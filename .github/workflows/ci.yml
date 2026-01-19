@@ -26,7 +26,7 @@ jobs:
           grep -v -E "_mock.go|/mocks/" $GITHUB_WORKSPACE/profile.cov_tmp > $GITHUB_WORKSPACE/profile.cov
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
