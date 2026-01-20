@@ -1,4 +1,4 @@
-package runner
+package processor
 
 import (
 	"testing"
@@ -6,8 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBuildTaskPrompt(t *testing.T) {
-	prompt := buildTaskPrompt("docs/plans/test.md", "progress-test.txt")
+func TestRunner_buildTaskPrompt(t *testing.T) {
+	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md"}}
+	prompt := r.buildTaskPrompt("progress-test.txt")
 
 	assert.Contains(t, prompt, "docs/plans/test.md")
 	assert.Contains(t, prompt, "progress-test.txt")
@@ -17,9 +18,10 @@ func TestBuildTaskPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "STOP HERE")
 }
 
-func TestBuildFirstReviewPrompt(t *testing.T) {
+func TestRunner_buildFirstReviewPrompt(t *testing.T) {
 	t.Run("with plan file", func(t *testing.T) {
-		prompt := buildFirstReviewPrompt("docs/plans/test.md")
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md"}}
+		prompt := r.buildFirstReviewPrompt()
 
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.Contains(t, prompt, "git diff master...HEAD")
@@ -37,16 +39,18 @@ func TestBuildFirstReviewPrompt(t *testing.T) {
 	})
 
 	t.Run("without plan file", func(t *testing.T) {
-		prompt := buildFirstReviewPrompt("")
+		r := &Runner{cfg: Config{PlanFile: ""}}
+		prompt := r.buildFirstReviewPrompt()
 
 		assert.Contains(t, prompt, "current branch vs master")
 		assert.Contains(t, prompt, "<<<RALPHEX:REVIEW_DONE>>>")
 	})
 }
 
-func TestBuildSecondReviewPrompt(t *testing.T) {
+func TestRunner_buildSecondReviewPrompt(t *testing.T) {
 	t.Run("with plan file", func(t *testing.T) {
-		prompt := buildSecondReviewPrompt("docs/plans/test.md")
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md"}}
+		prompt := r.buildSecondReviewPrompt()
 
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.Contains(t, prompt, "git diff master...HEAD")
@@ -59,16 +63,18 @@ func TestBuildSecondReviewPrompt(t *testing.T) {
 	})
 
 	t.Run("without plan file", func(t *testing.T) {
-		prompt := buildSecondReviewPrompt("")
+		r := &Runner{cfg: Config{PlanFile: ""}}
+		prompt := r.buildSecondReviewPrompt()
 
 		assert.Contains(t, prompt, "current branch vs master")
 	})
 }
 
-func TestBuildCodexEvaluationPrompt(t *testing.T) {
+func TestRunner_buildCodexEvaluationPrompt(t *testing.T) {
 	findings := "Issue 1: Missing error check in foo.go:42"
 
-	prompt := buildCodexEvaluationPrompt(findings)
+	r := &Runner{cfg: Config{}}
+	prompt := r.buildCodexEvaluationPrompt(findings)
 
 	assert.Contains(t, prompt, findings)
 	assert.Contains(t, prompt, "<<<RALPHEX:CODEX_REVIEW_DONE>>>")

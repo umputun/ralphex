@@ -147,7 +147,7 @@ func (e *ClaudeExecutor) parseStream(r io.Reader) Result {
 
 		var event streamEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			// print non-JSON lines as-is (like ralph.py)
+			// print non-JSON lines as-is
 			if e.Debug {
 				fmt.Printf("[debug] non-JSON line: %s\n", line)
 			}

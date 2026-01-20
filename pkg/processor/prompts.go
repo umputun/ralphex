@@ -1,12 +1,11 @@
-package runner
+package processor
 
 import (
 	"fmt"
 )
 
 // buildTaskPrompt creates the prompt for executing a single task.
-// Matches ralph.py exactly.
-func buildTaskPrompt(planFile, progressPath string) string {
+func (r *Runner) buildTaskPrompt(progressPath string) string {
 	return fmt.Sprintf(`Read the plan file at %s. Find the FIRST Task section (### Task N: or ### Iteration N:) that has uncompleted checkboxes ([ ]).
 
 NOTE: Progress is logged to %s - this file contains detailed execution steps and can be reviewed for debugging.
@@ -34,14 +33,13 @@ PHASE 3 - COMPLETE (after validation passes):
 
 If any phase fails after reasonable fix attempts, output exactly: <<<RALPHEX:TASK_FAILED>>>
 
-REMINDER: ONE section (Task/Iteration) per loop cycle. After commit, STOP and let the loop handle the next section.`, planFile, progressPath)
+REMINDER: ONE section (Task/Iteration) per loop cycle. After commit, STOP and let the loop handle the next section.`, r.cfg.PlanFile, progressPath)
 }
 
 // buildFirstReviewPrompt creates the prompt for first review pass - address all findings.
-// Matches ralph.py exactly.
-func buildFirstReviewPrompt(planFile string) string {
-	goal := "implementation of plan at " + planFile
-	if planFile == "" {
+func (r *Runner) buildFirstReviewPrompt() string {
+	goal := "implementation of plan at " + r.cfg.PlanFile
+	if r.cfg.PlanFile == "" {
 		goal = "current branch vs master"
 	}
 
@@ -105,10 +103,9 @@ If unable to fix issues after reasonable attempts: <<<RALPHEX:TASK_FAILED>>>`, g
 }
 
 // buildSecondReviewPrompt creates the prompt for second review pass - critical/major only.
-// Matches ralph.py exactly.
-func buildSecondReviewPrompt(planFile string) string {
-	goal := "implementation of plan at " + planFile
-	if planFile == "" {
+func (r *Runner) buildSecondReviewPrompt() string {
+	goal := "implementation of plan at " + r.cfg.PlanFile
+	if r.cfg.PlanFile == "" {
 		goal = "current branch vs master"
 	}
 
@@ -151,8 +148,7 @@ If unable to fix: <<<RALPHEX:TASK_FAILED>>>`, goal, goal)
 }
 
 // buildCodexEvaluationPrompt creates the prompt for claude to evaluate codex review output.
-// Matches ralph.py exactly.
-func buildCodexEvaluationPrompt(codexOutput string) string {
+func (r *Runner) buildCodexEvaluationPrompt(codexOutput string) string {
 	return fmt.Sprintf(`External code review evaluation.
 
 Codex (GPT-5.2) reviewed the code and found:

@@ -17,7 +17,7 @@ make install    # install to ~/.local/bin
 ```
 cmd/ralphex/        # main entry point, CLI parsing
 pkg/executor/       # claude and codex CLI execution
-pkg/runner/         # orchestration loop, prompts, signals
+pkg/processor/      # orchestration loop, prompts, signals
 pkg/progress/       # timestamped logging with color
 docs/plans/         # plan files location
 ```

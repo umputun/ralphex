@@ -1,7 +1,7 @@
-package runner
+package processor
 
 // Signal constants for execution control.
-// Using <<<RALPHEX:...>>> format for clear detection like ralph.py.
+// using <<<RALPHEX:...>>> format for clear detection.
 const (
 	SignalCompleted  = "<<<RALPHEX:ALL_TASKS_DONE>>>"
 	SignalFailed     = "<<<RALPHEX:TASK_FAILED>>>"

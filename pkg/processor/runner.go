@@ -1,5 +1,5 @@
-// Package runner provides the main orchestration loop for ralphex execution.
-package runner
+// Package processor provides the main orchestration loop for ralphex execution.
+package processor
 
 import (
 	"context"
@@ -65,7 +65,7 @@ func New(cfg Config, log *progress.Logger) *Runner {
 		log: log,
 		claude: &executor.ClaudeExecutor{
 			OutputHandler: func(text string) {
-				// stream output with timestamps like ralph.py's print_aligned
+				// stream output with timestamps
 				log.PrintAligned(text)
 			},
 			Debug: cfg.Debug,
@@ -104,7 +104,6 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 // runFull executes the complete pipeline: tasks → review → codex → review.
-// Matches ralph.py's run_loop exactly.
 func (r *Runner) runFull(ctx context.Context) error {
 	if r.cfg.PlanFile == "" {
 		return errors.New("plan file required for full mode")
@@ -122,7 +121,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 	r.log.SetPhase(progress.PhaseReview)
 	r.log.Print("review pass 1: all findings")
 
-	if err := r.runClaudeReview(ctx, buildFirstReviewPrompt(r.cfg.PlanFile)); err != nil {
+	if err := r.runClaudeReview(ctx, r.buildFirstReviewPrompt()); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -156,7 +155,7 @@ func (r *Runner) runReviewOnly(ctx context.Context) error {
 	r.log.SetPhase(progress.PhaseReview)
 	r.log.Print("review pass 1: all findings")
 
-	if err := r.runClaudeReview(ctx, buildFirstReviewPrompt(r.cfg.PlanFile)); err != nil {
+	if err := r.runClaudeReview(ctx, r.buildFirstReviewPrompt()); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -206,10 +205,10 @@ func (r *Runner) runCodexOnly(ctx context.Context) error {
 }
 
 // runTaskPhase executes tasks until completion or max iterations.
-// Matches ralph.py exactly: ONE Task section per iteration.
+// executes ONE Task section per iteration.
 func (r *Runner) runTaskPhase(ctx context.Context) error {
 	progressPath := r.log.Path()
-	prompt := buildTaskPrompt(r.cfg.PlanFile, progressPath)
+	prompt := r.buildTaskPrompt(progressPath)
 	retryCount := 0
 
 	for i := 1; i <= r.cfg.MaxIterations; i++ {
@@ -228,7 +227,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 
 		if result.Signal == SignalCompleted {
 			// verify plan actually has no uncompleted checkboxes
-			if hasUncompletedTasks(r.cfg.PlanFile) {
+			if r.hasUncompletedTasks() {
 				r.log.Print("warning: completion signal received but plan still has [ ] items, continuing...")
 				continue
 			}
@@ -273,7 +272,6 @@ func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
 }
 
 // runClaudeReviewLoop runs claude review iterations using second review prompt.
-// Matches ralph.py's run_claude_review_loop exactly.
 func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 	// review iterations = 10% of max_iterations (min 3)
 	maxReviewIterations := max(3, r.cfg.MaxIterations/10)
@@ -287,7 +285,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 
 		r.log.Print("claude review: critical/major (iteration %d)", i)
 
-		result := r.claude.Run(ctx, buildSecondReviewPrompt(r.cfg.PlanFile))
+		result := r.claude.Run(ctx, r.buildSecondReviewPrompt())
 		if result.Error != nil {
 			return fmt.Errorf("claude execution: %w", result.Error)
 		}
@@ -310,7 +308,6 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 }
 
 // runCodexLoop runs the codex-claude review loop until no findings.
-// Matches ralph.py's run_codex_loop exactly.
 func (r *Runner) runCodexLoop(ctx context.Context) error {
 	// codex iterations = 20% of max_iterations (min 3)
 	maxCodexIterations := max(3, r.cfg.MaxIterations/5)
@@ -327,7 +324,7 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 		r.log.Print("codex iteration %d", i)
 
 		// run codex analysis
-		codexResult := r.codex.Run(ctx, buildCodexPrompt(i == 1, claudeResponse, r.cfg.PlanFile))
+		codexResult := r.codex.Run(ctx, r.buildCodexPrompt(i == 1, claudeResponse))
 		if codexResult.Error != nil {
 			return fmt.Errorf("codex execution: %w", codexResult.Error)
 		}
@@ -338,7 +335,7 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 		}
 
 		// pass codex output to claude for evaluation and fixing
-		claudeResult := r.claude.Run(ctx, buildCodexEvaluationPrompt(codexResult.Output))
+		claudeResult := r.claude.Run(ctx, r.buildCodexEvaluationPrompt(codexResult.Output))
 		if claudeResult.Error != nil {
 			return fmt.Errorf("claude execution: %w", claudeResult.Error)
 		}
@@ -359,17 +356,16 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 }
 
 // buildCodexPrompt creates the prompt for codex review.
-// Matches ralph.py's run_codex_review behavior.
-func buildCodexPrompt(isFirst bool, claudeResponse, planFile string) string {
+func (r *Runner) buildCodexPrompt(isFirst bool, claudeResponse string) string {
 	// build plan context if available
 	planContext := ""
-	if planFile != "" {
+	if r.cfg.PlanFile != "" {
 		planContext = fmt.Sprintf(`
 ## Plan Context
 The code implements the plan at: %s
 
 ---
-`, planFile)
+`, r.cfg.PlanFile)
 	}
 
 	// different diff command based on iteration
@@ -412,14 +408,13 @@ If Claude's arguments are invalid, explain why the issues still exist.`, basePro
 }
 
 // hasUncompletedTasks checks if plan file has any uncompleted checkboxes.
-// Matches ralph.py's has_uncompleted_tasks exactly.
 // Checks both original path and completed/ subdirectory.
-func hasUncompletedTasks(planFile string) bool {
+func (r *Runner) hasUncompletedTasks() bool {
 	// try original path first
-	content, err := os.ReadFile(planFile) //nolint:gosec // planFile from CLI args
+	content, err := os.ReadFile(r.cfg.PlanFile)
 	if err != nil {
 		// try completed/ subdirectory as fallback
-		completedPath := filepath.Join(filepath.Dir(planFile), "completed", filepath.Base(planFile))
+		completedPath := filepath.Join(filepath.Dir(r.cfg.PlanFile), "completed", filepath.Base(r.cfg.PlanFile))
 		content, err = os.ReadFile(completedPath) //nolint:gosec // planFile from CLI args
 		if err != nil {
 			return true // assume incomplete if can't read from either location

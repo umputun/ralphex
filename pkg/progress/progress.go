@@ -203,7 +203,7 @@ func wrapText(text string, width int) string {
 }
 
 // PrintAligned writes text with timestamp, handling multi-line content properly.
-// Like ralph.py's print_aligned - timestamps the first line, indents continuation lines.
+// timestamps the first line, indents continuation lines.
 func (l *Logger) PrintAligned(text string) {
 	if text == "" {
 		return

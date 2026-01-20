@@ -141,7 +141,7 @@ type filterState struct {
 }
 
 // isNoise returns true if line should be filtered out.
-// Uses state machine to detect headers and sections like ralph.py.
+// uses state machine to detect headers and sections.
 func (e *CodexExecutor) isNoise(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {

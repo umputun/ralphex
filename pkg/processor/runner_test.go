@@ -1,4 +1,4 @@
-package runner
+package processor
 
 import (
 	"context"
@@ -319,24 +319,27 @@ func TestRunner_ClaudeExecution_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "claude execution")
 }
 
-func TestHasUncompletedTasks(t *testing.T) {
+func TestRunner_hasUncompletedTasks(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("with uncompleted tasks", func(t *testing.T) {
 		planFile := filepath.Join(tmpDir, "uncompleted.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1\n- [x] Task 2"), 0o600))
 
-		assert.True(t, hasUncompletedTasks(planFile))
+		r := &Runner{cfg: Config{PlanFile: planFile}}
+		assert.True(t, r.hasUncompletedTasks())
 	})
 
 	t.Run("all tasks completed", func(t *testing.T) {
 		planFile := filepath.Join(tmpDir, "completed.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1\n- [x] Task 2"), 0o600))
 
-		assert.False(t, hasUncompletedTasks(planFile))
+		r := &Runner{cfg: Config{PlanFile: planFile}}
+		assert.False(t, r.hasUncompletedTasks())
 	})
 
 	t.Run("missing file", func(t *testing.T) {
-		assert.True(t, hasUncompletedTasks("/nonexistent/file.md"))
+		r := &Runner{cfg: Config{PlanFile: "/nonexistent/file.md"}}
+		assert.True(t, r.hasUncompletedTasks())
 	})
 }

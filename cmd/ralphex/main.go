@@ -15,8 +15,8 @@ import (
 
 	"github.com/jessevdk/go-flags"
 
+	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
-	"github.com/umputun/ralphex/pkg/runner"
 )
 
 // opts holds all command-line options.
@@ -97,11 +97,11 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// determine mode
-	mode := runner.ModeFull
+	mode := processor.ModeFull
 	if o.CodexOnly {
-		mode = runner.ModeCodexOnly
+		mode = processor.ModeCodexOnly
 	} else if o.Review {
-		mode = runner.ModeReview
+		mode = processor.ModeReview
 	}
 
 	// get current branch for logging
@@ -126,7 +126,7 @@ func run(ctx context.Context, o opts) error {
 		planStr = "(no plan - review only)"
 	}
 	modeStr := ""
-	if mode != runner.ModeFull {
+	if mode != processor.ModeFull {
 		modeStr = fmt.Sprintf(" (%s mode)", mode)
 	}
 	fmt.Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, o.MaxIterations, modeStr)
@@ -134,7 +134,7 @@ func run(ctx context.Context, o opts) error {
 	fmt.Printf("progress log: %s\n\n", log.Path())
 
 	// create and run the runner
-	r := runner.New(runner.Config{
+	r := processor.New(processor.Config{
 		PlanFile:      planFile,
 		Mode:          mode,
 		MaxIterations: o.MaxIterations,
@@ -147,7 +147,7 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// move completed plan to completed/ directory
-	if planFile != "" && mode == runner.ModeFull {
+	if planFile != "" && mode == processor.ModeFull {
 		if moveErr := movePlanToCompleted(ctx, planFile); moveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
