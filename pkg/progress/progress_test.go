@@ -404,3 +404,51 @@ func TestExtractSignal(t *testing.T) {
 		})
 	}
 }
+
+func TestIsListItem(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"1. first item", true},
+		{"12. item twelve", true},
+		{"123. large number", true},
+		{"- bullet item", true},
+		{"* star item", true},
+		{"regular text", false},
+		{"1 no dot", false},
+		{"1.no space", false},
+		{".1 dot first", false},
+		{"", false},
+		{"  - already indented", false}, // has leading space, won't match
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := isListItem(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestFormatListItem(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"numbered list", "1. first item", "  1. first item"},
+		{"bullet list", "- bullet item", "  - bullet item"},
+		{"star list", "* star item", "  * star item"},
+		{"regular text", "regular text", "regular text"},
+		{"already indented", "  - item", "  - item"},
+		{"double digit", "12. item", "  12. item"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatListItem(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

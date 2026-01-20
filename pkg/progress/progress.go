@@ -246,14 +246,16 @@ func (l *Logger) PrintAligned(text string) {
 			continue // skip empty lines
 		}
 
+		// add indent for list items
+		displayLine := formatListItem(line)
+
 		// timestamp each line
 		timestamp := time.Now().Format(timestampFormat)
 		tsPrefix := timestampColor.Sprintf("[%s]", timestamp)
-		l.writeFile("[%s] %s\n", timestamp, line)
+		l.writeFile("[%s] %s\n", timestamp, displayLine)
 
 		// use red for signal lines
 		lineColor := phaseColor
-		displayLine := line
 
 		// format signal lines nicely
 		if sig := extractSignal(line); sig != "" {
@@ -282,6 +284,37 @@ func extractSignal(line string) string {
 	}
 
 	return line[start+len(prefix) : start+end]
+}
+
+// formatListItem adds 2-space indent for list items (numbered or bulleted).
+// detects patterns like "1. ", "12. ", "- ", "* " at line start.
+func formatListItem(line string) string {
+	trimmed := strings.TrimLeft(line, " \t")
+	if trimmed == line { // no leading whitespace
+		if isListItem(trimmed) {
+			return "  " + line
+		}
+	}
+	return line
+}
+
+// isListItem returns true if line starts with a list marker.
+func isListItem(line string) bool {
+	// check for "- " or "* " (bullet lists)
+	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+		return true
+	}
+	// check for numbered lists like "1. ", "12. ", "123. "
+	for i, r := range line {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '.' && i > 0 && i < len(line)-1 && line[i+1] == ' ' {
+			return true
+		}
+		break
+	}
+	return false
 }
 
 // Error writes an error message in red.
