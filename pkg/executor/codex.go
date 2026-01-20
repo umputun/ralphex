@@ -242,19 +242,19 @@ func (e *CodexExecutor) filterOutput(output string) (string, error) {
 			continue
 		}
 
-		// once we get real content, we're past the header
-		if trimmed != "" && !state.inHeader {
-			// strip bold markers
-			cleaned := e.stripBold(line)
-			// deduplicate
-			if cleaned != state.lastLine {
-				lines = append(lines, cleaned)
-				state.lastLine = cleaned
-			}
-		} else if trimmed != "" {
-			// first real content line ends header
+		// skip empty lines in header
+		if trimmed == "" {
+			continue
+		}
+
+		// first real content line ends header phase
+		if state.inHeader {
 			state.inHeader = false
-			cleaned := e.stripBold(line)
+		}
+
+		// process content line with deduplication
+		cleaned := e.stripBold(line)
+		if cleaned != state.lastLine {
 			lines = append(lines, cleaned)
 			state.lastLine = cleaned
 		}

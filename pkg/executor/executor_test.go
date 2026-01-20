@@ -16,7 +16,7 @@ import (
 func TestClaudeExecutor_Run_Success(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello world <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
 
-	mock := &mocks.CommandRunnerMock{
+	mock := &mocks.ClaudeCommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
 			return strings.NewReader(jsonStream), func() error { return nil }, nil
 		},
@@ -31,7 +31,7 @@ func TestClaudeExecutor_Run_Success(t *testing.T) {
 }
 
 func TestClaudeExecutor_Run_StartError(t *testing.T) {
-	mock := &mocks.CommandRunnerMock{
+	mock := &mocks.ClaudeCommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
 			return nil, nil, errors.New("command not found")
 		},
@@ -47,7 +47,7 @@ func TestClaudeExecutor_Run_StartError(t *testing.T) {
 func TestClaudeExecutor_Run_WaitError_WithOutput(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial output"}}`
 
-	mock := &mocks.CommandRunnerMock{
+	mock := &mocks.ClaudeCommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
 			return strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
 		},
@@ -62,7 +62,7 @@ func TestClaudeExecutor_Run_WaitError_WithOutput(t *testing.T) {
 }
 
 func TestClaudeExecutor_Run_WaitError_NoOutput(t *testing.T) {
-	mock := &mocks.CommandRunnerMock{
+	mock := &mocks.ClaudeCommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
 			return strings.NewReader(""), func() error { return errors.New("exit status 1") }, nil
 		},
@@ -79,7 +79,7 @@ func TestClaudeExecutor_Run_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	mock := &mocks.CommandRunnerMock{
+	mock := &mocks.ClaudeCommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
 			return strings.NewReader(""), func() error { return context.Canceled }, nil
 		},
@@ -96,7 +96,7 @@ func TestClaudeExecutor_Run_WithOutputHandler(t *testing.T) {
 {"type":"content_block_delta","delta":{"type":"text_delta","text":"chunk2"}}`
 
 	var chunks []string
-	mock := &mocks.CommandRunnerMock{
+	mock := &mocks.ClaudeCommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
 			return strings.NewReader(jsonStream), func() error { return nil }, nil
 		},

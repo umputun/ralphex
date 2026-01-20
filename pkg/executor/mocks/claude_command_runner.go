@@ -9,22 +9,22 @@ import (
 	"sync"
 )
 
-// CommandRunnerMock is a mock implementation of executor.CommandRunner.
+// ClaudeCommandRunnerMock is a mock implementation of executor.ClaudeCommandRunner.
 //
-//	func TestSomethingThatUsesCommandRunner(t *testing.T) {
+//	func TestSomethingThatUsesClaudeCommandRunner(t *testing.T) {
 //
-//		// make and configure a mocked executor.CommandRunner
-//		mockedCommandRunner := &CommandRunnerMock{
+//		// make and configure a mocked executor.ClaudeCommandRunner
+//		mockedClaudeCommandRunner := &ClaudeCommandRunnerMock{
 //			RunFunc: func(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
 //				panic("mock out the Run method")
 //			},
 //		}
 //
-//		// use mockedCommandRunner in code that requires executor.CommandRunner
+//		// use mockedClaudeCommandRunner in code that requires executor.ClaudeCommandRunner
 //		// and then make assertions.
 //
 //	}
-type CommandRunnerMock struct {
+type ClaudeCommandRunnerMock struct {
 	// RunFunc mocks the Run method.
 	RunFunc func(ctx context.Context, name string, args ...string) (io.Reader, func() error, error)
 
@@ -44,9 +44,9 @@ type CommandRunnerMock struct {
 }
 
 // Run calls RunFunc.
-func (mock *CommandRunnerMock) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
+func (mock *ClaudeCommandRunnerMock) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
 	if mock.RunFunc == nil {
-		panic("CommandRunnerMock.RunFunc: method is nil but CommandRunner.Run was just called")
+		panic("ClaudeCommandRunnerMock.RunFunc: method is nil but ClaudeCommandRunner.Run was just called")
 	}
 	callInfo := struct {
 		Ctx  context.Context
@@ -66,8 +66,8 @@ func (mock *CommandRunnerMock) Run(ctx context.Context, name string, args ...str
 // RunCalls gets all the calls that were made to Run.
 // Check the length with:
 //
-//	len(mockedCommandRunner.RunCalls())
-func (mock *CommandRunnerMock) RunCalls() []struct {
+//	len(mockedClaudeCommandRunner.RunCalls())
+func (mock *ClaudeCommandRunnerMock) RunCalls() []struct {
 	Ctx  context.Context
 	Name string
 	Args []string

@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:generate moq -out mocks/command_runner.go -pkg mocks -skip-ensure -fmt goimports . CommandRunner
+//go:generate moq -out mocks/claude_command_runner.go -pkg mocks -skip-ensure -fmt goimports . ClaudeCommandRunner
 
 // Result holds execution result with output and detected signal.
 type Result struct {
@@ -21,15 +21,15 @@ type Result struct {
 	Error  error  // execution error if any
 }
 
-// CommandRunner abstracts command execution for testing.
-type CommandRunner interface {
+// ClaudeCommandRunner abstracts command execution for claude testing.
+type ClaudeCommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) (stdout io.Reader, wait func() error, err error)
 }
 
-// execCommandRunner is the default command runner using os/exec.
-type execCommandRunner struct{}
+// execClaudeRunner is the default command runner using os/exec.
+type execClaudeRunner struct{}
 
-func (r *execCommandRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
+func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 
 	// filter out ANTHROPIC_API_KEY from environment (claude uses different auth)
@@ -87,9 +87,9 @@ type streamEvent struct {
 
 // ClaudeExecutor runs claude CLI commands with streaming JSON parsing.
 type ClaudeExecutor struct {
-	OutputHandler func(text string) // called for each text chunk, can be nil
-	Debug         bool              // enable debug output
-	cmdRunner     CommandRunner     // for testing, nil uses default
+	OutputHandler func(text string)   // called for each text chunk, can be nil
+	Debug         bool                // enable debug output
+	cmdRunner     ClaudeCommandRunner // for testing, nil uses default
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -103,7 +103,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 
 	runner := e.cmdRunner
 	if runner == nil {
-		runner = &execCommandRunner{}
+		runner = &execClaudeRunner{}
 	}
 
 	stdout, wait, err := runner.Run(ctx, "claude", args...)

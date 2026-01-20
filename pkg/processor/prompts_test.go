@@ -82,35 +82,3 @@ func TestRunner_buildCodexEvaluationPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "Valid issues")
 	assert.Contains(t, prompt, "Invalid/irrelevant issues")
 }
-
-func TestBuildContinuePrompt(t *testing.T) {
-	t.Run("short output", func(t *testing.T) {
-		prompt := buildContinuePrompt("short output")
-
-		assert.Contains(t, prompt, "Continue from where you left off")
-		assert.Contains(t, prompt, "short output")
-		assert.Contains(t, prompt, "<<<RALPHEX:ALL_TASKS_DONE>>>")
-		assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
-	})
-
-	t.Run("long output truncated", func(t *testing.T) {
-		// use 'z' to avoid matching other letters in the prompt template
-		longOutput := make([]byte, 1000)
-		for i := range longOutput {
-			longOutput[i] = 'z'
-		}
-
-		prompt := buildContinuePrompt(string(longOutput))
-
-		// should only contain last 500 chars
-		assert.Contains(t, prompt, "Previous Output (last 500 chars)")
-		// count z's - should be exactly 500
-		count := 0
-		for _, c := range prompt {
-			if c == 'z' {
-				count++
-			}
-		}
-		assert.Equal(t, 500, count)
-	})
-}

@@ -63,7 +63,7 @@ type Runner struct {
 }
 
 // New creates a new Runner with the given configuration.
-func New(cfg Config, log *progress.Logger) *Runner {
+func New(cfg Config, log Logger) *Runner {
 	return &Runner{
 		cfg: cfg,
 		log: log,

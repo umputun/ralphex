@@ -189,21 +189,3 @@ CRITICAL: Never run codex commands yourself. The external loop handles codex exe
 
 OUTPUT FORMAT: No markdown formatting (no **bold**, `+"`"+`code`+"`"+`, # headers). Plain text and - lists are fine.`, codexOutput)
 }
-
-// buildContinuePrompt creates a prompt to continue after previous iteration.
-func buildContinuePrompt(previousOutput string) string {
-	output := previousOutput
-	if len(output) > 500 {
-		output = output[len(output)-500:]
-	}
-
-	return fmt.Sprintf(`Continue from where you left off.
-
-## Previous Output (last 500 chars)
-
-%s
-
-Continue executing tasks. Remember to output <<<RALPHEX:ALL_TASKS_DONE>>> when done or <<<RALPHEX:TASK_FAILED>>> if blocked.
-
-OUTPUT FORMAT: No markdown formatting (no **bold**, `+"`"+`code`+"`"+`, # headers). Plain text and - lists are fine.`, output)
-}

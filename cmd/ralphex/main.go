@@ -70,11 +70,8 @@ func main() {
 }
 
 func run(ctx context.Context, o opts) error {
-	// check dependencies
-	for _, dep := range []string{"claude", "git"} {
-		if _, err := exec.LookPath(dep); err != nil {
-			return fmt.Errorf("%s not found in PATH", dep)
-		}
+	if err := checkDependencies("claude", "git"); err != nil {
+		return err
 	}
 
 	// select plan file
@@ -101,16 +98,22 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// determine mode
-	mode := processor.ModeFull
-	if o.CodexOnly {
+	var mode processor.Mode
+	switch {
+	case o.CodexOnly:
 		mode = processor.ModeCodexOnly
-	} else if o.Review {
+	case o.Review:
 		mode = processor.ModeReview
+	default:
+		mode = processor.ModeFull
 	}
 
 	// get current branch for logging
-	out, _ := exec.CommandContext(ctx, "git", "branch", "--show-current").Output()
+	out, err := exec.CommandContext(ctx, "git", "branch", "--show-current").Output()
 	branch := strings.TrimSpace(string(out))
+	if err != nil || branch == "" {
+		branch = "unknown"
+	}
 
 	// create progress logger
 	log, err := progress.NewLogger(progress.Config{
@@ -125,17 +128,7 @@ func run(ctx context.Context, o opts) error {
 	defer log.Close()
 
 	// print startup info
-	planStr := planFile
-	if planStr == "" {
-		planStr = "(no plan - review only)"
-	}
-	modeStr := ""
-	if mode != processor.ModeFull {
-		modeStr = fmt.Sprintf(" (%s mode)", mode)
-	}
-	infoColor.Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, o.MaxIterations, modeStr)
-	infoColor.Printf("branch: %s\n", branch)
-	infoColor.Printf("progress log: %s\n\n", log.Path())
+	printStartupInfo(planFile, branch, mode, o.MaxIterations, log.Path())
 
 	// create and run the runner
 	r := processor.New(processor.Config{
@@ -220,7 +213,7 @@ func createBranchIfNeeded(ctx context.Context, planFile string) error {
 	// get current branch
 	out, err := exec.CommandContext(ctx, "git", "branch", "--show-current").Output()
 	if err != nil {
-		return fmt.Errorf("failed to get current branch: %w", err)
+		return fmt.Errorf("get current branch: %w", err)
 	}
 
 	currentBranch := strings.TrimSpace(string(out))
@@ -239,7 +232,7 @@ func createBranchIfNeeded(ctx context.Context, planFile string) error {
 
 	infoColor.Printf("creating branch: %s\n", branchName)
 	if err := exec.CommandContext(ctx, "git", "checkout", "-b", branchName).Run(); err != nil { //nolint:gosec // branch name from plan filename
-		return fmt.Errorf("failed to create branch %s: %w", branchName, err)
+		return fmt.Errorf("create branch %s: %w", branchName, err)
 	}
 
 	return nil
@@ -284,14 +277,37 @@ func ensureGitignore(ctx context.Context) error {
 	// add to .gitignore
 	f, err := os.OpenFile(".gitignore", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // .gitignore needs world-readable
 	if err != nil {
-		return fmt.Errorf("failed to open .gitignore: %w", err)
+		return fmt.Errorf("open .gitignore: %w", err)
 	}
 	defer f.Close()
 
 	if _, err := f.WriteString("\n# ralphex progress logs\nprogress-*.txt\n"); err != nil {
-		return fmt.Errorf("failed to write .gitignore: %w", err)
+		return fmt.Errorf("write .gitignore: %w", err)
 	}
 
 	infoColor.Println("added progress-*.txt to .gitignore")
 	return nil
+}
+
+func checkDependencies(deps ...string) error {
+	for _, dep := range deps {
+		if _, err := exec.LookPath(dep); err != nil {
+			return fmt.Errorf("%s not found in PATH", dep)
+		}
+	}
+	return nil
+}
+
+func printStartupInfo(planFile, branch string, mode processor.Mode, maxIterations int, progressPath string) {
+	planStr := planFile
+	if planStr == "" {
+		planStr = "(no plan - review only)"
+	}
+	modeStr := ""
+	if mode != processor.ModeFull {
+		modeStr = fmt.Sprintf(" (%s mode)", mode)
+	}
+	infoColor.Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, maxIterations, modeStr)
+	infoColor.Printf("branch: %s\n", branch)
+	infoColor.Printf("progress log: %s\n\n", progressPath)
 }
