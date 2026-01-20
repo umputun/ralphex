@@ -20,12 +20,9 @@ type Phase string
 
 // Phase constants for execution stages.
 const (
-	// PhaseTask is the task execution phase (green).
-	PhaseTask Phase = "task"
-	// PhaseReview is the code review phase (cyan).
-	PhaseReview Phase = "review"
-	// PhaseCodex is the codex analysis phase (magenta).
-	PhaseCodex Phase = "codex"
+	PhaseTask   Phase = "task"   // execution phase (green)
+	PhaseReview Phase = "review" // code review phase (cyan)
+	PhaseCodex  Phase = "codex"  // codex analysis phase (magenta)
 )
 
 // phase colors using fatih/color.
@@ -68,7 +65,7 @@ func NewLogger(cfg Config) (*Logger, error) {
 		color.NoColor = true
 	}
 
-	progressPath := getProgressFilename(cfg.PlanFile, cfg.Mode)
+	progressPath := progressFilename(cfg.PlanFile, cfg.Mode)
 
 	// ensure progress files are tracked by creating parent dir
 	if dir := filepath.Dir(progressPath); dir != "." {
@@ -313,7 +310,7 @@ func (l *Logger) writeStdout(format string, args ...any) {
 }
 
 // getProgressFilename returns progress file path based on plan and mode.
-func getProgressFilename(planFile, mode string) string {
+func progressFilename(planFile, mode string) string {
 	if planFile != "" {
 		stem := strings.TrimSuffix(filepath.Base(planFile), ".md")
 		switch mode {

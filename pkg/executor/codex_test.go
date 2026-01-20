@@ -294,9 +294,10 @@ func TestStripBold(t *testing.T) {
 		{"empty bold", "**** empty", " empty"},
 	}
 
+	e := &CodexExecutor{}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := stripBold(tc.input)
+			got := e.stripBold(tc.input)
 			assert.Equal(t, tc.want, got)
 		})
 	}

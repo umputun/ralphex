@@ -195,7 +195,7 @@ func (e *CodexExecutor) filterOutput(output string) (string, error) {
 		// once in review section, keep all lines
 		if state.inFullReview {
 			// strip bold markers **text**
-			cleaned := stripBold(line)
+			cleaned := e.stripBold(line)
 			// deduplicate consecutive identical lines (but keep blank lines)
 			if cleaned != state.lastLine || trimmed == "" {
 				lines = append(lines, cleaned)
@@ -223,7 +223,7 @@ func (e *CodexExecutor) filterOutput(output string) (string, error) {
 		// once we get real content, we're past the header
 		if trimmed != "" && !state.inHeader {
 			// strip bold markers
-			cleaned := stripBold(line)
+			cleaned := e.stripBold(line)
 			// deduplicate
 			if cleaned != state.lastLine {
 				lines = append(lines, cleaned)
@@ -232,7 +232,7 @@ func (e *CodexExecutor) filterOutput(output string) (string, error) {
 		} else if trimmed != "" {
 			// first real content line ends header
 			state.inHeader = false
-			cleaned := stripBold(line)
+			cleaned := e.stripBold(line)
 			lines = append(lines, cleaned)
 			state.lastLine = cleaned
 		}
@@ -246,7 +246,7 @@ func (e *CodexExecutor) filterOutput(output string) (string, error) {
 }
 
 // stripBold removes markdown bold markers (**text**) from text.
-func stripBold(s string) string {
+func (e *CodexExecutor) stripBold(s string) string {
 	// replace **text** with text
 	result := s
 	for {

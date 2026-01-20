@@ -298,7 +298,7 @@ func TestGetProgressFilename(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.planFile+"_"+tc.mode, func(t *testing.T) {
-			got := getProgressFilename(tc.planFile, tc.mode)
+			got := progressFilename(tc.planFile, tc.mode)
 			assert.Equal(t, tc.want, got)
 		})
 	}
