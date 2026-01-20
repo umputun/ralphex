@@ -30,7 +30,7 @@ func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) 
 
 // CodexExecutor runs codex CLI commands and filters output.
 type CodexExecutor struct {
-	Model         string             // model to use, defaults to gpt-5
+	Model         string             // model to use, defaults to gpt-5.2-codex
 	ProjectDoc    string             // path to project documentation file
 	OutputHandler func(text string)  // called for each output line, can be nil
 	Debug         bool               // enable debug output
@@ -41,12 +41,15 @@ type CodexExecutor struct {
 func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	model := e.Model
 	if model == "" {
-		model = "gpt-5"
+		model = "gpt-5.2-codex"
 	}
 
 	args := []string{
 		"exec",
-		"-m", model,
+		"-c", fmt.Sprintf("model=%q", model),
+		"-c", "model_reasoning_effort=xhigh",
+		"-c", "stream_idle_timeout_ms=3600000",
+		"-c", `sandbox="read-only"`,
 	}
 
 	if e.ProjectDoc != "" {

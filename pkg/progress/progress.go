@@ -92,7 +92,7 @@ func NewLogger(cfg Config) (*Logger, error) {
 	if planStr == "" {
 		planStr = "(no plan - review only)"
 	}
-	l.writeFile("# Ralph Progress Log\n")
+	l.writeFile("# Ralphex Progress Log\n")
 	l.writeFile("Plan: %s\n", planStr)
 	l.writeFile("Branch: %s\n", cfg.Branch)
 	l.writeFile("Mode: %s\n", cfg.Mode)
@@ -135,6 +135,46 @@ func (l *Logger) PrintRaw(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	l.writeFile("%s", msg)
 	l.writeStdout("%s", msg)
+}
+
+// PrintAligned writes text with timestamp, handling multi-line content properly.
+// Like ralph.py's print_aligned - timestamps the first line, indents continuation lines.
+func (l *Logger) PrintAligned(text string) {
+	if text == "" {
+		return
+	}
+
+	// trim trailing newlines to avoid extra blank lines
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return
+	}
+
+	timestamp := time.Now().Format("15:04:05")
+	phaseColor := phaseColors[l.phase]
+	tsPrefix := timestampColor.Sprintf("[%s]", timestamp)
+	indent := "          " // 10 chars to align with "[HH:MM:SS] "
+
+	// split into lines and print each
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line == "" {
+			// preserve empty lines within content
+			l.writeFile("\n")
+			l.writeStdout("\n")
+			continue
+		}
+
+		if i == 0 {
+			// first line gets timestamp
+			l.writeFile("[%s] %s\n", timestamp, line)
+			l.writeStdout("%s %s\n", tsPrefix, phaseColor.Sprint(line))
+		} else {
+			// continuation lines get indent
+			l.writeFile("%s%s\n", indent, line)
+			l.writeStdout("%s%s\n", indent, phaseColor.Sprint(line))
+		}
+	}
 }
 
 // Error writes an error message in red.

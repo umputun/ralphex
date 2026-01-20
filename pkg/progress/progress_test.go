@@ -44,7 +44,7 @@ func TestNewLogger(t *testing.T) {
 			// verify header written
 			content, err := os.ReadFile(l.Path())
 			require.NoError(t, err)
-			assert.Contains(t, string(content), "# Ralph Progress Log")
+			assert.Contains(t, string(content), "# Ralphex Progress Log")
 			assert.Contains(t, string(content), "Mode: "+tc.cfg.Mode)
 		})
 	}
@@ -94,6 +94,54 @@ func TestLogger_PrintRaw(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "raw output")
 	assert.Contains(t, buf.String(), "raw output")
+}
+
+func TestLogger_PrintAligned(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true})
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	l.PrintAligned("first line\nsecond line\nthird line")
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	// check file has timestamps and proper formatting
+	assert.Contains(t, string(content), "] first line")
+	assert.Contains(t, string(content), "second line")
+	assert.Contains(t, string(content), "third line")
+
+	// check stdout output
+	output := buf.String()
+	assert.Contains(t, output, "first line")
+	assert.Contains(t, output, "second line")
+	// lines should end with newlines
+	assert.True(t, strings.HasSuffix(output, "\n"), "output should end with newline")
+}
+
+func TestLogger_PrintAligned_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true})
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	l.PrintAligned("") // empty string should do nothing
+
+	assert.Empty(t, buf.String())
 }
 
 func TestLogger_Error(t *testing.T) {

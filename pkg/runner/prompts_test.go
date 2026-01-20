@@ -1,81 +1,80 @@
 package runner
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBuildTaskPrompt(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "test-plan.md")
+	prompt := buildTaskPrompt("docs/plans/test.md", "progress-test.txt")
 
-	planContent := `# Test Plan
-
-- [ ] Task 1
-- [ ] Task 2
-`
-	require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0o600))
-
-	t.Run("first iteration", func(t *testing.T) {
-		prompt, err := buildTaskPrompt(planFile, 1)
-		require.NoError(t, err)
-
-		assert.Contains(t, prompt, "iteration 1")
-		assert.Contains(t, prompt, "# Test Plan")
-		assert.Contains(t, prompt, "Task 1")
-		assert.Contains(t, prompt, "COMPLETED")
-		assert.Contains(t, prompt, "FAILED")
-	})
-
-	t.Run("later iteration", func(t *testing.T) {
-		prompt, err := buildTaskPrompt(planFile, 5)
-		require.NoError(t, err)
-
-		assert.Contains(t, prompt, "iteration 5")
-	})
-
-	t.Run("file not found", func(t *testing.T) {
-		_, err := buildTaskPrompt("/nonexistent/file.md", 1)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read plan file")
-	})
+	assert.Contains(t, prompt, "docs/plans/test.md")
+	assert.Contains(t, prompt, "progress-test.txt")
+	assert.Contains(t, prompt, "<<<RALPHEX:ALL_TASKS_DONE>>>")
+	assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
+	assert.Contains(t, prompt, "ONE Task section per iteration")
+	assert.Contains(t, prompt, "STOP HERE")
 }
 
 func TestBuildFirstReviewPrompt(t *testing.T) {
-	prompt := buildFirstReviewPrompt()
+	t.Run("with plan file", func(t *testing.T) {
+		prompt := buildFirstReviewPrompt("docs/plans/test.md")
 
-	assert.Contains(t, prompt, "reviewing code changes")
-	assert.Contains(t, prompt, "git diff")
-	assert.Contains(t, prompt, "REVIEW_DONE")
-	assert.Contains(t, prompt, "FAILED")
-	assert.Contains(t, prompt, "Code correctness")
-	assert.Contains(t, prompt, "Error handling")
-	assert.Contains(t, prompt, "Test coverage")
+		assert.Contains(t, prompt, "docs/plans/test.md")
+		assert.Contains(t, prompt, "git diff master...HEAD")
+		assert.Contains(t, prompt, "<<<RALPHEX:REVIEW_DONE>>>")
+		assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
+		// verify 8 agents are listed
+		assert.Contains(t, prompt, "qa-expert")
+		assert.Contains(t, prompt, "go-test-expert")
+		assert.Contains(t, prompt, "go-smells-expert")
+		assert.Contains(t, prompt, "go-simplify-expert")
+		assert.Contains(t, prompt, "go-error-auditor")
+		assert.Contains(t, prompt, "go-docs-analyzer")
+		assert.Contains(t, prompt, "implementation-reviewer")
+		assert.Contains(t, prompt, "documentation-expert")
+	})
+
+	t.Run("without plan file", func(t *testing.T) {
+		prompt := buildFirstReviewPrompt("")
+
+		assert.Contains(t, prompt, "current branch vs master")
+		assert.Contains(t, prompt, "<<<RALPHEX:REVIEW_DONE>>>")
+	})
 }
 
 func TestBuildSecondReviewPrompt(t *testing.T) {
-	findings := "Issue 1: Missing error check in foo.go:42"
+	t.Run("with plan file", func(t *testing.T) {
+		prompt := buildSecondReviewPrompt("docs/plans/test.md")
 
-	prompt := buildSecondReviewPrompt(findings)
+		assert.Contains(t, prompt, "docs/plans/test.md")
+		assert.Contains(t, prompt, "git diff master...HEAD")
+		assert.Contains(t, prompt, "<<<RALPHEX:REVIEW_DONE>>>")
+		assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
+		assert.Contains(t, prompt, "qa-expert")
+		assert.Contains(t, prompt, "implementation-reviewer")
+		// should NOT have all 8 agents (only 2 for second pass)
+		assert.NotContains(t, prompt, "go-smells-expert")
+	})
 
-	assert.Contains(t, prompt, "Codex Analysis Findings")
-	assert.Contains(t, prompt, findings)
-	assert.Contains(t, prompt, "REVIEW_DONE")
-	assert.Contains(t, prompt, "FAILED")
-	assert.Contains(t, prompt, "false positives")
+	t.Run("without plan file", func(t *testing.T) {
+		prompt := buildSecondReviewPrompt("")
+
+		assert.Contains(t, prompt, "current branch vs master")
+	})
 }
 
-func TestBuildCodexPrompt(t *testing.T) {
-	prompt := buildCodexPrompt()
+func TestBuildCodexEvaluationPrompt(t *testing.T) {
+	findings := "Issue 1: Missing error check in foo.go:42"
 
-	assert.Contains(t, prompt, "git diff")
-	assert.Contains(t, prompt, "Logic errors")
-	assert.Contains(t, prompt, "Security vulnerabilities")
-	assert.Contains(t, prompt, "CODEX_DONE")
+	prompt := buildCodexEvaluationPrompt(findings)
+
+	assert.Contains(t, prompt, findings)
+	assert.Contains(t, prompt, "<<<RALPHEX:CODEX_REVIEW_DONE>>>")
+	assert.Contains(t, prompt, "Codex (GPT-5.2)")
+	assert.Contains(t, prompt, "Valid issues")
+	assert.Contains(t, prompt, "Invalid/irrelevant issues")
 }
 
 func TestBuildContinuePrompt(t *testing.T) {
@@ -84,8 +83,8 @@ func TestBuildContinuePrompt(t *testing.T) {
 
 		assert.Contains(t, prompt, "Continue from where you left off")
 		assert.Contains(t, prompt, "short output")
-		assert.Contains(t, prompt, "COMPLETED")
-		assert.Contains(t, prompt, "FAILED")
+		assert.Contains(t, prompt, "<<<RALPHEX:ALL_TASKS_DONE>>>")
+		assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
 	})
 
 	t.Run("long output truncated", func(t *testing.T) {

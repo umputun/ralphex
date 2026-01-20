@@ -129,7 +129,7 @@ func run(ctx context.Context, o opts) error {
 	if mode != runner.ModeFull {
 		modeStr = fmt.Sprintf(" (%s mode)", mode)
 	}
-	fmt.Printf("starting ralph loop: %s (max %d iterations)%s\n", planStr, o.MaxIterations, modeStr)
+	fmt.Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, o.MaxIterations, modeStr)
 	fmt.Printf("branch: %s\n", branch)
 	fmt.Printf("progress log: %s\n\n", log.Path())
 
@@ -247,7 +247,7 @@ func ensureGitignore(ctx context.Context) error {
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString("\n# ralph progress logs\nprogress-*.txt\n"); err != nil {
+	if _, err := f.WriteString("\n# ralphex progress logs\nprogress-*.txt\n"); err != nil {
 		return fmt.Errorf("failed to write .gitignore: %w", err)
 	}
 

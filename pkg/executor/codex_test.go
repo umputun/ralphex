@@ -14,7 +14,7 @@ import (
 func TestCodexExecutor_Run_Success(t *testing.T) {
 	mock := &mocks.CodexCommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (string, string, error) {
-			return "Found issue in foo.go:42\nCODEX_DONE", "", nil
+			return "Found issue in foo.go:42\n<<<RALPHEX:CODEX_REVIEW_DONE>>>", "", nil
 		},
 	}
 	e := &CodexExecutor{cmdRunner: mock}
@@ -22,8 +22,8 @@ func TestCodexExecutor_Run_Success(t *testing.T) {
 	result := e.Run(context.Background(), "analyze code")
 
 	require.NoError(t, result.Error)
-	assert.Equal(t, "Found issue in foo.go:42\nCODEX_DONE", result.Output)
-	assert.Equal(t, "CODEX_DONE", result.Signal)
+	assert.Equal(t, "Found issue in foo.go:42\n<<<RALPHEX:CODEX_REVIEW_DONE>>>", result.Output)
+	assert.Equal(t, "<<<RALPHEX:CODEX_REVIEW_DONE>>>", result.Signal)
 }
 
 func TestCodexExecutor_Run_FiltersNoise(t *testing.T) {
@@ -115,7 +115,7 @@ func TestCodexExecutor_Run_DefaultModel(t *testing.T) {
 	result := e.Run(context.Background(), "test")
 
 	require.NoError(t, result.Error)
-	// default model should be gpt-5 (tested implicitly by success)
+	// default model should be gpt-5.2-codex (tested implicitly by success)
 }
 
 func TestCodexExecutor_Run_CustomModel(t *testing.T) {

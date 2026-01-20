@@ -14,7 +14,7 @@ import (
 )
 
 func TestClaudeExecutor_Run_Success(t *testing.T) {
-	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello world COMPLETED"}}`
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello world <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
 
 	mock := &mocks.CommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
@@ -26,8 +26,8 @@ func TestClaudeExecutor_Run_Success(t *testing.T) {
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	assert.Equal(t, "Hello world COMPLETED", result.Output)
-	assert.Equal(t, "COMPLETED", result.Signal)
+	assert.Equal(t, "Hello world <<<RALPHEX:ALL_TASKS_DONE>>>", result.Output)
+	assert.Equal(t, "<<<RALPHEX:ALL_TASKS_DONE>>>", result.Signal)
 }
 
 func TestClaudeExecutor_Run_StartError(t *testing.T) {
@@ -135,27 +135,27 @@ func TestClaudeExecutor_parseStream(t *testing.T) {
 		},
 		{
 			name:       "completed signal",
-			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Task done. COMPLETED"}}`,
-			wantOutput: "Task done. COMPLETED",
-			wantSignal: "COMPLETED",
+			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Task done. <<<RALPHEX:ALL_TASKS_DONE>>>"}}`,
+			wantOutput: "Task done. <<<RALPHEX:ALL_TASKS_DONE>>>",
+			wantSignal: "<<<RALPHEX:ALL_TASKS_DONE>>>",
 		},
 		{
 			name:       "failed signal",
-			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Could not finish. FAILED"}}`,
-			wantOutput: "Could not finish. FAILED",
-			wantSignal: "FAILED",
+			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Could not finish. <<<RALPHEX:TASK_FAILED>>>"}}`,
+			wantOutput: "Could not finish. <<<RALPHEX:TASK_FAILED>>>",
+			wantSignal: "<<<RALPHEX:TASK_FAILED>>>",
 		},
 		{
 			name:       "review done signal",
-			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Review complete. REVIEW_DONE"}}`,
-			wantOutput: "Review complete. REVIEW_DONE",
-			wantSignal: "REVIEW_DONE",
+			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Review complete. <<<RALPHEX:REVIEW_DONE>>>"}}`,
+			wantOutput: "Review complete. <<<RALPHEX:REVIEW_DONE>>>",
+			wantSignal: "<<<RALPHEX:REVIEW_DONE>>>",
 		},
 		{
 			name:       "codex done signal",
-			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Codex analysis complete. CODEX_DONE"}}`,
-			wantOutput: "Codex analysis complete. CODEX_DONE",
-			wantSignal: "CODEX_DONE",
+			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Codex done. <<<RALPHEX:CODEX_REVIEW_DONE>>>"}}`,
+			wantOutput: "Codex done. <<<RALPHEX:CODEX_REVIEW_DONE>>>",
+			wantSignal: "<<<RALPHEX:CODEX_REVIEW_DONE>>>",
 		},
 		{
 			name:       "result type",
@@ -179,6 +179,12 @@ func TestClaudeExecutor_parseStream(t *testing.T) {
 			name:       "unknown event type",
 			input:      `{"type":"unknown_type","data":"something"}`,
 			wantOutput: "",
+			wantSignal: "",
+		},
+		{
+			name:       "assistant event type",
+			input:      `{"type":"assistant","message":{"content":[{"type":"text","text":"assistant output"}]}}`,
+			wantOutput: "assistant output",
 			wantSignal: "",
 		},
 	}
@@ -223,6 +229,29 @@ func TestClaudeExecutor_parseStream_withDebug(t *testing.T) {
 
 func TestClaudeExecutor_extractText(t *testing.T) {
 	e := &ClaudeExecutor{}
+
+	t.Run("assistant event with text", func(t *testing.T) {
+		event := streamEvent{Type: "assistant"}
+		event.Message.Content = []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{{Type: "text", Text: "assistant message"}}
+		assert.Equal(t, "assistant message", e.extractText(&event))
+	})
+
+	t.Run("assistant event with multiple text blocks", func(t *testing.T) {
+		event := streamEvent{Type: "assistant"}
+		event.Message.Content = []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{{Type: "text", Text: "first"}, {Type: "text", Text: "second"}}
+		assert.Equal(t, "firstsecond", e.extractText(&event))
+	})
+
+	t.Run("assistant event with empty content", func(t *testing.T) {
+		event := streamEvent{Type: "assistant"}
+		assert.Empty(t, e.extractText(&event))
+	})
 
 	t.Run("content block delta", func(t *testing.T) {
 		event := streamEvent{Type: "content_block_delta"}
@@ -283,14 +312,11 @@ func TestDetectSignal(t *testing.T) {
 		want string
 	}{
 		{"some text", ""},
-		{"task completed", "COMPLETED"},
-		{"COMPLETED", "COMPLETED"},
-		{"Operation FAILED", "FAILED"},
-		{"failed to compile", "FAILED"},
-		{"REVIEW_DONE", "REVIEW_DONE"},
-		{"Review_Done here", "REVIEW_DONE"},
-		{"CODEX_DONE analysis", "CODEX_DONE"},
-		{"codex_done", "CODEX_DONE"},
+		{"task done <<<RALPHEX:ALL_TASKS_DONE>>>", "<<<RALPHEX:ALL_TASKS_DONE>>>"},
+		{"<<<RALPHEX:TASK_FAILED>>> error", "<<<RALPHEX:TASK_FAILED>>>"},
+		{"review complete <<<RALPHEX:REVIEW_DONE>>>", "<<<RALPHEX:REVIEW_DONE>>>"},
+		{"<<<RALPHEX:CODEX_REVIEW_DONE>>> analysis done", "<<<RALPHEX:CODEX_REVIEW_DONE>>>"},
+		{"no signal here", ""},
 	}
 
 	for _, tc := range tests {

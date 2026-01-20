@@ -38,5 +38,5 @@ dist/
 # debug
 __debug_bin*
 
-# ralph progress logs
+# ralphex progress logs
 progress-*.txt

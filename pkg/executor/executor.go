@@ -34,6 +34,8 @@ func (r *execCommandRunner) Run(ctx context.Context, name string, args ...string
 	if err != nil {
 		return nil, nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
+	// merge stderr into stdout like python's stderr=subprocess.STDOUT
+	cmd.Stderr = cmd.Stdout
 	if err := cmd.Start(); err != nil {
 		return nil, nil, fmt.Errorf("start command: %w", err)
 	}
@@ -72,6 +74,7 @@ type ClaudeExecutor struct {
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
 func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	args := []string{
+		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
 		"--verbose",
 		"-p", prompt,
@@ -151,6 +154,15 @@ func (e *ClaudeExecutor) parseStream(r io.Reader) Result {
 // extractText extracts text content from various event types.
 func (e *ClaudeExecutor) extractText(event *streamEvent) string {
 	switch event.Type {
+	case "assistant":
+		// assistant events contain message.content array with text blocks
+		var texts []string
+		for _, c := range event.Message.Content {
+			if c.Type == "text" && c.Text != "" {
+				texts = append(texts, c.Text)
+			}
+		}
+		return strings.Join(texts, "")
 	case "content_block_delta":
 		if event.Delta.Type == "text_delta" {
 			return event.Delta.Text
@@ -169,10 +181,16 @@ func (e *ClaudeExecutor) extractText(event *streamEvent) string {
 }
 
 // detectSignal checks text for completion signals.
+// Looks for <<<RALPHEX:...>>> format signals.
 func detectSignal(text string) string {
-	upper := strings.ToUpper(text)
-	for _, sig := range []string{"COMPLETED", "FAILED", "REVIEW_DONE", "CODEX_DONE"} {
-		if strings.Contains(upper, sig) {
+	signals := []string{
+		"<<<RALPHEX:ALL_TASKS_DONE>>>",
+		"<<<RALPHEX:TASK_FAILED>>>",
+		"<<<RALPHEX:REVIEW_DONE>>>",
+		"<<<RALPHEX:CODEX_REVIEW_DONE>>>",
+	}
+	for _, sig := range signals {
+		if strings.Contains(text, sig) {
 			return sig
 		}
 	}
