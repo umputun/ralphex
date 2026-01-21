@@ -379,8 +379,16 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 			break
 		}
 
+		// show codex findings summary before Claude evaluation
+		r.showCodexSummary(codexResult.Output)
+
 		// pass codex output to claude for evaluation and fixing
+		r.log.SetPhase(progress.PhaseClaudeEval)
+		r.log.PrintSection("claude evaluating codex findings")
 		claudeResult := r.claude.Run(ctx, r.buildCodexEvaluationPrompt(codexResult.Output))
+
+		// restore codex phase for next iteration
+		r.log.SetPhase(progress.PhaseCodex)
 		if claudeResult.Error != nil {
 			return fmt.Errorf("claude execution: %w", claudeResult.Error)
 		}
@@ -474,4 +482,33 @@ func (r *Runner) hasUncompletedTasks() bool {
 		}
 	}
 	return false
+}
+
+// showCodexSummary displays a condensed summary of codex output before Claude evaluation.
+// extracts text until first code block or 500 chars, whichever is shorter.
+func (r *Runner) showCodexSummary(output string) {
+	summary := output
+
+	// trim to first code block if present
+	if idx := strings.Index(summary, "```"); idx > 0 {
+		summary = summary[:idx]
+	}
+
+	// limit to 5000 chars
+	if len(summary) > 5000 {
+		summary = summary[:5000] + "..."
+	}
+
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return
+	}
+
+	r.log.Print("codex findings:")
+	for line := range strings.SplitSeq(summary, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		r.log.PrintAligned("  " + line)
+	}
 }

@@ -20,27 +20,30 @@ type Phase string
 
 // Phase constants for execution stages.
 const (
-	PhaseTask   Phase = "task"   // execution phase (green)
-	PhaseReview Phase = "review" // code review phase (cyan)
-	PhaseCodex  Phase = "codex"  // codex analysis phase (magenta)
+	PhaseTask       Phase = "task"        // execution phase (green)
+	PhaseReview     Phase = "review"      // code review phase (cyan)
+	PhaseCodex      Phase = "codex"       // codex analysis phase (magenta)
+	PhaseClaudeEval Phase = "claude-eval" // claude evaluating codex (bright cyan)
 )
 
 // phase colors using fatih/color.
 var (
-	taskColor      = color.New(color.FgGreen)
-	reviewColor    = color.New(color.FgCyan)
-	codexColor     = color.New(color.FgMagenta)
-	warnColor      = color.New(color.FgYellow)
-	errorColor     = color.New(color.FgRed)
-	signalColor    = color.RGB(255, 100, 100) // bright red
-	timestampColor = color.RGB(138, 138, 138) // medium grey
+	taskColor       = color.New(color.FgGreen)
+	reviewColor     = color.New(color.FgCyan)
+	codexColor      = color.New(color.FgMagenta)
+	claudeEvalColor = color.RGB(100, 200, 255) // bright cyan/light blue
+	warnColor       = color.New(color.FgYellow)
+	errorColor      = color.New(color.FgRed)
+	signalColor     = color.RGB(255, 100, 100) // bright red
+	timestampColor  = color.RGB(138, 138, 138) // medium grey
 )
 
 // phaseColors maps phases to their color functions.
 var phaseColors = map[Phase]*color.Color{
-	PhaseTask:   taskColor,
-	PhaseReview: reviewColor,
-	PhaseCodex:  codexColor,
+	PhaseTask:       taskColor,
+	PhaseReview:     reviewColor,
+	PhaseCodex:      codexColor,
+	PhaseClaudeEval: claudeEvalColor,
 }
 
 // Logger writes timestamped output to both file and stdout.

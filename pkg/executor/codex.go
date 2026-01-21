@@ -3,31 +3,47 @@ package executor
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
-	"regexp"
 	"strings"
 )
 
+// CodexStreams holds both stderr and stdout from codex command.
+type CodexStreams struct {
+	Stderr io.Reader
+	Stdout io.Reader
+}
+
+// CodexRunner abstracts command execution for codex.
+// Returns both stderr (streaming progress) and stdout (final response).
+type CodexRunner interface {
+	Run(ctx context.Context, name string, args ...string) (streams CodexStreams, wait func() error, err error)
+}
+
 // execCodexRunner is the default command runner using os/exec for codex.
-// codex outputs to stderr for streaming, unlike claude which uses stdout.
+// codex outputs streaming progress to stderr, final response to stdout.
 type execCodexRunner struct{}
 
-func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
+func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) (CodexStreams, func() error, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 
-	// codex outputs to stderr for streaming
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, nil, fmt.Errorf("stderr pipe: %w", err)
+		return CodexStreams{}, nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return CodexStreams{}, nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("start command: %w", err)
+		return CodexStreams{}, nil, fmt.Errorf("start command: %w", err)
 	}
 
-	return stderr, cmd.Wait, nil
+	return CodexStreams{Stderr: stderr, Stdout: stdout}, cmd.Wait, nil
 }
 
 // CodexExecutor runs codex CLI commands and filters output.
@@ -40,19 +56,18 @@ type CodexExecutor struct {
 	ProjectDoc      string            // path to project documentation file
 	OutputHandler   func(text string) // called for each filtered output line in real-time
 	Debug           bool              // enable debug output
-	cmdRunner       CommandRunner     // for testing, nil uses default
+	runner          CodexRunner       // for testing, nil uses default
 }
 
-// codexFilterState tracks whitelist filter state machine.
+// codexFilterState tracks header separator count for filtering.
 type codexFilterState struct {
-	inHeader  bool            // true at start, false when non-header seen
-	inReview  bool            // true after "Full review comments:"
-	seenBold  map[string]bool // dedupe bold summaries
-	lineCount int             // track header lines
+	headerCount int             // tracks "--------" separators seen (show content between first two)
+	seen        map[string]bool // track all shown lines for deduplication
 }
 
 // Run executes codex CLI with the given prompt and returns filtered output.
-// Output is streamed line-by-line to OutputHandler in real-time.
+// stderr is streamed line-by-line to OutputHandler for progress indication.
+// stdout is captured entirely as the final response (returned in Result.Output).
 func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	cmd := e.Command
 	if cmd == "" {
@@ -93,185 +108,132 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 
 	args = append(args, prompt)
 
-	runner := e.cmdRunner
+	runner := e.runner
 	if runner == nil {
 		runner = &execCodexRunner{}
 	}
 
-	stderr, wait, err := runner.Run(ctx, cmd, args...)
+	streams, wait, err := runner.Run(ctx, cmd, args...)
 	if err != nil {
 		return Result{Error: fmt.Errorf("start codex: %w", err)}
 	}
 
-	// stream and filter output
-	filteredOutput, rawOutput, streamErr := e.processStream(ctx, stderr)
+	// process stderr for progress display (header block + bold summaries)
+	stderrDone := make(chan error, 1)
+	go func() {
+		stderrDone <- e.processStderr(ctx, streams.Stderr)
+	}()
+
+	// read stdout entirely as final response
+	stdoutContent, stdoutErr := e.readStdout(streams.Stdout)
+
+	// wait for stderr processing to complete
+	stderrErr := <-stderrDone
 
 	// wait for command completion
 	waitErr := wait()
 
-	// determine final error
+	// determine final error (prefer stderr/stdout errors over wait error)
 	var finalErr error
-	if streamErr != nil {
-		finalErr = streamErr
-	} else if waitErr != nil {
+	switch {
+	case stderrErr != nil && !errors.Is(stderrErr, context.Canceled):
+		finalErr = stderrErr
+	case stdoutErr != nil:
+		finalErr = stdoutErr
+	case waitErr != nil:
 		if ctx.Err() != nil {
-			finalErr = ctx.Err()
+			finalErr = fmt.Errorf("context error: %w", ctx.Err())
 		} else {
 			finalErr = fmt.Errorf("codex exited with error: %w", waitErr)
 		}
 	}
 
-	// detect signal in raw output (includes all content)
-	signal := detectSignal(rawOutput)
+	// detect signal in stdout (the actual response)
+	signal := detectSignal(stdoutContent)
 
-	// return filtered output for evaluation prompt
-	return Result{Output: filteredOutput, Signal: signal, Error: finalErr}
+	// return stdout content as the result (the actual answer from codex)
+	return Result{Output: stdoutContent, Signal: signal, Error: finalErr}
 }
 
-// processStream reads stderr line-by-line, filters, and calls OutputHandler.
-// returns filtered output (for evaluation prompt) and raw output (for signal detection).
-func (e *CodexExecutor) processStream(ctx context.Context, r io.Reader) (filtered, raw string, err error) {
-	var filteredOutput, rawOutput strings.Builder
-	state := &codexFilterState{
-		inHeader: true,
-		seenBold: make(map[string]bool),
-	}
-
+// processStderr reads stderr line-by-line, filters for progress display.
+// shows header block (between first two "--------" separators) and bold summaries.
+func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) error {
+	state := &codexFilterState{}
 	scanner := bufio.NewScanner(r)
+
 	for scanner.Scan() {
-		// check for context cancellation
 		select {
 		case <-ctx.Done():
-			return filteredOutput.String(), rawOutput.String(), ctx.Err()
+			return fmt.Errorf("context done: %w", ctx.Err())
 		default:
 		}
 
 		line := scanner.Text()
-		rawOutput.WriteString(line + "\n")
-
-		// apply whitelist filter
-		show, filteredLine := e.shouldDisplay(line, state)
-		if show {
-			filteredOutput.WriteString(filteredLine + "\n")
+		if show, filtered := e.shouldDisplay(line, state); show {
 			if e.OutputHandler != nil {
-				e.OutputHandler(filteredLine + "\n")
+				e.OutputHandler(filtered + "\n")
 			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return filteredOutput.String(), rawOutput.String(), fmt.Errorf("read stream: %w", err)
+		return fmt.Errorf("read stderr: %w", err)
 	}
-
-	return filteredOutput.String(), rawOutput.String(), nil
+	return nil
 }
 
-// codexHeaderPrefixes are displayed during the header phase (whitelist).
-var codexHeaderPrefixes = []string{
-	"OpenAI Codex",
-	"workdir:",
-	"model:",
-	"provider:",
-	"approval:",
-	"sandbox:",
-	"reasoning effort:",
-	"reasoning summaries:",
-	"session id:",
-	"project_doc:",
-	"--------", // separator line
+// readStdout reads the entire stdout content as the final response.
+func (e *CodexExecutor) readStdout(r io.Reader) (string, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("read stdout: %w", err)
+	}
+	return string(data), nil
 }
 
-// shouldDisplay implements whitelist filter for codex output.
-// Returns whether to display the line and the cleaned version.
+// shouldDisplay implements a simple filter for codex stderr output.
+// shows: header block (between first two "--------" separators) and bold summaries.
+// also deduplicates lines to avoid non-consecutive repeats.
 func (e *CodexExecutor) shouldDisplay(line string, state *codexFilterState) (bool, string) {
 	s := strings.TrimSpace(line)
 	if s == "" {
 		return false, ""
 	}
 
-	state.lineCount++
+	var show bool
+	var filtered string
+	var skipDedup bool // separators are not deduplicated
 
-	// review section marker: show it and everything after
-	if strings.Contains(s, "Full review comments:") {
-		state.inReview = true
-		state.inHeader = false
-		return true, line
-	}
-	if state.inReview {
-		return true, e.stripBold(line)
+	switch {
+	case strings.HasPrefix(s, "--------"):
+		// track "--------" separators for header block
+		state.headerCount++
+		show = state.headerCount <= 2 // show first two separators
+		filtered = line
+		skipDedup = true // don't deduplicate separators
+	case state.headerCount == 1:
+		// show everything between first two separators (header block)
+		show = true
+		filtered = line
+	case strings.HasPrefix(s, "**"):
+		// show bold summaries after header (progress indication)
+		show = true
+		filtered = e.stripBold(s)
 	}
 
-	// "NO ISSUES FOUND" - explicit clean result from codex
-	upper := strings.ToUpper(s)
-	if strings.Contains(upper, "NO ISSUES FOUND") || strings.Contains(upper, "NO ISSUES") {
-		state.inHeader = false
-		return true, line
-	}
-
-	// bold summaries: show (deduplicated)
-	if strings.HasPrefix(s, "**") {
-		state.inHeader = false
-		cleaned := e.stripBold(s)
-		if state.seenBold[cleaned] {
-			return false, ""
+	// check for duplicates before returning (except separators)
+	if show && !skipDedup {
+		if state.seen == nil {
+			state.seen = make(map[string]bool)
 		}
-		state.seenBold[cleaned] = true
-		return true, cleaned
-	}
-
-	// priority findings: show
-	if strings.HasPrefix(s, "- [P") {
-		state.inHeader = false
-		return true, e.stripBold(line)
-	}
-
-	// file:line references (e.g., "pkg/foo/bar.go:123" or "- pkg/foo.go:45 - description")
-	// this matches the format requested in the codex prompt
-	if containsFileLineRef(s) {
-		state.inHeader = false
-		return true, e.stripBold(line)
-	}
-
-	// header: show only specific prefixes (first ~20 lines)
-	if state.inHeader && state.lineCount <= 20 {
-		for _, prefix := range codexHeaderPrefixes {
-			if strings.HasPrefix(s, prefix) {
-				return true, line
-			}
+		if state.seen[filtered] {
+			return false, "" // skip duplicate
 		}
-		// still in header zone but not a header prefix - continue
-		return false, ""
+		state.seen[filtered] = true
 	}
 
-	// exit header phase after threshold
-	if state.inHeader && state.lineCount > 20 {
-		state.inHeader = false
-	}
-
-	// everything else is filtered (commands, diffs, tool output, etc.)
-	return false, ""
+	return show, filtered
 }
-
-// fileLineRefPattern matches file:line references like "pkg/foo.go:123", "Makefile:45",
-// "./path/file.ts:12", "docs/readme.md:9". Handles both files with extensions and
-// extensionless files (Makefile, Dockerfile, etc.).
-// excludes URLs by requiring no // before the match.
-var fileLineRefPattern = regexp.MustCompile(`(?:^|[^a-zA-Z0-9/])([a-zA-Z0-9_./-]+[a-zA-Z0-9_]):(\d+)`)
-
-// containsFileLineRef checks if a line contains a file:line reference pattern.
-// matches patterns like "pkg/foo.go:123", "Makefile:45", "./path/file.ts:12".
-// avoids false positives on URLs like "http://example.com:8080".
-func containsFileLineRef(s string) bool {
-	// quick check for URL patterns to avoid false positives
-	if strings.Contains(s, "://") {
-		// remove URL portion and check remaining text
-		s = urlPattern.ReplaceAllString(s, " ")
-	}
-	return fileLineRefPattern.MatchString(s)
-}
-
-// urlPattern matches common URL patterns to filter them out
-var urlPattern = regexp.MustCompile(`https?://\S+`)
 
 // stripBold removes markdown bold markers (**text**) from text.
 func (e *CodexExecutor) stripBold(s string) string {
