@@ -608,3 +608,70 @@ func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
+	// test that stderr lines larger than 64KB (default bufio.Scanner limit) are handled
+	// this was the "token too long" bug fix
+
+	tests := []struct {
+		name string
+		size int
+	}{
+		{"100KB line", 100 * 1024},
+		{"500KB line", 500 * 1024},
+		{"1MB line", 1024 * 1024},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// create a large line in header block (which gets displayed)
+			largeContent := strings.Repeat("x", tc.size)
+			stderr := "--------\n" + largeContent + "\n--------\n"
+
+			var shown []string
+			e := &CodexExecutor{
+				OutputHandler: func(text string) {
+					shown = append(shown, strings.TrimSuffix(text, "\n"))
+				},
+			}
+
+			err := e.processStderr(context.Background(), strings.NewReader(stderr))
+
+			require.NoError(t, err, "should handle %d byte line without error", tc.size)
+			assert.Contains(t, shown, largeContent, "large content should be captured")
+		})
+	}
+}
+
+func TestCodexExecutor_Run_largeOutput(t *testing.T) {
+	// test end-to-end with large stderr and stdout
+	largeStderr := strings.Repeat("x", 200*1024) // 200KB
+	largeStdout := strings.Repeat("y", 500*1024) // 500KB
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			stderr := "--------\n" + largeStderr + "\n--------\n"
+			return mockStreams(stderr, largeStdout), mockWait(), nil
+		},
+	}
+
+	var captured []string
+	e := &CodexExecutor{
+		runner:        mock,
+		OutputHandler: func(text string) { captured = append(captured, text) },
+	}
+
+	result := e.Run(context.Background(), "test")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, largeStdout, result.Output, "stdout should be fully captured")
+	// verify large stderr was processed (appears in header block)
+	found := false
+	for _, c := range captured {
+		if strings.Contains(c, strings.Repeat("x", 100)) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "large stderr content should be captured")
+}

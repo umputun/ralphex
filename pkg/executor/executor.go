@@ -197,9 +197,9 @@ func (e *ClaudeExecutor) parseStream(r io.Reader) Result {
 	var signal string
 
 	scanner := bufio.NewScanner(r)
-	// increase buffer size for large JSON lines
+	// increase buffer size for large JSON lines (16MB max for large diffs with parallel agents)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(buf, 16*1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()

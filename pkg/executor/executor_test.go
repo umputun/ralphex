@@ -471,3 +471,51 @@ func TestFilterEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeExecutor_parseStream_largeLines(t *testing.T) {
+	// test that lines larger than 64KB (default bufio.Scanner limit) are handled
+	// this was the "token too long" bug fix
+
+	tests := []struct {
+		name string
+		size int
+	}{
+		{"100KB line", 100 * 1024},
+		{"500KB line", 500 * 1024},
+		{"1MB line", 1024 * 1024},
+		{"2MB line", 2 * 1024 * 1024},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// create a large text payload
+			largeText := strings.Repeat("x", tc.size)
+			jsonLine := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + largeText + `"}}`
+
+			e := &ClaudeExecutor{}
+			result := e.parseStream(strings.NewReader(jsonLine))
+
+			require.NoError(t, result.Error, "should handle %d byte line without error", tc.size)
+			assert.Len(t, result.Output, tc.size, "output should contain full text")
+		})
+	}
+}
+
+func TestClaudeExecutor_parseStream_multipleLargeLines(t *testing.T) {
+	// test multiple large lines in sequence (simulates parallel agent output)
+	lineSize := 200 * 1024 // 200KB per line
+	numLines := 5          // simulate 5 parallel agents
+
+	lines := make([]string, 0, numLines)
+	for i := range numLines {
+		text := strings.Repeat(string(rune('a'+i)), lineSize)
+		lines = append(lines, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"`+text+`"}}`)
+	}
+	input := strings.Join(lines, "\n")
+
+	e := &ClaudeExecutor{}
+	result := e.parseStream(strings.NewReader(input))
+
+	require.NoError(t, result.Error)
+	assert.Len(t, result.Output, lineSize*numLines, "should contain all output from all lines")
+}

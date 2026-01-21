@@ -160,6 +160,9 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) error {
 	state := &codexFilterState{}
 	scanner := bufio.NewScanner(r)
+	// increase buffer size for large output lines (16MB max)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 16*1024*1024)
 
 	for scanner.Scan() {
 		select {
