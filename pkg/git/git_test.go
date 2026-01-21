@@ -460,7 +460,7 @@ func TestRepo_CheckoutBranch(t *testing.T) {
 		require.NoError(t, err, "untracked file should be preserved after checkout")
 
 		// verify content is intact
-		content, err := os.ReadFile(untrackedPath)
+		content, err := os.ReadFile(untrackedPath) //nolint:gosec // test file path
 		require.NoError(t, err)
 		assert.Equal(t, "untracked content", string(content))
 	})
