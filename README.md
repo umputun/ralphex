@@ -307,6 +307,15 @@ On first run, ralphex creates this directory with default configuration.
 | `iteration_delay_ms` | Delay between iterations | `2000` |
 | `task_retry_count` | Task retry attempts | `1` |
 | `plans_dir` | Plans directory | `docs/plans` |
+| `color_task` | Task execution phase color (hex) | `#00ff00` |
+| `color_review` | Review phase color (hex) | `#00ffff` |
+| `color_codex` | Codex review color (hex) | `#ff00ff` |
+| `color_claude_eval` | Claude evaluation color (hex) | `#64c8ff` |
+| `color_warn` | Warning messages color (hex) | `#ffff00` |
+| `color_error` | Error messages color (hex) | `#ff0000` |
+| `color_signal` | Completion/failure signals color (hex) | `#ff6464` |
+| `color_timestamp` | Timestamp prefix color (hex) | `#8a8a8a` |
+| `color_info` | Informational messages color (hex) | `#b4b4b4` |
 
 ### Custom prompts
 

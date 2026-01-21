@@ -464,6 +464,7 @@ func TestSetColors(t *testing.T) {
 	origErrorColor := errorColor
 	origSignalColor := signalColor
 	origTimestampColor := timestampColor
+	origInfoColor := infoColor
 	defer func() {
 		taskColor = origTaskColor
 		reviewColor = origReviewColor
@@ -473,6 +474,7 @@ func TestSetColors(t *testing.T) {
 		errorColor = origErrorColor
 		signalColor = origSignalColor
 		timestampColor = origTimestampColor
+		infoColor = origInfoColor
 	}()
 
 	tests := []struct {
@@ -631,4 +633,38 @@ func TestInfoColor(t *testing.T) {
 		c := InfoColor()
 		assert.NotNil(t, c)
 	})
+}
+
+func TestParseRGB(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		want []int
+	}{
+		{name: "valid rgb", s: "255,0,0", want: []int{255, 0, 0}},
+		{name: "valid rgb with zeros", s: "0,0,0", want: []int{0, 0, 0}},
+		{name: "valid rgb max values", s: "255,255,255", want: []int{255, 255, 255}},
+		{name: "valid rgb with spaces", s: " 100 , 150 , 200 ", want: []int{100, 150, 200}},
+		{name: "empty string", s: "", want: nil},
+		{name: "too few parts", s: "255,0", want: nil},
+		{name: "too many parts", s: "255,0,0,0", want: nil},
+		{name: "invalid r component", s: "abc,0,0", want: nil},
+		{name: "invalid g component", s: "0,abc,0", want: nil},
+		{name: "invalid b component", s: "0,0,abc", want: nil},
+		{name: "r out of range high", s: "256,0,0", want: nil},
+		{name: "g out of range high", s: "0,256,0", want: nil},
+		{name: "b out of range high", s: "0,0,256", want: nil},
+		{name: "r out of range negative", s: "-1,0,0", want: nil},
+		{name: "g out of range negative", s: "0,-1,0", want: nil},
+		{name: "b out of range negative", s: "0,0,-1", want: nil},
+		{name: "single value", s: "255", want: nil},
+		{name: "no delimiter", s: "255000", want: nil},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseRGB(tc.s)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
