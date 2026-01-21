@@ -4,15 +4,7 @@
 
 Claude Code is powerful but interactive - it requires you to watch, approve, and guide each step. For complex features spanning multiple tasks, this means hours of babysitting. Worse, as context fills up during long sessions, the model's quality degrades - it starts making mistakes, forgetting earlier decisions, and producing worse code.
 
-ralphex solves both problems. Each task executes in a fresh Claude Code session with minimal context, keeping the model sharp throughout the entire plan. Write a plan with tasks and validation commands, start ralphex, and walk away. It will:
-- Execute each task via Claude Code
-- Run your tests and linters after each change
-- Commit working code automatically
-- Run multi-phase code reviews (Claude agents + external Codex)
-- Fix issues found during review
-- Move the completed plan to `completed/` when done
-
-Come back to find your feature implemented, reviewed, and committed - or check the progress log to see what it is doing.
+ralphex solves both problems. Each task executes in a fresh Claude Code session with minimal context, keeping the model sharp throughout the entire plan. Write a plan with tasks and validation commands, start ralphex, and walk away. Come back to find your feature implemented, reviewed, and committed - or check the progress log to see what it's doing.
 
 ## Features
 
