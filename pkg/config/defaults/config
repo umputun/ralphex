@@ -3,6 +3,10 @@
 #
 # config values in this file can be overridden by CLI flags.
 # precedence (highest to lowest): CLI flags > user config > embedded defaults
+#
+# NOTE: inline comments (e.g., "key = value # comment") are NOT supported.
+# use full-line comments starting with # on a separate line instead.
+# this is required to support hex color values like #00ff00.
 
 # ------------------------------------------------------------------------------
 # claude executor

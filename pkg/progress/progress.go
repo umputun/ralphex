@@ -103,6 +103,8 @@ func InitColors() {
 // SetColors applies color configuration from ColorConfig.
 // each color value is expected to be comma-separated RGB values (e.g., "255,0,0").
 // empty values are skipped, keeping the current/default color.
+// NOTE: this function must be called once during initialization, before any logging starts.
+// it is not safe for concurrent use - calling it after logging begins may cause data races.
 func SetColors(cfg ColorConfig) {
 	if rgb := parseRGB(cfg.Task); rgb != nil {
 		taskColor = color.RGB(rgb[0], rgb[1], rgb[2])
