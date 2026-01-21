@@ -18,89 +18,67 @@ Autonomous plan execution with Claude Code with automated reviews.
 - **Progress logging** - detailed execution logs for debugging
 - **Multiple modes** - full execution, review-only, or codex-only
 
+## Quick Start
+
+Make sure ralphex is [installed](#installation) and your project is a git repository. You need a plan file in `docs/plans/`, for example:
+
+```markdown
+# Plan: My Feature
+
+## Validation Commands
+- `go test ./...`
+
+### Task 1: Implement feature
+- [ ] Add the new functionality
+- [ ] Add tests
+```
+
+Then run:
+
+```bash
+ralphex docs/plans/my-feature.md
+```
+
+ralphex will create a branch, execute tasks, commit results, run multi-phase reviews, and move the plan to `completed/` when done.
+
 ## How It Works
 
-ralphex executes plans in four phases with automated code review between each phase.
+ralphex executes plans in four phases with automated code reviews.
 
 ### Execution Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         PHASE 1: Task Execution                         │
-│                                                                         │
-│  ┌─────────┐    ┌─────────────┐    ┌──────────┐    ┌────────────────┐   │
-│  │  Read   │───▶│   Execute   │───▶│ Validate │───▶│ Mark Complete  │   │
-│  │  Task   │    │  via Claude │    │ (tests)  │    │   & Commit     │   │
-│  └─────────┘    └─────────────┘    └──────────┘    └───────┬────────┘   │
-│       ▲                                                    │            │
-│       │                         ┌──────────────────────────┘            │
-│       │                         ▼                                       │
-│       │                  ┌─────────────┐                                │
-│       └──────────────────│ more tasks? │                                │
-│              YES         └──────┬──────┘                                │
-│                                 │ NO (COMPLETED signal)                 │
-└─────────────────────────────────┼───────────────────────────────────────┘
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      PHASE 2: First Code Review                         │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  N agents in parallel: quality, implementation, testing,         │   │
-│  │                        simplification, documentation, etc        │   │
-│  └──────────────────────────────┬───────────────────────────────────┘   │
-│              ▲                  ▼                                       │
-│              │          ┌───────────────┐                               │
-│              └──────────│ issues found? │                               │
-│                  YES    └───────┬───────┘                               │
-│                                 │ NO                                    │
-│                                 ▼                                       │
-│                         ┌───────────────┐                               │
-│                         │  Fix & Commit │                               │
-│                         └───────┬───────┘                               │
-│                                 │                                       │
-│                                 │ REVIEW_DONE signal                    │
-└─────────────────────────────────┼───────────────────────────────────────┘
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     PHASE 3: Codex External Review                      │
-│                                                                         │
-│              ┌──────────────────────────────────────────┐               │
-│              │                                          │               │
-│              ▼                                          │               │
-│      ┌───────────────┐    ┌───────────────┐             │               │
-│      │ Codex reviews │───▶│ Claude evals  │             │               │
-│      │   (GPT-5.2)   │    │   & fixes     │             │               │
-│      └───────────────┘    └───────┬───────┘             │               │
-│                                   ▼                     │               │
-│                           ┌───────────────┐             │               │
-│                           │ issues found? │─────────────┘               │
-│                           └───────┬───────┘   YES                       │
-│                                   │ NO (CODEX_REVIEW_DONE signal)       │
-└───────────────────────────────────┼─────────────────────────────────────┘
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     PHASE 4: Second Code Review                         │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  M agents: quality, implementation (critical/major only)         │   │
-│  └──────────────────────────────┬───────────────────────────────────┘   │
-│              ▲                  ▼                                       │
-│              │          ┌───────────────┐                               │
-│              └──────────│ issues found? │                               │
-│                  YES    └───────┬───────┘                               │
-│                                 │ NO                                    │
-│                                 ▼                                       │
-│                         ┌───────────────┐                               │
-│                         │  Fix & Commit │                               │
-│                         └───────┬───────┘                               │
-│                                 │                                       │
-│                                 │ REVIEW_DONE signal                    │
-└─────────────────────────────────┼───────────────────────────────────────┘
-                                  ▼
-                      ┌───────────────────────┐
-                      │  Move plan to         │
-                      │  docs/plans/completed │
-                      └───────────────────────┘
+```mermaid
+flowchart TD
+    subgraph P1["Phase 1: Task Execution"]
+        T1[Read Task] --> T2[Execute via Claude]
+        T2 --> T3[Validate & Commit]
+        T3 --> T4{More tasks?}
+        T4 -->|Yes| T1
+    end
+
+    subgraph P2["Phase 2: First Code Review"]
+        R1[Run N agents] --> R2{Issues?}
+        R2 -->|Yes| R3[Fix & Commit]
+        R3 --> R1
+    end
+
+    subgraph P3["Phase 3: Codex External Review"]
+        C1[Codex reviews] --> C2[Claude evaluates]
+        C2 --> C3{Issues?}
+        C3 -->|Yes| C4[Fix & Commit]
+        C4 --> C1
+    end
+
+    subgraph P4["Phase 4: Second Code Review"]
+        S1[Run 2 agents] --> S2{Issues?}
+        S2 -->|Yes| S3[Fix & Commit]
+        S3 --> S1
+    end
+
+    T4 -->|No| R1
+    R2 -->|No| C1
+    C3 -->|No| S1
+    S2 -->|No| Done[Move plan to completed/]
 ```
 
 ### Phase 1: Task Execution
