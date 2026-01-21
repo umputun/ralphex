@@ -143,7 +143,7 @@ func (r *Repo) CheckoutBranch(name string) error {
 	}
 
 	branchRef := plumbing.NewBranchReferenceName(name)
-	if err := wt.Checkout(&git.CheckoutOptions{Branch: branchRef}); err != nil {
+	if err := wt.Checkout(&git.CheckoutOptions{Branch: branchRef, Keep: true}); err != nil {
 		return fmt.Errorf("checkout branch: %w", err)
 	}
 	return nil

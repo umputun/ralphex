@@ -428,6 +428,42 @@ func TestRepo_CheckoutBranch(t *testing.T) {
 		err = repo.CheckoutBranch("nonexistent")
 		assert.Error(t, err)
 	})
+
+	t.Run("preserves untracked files", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create a branch
+		err = repo.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// switch back to master
+		err = repo.CheckoutBranch("master")
+		require.NoError(t, err)
+
+		// create an untracked file while on master
+		untrackedPath := filepath.Join(dir, "untracked.txt")
+		err = os.WriteFile(untrackedPath, []byte("untracked content"), 0o600)
+		require.NoError(t, err)
+
+		// verify file exists before checkout
+		_, err = os.Stat(untrackedPath)
+		require.NoError(t, err, "untracked file should exist before checkout")
+
+		// switch to feature branch
+		err = repo.CheckoutBranch("feature")
+		require.NoError(t, err)
+
+		// verify untracked file still exists after checkout
+		_, err = os.Stat(untrackedPath)
+		require.NoError(t, err, "untracked file should be preserved after checkout")
+
+		// verify content is intact
+		content, err := os.ReadFile(untrackedPath)
+		require.NoError(t, err)
+		assert.Equal(t, "untracked content", string(content))
+	})
 }
 
 func TestRepo_IsDirty(t *testing.T) {
