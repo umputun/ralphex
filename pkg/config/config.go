@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/ini.v1"
@@ -59,6 +60,9 @@ type Config struct {
 
 	PlansDir string `json:"plans_dir"`
 
+	// output colors (RGB values as comma-separated strings)
+	Colors ColorConfig `json:"-"`
+
 	// prompts (loaded separately from files)
 	TaskPrompt         string `json:"-"`
 	ReviewFirstPrompt  string `json:"-"`
@@ -104,6 +108,20 @@ func Load(configDir string) (*Config, error) {
 type CustomAgent struct {
 	Name   string // filename without extension
 	Prompt string // contents of the agent file
+}
+
+// ColorConfig holds RGB values for output colors.
+// each field stores comma-separated RGB values (e.g., "255,0,0" for red).
+type ColorConfig struct {
+	Task       string // task execution phase
+	Review     string // review phase
+	Codex      string // codex external review
+	ClaudeEval string // claude evaluation of codex output
+	Warn       string // warning messages
+	Error      string // error messages
+	Signal     string // completion/failure signals
+	Timestamp  string // timestamp prefix
+	Info       string // informational messages
 }
 
 // DefaultsFS returns the embedded filesystem containing default config files.
@@ -468,4 +486,27 @@ func (c *Config) loadAgentFile(path string) (string, error) {
 		return "", fmt.Errorf("read agent file %s: %w", path, err)
 	}
 	return strings.TrimSpace(stripComments(string(data))), nil
+}
+
+// parseHexColor parses a hex color string (e.g., "#ff0000") into RGB components.
+// returns an error if the format is invalid.
+func parseHexColor(hex string) (r, g, b int, err error) {
+	if hex == "" || hex[0] != '#' {
+		return 0, 0, 0, errors.New("hex color must start with #")
+	}
+	if len(hex) != 7 {
+		return 0, 0, 0, errors.New("hex color must be 7 characters (e.g., #ff0000)")
+	}
+
+	// parse the hex value
+	var val int64
+	val, err = strconv.ParseInt(hex[1:], 16, 32)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid hex color %q: %w", hex, err)
+	}
+
+	r = int((val >> 16) & 0xFF)
+	g = int((val >> 8) & 0xFF)
+	b = int(val & 0xFF)
+	return r, g, b, nil
 }

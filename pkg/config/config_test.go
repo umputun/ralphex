@@ -976,3 +976,50 @@ func TestConfig_loadAgents_StripsCommentsFromAgentFiles(t *testing.T) {
 	assert.Equal(t, "security", cfg.CustomAgents[0].Name)
 	assert.Equal(t, "check for SQL injection\ncheck for XSS", cfg.CustomAgents[0].Prompt)
 }
+
+// --- parseHexColor tests ---
+
+func TestParseHexColor(t *testing.T) {
+	tests := []struct {
+		name    string
+		hex     string
+		wantR   int
+		wantG   int
+		wantB   int
+		wantErr bool
+		errMsg  string
+	}{
+		{name: "valid red", hex: "#ff0000", wantR: 255, wantG: 0, wantB: 0},
+		{name: "valid green", hex: "#00ff00", wantR: 0, wantG: 255, wantB: 0},
+		{name: "valid blue", hex: "#0000ff", wantR: 0, wantG: 0, wantB: 255},
+		{name: "valid lowercase", hex: "#aabbcc", wantR: 170, wantG: 187, wantB: 204},
+		{name: "valid uppercase", hex: "#AABBCC", wantR: 170, wantG: 187, wantB: 204},
+		{name: "valid mixed case", hex: "#AaBbCc", wantR: 170, wantG: 187, wantB: 204},
+		{name: "valid white", hex: "#ffffff", wantR: 255, wantG: 255, wantB: 255},
+		{name: "valid black", hex: "#000000", wantR: 0, wantG: 0, wantB: 0},
+		{name: "valid gray", hex: "#8a8a8a", wantR: 138, wantG: 138, wantB: 138},
+		{name: "missing # prefix", hex: "ff0000", wantErr: true, errMsg: "must start with #"},
+		{name: "wrong length short", hex: "#fff", wantErr: true, errMsg: "must be 7 characters"},
+		{name: "wrong length long", hex: "#ff00ff00", wantErr: true, errMsg: "must be 7 characters"},
+		{name: "empty string", hex: "", wantErr: true, errMsg: "must start with #"},
+		{name: "only hash", hex: "#", wantErr: true, errMsg: "must be 7 characters"},
+		{name: "invalid hex char g", hex: "#gggggg", wantErr: true, errMsg: "invalid hex"},
+		{name: "invalid hex char z", hex: "#zz0000", wantErr: true, errMsg: "invalid hex"},
+		{name: "invalid hex space", hex: "#ff 000", wantErr: true, errMsg: "invalid hex"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, g, b, err := parseHexColor(tc.hex)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMsg)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantR, r, "red component")
+			assert.Equal(t, tc.wantG, g, "green component")
+			assert.Equal(t, tc.wantB, b, "blue component")
+		})
+	}
+}
