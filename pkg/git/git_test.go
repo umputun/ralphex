@@ -474,6 +474,21 @@ func TestRepo_IsDirty(t *testing.T) {
 		assert.True(t, dirty)
 	})
 
+	t.Run("deleted tracked file returns true", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// delete the existing README.md (which is tracked)
+		readmePath := filepath.Join(dir, "README.md")
+		err = os.Remove(readmePath)
+		require.NoError(t, err)
+
+		dirty, err := repo.IsDirty()
+		require.NoError(t, err)
+		assert.True(t, dirty)
+	})
+
 	t.Run("untracked file only returns false", func(t *testing.T) {
 		dir := setupTestRepo(t)
 		repo, err := Open(dir)
