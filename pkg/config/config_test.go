@@ -979,6 +979,78 @@ func TestConfig_loadAgents_StripsCommentsFromAgentFiles(t *testing.T) {
 
 // --- parseHexColor tests ---
 
+// --- color config parsing tests ---
+
+func TestConfig_parseConfig_FullColorConfig(t *testing.T) {
+	input := `
+color_task = #00ff00
+color_review = #00ffff
+color_codex = #ff00ff
+color_claude_eval = #64c8ff
+color_warn = #ffff00
+color_error = #ff0000
+color_signal = #ff6464
+color_timestamp = #8a8a8a
+color_info = #b4b4b4
+`
+	cfg := &Config{}
+	require.NoError(t, cfg.parseConfig(strings.NewReader(input)))
+
+	assert.Equal(t, "0,255,0", cfg.Colors.Task)
+	assert.Equal(t, "0,255,255", cfg.Colors.Review)
+	assert.Equal(t, "255,0,255", cfg.Colors.Codex)
+	assert.Equal(t, "100,200,255", cfg.Colors.ClaudeEval)
+	assert.Equal(t, "255,255,0", cfg.Colors.Warn)
+	assert.Equal(t, "255,0,0", cfg.Colors.Error)
+	assert.Equal(t, "255,100,100", cfg.Colors.Signal)
+	assert.Equal(t, "138,138,138", cfg.Colors.Timestamp)
+	assert.Equal(t, "180,180,180", cfg.Colors.Info)
+}
+
+func TestConfig_parseConfig_PartialColorConfig(t *testing.T) {
+	input := `
+color_task = #ff0000
+color_error = #00ff00
+`
+	cfg := &Config{}
+	require.NoError(t, cfg.parseConfig(strings.NewReader(input)))
+
+	// explicitly set colors
+	assert.Equal(t, "255,0,0", cfg.Colors.Task)
+	assert.Equal(t, "0,255,0", cfg.Colors.Error)
+
+	// unset colors should be empty (defaults are applied elsewhere)
+	assert.Empty(t, cfg.Colors.Review)
+	assert.Empty(t, cfg.Colors.Codex)
+	assert.Empty(t, cfg.Colors.ClaudeEval)
+	assert.Empty(t, cfg.Colors.Warn)
+	assert.Empty(t, cfg.Colors.Signal)
+	assert.Empty(t, cfg.Colors.Timestamp)
+	assert.Empty(t, cfg.Colors.Info)
+}
+
+func TestConfig_parseConfig_InvalidColorHex(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		errMsg string
+	}{
+		{name: "missing hash", input: "color_task = ff0000", errMsg: "color_task"},
+		{name: "wrong length", input: "color_review = #fff", errMsg: "color_review"},
+		{name: "invalid chars", input: "color_codex = #gggggg", errMsg: "color_codex"},
+		{name: "empty value", input: "color_error = ", errMsg: "color_error"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{}
+			err := cfg.parseConfig(strings.NewReader(tc.input))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errMsg)
+		})
+	}
+}
+
 func TestParseHexColor(t *testing.T) {
 	tests := []struct {
 		name    string

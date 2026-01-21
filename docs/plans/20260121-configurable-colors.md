@@ -57,13 +57,13 @@ Move all hardcoded colors to the config file with current colors as defaults. Us
 
 ### Task 2: Add color parsing to config loader
 
-- [ ] write tests for color config parsing in `pkg/config/config_test.go`:
+- [x] write tests for color config parsing in `pkg/config/config_test.go`:
   - parse full color config with all 9 colors
   - parse partial config (only some colors specified)
   - invalid hex color returns error
-- [ ] add color parsing in `parseConfigBytes()` for all 9 color_* keys
-- [ ] set sensible defaults for missing colors (current hardcoded values as hex)
-- [ ] run tests - must pass before next task
+- [x] add color parsing in `parseConfigBytes()` for all 9 color_* keys
+- [x] set sensible defaults for missing colors (current hardcoded values as hex)
+- [x] run tests - must pass before next task
 
 ### Task 3: Add color defaults to embedded config
 

@@ -287,7 +287,9 @@ func (c *Config) parseConfig(r io.Reader) error {
 
 // parseConfigBytes parses configuration from a byte slice into c.
 func (c *Config) parseConfigBytes(data []byte) error {
-	cfg, err := ini.Load(data)
+	// ignoreInlineComment: true is needed to allow # in values (e.g., color_task = #00ff00)
+	// without this, the # would be treated as an inline comment
+	cfg, err := ini.LoadSources(ini.LoadOptions{IgnoreInlineComment: true}, data)
 	if err != nil {
 		return fmt.Errorf("parse config: %w", err)
 	}
@@ -354,6 +356,49 @@ func (c *Config) parseConfigBytes(data []byte) error {
 	// paths
 	if key, err := section.GetKey("plans_dir"); err == nil {
 		c.PlansDir = key.String()
+	}
+
+	// colors - parse hex values and convert to RGB strings
+	if err := c.parseColors(section); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// parseColors parses color configuration from the INI section.
+// each color_* key is expected to have a hex value (e.g., #ff0000).
+// the parsed colors are stored as comma-separated RGB values (e.g., "255,0,0").
+func (c *Config) parseColors(section *ini.Section) error {
+	colorKeys := []struct {
+		key   string
+		field *string
+	}{
+		{"color_task", &c.Colors.Task},
+		{"color_review", &c.Colors.Review},
+		{"color_codex", &c.Colors.Codex},
+		{"color_claude_eval", &c.Colors.ClaudeEval},
+		{"color_warn", &c.Colors.Warn},
+		{"color_error", &c.Colors.Error},
+		{"color_signal", &c.Colors.Signal},
+		{"color_timestamp", &c.Colors.Timestamp},
+		{"color_info", &c.Colors.Info},
+	}
+
+	for _, ck := range colorKeys {
+		key, err := section.GetKey(ck.key)
+		if err != nil {
+			continue
+		}
+		hex := strings.TrimSpace(key.String())
+		if hex == "" {
+			return fmt.Errorf("invalid %s: empty value", ck.key)
+		}
+		r, g, b, err := parseHexColor(hex)
+		if err != nil {
+			return fmt.Errorf("invalid %s: %w", ck.key, err)
+		}
+		*ck.field = fmt.Sprintf("%d,%d,%d", r, g, b)
 	}
 
 	return nil
