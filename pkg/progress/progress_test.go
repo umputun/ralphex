@@ -606,3 +606,29 @@ func TestColorConfig_ParsesRGBCorrectly(t *testing.T) {
 	// the color object exists and is functional)
 	assert.NotNil(t, taskColor)
 }
+
+func TestInfoColor(t *testing.T) {
+	// save original and restore
+	origInfoColor := infoColor
+	defer func() { infoColor = origInfoColor }()
+
+	t.Run("returns default info color", func(t *testing.T) {
+		InitColors()
+		c := InfoColor()
+		assert.NotNil(t, c)
+	})
+
+	t.Run("returns custom info color after SetColors", func(t *testing.T) {
+		SetColors(ColorConfig{Info: "100,150,200"})
+		c := InfoColor()
+		assert.NotNil(t, c)
+	})
+
+	t.Run("ignores invalid info color value", func(t *testing.T) {
+		InitColors()
+		SetColors(ColorConfig{Info: "invalid"})
+		// should still return a valid color (the default)
+		c := InfoColor()
+		assert.NotNil(t, c)
+	})
+}

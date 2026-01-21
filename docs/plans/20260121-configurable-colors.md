@@ -82,10 +82,10 @@ Move all hardcoded colors to the config file with current colors as defaults. Us
 
 ### Task 5: Update main.go to use configured info color
 
-- [ ] move `infoColor` initialization after config load
-- [ ] use `cfg.Colors.Info` to set info color
-- [ ] verify startup messages display correctly
-- [ ] run tests - must pass before next task
+- [x] move `infoColor` initialization after config load
+- [x] use `cfg.Colors.Info` to set info color
+- [x] verify startup messages display correctly
+- [x] run tests - must pass before next task
 
 ### Task 6: Verify acceptance criteria
 

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/fatih/color"
 	"github.com/jessevdk/go-flags"
 
 	"github.com/umputun/ralphex/pkg/config"
@@ -21,9 +20,6 @@ import (
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
 )
-
-// infoColor for startup messages - light grey
-var infoColor = color.RGB(180, 180, 180)
 
 // opts holds all command-line options.
 type opts struct {
@@ -80,6 +76,19 @@ func run(ctx context.Context, o opts) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+
+	// apply color configuration
+	progress.SetColors(progress.ColorConfig{
+		Task:       cfg.Colors.Task,
+		Review:     cfg.Colors.Review,
+		Codex:      cfg.Colors.Codex,
+		ClaudeEval: cfg.Colors.ClaudeEval,
+		Warn:       cfg.Colors.Warn,
+		Error:      cfg.Colors.Error,
+		Signal:     cfg.Colors.Signal,
+		Timestamp:  cfg.Colors.Timestamp,
+		Info:       cfg.Colors.Info,
+	})
 
 	// check dependencies using configured command (or default "claude")
 	if depErr := checkClaudeDep(cfg); depErr != nil {
@@ -152,7 +161,7 @@ func run(ctx context.Context, o opts) error {
 		}
 	}
 
-	infoColor.Printf("\ncompleted in %s\n", log.Elapsed())
+	progress.InfoColor().Printf("\ncompleted in %s\n", log.Elapsed())
 	return nil
 }
 
@@ -246,7 +255,7 @@ func selectPlanWithFzf(ctx context.Context, plansDir string) (string, error) {
 
 	// auto-select if single plan (no fzf needed)
 	if len(plans) == 1 {
-		infoColor.Printf("auto-selected: %s\n", plans[0])
+		progress.InfoColor().Printf("auto-selected: %s\n", plans[0])
 		return plans[0], nil
 	}
 
@@ -294,14 +303,14 @@ func createBranchIfNeeded(gitOps *git.Repo, planFile string) error {
 
 	// check if branch already exists
 	if gitOps.BranchExists(branchName) {
-		infoColor.Printf("switching to existing branch: %s\n", branchName)
+		progress.InfoColor().Printf("switching to existing branch: %s\n", branchName)
 		if err := gitOps.CheckoutBranch(branchName); err != nil {
 			return fmt.Errorf("checkout branch %s: %w", branchName, err)
 		}
 		return nil
 	}
 
-	infoColor.Printf("creating branch: %s\n", branchName)
+	progress.InfoColor().Printf("creating branch: %s\n", branchName)
 	if err := gitOps.CreateBranch(branchName); err != nil {
 		return fmt.Errorf("create branch %s: %w", branchName, err)
 	}
@@ -337,7 +346,7 @@ func movePlanToCompleted(gitOps *git.Repo, planFile string) error {
 		return fmt.Errorf("commit plan move: %w", err)
 	}
 
-	infoColor.Printf("moved plan to %s\n", destPath)
+	progress.InfoColor().Printf("moved plan to %s\n", destPath)
 	return nil
 }
 
@@ -364,7 +373,7 @@ func ensureGitignore(gitOps *git.Repo) error {
 		return fmt.Errorf("close .gitignore: %w", err)
 	}
 
-	infoColor.Println("added progress-*.txt to .gitignore")
+	progress.InfoColor().Println("added progress-*.txt to .gitignore")
 	return nil
 }
 
@@ -386,7 +395,7 @@ func printStartupInfo(planFile, branch string, mode processor.Mode, maxIteration
 	if mode != processor.ModeFull {
 		modeStr = fmt.Sprintf(" (%s mode)", mode)
 	}
-	infoColor.Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, maxIterations, modeStr)
-	infoColor.Printf("branch: %s\n", branch)
-	infoColor.Printf("progress log: %s\n\n", progressPath)
+	progress.InfoColor().Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, maxIterations, modeStr)
+	progress.InfoColor().Printf("branch: %s\n", branch)
+	progress.InfoColor().Printf("progress log: %s\n\n", progressPath)
 }

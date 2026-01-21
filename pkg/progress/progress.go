@@ -50,6 +50,7 @@ var (
 	defaultErrorRGB      = [3]int{255, 0, 0}     // red
 	defaultSignalRGB     = [3]int{255, 100, 100} // bright red
 	defaultTimestampRGB  = [3]int{138, 138, 138} // medium grey
+	defaultInfoRGB       = [3]int{180, 180, 180} // light grey
 )
 
 // phase colors using fatih/color.
@@ -63,6 +64,7 @@ var (
 	errorColor      = color.RGB(defaultErrorRGB[0], defaultErrorRGB[1], defaultErrorRGB[2])
 	signalColor     = color.RGB(defaultSignalRGB[0], defaultSignalRGB[1], defaultSignalRGB[2])
 	timestampColor  = color.RGB(defaultTimestampRGB[0], defaultTimestampRGB[1], defaultTimestampRGB[2])
+	infoColor       = color.RGB(defaultInfoRGB[0], defaultInfoRGB[1], defaultInfoRGB[2])
 )
 
 // phaseColors maps phases to their color functions.
@@ -93,6 +95,7 @@ func InitColors() {
 	errorColor = color.RGB(defaultErrorRGB[0], defaultErrorRGB[1], defaultErrorRGB[2])
 	signalColor = color.RGB(defaultSignalRGB[0], defaultSignalRGB[1], defaultSignalRGB[2])
 	timestampColor = color.RGB(defaultTimestampRGB[0], defaultTimestampRGB[1], defaultTimestampRGB[2])
+	infoColor = color.RGB(defaultInfoRGB[0], defaultInfoRGB[1], defaultInfoRGB[2])
 
 	initPhaseColors()
 }
@@ -129,7 +132,15 @@ func SetColors(cfg ColorConfig) {
 	if rgb := parseRGB(cfg.Timestamp); rgb != nil {
 		timestampColor = color.RGB(rgb[0], rgb[1], rgb[2])
 	}
-	// info is not used in this package - it's used in main.go
+	if rgb := parseRGB(cfg.Info); rgb != nil {
+		infoColor = color.RGB(rgb[0], rgb[1], rgb[2])
+	}
+}
+
+// InfoColor returns the configured info color for use in main.go.
+// this provides access to the info color set via SetColors().
+func InfoColor() *color.Color {
+	return infoColor
 }
 
 // parseRGB parses comma-separated RGB values (e.g., "255,0,0") into [r, g, b].
