@@ -40,137 +40,95 @@ type ColorConfig struct {
 	Info       string // informational messages (used in main.go)
 }
 
-// default RGB values for colors (used when not configured).
-var (
-	defaultTaskRGB       = [3]int{0, 255, 0}     // green
-	defaultReviewRGB     = [3]int{0, 255, 255}   // cyan
-	defaultCodexRGB      = [3]int{255, 0, 255}   // magenta
-	defaultClaudeEvalRGB = [3]int{100, 200, 255} // bright cyan/light blue
-	defaultWarnRGB       = [3]int{255, 255, 0}   // yellow
-	defaultErrorRGB      = [3]int{255, 0, 0}     // red
-	defaultSignalRGB     = [3]int{255, 100, 100} // bright red
-	defaultTimestampRGB  = [3]int{138, 138, 138} // medium grey
-	defaultInfoRGB       = [3]int{180, 180, 180} // light grey
-)
-
-// phase colors using fatih/color.
-// package-level color variables, initialized by InitColors().
-var (
-	taskColor       = color.RGB(defaultTaskRGB[0], defaultTaskRGB[1], defaultTaskRGB[2])
-	reviewColor     = color.RGB(defaultReviewRGB[0], defaultReviewRGB[1], defaultReviewRGB[2])
-	codexColor      = color.RGB(defaultCodexRGB[0], defaultCodexRGB[1], defaultCodexRGB[2])
-	claudeEvalColor = color.RGB(defaultClaudeEvalRGB[0], defaultClaudeEvalRGB[1], defaultClaudeEvalRGB[2])
-	warnColor       = color.RGB(defaultWarnRGB[0], defaultWarnRGB[1], defaultWarnRGB[2])
-	errorColor      = color.RGB(defaultErrorRGB[0], defaultErrorRGB[1], defaultErrorRGB[2])
-	signalColor     = color.RGB(defaultSignalRGB[0], defaultSignalRGB[1], defaultSignalRGB[2])
-	timestampColor  = color.RGB(defaultTimestampRGB[0], defaultTimestampRGB[1], defaultTimestampRGB[2])
-	infoColor       = color.RGB(defaultInfoRGB[0], defaultInfoRGB[1], defaultInfoRGB[2])
-)
-
-// phaseColors maps phases to their color functions.
-// note: map is initialized empty and populated by initPhaseColors() called from init().
-var phaseColors = map[Phase]*color.Color{}
-
-//nolint:gochecknoinits // required to populate phaseColors after color vars are initialized
-func init() {
-	initPhaseColors()
+// Colors holds all color configuration for output formatting.
+// use NewColors to create from ColorConfig.
+type Colors struct {
+	task       *color.Color
+	review     *color.Color
+	codex      *color.Color
+	claudeEval *color.Color
+	warn       *color.Color
+	err        *color.Color
+	signal     *color.Color
+	timestamp  *color.Color
+	info       *color.Color
+	phases     map[Phase]*color.Color
 }
 
-// initPhaseColors populates the phaseColors map with current color values.
-func initPhaseColors() {
-	phaseColors[PhaseTask] = taskColor
-	phaseColors[PhaseReview] = reviewColor
-	phaseColors[PhaseCodex] = codexColor
-	phaseColors[PhaseClaudeEval] = claudeEvalColor
+// NewColors creates Colors from ColorConfig.
+// all colors must be provided - use config with embedded defaults fallback.
+// panics if any color value is invalid (configuration error).
+func NewColors(cfg ColorConfig) *Colors {
+	c := &Colors{phases: make(map[Phase]*color.Color)}
+	c.task = parseColorOrPanic(cfg.Task, "task")
+	c.review = parseColorOrPanic(cfg.Review, "review")
+	c.codex = parseColorOrPanic(cfg.Codex, "codex")
+	c.claudeEval = parseColorOrPanic(cfg.ClaudeEval, "claude_eval")
+	c.warn = parseColorOrPanic(cfg.Warn, "warn")
+	c.err = parseColorOrPanic(cfg.Error, "error")
+	c.signal = parseColorOrPanic(cfg.Signal, "signal")
+	c.timestamp = parseColorOrPanic(cfg.Timestamp, "timestamp")
+	c.info = parseColorOrPanic(cfg.Info, "info")
+
+	c.phases[PhaseTask] = c.task
+	c.phases[PhaseReview] = c.review
+	c.phases[PhaseCodex] = c.codex
+	c.phases[PhaseClaudeEval] = c.claudeEval
+
+	return c
 }
 
-// InitColors resets all colors to their default values.
-// useful for testing or when configuration needs to be reset.
-func InitColors() {
-	taskColor = color.RGB(defaultTaskRGB[0], defaultTaskRGB[1], defaultTaskRGB[2])
-	reviewColor = color.RGB(defaultReviewRGB[0], defaultReviewRGB[1], defaultReviewRGB[2])
-	codexColor = color.RGB(defaultCodexRGB[0], defaultCodexRGB[1], defaultCodexRGB[2])
-	claudeEvalColor = color.RGB(defaultClaudeEvalRGB[0], defaultClaudeEvalRGB[1], defaultClaudeEvalRGB[2])
-	warnColor = color.RGB(defaultWarnRGB[0], defaultWarnRGB[1], defaultWarnRGB[2])
-	errorColor = color.RGB(defaultErrorRGB[0], defaultErrorRGB[1], defaultErrorRGB[2])
-	signalColor = color.RGB(defaultSignalRGB[0], defaultSignalRGB[1], defaultSignalRGB[2])
-	timestampColor = color.RGB(defaultTimestampRGB[0], defaultTimestampRGB[1], defaultTimestampRGB[2])
-	infoColor = color.RGB(defaultInfoRGB[0], defaultInfoRGB[1], defaultInfoRGB[2])
+// parseColorOrPanic parses RGB string and returns color, panics on invalid input.
+func parseColorOrPanic(s, name string) *color.Color {
+	parseRGB := func(s string) []int {
+		if s == "" {
+			return nil
+		}
+		parts := strings.Split(s, ",")
+		if len(parts) != 3 {
+			return nil
+		}
 
-	initPhaseColors()
+		// parse each component
+		r, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || r < 0 || r > 255 {
+			return nil
+		}
+		g, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || g < 0 || g > 255 {
+			return nil
+		}
+		b, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+		if err != nil || b < 0 || b > 255 {
+			return nil
+		}
+		return []int{r, g, b}
+	}
+
+	rgb := parseRGB(s)
+	if rgb == nil {
+		panic(fmt.Sprintf("invalid color_%s value: %q", name, s))
+	}
+	return color.RGB(rgb[0], rgb[1], rgb[2])
 }
 
-// SetColors applies color configuration from ColorConfig.
-// each color value is expected to be comma-separated RGB values (e.g., "255,0,0").
-// empty values are skipped, keeping the current/default color.
-// NOTE: this function must be called once during initialization, before any logging starts.
-// it is not safe for concurrent use - calling it after logging begins may cause data races.
-func SetColors(cfg ColorConfig) {
-	if rgb := parseRGB(cfg.Task); rgb != nil {
-		taskColor = color.RGB(rgb[0], rgb[1], rgb[2])
-		phaseColors[PhaseTask] = taskColor
-	}
-	if rgb := parseRGB(cfg.Review); rgb != nil {
-		reviewColor = color.RGB(rgb[0], rgb[1], rgb[2])
-		phaseColors[PhaseReview] = reviewColor
-	}
-	if rgb := parseRGB(cfg.Codex); rgb != nil {
-		codexColor = color.RGB(rgb[0], rgb[1], rgb[2])
-		phaseColors[PhaseCodex] = codexColor
-	}
-	if rgb := parseRGB(cfg.ClaudeEval); rgb != nil {
-		claudeEvalColor = color.RGB(rgb[0], rgb[1], rgb[2])
-		phaseColors[PhaseClaudeEval] = claudeEvalColor
-	}
-	if rgb := parseRGB(cfg.Warn); rgb != nil {
-		warnColor = color.RGB(rgb[0], rgb[1], rgb[2])
-	}
-	if rgb := parseRGB(cfg.Error); rgb != nil {
-		errorColor = color.RGB(rgb[0], rgb[1], rgb[2])
-	}
-	if rgb := parseRGB(cfg.Signal); rgb != nil {
-		signalColor = color.RGB(rgb[0], rgb[1], rgb[2])
-	}
-	if rgb := parseRGB(cfg.Timestamp); rgb != nil {
-		timestampColor = color.RGB(rgb[0], rgb[1], rgb[2])
-	}
-	if rgb := parseRGB(cfg.Info); rgb != nil {
-		infoColor = color.RGB(rgb[0], rgb[1], rgb[2])
-	}
-}
+// Info returns the info color for informational messages.
+func (c *Colors) Info() *color.Color { return c.info }
 
-// InfoColor returns the configured info color for use in main.go.
-// this provides access to the info color set via SetColors().
-func InfoColor() *color.Color {
-	return infoColor
-}
+// ForPhase returns the color for the given execution phase.
+func (c *Colors) ForPhase(p Phase) *color.Color { return c.phases[p] }
 
-// parseRGB parses comma-separated RGB values (e.g., "255,0,0") into [r, g, b].
-// returns nil if the string is empty or invalid.
-func parseRGB(s string) []int {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	if len(parts) != 3 {
-		return nil
-	}
+// Timestamp returns the timestamp color.
+func (c *Colors) Timestamp() *color.Color { return c.timestamp }
 
-	// parse each component
-	r, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil || r < 0 || r > 255 {
-		return nil
-	}
-	g, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil || g < 0 || g > 255 {
-		return nil
-	}
-	b, err := strconv.Atoi(strings.TrimSpace(parts[2]))
-	if err != nil || b < 0 || b > 255 {
-		return nil
-	}
-	return []int{r, g, b}
-}
+// Warn returns the warning color.
+func (c *Colors) Warn() *color.Color { return c.warn }
+
+// Error returns the error color.
+func (c *Colors) Error() *color.Color { return c.err }
+
+// Signal returns the signal color.
+func (c *Colors) Signal() *color.Color { return c.signal }
 
 // Logger writes timestamped output to both file and stdout.
 type Logger struct {
@@ -178,6 +136,7 @@ type Logger struct {
 	stdout    io.Writer
 	startTime time.Time
 	phase     Phase
+	colors    *Colors
 }
 
 // Config holds logger configuration.
@@ -189,7 +148,8 @@ type Config struct {
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
-func NewLogger(cfg Config) (*Logger, error) {
+// colors must be provided (created via NewColors from config).
+func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 	// set global color setting
 	if cfg.NoColor {
 		color.NoColor = true
@@ -214,6 +174,7 @@ func NewLogger(cfg Config) (*Logger, error) {
 		stdout:    os.Stdout,
 		startTime: time.Now(),
 		phase:     PhaseTask,
+		colors:    colors,
 	}
 
 	// write header
@@ -256,8 +217,8 @@ func (l *Logger) Print(format string, args ...any) {
 	l.writeFile("[%s] %s\n", timestamp, msg)
 
 	// write to stdout with color
-	phaseColor := phaseColors[l.phase]
-	tsStr := timestampColor.Sprintf("[%s]", timestamp)
+	phaseColor := l.colors.ForPhase(l.phase)
+	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
 	msgStr := phaseColor.Sprint(msg)
 	l.writeStdout("%s %s\n", tsStr, msgStr)
 }
@@ -274,7 +235,7 @@ func (l *Logger) PrintRaw(format string, args ...any) {
 func (l *Logger) PrintSection(name string) {
 	header := fmt.Sprintf("\n--- %s ---\n", name)
 	l.writeFile("%s", header)
-	l.writeStdout("%s", warnColor.Sprint(header))
+	l.writeStdout("%s", l.colors.Warn().Sprint(header))
 }
 
 // getTerminalWidth returns terminal width, using COLUMNS env var or syscall.
@@ -352,7 +313,7 @@ func (l *Logger) PrintAligned(text string) {
 		return
 	}
 
-	phaseColor := phaseColors[l.phase]
+	phaseColor := l.colors.ForPhase(l.phase)
 
 	// wrap text to terminal width
 	width := getTerminalWidth()
@@ -380,7 +341,7 @@ func (l *Logger) PrintAligned(text string) {
 
 		// timestamp each line
 		timestamp := time.Now().Format(timestampFormat)
-		tsPrefix := timestampColor.Sprintf("[%s]", timestamp)
+		tsPrefix := l.colors.Timestamp().Sprintf("[%s]", timestamp)
 		l.writeFile("[%s] %s\n", timestamp, displayLine)
 
 		// use red for signal lines
@@ -389,7 +350,7 @@ func (l *Logger) PrintAligned(text string) {
 		// format signal lines nicely
 		if sig := extractSignal(line); sig != "" {
 			displayLine = sig
-			lineColor = signalColor
+			lineColor = l.colors.Signal()
 		}
 
 		l.writeStdout("%s %s\n", tsPrefix, lineColor.Sprint(displayLine))
@@ -453,8 +414,8 @@ func (l *Logger) Error(format string, args ...any) {
 
 	l.writeFile("[%s] ERROR: %s\n", timestamp, msg)
 
-	tsStr := timestampColor.Sprintf("[%s]", timestamp)
-	errStr := errorColor.Sprintf("ERROR: %s", msg)
+	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	errStr := l.colors.Error().Sprintf("ERROR: %s", msg)
 	l.writeStdout("%s %s\n", tsStr, errStr)
 }
 
@@ -465,8 +426,8 @@ func (l *Logger) Warn(format string, args ...any) {
 
 	l.writeFile("[%s] WARN: %s\n", timestamp, msg)
 
-	tsStr := timestampColor.Sprintf("[%s]", timestamp)
-	warnStr := warnColor.Sprintf("WARN: %s", msg)
+	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	warnStr := l.colors.Warn().Sprintf("WARN: %s", msg)
 	l.writeStdout("%s %s\n", tsStr, warnStr)
 }
 

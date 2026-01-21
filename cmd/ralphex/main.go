@@ -77,8 +77,8 @@ func run(ctx context.Context, o opts) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// apply color configuration
-	progress.SetColors(progress.ColorConfig{
+	// create colors from config (all colors guaranteed populated via fallback)
+	colors := progress.NewColors(progress.ColorConfig{
 		Task:       cfg.Colors.Task,
 		Review:     cfg.Colors.Review,
 		Codex:      cfg.Colors.Codex,
@@ -108,20 +108,20 @@ func run(ctx context.Context, o opts) error {
 
 	// select and prepare plan file
 	skipTasks := o.Review || o.CodexOnly
-	planFile, err := preparePlanFile(ctx, o.PlanFile, skipTasks, cfg.PlansDir)
+	planFile, err := preparePlanFile(ctx, o.PlanFile, skipTasks, cfg.PlansDir, colors)
 	if err != nil {
 		return err
 	}
 
 	// create branch if on main/master
 	if planFile != "" {
-		if branchErr := createBranchIfNeeded(gitOps, planFile); branchErr != nil {
+		if branchErr := createBranchIfNeeded(gitOps, planFile, colors); branchErr != nil {
 			return branchErr
 		}
 	}
 
 	// ensure progress files are gitignored
-	if gitErr := ensureGitignore(gitOps); gitErr != nil {
+	if gitErr := ensureGitignore(gitOps, colors); gitErr != nil {
 		return gitErr
 	}
 
@@ -139,14 +139,14 @@ func run(ctx context.Context, o opts) error {
 		Mode:     string(mode),
 		Branch:   branch,
 		NoColor:  o.NoColor,
-	})
+	}, colors)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
 	defer log.Close()
 
 	// print startup info
-	printStartupInfo(planFile, branch, mode, o.MaxIterations, log.Path())
+	printStartupInfo(planFile, branch, mode, o.MaxIterations, log.Path(), colors)
 
 	// create and run the runner
 	r := createRunner(cfg, o, planFile, mode, log)
@@ -156,12 +156,12 @@ func run(ctx context.Context, o opts) error {
 
 	// move completed plan to completed/ directory
 	if planFile != "" && mode == processor.ModeFull {
-		if moveErr := movePlanToCompleted(gitOps, planFile); moveErr != nil {
+		if moveErr := movePlanToCompleted(gitOps, planFile, colors); moveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
 	}
 
-	progress.InfoColor().Printf("\ncompleted in %s\n", log.Elapsed())
+	colors.Info().Printf("\ncompleted in %s\n", log.Elapsed())
 	return nil
 }
 
@@ -206,8 +206,8 @@ func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mo
 	}, log)
 }
 
-func preparePlanFile(ctx context.Context, planFile string, skipTasks bool, plansDir string) (string, error) {
-	selected, err := selectPlan(ctx, planFile, skipTasks, plansDir)
+func preparePlanFile(ctx context.Context, planFile string, skipTasks bool, plansDir string, colors *progress.Colors) (string, error) {
+	selected, err := selectPlan(ctx, planFile, skipTasks, plansDir, colors)
 	if err != nil {
 		return "", err
 	}
@@ -225,7 +225,7 @@ func preparePlanFile(ctx context.Context, planFile string, skipTasks bool, plans
 	return abs, nil
 }
 
-func selectPlan(ctx context.Context, planFile string, optional bool, plansDir string) (string, error) {
+func selectPlan(ctx context.Context, planFile string, optional bool, plansDir string, colors *progress.Colors) (string, error) {
 	if planFile != "" {
 		if _, err := os.Stat(planFile); err != nil {
 			return "", fmt.Errorf("plan file not found: %s", planFile)
@@ -239,10 +239,10 @@ func selectPlan(ctx context.Context, planFile string, optional bool, plansDir st
 	}
 
 	// use fzf to select plan
-	return selectPlanWithFzf(ctx, plansDir)
+	return selectPlanWithFzf(ctx, plansDir, colors)
 }
 
-func selectPlanWithFzf(ctx context.Context, plansDir string) (string, error) {
+func selectPlanWithFzf(ctx context.Context, plansDir string, colors *progress.Colors) (string, error) {
 	if _, err := os.Stat(plansDir); err != nil {
 		return "", fmt.Errorf("plans directory not found: %s", plansDir)
 	}
@@ -255,7 +255,7 @@ func selectPlanWithFzf(ctx context.Context, plansDir string) (string, error) {
 
 	// auto-select if single plan (no fzf needed)
 	if len(plans) == 1 {
-		progress.InfoColor().Printf("auto-selected: %s\n", plans[0])
+		colors.Info().Printf("auto-selected: %s\n", plans[0])
 		return plans[0], nil
 	}
 
@@ -281,7 +281,7 @@ func selectPlanWithFzf(ctx context.Context, plansDir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func createBranchIfNeeded(gitOps *git.Repo, planFile string) error {
+func createBranchIfNeeded(gitOps *git.Repo, planFile string, colors *progress.Colors) error {
 	// get current branch
 	currentBranch, err := gitOps.CurrentBranch()
 	if err != nil {
@@ -303,14 +303,14 @@ func createBranchIfNeeded(gitOps *git.Repo, planFile string) error {
 
 	// check if branch already exists
 	if gitOps.BranchExists(branchName) {
-		progress.InfoColor().Printf("switching to existing branch: %s\n", branchName)
+		colors.Info().Printf("switching to existing branch: %s\n", branchName)
 		if err := gitOps.CheckoutBranch(branchName); err != nil {
 			return fmt.Errorf("checkout branch %s: %w", branchName, err)
 		}
 		return nil
 	}
 
-	progress.InfoColor().Printf("creating branch: %s\n", branchName)
+	colors.Info().Printf("creating branch: %s\n", branchName)
 	if err := gitOps.CreateBranch(branchName); err != nil {
 		return fmt.Errorf("create branch %s: %w", branchName, err)
 	}
@@ -318,7 +318,7 @@ func createBranchIfNeeded(gitOps *git.Repo, planFile string) error {
 	return nil
 }
 
-func movePlanToCompleted(gitOps *git.Repo, planFile string) error {
+func movePlanToCompleted(gitOps *git.Repo, planFile string, colors *progress.Colors) error {
 	// create completed directory
 	completedDir := filepath.Join(filepath.Dir(planFile), "completed")
 	if err := os.MkdirAll(completedDir, 0o750); err != nil {
@@ -346,11 +346,11 @@ func movePlanToCompleted(gitOps *git.Repo, planFile string) error {
 		return fmt.Errorf("commit plan move: %w", err)
 	}
 
-	progress.InfoColor().Printf("moved plan to %s\n", destPath)
+	colors.Info().Printf("moved plan to %s\n", destPath)
 	return nil
 }
 
-func ensureGitignore(gitOps *git.Repo) error {
+func ensureGitignore(gitOps *git.Repo, colors *progress.Colors) error {
 	// check if already ignored
 	ignored, err := gitOps.IsIgnored("progress-test.txt")
 	if err == nil && ignored {
@@ -373,7 +373,7 @@ func ensureGitignore(gitOps *git.Repo) error {
 		return fmt.Errorf("close .gitignore: %w", err)
 	}
 
-	progress.InfoColor().Println("added progress-*.txt to .gitignore")
+	colors.Info().Println("added progress-*.txt to .gitignore")
 	return nil
 }
 
@@ -386,7 +386,7 @@ func checkDependencies(deps ...string) error {
 	return nil
 }
 
-func printStartupInfo(planFile, branch string, mode processor.Mode, maxIterations int, progressPath string) {
+func printStartupInfo(planFile, branch string, mode processor.Mode, maxIterations int, progressPath string, colors *progress.Colors) {
 	planStr := planFile
 	if planStr == "" {
 		planStr = "(no plan - review only)"
@@ -395,7 +395,7 @@ func printStartupInfo(planFile, branch string, mode processor.Mode, maxIteration
 	if mode != processor.ModeFull {
 		modeStr = fmt.Sprintf(" (%s mode)", mode)
 	}
-	progress.InfoColor().Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, maxIterations, modeStr)
-	progress.InfoColor().Printf("branch: %s\n", branch)
-	progress.InfoColor().Printf("progress log: %s\n\n", progressPath)
+	colors.Info().Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, maxIterations, modeStr)
+	colors.Info().Printf("branch: %s\n", branch)
+	colors.Info().Printf("progress log: %s\n\n", progressPath)
 }

@@ -12,36 +12,56 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/git"
+	"github.com/umputun/ralphex/pkg/progress"
 )
 
+// testColors returns a Colors instance for testing.
+func testColors() *progress.Colors {
+	return progress.NewColors(progress.ColorConfig{
+		Task:       "0,255,0",
+		Review:     "0,255,255",
+		Codex:      "255,0,255",
+		ClaudeEval: "100,200,255",
+		Warn:       "255,255,0",
+		Error:      "255,0,0",
+		Signal:     "255,100,100",
+		Timestamp:  "138,138,138",
+		Info:       "180,180,180",
+	})
+}
+
 func TestSelectPlan(t *testing.T) {
+	colors := testColors()
+
 	t.Run("returns provided plan file if exists", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		planFile := filepath.Join(tmpDir, "test-plan.md")
 		err := os.WriteFile(planFile, []byte("# Test Plan"), 0o600)
 		require.NoError(t, err)
 
-		result, err := selectPlan(context.Background(), planFile, false, tmpDir)
+		result, err := selectPlan(context.Background(), planFile, false, tmpDir, colors)
 		require.NoError(t, err)
 		assert.Equal(t, planFile, result)
 	})
 
 	t.Run("returns error if plan file not found", func(t *testing.T) {
-		_, err := selectPlan(context.Background(), "/nonexistent/plan.md", false, "")
+		_, err := selectPlan(context.Background(), "/nonexistent/plan.md", false, "", colors)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "plan file not found")
 	})
 
 	t.Run("returns empty string for optional mode with no plan", func(t *testing.T) {
-		result, err := selectPlan(context.Background(), "", true, "")
+		result, err := selectPlan(context.Background(), "", true, "", colors)
 		require.NoError(t, err)
 		assert.Empty(t, result)
 	})
 }
 
 func TestSelectPlanWithFzf(t *testing.T) {
+	colors := testColors()
+
 	t.Run("returns error if plans directory not found", func(t *testing.T) {
-		_, err := selectPlanWithFzf(context.Background(), "/nonexistent/plans")
+		_, err := selectPlanWithFzf(context.Background(), "/nonexistent/plans", colors)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "plans directory not found")
 	})
@@ -52,7 +72,7 @@ func TestSelectPlanWithFzf(t *testing.T) {
 		err := os.WriteFile(planFile, []byte("# Single Plan"), 0o600)
 		require.NoError(t, err)
 
-		result, err := selectPlanWithFzf(context.Background(), tmpDir)
+		result, err := selectPlanWithFzf(context.Background(), tmpDir, colors)
 		require.NoError(t, err)
 		assert.Equal(t, planFile, result)
 	})
@@ -72,6 +92,8 @@ func TestCheckDependencies(t *testing.T) {
 }
 
 func TestCreateBranchIfNeeded(t *testing.T) {
+	colors := testColors()
+
 	t.Run("on_feature_branch_does_nothing", func(t *testing.T) {
 		dir := setupTestRepo(t)
 		repo, err := git.Open(dir)
@@ -82,7 +104,7 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 		require.NoError(t, err)
 
 		// should return nil without creating new branch
-		err = createBranchIfNeeded(repo, "docs/plans/some-plan.md")
+		err = createBranchIfNeeded(repo, "docs/plans/some-plan.md", colors)
 		require.NoError(t, err)
 
 		// verify still on feature-test
@@ -102,7 +124,7 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 		assert.Equal(t, "master", branch)
 
 		// should create branch from plan filename
-		err = createBranchIfNeeded(repo, "docs/plans/add-feature.md")
+		err = createBranchIfNeeded(repo, "docs/plans/add-feature.md", colors)
 		require.NoError(t, err)
 
 		// verify switched to new branch
@@ -125,7 +147,7 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 		require.NoError(t, err)
 
 		// should switch to existing branch without error
-		err = createBranchIfNeeded(repo, "docs/plans/existing-feature.md")
+		err = createBranchIfNeeded(repo, "docs/plans/existing-feature.md", colors)
 		require.NoError(t, err)
 
 		branch, err := repo.CurrentBranch()
@@ -139,7 +161,7 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 		require.NoError(t, err)
 
 		// plan file with date prefix
-		err = createBranchIfNeeded(repo, "docs/plans/2024-01-15-feature.md")
+		err = createBranchIfNeeded(repo, "docs/plans/2024-01-15-feature.md", colors)
 		require.NoError(t, err)
 
 		branch, err := repo.CurrentBranch()
@@ -152,7 +174,7 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 		repo, err := git.Open(dir)
 		require.NoError(t, err)
 
-		err = createBranchIfNeeded(repo, "add-tests.md")
+		err = createBranchIfNeeded(repo, "add-tests.md", colors)
 		require.NoError(t, err)
 
 		branch, err := repo.CurrentBranch()
@@ -166,7 +188,7 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 		require.NoError(t, err)
 
 		// edge case: plan with complex date prefix
-		err = createBranchIfNeeded(repo, "docs/plans/2024-01-15-12-30-my-feature.md")
+		err = createBranchIfNeeded(repo, "docs/plans/2024-01-15-12-30-my-feature.md", colors)
 		require.NoError(t, err)
 
 		branch, err := repo.CurrentBranch()
@@ -176,6 +198,8 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 }
 
 func TestMovePlanToCompleted(t *testing.T) {
+	colors := testColors()
+
 	t.Run("moves_tracked_file_and_commits", func(t *testing.T) {
 		dir := setupTestRepo(t)
 
@@ -204,7 +228,7 @@ func TestMovePlanToCompleted(t *testing.T) {
 		require.NoError(t, err)
 
 		// move plan to completed
-		err = movePlanToCompleted(repo, planFile)
+		err = movePlanToCompleted(repo, planFile, colors)
 		require.NoError(t, err)
 
 		// verify old file removed
@@ -250,7 +274,7 @@ func TestMovePlanToCompleted(t *testing.T) {
 		assert.True(t, os.IsNotExist(err))
 
 		// move plan
-		err = movePlanToCompleted(repo, planFile)
+		err = movePlanToCompleted(repo, planFile, colors)
 		require.NoError(t, err)
 
 		// verify completed directory was created
@@ -281,7 +305,7 @@ func TestMovePlanToCompleted(t *testing.T) {
 		require.NoError(t, err)
 
 		// don't stage the file, just move it
-		err = movePlanToCompleted(repo, planFile)
+		err = movePlanToCompleted(repo, planFile, colors)
 		require.NoError(t, err)
 
 		// verify old file removed
@@ -326,7 +350,7 @@ func TestMovePlanToCompleted(t *testing.T) {
 		require.NoError(t, err)
 
 		// move using absolute path (simulates normalized path from run())
-		err = movePlanToCompleted(repo, planFile)
+		err = movePlanToCompleted(repo, planFile, colors)
 		require.NoError(t, err)
 
 		// verify old file removed
@@ -341,6 +365,8 @@ func TestMovePlanToCompleted(t *testing.T) {
 }
 
 func TestEnsureGitignore(t *testing.T) {
+	colors := testColors()
+
 	t.Run("adds_pattern_when_not_ignored", func(t *testing.T) {
 		dir := setupTestRepo(t)
 		repo, err := git.Open(dir)
@@ -356,7 +382,7 @@ func TestEnsureGitignore(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 		// ensure gitignore
-		err = ensureGitignore(repo)
+		err = ensureGitignore(repo, colors)
 		require.NoError(t, err)
 
 		// verify .gitignore was created with the pattern
@@ -385,7 +411,7 @@ func TestEnsureGitignore(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 		// ensure gitignore - should be a no-op
-		err = ensureGitignore(repo)
+		err = ensureGitignore(repo, colors)
 		require.NoError(t, err)
 
 		// verify content unchanged (no duplicate pattern)
@@ -413,7 +439,7 @@ func TestEnsureGitignore(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 		// ensure gitignore
-		err = ensureGitignore(repo)
+		err = ensureGitignore(repo, colors)
 		require.NoError(t, err)
 
 		// verify .gitignore was created
