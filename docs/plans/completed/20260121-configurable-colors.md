@@ -98,8 +98,8 @@ Move all hardcoded colors to the config file with current colors as defaults. Us
 
 ### Task 7: Update documentation
 
-- [ ] update CLAUDE.md if new patterns discovered
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md if new patterns discovered
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
