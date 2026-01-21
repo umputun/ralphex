@@ -93,6 +93,10 @@ func Load(configDir string) (*Config, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
+	if err := c.loadScalarsWithFallback(); err != nil {
+		return nil, fmt.Errorf("load scalars fallback: %w", err)
+	}
+
 	if err := c.loadColorsWithFallback(); err != nil {
 		return nil, fmt.Errorf("load colors fallback: %w", err)
 	}
@@ -170,6 +174,71 @@ func (c *Config) parseEmbeddedDefaults() error {
 		return fmt.Errorf("read embedded defaults: %w", err)
 	}
 	return c.parseConfigBytes(data)
+}
+
+// loadScalarsWithFallback fills any missing scalar config values from embedded defaults.
+// this ensures all scalar fields are populated after config loading.
+func (c *Config) loadScalarsWithFallback() error {
+	embedded, err := c.parseEmbeddedScalars()
+	if err != nil {
+		return err
+	}
+
+	// string fields: empty = not set
+	if c.ClaudeCommand == "" {
+		c.ClaudeCommand = embedded.ClaudeCommand
+	}
+	if c.ClaudeArgs == "" {
+		c.ClaudeArgs = embedded.ClaudeArgs
+	}
+	if c.CodexCommand == "" {
+		c.CodexCommand = embedded.CodexCommand
+	}
+	if c.CodexModel == "" {
+		c.CodexModel = embedded.CodexModel
+	}
+	if c.CodexReasoningEffort == "" {
+		c.CodexReasoningEffort = embedded.CodexReasoningEffort
+	}
+	if c.CodexSandbox == "" {
+		c.CodexSandbox = embedded.CodexSandbox
+	}
+	if c.PlansDir == "" {
+		c.PlansDir = embedded.PlansDir
+	}
+
+	// bool with tracking: use *Set flag
+	if !c.CodexEnabledSet {
+		c.CodexEnabled = embedded.CodexEnabled
+	}
+
+	// int with tracking: use *Set flag
+	if !c.TaskRetryCountSet {
+		c.TaskRetryCount = embedded.TaskRetryCount
+	}
+
+	// int without tracking: 0 = not set
+	if c.IterationDelayMs == 0 {
+		c.IterationDelayMs = embedded.IterationDelayMs
+	}
+	if c.CodexTimeoutMs == 0 {
+		c.CodexTimeoutMs = embedded.CodexTimeoutMs
+	}
+
+	return nil
+}
+
+// parseEmbeddedScalars parses only the scalar config from embedded defaults.
+func (c *Config) parseEmbeddedScalars() (*Config, error) {
+	embedded := &Config{}
+	data, err := DefaultsFS().ReadFile("defaults/config")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded defaults: %w", err)
+	}
+	if err := embedded.parseConfigBytes(data); err != nil {
+		return nil, fmt.Errorf("parse embedded defaults: %w", err)
+	}
+	return embedded, nil
 }
 
 // loadColorsWithFallback fills any missing color values from embedded defaults.

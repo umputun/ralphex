@@ -1116,3 +1116,159 @@ func TestParseHexColor(t *testing.T) {
 		})
 	}
 }
+
+// --- scalar fallback tests ---
+
+func TestConfig_loadScalarsWithFallback_PartialConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// create config with only partial values
+	configContent := `plans_dir = custom/plans`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// partial value preserved
+	assert.Equal(t, "custom/plans", cfg.PlansDir)
+
+	// missing values filled from embedded defaults
+	assert.Equal(t, "claude", cfg.ClaudeCommand)
+	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
+	assert.Equal(t, "codex", cfg.CodexCommand)
+	assert.Equal(t, "gpt-5.2-codex", cfg.CodexModel)
+	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
+	assert.Equal(t, "read-only", cfg.CodexSandbox)
+	assert.Equal(t, 2000, cfg.IterationDelayMs)
+	assert.Equal(t, 3600000, cfg.CodexTimeoutMs)
+	assert.True(t, cfg.CodexEnabled)
+	assert.Equal(t, 1, cfg.TaskRetryCount)
+}
+
+func TestConfig_loadScalarsWithFallback_EmptyConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// create empty config file
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// all values should come from embedded defaults
+	assert.Equal(t, "claude", cfg.ClaudeCommand)
+	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
+	assert.Equal(t, "codex", cfg.CodexCommand)
+	assert.Equal(t, "gpt-5.2-codex", cfg.CodexModel)
+	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
+	assert.Equal(t, "read-only", cfg.CodexSandbox)
+	assert.Equal(t, "docs/plans", cfg.PlansDir)
+	assert.Equal(t, 2000, cfg.IterationDelayMs)
+	assert.Equal(t, 3600000, cfg.CodexTimeoutMs)
+	assert.True(t, cfg.CodexEnabled)
+	assert.Equal(t, 1, cfg.TaskRetryCount)
+}
+
+func TestConfig_loadScalarsWithFallback_ExplicitZeroTaskRetryCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// explicitly set task_retry_count to 0
+	configContent := `task_retry_count = 0`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// explicit zero should be preserved (not overwritten by default 1)
+	assert.Equal(t, 0, cfg.TaskRetryCount)
+	assert.True(t, cfg.TaskRetryCountSet)
+}
+
+func TestConfig_loadScalarsWithFallback_ExplicitFalseCodexEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// explicitly set codex_enabled to false
+	configContent := `codex_enabled = false`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// explicit false should be preserved (not overwritten by default true)
+	assert.False(t, cfg.CodexEnabled)
+	assert.True(t, cfg.CodexEnabledSet)
+}
+
+func TestConfig_loadScalarsWithFallback_UserValuesOverrideDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// set all values to custom values
+	configContent := `
+claude_command = /custom/claude
+claude_args = --custom
+codex_enabled = false
+codex_command = /custom/codex
+codex_model = custom-model
+codex_reasoning_effort = low
+codex_timeout_ms = 1000
+codex_sandbox = none
+iteration_delay_ms = 500
+task_retry_count = 5
+plans_dir = my/plans
+`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// all values should be user-specified, not defaults
+	assert.Equal(t, "/custom/claude", cfg.ClaudeCommand)
+	assert.Equal(t, "--custom", cfg.ClaudeArgs)
+	assert.False(t, cfg.CodexEnabled)
+	assert.Equal(t, "/custom/codex", cfg.CodexCommand)
+	assert.Equal(t, "custom-model", cfg.CodexModel)
+	assert.Equal(t, "low", cfg.CodexReasoningEffort)
+	assert.Equal(t, 1000, cfg.CodexTimeoutMs)
+	assert.Equal(t, "none", cfg.CodexSandbox)
+	assert.Equal(t, 500, cfg.IterationDelayMs)
+	assert.Equal(t, 5, cfg.TaskRetryCount)
+	assert.Equal(t, "my/plans", cfg.PlansDir)
+}
+
+func TestConfig_parseEmbeddedScalars(t *testing.T) {
+	cfg := &Config{}
+	embedded, err := cfg.parseEmbeddedScalars()
+	require.NoError(t, err)
+
+	// verify embedded defaults have expected values
+	assert.Equal(t, "claude", embedded.ClaudeCommand)
+	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", embedded.ClaudeArgs)
+	assert.Equal(t, "codex", embedded.CodexCommand)
+	assert.Equal(t, "gpt-5.2-codex", embedded.CodexModel)
+	assert.Equal(t, "xhigh", embedded.CodexReasoningEffort)
+	assert.Equal(t, "read-only", embedded.CodexSandbox)
+	assert.Equal(t, "docs/plans", embedded.PlansDir)
+	assert.Equal(t, 2000, embedded.IterationDelayMs)
+	assert.Equal(t, 3600000, embedded.CodexTimeoutMs)
+	assert.True(t, embedded.CodexEnabled)
+	assert.Equal(t, 1, embedded.TaskRetryCount)
+}
