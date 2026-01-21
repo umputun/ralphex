@@ -120,8 +120,8 @@ func (r *Repo) CreateBranch(name string) error {
 		}
 	}
 
-	// checkout the new branch
-	if err := wt.Checkout(&git.CheckoutOptions{Branch: branchRef}); err != nil {
+	// checkout the new branch, Keep preserves untracked files
+	if err := wt.Checkout(&git.CheckoutOptions{Branch: branchRef, Keep: true}); err != nil {
 		return fmt.Errorf("checkout branch: %w", err)
 	}
 

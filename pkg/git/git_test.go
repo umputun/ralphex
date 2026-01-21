@@ -170,6 +170,34 @@ func TestRepo_CreateBranch(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already exists")
 	})
+
+	t.Run("preserves untracked files", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create an untracked file while on master
+		untrackedPath := filepath.Join(dir, "untracked.txt")
+		err = os.WriteFile(untrackedPath, []byte("untracked content"), 0o600)
+		require.NoError(t, err)
+
+		// verify file exists before creating branch
+		_, err = os.Stat(untrackedPath)
+		require.NoError(t, err, "untracked file should exist before branch creation")
+
+		// create and switch to new branch
+		err = repo.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// verify untracked file still exists after branch creation
+		_, err = os.Stat(untrackedPath)
+		require.NoError(t, err, "untracked file should be preserved after branch creation")
+
+		// verify content is intact
+		content, err := os.ReadFile(untrackedPath) //nolint:gosec // test file path
+		require.NoError(t, err)
+		assert.Equal(t, "untracked content", string(content))
+	})
 }
 
 func TestRepo_Add(t *testing.T) {
