@@ -67,10 +67,10 @@ Move all hardcoded colors to the config file with current colors as defaults. Us
 
 ### Task 3: Add color defaults to embedded config
 
-- [ ] add color section to `pkg/config/defaults/config` with all 9 colors as hex values
-- [ ] add comments explaining each color's purpose
-- [ ] write test verifying embedded defaults load correctly with expected color values
-- [ ] run tests - must pass before next task
+- [x] add color section to `pkg/config/defaults/config` with all 9 colors as hex values
+- [x] add comments explaining each color's purpose
+- [x] write test verifying embedded defaults load correctly with expected color values
+- [x] run tests - must pass before next task
 
 ### Task 4: Update progress package to use configured colors
 

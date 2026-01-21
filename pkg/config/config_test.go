@@ -1051,6 +1051,27 @@ func TestConfig_parseConfig_InvalidColorHex(t *testing.T) {
 	}
 }
 
+func TestEmbeddedDefaultsColorValues(t *testing.T) {
+	// tests that embedded defaults/config contains correct color values
+	// and that they parse into expected RGB strings
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// verify all 9 colors have expected default values (from defaults/config)
+	assert.Equal(t, "0,255,0", cfg.Colors.Task, "task color should be green (#00ff00)")
+	assert.Equal(t, "0,255,255", cfg.Colors.Review, "review color should be cyan (#00ffff)")
+	assert.Equal(t, "255,0,255", cfg.Colors.Codex, "codex color should be magenta (#ff00ff)")
+	assert.Equal(t, "100,200,255", cfg.Colors.ClaudeEval, "claude_eval color should be light blue (#64c8ff)")
+	assert.Equal(t, "255,255,0", cfg.Colors.Warn, "warn color should be yellow (#ffff00)")
+	assert.Equal(t, "255,0,0", cfg.Colors.Error, "error color should be red (#ff0000)")
+	assert.Equal(t, "255,100,100", cfg.Colors.Signal, "signal color should be light red (#ff6464)")
+	assert.Equal(t, "138,138,138", cfg.Colors.Timestamp, "timestamp color should be gray (#8a8a8a)")
+	assert.Equal(t, "180,180,180", cfg.Colors.Info, "info color should be light gray (#b4b4b4)")
+}
+
 func TestParseHexColor(t *testing.T) {
 	tests := []struct {
 		name    string
