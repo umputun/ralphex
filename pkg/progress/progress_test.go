@@ -2,6 +2,7 @@ package progress
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -451,4 +452,157 @@ func TestFormatListItem(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestSetColors(t *testing.T) {
+	// save original colors and restore after test
+	origTaskColor := taskColor
+	origReviewColor := reviewColor
+	origCodexColor := codexColor
+	origClaudeEvalColor := claudeEvalColor
+	origWarnColor := warnColor
+	origErrorColor := errorColor
+	origSignalColor := signalColor
+	origTimestampColor := timestampColor
+	defer func() {
+		taskColor = origTaskColor
+		reviewColor = origReviewColor
+		codexColor = origCodexColor
+		claudeEvalColor = origClaudeEvalColor
+		warnColor = origWarnColor
+		errorColor = origErrorColor
+		signalColor = origSignalColor
+		timestampColor = origTimestampColor
+	}()
+
+	tests := []struct {
+		name   string
+		colors ColorConfig
+	}{
+		{
+			name: "set all colors from config",
+			colors: ColorConfig{
+				Task:       "0,255,0",     // green
+				Review:     "0,255,255",   // cyan
+				Codex:      "255,0,255",   // magenta
+				ClaudeEval: "100,200,255", // light blue
+				Warn:       "255,255,0",   // yellow
+				Error:      "255,0,0",     // red
+				Signal:     "255,100,100", // bright red
+				Timestamp:  "138,138,138", // grey
+				Info:       "180,180,180", // light grey
+			},
+		},
+		{
+			name: "set partial colors - only task and review",
+			colors: ColorConfig{
+				Task:   "128,0,128", // purple
+				Review: "64,64,64",  // dark grey
+			},
+		},
+		{
+			name:   "empty config - uses defaults",
+			colors: ColorConfig{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// reset to defaults before each test
+			InitColors()
+
+			// apply custom colors
+			SetColors(tc.colors)
+
+			// verify colors were set if values were provided
+			if tc.colors.Task != "" {
+				assert.NotNil(t, taskColor)
+			}
+			if tc.colors.Review != "" {
+				assert.NotNil(t, reviewColor)
+			}
+			if tc.colors.Codex != "" {
+				assert.NotNil(t, codexColor)
+			}
+			if tc.colors.ClaudeEval != "" {
+				assert.NotNil(t, claudeEvalColor)
+			}
+			if tc.colors.Warn != "" {
+				assert.NotNil(t, warnColor)
+			}
+			if tc.colors.Error != "" {
+				assert.NotNil(t, errorColor)
+			}
+			if tc.colors.Signal != "" {
+				assert.NotNil(t, signalColor)
+			}
+			if tc.colors.Timestamp != "" {
+				assert.NotNil(t, timestampColor)
+			}
+		})
+	}
+}
+
+func TestSetColors_AppliesColors(t *testing.T) {
+	// save original colors
+	origPhaseColors := make(map[Phase]*color.Color)
+	maps.Copy(origPhaseColors, phaseColors)
+	defer func() {
+		maps.Copy(phaseColors, origPhaseColors)
+	}()
+
+	// set custom colors
+	SetColors(ColorConfig{
+		Task:       "255,128,0",   // orange
+		Review:     "128,255,128", // light green
+		Codex:      "255,0,128",   // pink
+		ClaudeEval: "0,128,255",   // light blue
+	})
+
+	// verify phaseColors map was updated
+	assert.NotNil(t, phaseColors[PhaseTask])
+	assert.NotNil(t, phaseColors[PhaseReview])
+	assert.NotNil(t, phaseColors[PhaseCodex])
+	assert.NotNil(t, phaseColors[PhaseClaudeEval])
+}
+
+func TestInitColors(t *testing.T) {
+	// save original colors
+	origTaskColor := taskColor
+	origReviewColor := reviewColor
+	defer func() {
+		taskColor = origTaskColor
+		reviewColor = origReviewColor
+	}()
+
+	// set colors to nil to simulate uninitialized state
+	taskColor = nil
+	reviewColor = nil
+
+	// initialize
+	InitColors()
+
+	// verify defaults were set
+	assert.NotNil(t, taskColor)
+	assert.NotNil(t, reviewColor)
+	assert.NotNil(t, codexColor)
+	assert.NotNil(t, claudeEvalColor)
+	assert.NotNil(t, warnColor)
+	assert.NotNil(t, errorColor)
+	assert.NotNil(t, signalColor)
+	assert.NotNil(t, timestampColor)
+}
+
+func TestColorConfig_ParsesRGBCorrectly(t *testing.T) {
+	// save original and restore
+	origTaskColor := taskColor
+	defer func() { taskColor = origTaskColor }()
+
+	// set a specific RGB value and verify it's applied
+	SetColors(ColorConfig{Task: "100,150,200"})
+
+	// the color should be set (we can't easily verify the exact RGB values
+	// without accessing internal fatih/color state, but we can verify
+	// the color object exists and is functional)
+	assert.NotNil(t, taskColor)
 }

@@ -26,24 +26,137 @@ const (
 	PhaseClaudeEval Phase = "claude-eval" // claude evaluating codex (bright cyan)
 )
 
-// phase colors using fatih/color.
+// ColorConfig holds RGB values for output colors.
+// each field stores comma-separated RGB values (e.g., "255,0,0" for red).
+type ColorConfig struct {
+	Task       string // task execution phase
+	Review     string // review phase
+	Codex      string // codex external review
+	ClaudeEval string // claude evaluation of codex output
+	Warn       string // warning messages
+	Error      string // error messages
+	Signal     string // completion/failure signals
+	Timestamp  string // timestamp prefix
+	Info       string // informational messages (used in main.go)
+}
+
+// default RGB values for colors (used when not configured).
 var (
-	taskColor       = color.New(color.FgGreen)
-	reviewColor     = color.New(color.FgCyan)
-	codexColor      = color.New(color.FgMagenta)
-	claudeEvalColor = color.RGB(100, 200, 255) // bright cyan/light blue
-	warnColor       = color.New(color.FgYellow)
-	errorColor      = color.New(color.FgRed)
-	signalColor     = color.RGB(255, 100, 100) // bright red
-	timestampColor  = color.RGB(138, 138, 138) // medium grey
+	defaultTaskRGB       = [3]int{0, 255, 0}     // green
+	defaultReviewRGB     = [3]int{0, 255, 255}   // cyan
+	defaultCodexRGB      = [3]int{255, 0, 255}   // magenta
+	defaultClaudeEvalRGB = [3]int{100, 200, 255} // bright cyan/light blue
+	defaultWarnRGB       = [3]int{255, 255, 0}   // yellow
+	defaultErrorRGB      = [3]int{255, 0, 0}     // red
+	defaultSignalRGB     = [3]int{255, 100, 100} // bright red
+	defaultTimestampRGB  = [3]int{138, 138, 138} // medium grey
+)
+
+// phase colors using fatih/color.
+// package-level color variables, initialized by InitColors().
+var (
+	taskColor       = color.RGB(defaultTaskRGB[0], defaultTaskRGB[1], defaultTaskRGB[2])
+	reviewColor     = color.RGB(defaultReviewRGB[0], defaultReviewRGB[1], defaultReviewRGB[2])
+	codexColor      = color.RGB(defaultCodexRGB[0], defaultCodexRGB[1], defaultCodexRGB[2])
+	claudeEvalColor = color.RGB(defaultClaudeEvalRGB[0], defaultClaudeEvalRGB[1], defaultClaudeEvalRGB[2])
+	warnColor       = color.RGB(defaultWarnRGB[0], defaultWarnRGB[1], defaultWarnRGB[2])
+	errorColor      = color.RGB(defaultErrorRGB[0], defaultErrorRGB[1], defaultErrorRGB[2])
+	signalColor     = color.RGB(defaultSignalRGB[0], defaultSignalRGB[1], defaultSignalRGB[2])
+	timestampColor  = color.RGB(defaultTimestampRGB[0], defaultTimestampRGB[1], defaultTimestampRGB[2])
 )
 
 // phaseColors maps phases to their color functions.
-var phaseColors = map[Phase]*color.Color{
-	PhaseTask:       taskColor,
-	PhaseReview:     reviewColor,
-	PhaseCodex:      codexColor,
-	PhaseClaudeEval: claudeEvalColor,
+// note: map is initialized empty and populated by initPhaseColors() called from init().
+var phaseColors = map[Phase]*color.Color{}
+
+//nolint:gochecknoinits // required to populate phaseColors after color vars are initialized
+func init() {
+	initPhaseColors()
+}
+
+// initPhaseColors populates the phaseColors map with current color values.
+func initPhaseColors() {
+	phaseColors[PhaseTask] = taskColor
+	phaseColors[PhaseReview] = reviewColor
+	phaseColors[PhaseCodex] = codexColor
+	phaseColors[PhaseClaudeEval] = claudeEvalColor
+}
+
+// InitColors resets all colors to their default values.
+// useful for testing or when configuration needs to be reset.
+func InitColors() {
+	taskColor = color.RGB(defaultTaskRGB[0], defaultTaskRGB[1], defaultTaskRGB[2])
+	reviewColor = color.RGB(defaultReviewRGB[0], defaultReviewRGB[1], defaultReviewRGB[2])
+	codexColor = color.RGB(defaultCodexRGB[0], defaultCodexRGB[1], defaultCodexRGB[2])
+	claudeEvalColor = color.RGB(defaultClaudeEvalRGB[0], defaultClaudeEvalRGB[1], defaultClaudeEvalRGB[2])
+	warnColor = color.RGB(defaultWarnRGB[0], defaultWarnRGB[1], defaultWarnRGB[2])
+	errorColor = color.RGB(defaultErrorRGB[0], defaultErrorRGB[1], defaultErrorRGB[2])
+	signalColor = color.RGB(defaultSignalRGB[0], defaultSignalRGB[1], defaultSignalRGB[2])
+	timestampColor = color.RGB(defaultTimestampRGB[0], defaultTimestampRGB[1], defaultTimestampRGB[2])
+
+	initPhaseColors()
+}
+
+// SetColors applies color configuration from ColorConfig.
+// each color value is expected to be comma-separated RGB values (e.g., "255,0,0").
+// empty values are skipped, keeping the current/default color.
+func SetColors(cfg ColorConfig) {
+	if rgb := parseRGB(cfg.Task); rgb != nil {
+		taskColor = color.RGB(rgb[0], rgb[1], rgb[2])
+		phaseColors[PhaseTask] = taskColor
+	}
+	if rgb := parseRGB(cfg.Review); rgb != nil {
+		reviewColor = color.RGB(rgb[0], rgb[1], rgb[2])
+		phaseColors[PhaseReview] = reviewColor
+	}
+	if rgb := parseRGB(cfg.Codex); rgb != nil {
+		codexColor = color.RGB(rgb[0], rgb[1], rgb[2])
+		phaseColors[PhaseCodex] = codexColor
+	}
+	if rgb := parseRGB(cfg.ClaudeEval); rgb != nil {
+		claudeEvalColor = color.RGB(rgb[0], rgb[1], rgb[2])
+		phaseColors[PhaseClaudeEval] = claudeEvalColor
+	}
+	if rgb := parseRGB(cfg.Warn); rgb != nil {
+		warnColor = color.RGB(rgb[0], rgb[1], rgb[2])
+	}
+	if rgb := parseRGB(cfg.Error); rgb != nil {
+		errorColor = color.RGB(rgb[0], rgb[1], rgb[2])
+	}
+	if rgb := parseRGB(cfg.Signal); rgb != nil {
+		signalColor = color.RGB(rgb[0], rgb[1], rgb[2])
+	}
+	if rgb := parseRGB(cfg.Timestamp); rgb != nil {
+		timestampColor = color.RGB(rgb[0], rgb[1], rgb[2])
+	}
+	// info is not used in this package - it's used in main.go
+}
+
+// parseRGB parses comma-separated RGB values (e.g., "255,0,0") into [r, g, b].
+// returns nil if the string is empty or invalid.
+func parseRGB(s string) []int {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	if len(parts) != 3 {
+		return nil
+	}
+
+	// parse each component
+	r, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || r < 0 || r > 255 {
+		return nil
+	}
+	g, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || g < 0 || g > 255 {
+		return nil
+	}
+	b, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+	if err != nil || b < 0 || b > 255 {
+		return nil
+	}
+	return []int{r, g, b}
 }
 
 // Logger writes timestamped output to both file and stdout.

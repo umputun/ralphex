@@ -74,11 +74,11 @@ Move all hardcoded colors to the config file with current colors as defaults. Us
 
 ### Task 4: Update progress package to use configured colors
 
-- [ ] write tests for `SetColors()` function in `pkg/progress/progress_test.go`
-- [ ] add `SetColors(cfg config.ColorConfig)` function to initialize color variables
-- [ ] export `InitColors()` to be called after config load
-- [ ] remove hardcoded color initializations (keep as fallback defaults)
-- [ ] run tests - must pass before next task
+- [x] write tests for `SetColors()` function in `pkg/progress/progress_test.go`
+- [x] add `SetColors(cfg config.ColorConfig)` function to initialize color variables
+- [x] export `InitColors()` to be called after config load
+- [x] remove hardcoded color initializations (keep as fallback defaults)
+- [x] run tests - must pass before next task
 
 ### Task 5: Update main.go to use configured info color
 
