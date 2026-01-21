@@ -283,3 +283,30 @@ func (r *Repo) IsIgnored(path string) (bool, error) {
 	pathParts := strings.Split(filepath.ToSlash(path), "/")
 	return matcher.Match(pathParts, false), nil
 }
+
+// IsDirty returns true if the worktree has uncommitted changes
+// (staged or modified tracked files).
+func (r *Repo) IsDirty() (bool, error) {
+	wt, err := r.repo.Worktree()
+	if err != nil {
+		return false, fmt.Errorf("get worktree: %w", err)
+	}
+
+	status, err := wt.Status()
+	if err != nil {
+		return false, fmt.Errorf("get status: %w", err)
+	}
+
+	for _, s := range status {
+		// check for staged changes
+		if s.Staging != git.Unmodified && s.Staging != git.Untracked {
+			return true, nil
+		}
+		// check for unstaged changes to tracked files
+		if s.Worktree == git.Modified || s.Worktree == git.Deleted {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}

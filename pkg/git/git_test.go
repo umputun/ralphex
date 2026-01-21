@@ -430,6 +430,81 @@ func TestRepo_CheckoutBranch(t *testing.T) {
 	})
 }
 
+func TestRepo_IsDirty(t *testing.T) {
+	t.Run("clean worktree returns false", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		dirty, err := repo.IsDirty()
+		require.NoError(t, err)
+		assert.False(t, dirty)
+	})
+
+	t.Run("staged file returns true", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create and stage a new file
+		testFile := filepath.Join(dir, "staged.txt")
+		err = os.WriteFile(testFile, []byte("staged content"), 0o600)
+		require.NoError(t, err)
+
+		err = repo.Add("staged.txt")
+		require.NoError(t, err)
+
+		dirty, err := repo.IsDirty()
+		require.NoError(t, err)
+		assert.True(t, dirty)
+	})
+
+	t.Run("modified tracked file returns true", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// modify the existing README.md (which is tracked)
+		readmePath := filepath.Join(dir, "README.md")
+		err = os.WriteFile(readmePath, []byte("# Modified\n"), 0o600)
+		require.NoError(t, err)
+
+		dirty, err := repo.IsDirty()
+		require.NoError(t, err)
+		assert.True(t, dirty)
+	})
+
+	t.Run("deleted tracked file returns true", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// delete the existing README.md (which is tracked)
+		readmePath := filepath.Join(dir, "README.md")
+		err = os.Remove(readmePath)
+		require.NoError(t, err)
+
+		dirty, err := repo.IsDirty()
+		require.NoError(t, err)
+		assert.True(t, dirty)
+	})
+
+	t.Run("untracked file only returns false", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create a new file without staging it
+		testFile := filepath.Join(dir, "untracked.txt")
+		err = os.WriteFile(testFile, []byte("untracked content"), 0o600)
+		require.NoError(t, err)
+
+		dirty, err := repo.IsDirty()
+		require.NoError(t, err)
+		assert.False(t, dirty)
+	})
+}
+
 func TestRepo_IsIgnored(t *testing.T) {
 	t.Run("returns false for non-ignored file", func(t *testing.T) {
 		dir := setupTestRepo(t)

@@ -282,6 +282,15 @@ func createBranchIfNeeded(gitOps *git.Repo, planFile string, colors *progress.Co
 		return nil // already on feature branch
 	}
 
+	// check for uncommitted changes before switching branches
+	dirty, err := gitOps.IsDirty()
+	if err != nil {
+		return fmt.Errorf("check worktree status: %w", err)
+	}
+	if dirty {
+		return errors.New("worktree has uncommitted changes, commit or stash before running ralphex")
+	}
+
 	// extract branch name from filename
 	name := strings.TrimSuffix(filepath.Base(planFile), ".md")
 	// remove date prefix like "2024-01-15-"
