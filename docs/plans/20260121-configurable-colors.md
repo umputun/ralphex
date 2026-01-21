@@ -89,12 +89,12 @@ Move all hardcoded colors to the config file with current colors as defaults. Us
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] verify all 9 colors are configurable
-- [ ] verify default colors match current behavior (no visual change without config)
-- [ ] test custom config with different colors - verify they apply
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run`
-- [ ] verify test coverage meets 80%+
+- [x] verify all 9 colors are configurable
+- [x] verify default colors match current behavior (no visual change without config)
+- [x] test custom config with different colors - verify they apply
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `golangci-lint run`
+- [x] verify test coverage meets 80%+
 
 ### Task 7: Update documentation
 
