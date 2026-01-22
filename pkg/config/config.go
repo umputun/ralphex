@@ -388,6 +388,11 @@ func (c *Config) installDefaults() error {
 		}
 	}
 
+	// install default prompt files if not exist
+	if err := c.installDefaultPrompts(promptsDir); err != nil {
+		return fmt.Errorf("install default prompts: %w", err)
+	}
+
 	// install default agent files if not exist
 	if err := c.installDefaultAgents(agentsDir); err != nil {
 		return fmt.Errorf("install default agents: %w", err)
@@ -396,25 +401,38 @@ func (c *Config) installDefaults() error {
 	return nil
 }
 
+// installDefaultPrompts copies embedded prompt files to the user's prompts directory.
+// prompts are only installed if the directory is empty - never overwrites or adds
+// to existing prompt configurations. called after promptsDir is created.
+func (c *Config) installDefaultPrompts(promptsDir string) error {
+	return c.installDefaultFiles(promptsDir, "defaults/prompts", "prompt")
+}
+
 // installDefaultAgents copies embedded agent files to the user's agents directory.
 // agents are only installed if the directory is empty - never overwrites or adds
 // to existing agent configurations. called after agentsDir is created.
 func (c *Config) installDefaultAgents(agentsDir string) error {
-	// check if agents directory has any .txt files - if so, skip installation entirely
-	existingEntries, err := os.ReadDir(agentsDir)
+	return c.installDefaultFiles(agentsDir, "defaults/agents", "agent")
+}
+
+// installDefaultFiles copies embedded .txt files to the destination directory.
+// files are only installed if the directory has no .txt files - never overwrites.
+func (c *Config) installDefaultFiles(destDir, embedPath, fileType string) error {
+	// check if directory has any .txt files - if so, skip installation entirely
+	existingEntries, err := os.ReadDir(destDir)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read agents dir: %w", err)
+		return fmt.Errorf("read %s dir: %w", fileType, err)
 	}
 	for _, entry := range existingEntries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".txt") {
-			return nil // directory has agent files, don't install defaults
+			return nil // directory has files, don't install defaults
 		}
 	}
 
 	embedFS := DefaultsFS()
-	defaultEntries, err := embedFS.ReadDir("defaults/agents")
+	defaultEntries, err := embedFS.ReadDir(embedPath)
 	if err != nil {
-		return fmt.Errorf("read embedded agents dir: %w", err)
+		return fmt.Errorf("read embedded %s dir: %w", fileType, err)
 	}
 
 	for _, entry := range defaultEntries {
@@ -422,14 +440,14 @@ func (c *Config) installDefaultAgents(agentsDir string) error {
 			continue
 		}
 
-		data, err := embedFS.ReadFile("defaults/agents/" + entry.Name())
+		data, err := embedFS.ReadFile(embedPath + "/" + entry.Name())
 		if err != nil {
-			return fmt.Errorf("read embedded agent %s: %w", entry.Name(), err)
+			return fmt.Errorf("read embedded %s %s: %w", fileType, entry.Name(), err)
 		}
 
-		destPath := filepath.Join(agentsDir, entry.Name())
+		destPath := filepath.Join(destDir, entry.Name())
 		if err := os.WriteFile(destPath, data, 0o600); err != nil {
-			return fmt.Errorf("write agent file %s: %w", entry.Name(), err)
+			return fmt.Errorf("write %s file %s: %w", fileType, entry.Name(), err)
 		}
 	}
 

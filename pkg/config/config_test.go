@@ -464,6 +464,96 @@ func TestConfig_installDefaultAgents_SkipsNonEmptyDir(t *testing.T) {
 	assert.Len(t, entries, 1, "should only have the user's custom agent")
 }
 
+func TestConfig_installDefaultPrompts_AllFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	promptsDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0o700))
+
+	cfg := &Config{}
+	require.NoError(t, cfg.installDefaultPrompts(promptsDir))
+
+	expectedPrompts := []string{"task.txt", "review_first.txt", "review_second.txt", "codex.txt"}
+	for _, prompt := range expectedPrompts {
+		promptPath := filepath.Join(promptsDir, prompt)
+		assert.FileExists(t, promptPath, "prompt file %s should be installed", prompt)
+
+		data, err := os.ReadFile(promptPath) //nolint:gosec // test
+		require.NoError(t, err)
+		assert.NotEmpty(t, string(data), "prompt file %s should have content", prompt)
+	}
+}
+
+func TestConfig_installDefaultPrompts_SkipsNonEmptyDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	promptsDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0o700))
+
+	// pre-create one prompt with custom content
+	customContent := "user's custom prompt"
+	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "my-custom.txt"), []byte(customContent), 0o600))
+
+	cfg := &Config{}
+	require.NoError(t, cfg.installDefaultPrompts(promptsDir))
+
+	// verify custom content was preserved
+	data, err := os.ReadFile(filepath.Join(promptsDir, "my-custom.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, customContent, string(data), "existing prompt file should not be overwritten")
+
+	// verify NO default prompts were added - directory was not empty
+	entries, err := os.ReadDir(promptsDir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "should only have the user's custom prompt")
+}
+
+func TestConfig_installDefaults_InstallsPromptFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	cfg := &Config{configDir: configDir}
+	require.NoError(t, cfg.installDefaults())
+
+	promptsDir := filepath.Join(configDir, "prompts")
+	expectedPrompts := []string{"task.txt", "review_first.txt", "review_second.txt", "codex.txt"}
+
+	for _, prompt := range expectedPrompts {
+		promptPath := filepath.Join(promptsDir, prompt)
+		assert.FileExists(t, promptPath, "prompt file %s should be installed", prompt)
+
+		data, err := os.ReadFile(promptPath) //nolint:gosec // test
+		require.NoError(t, err)
+		assert.NotEmpty(t, string(data), "prompt file %s should have content", prompt)
+	}
+}
+
+func TestConfig_installDefaults_NeverOverwritesPrompts(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	promptsDir := filepath.Join(configDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// create a single custom prompt file
+	customContent := "my custom prompt"
+	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "my-prompt.txt"), []byte(customContent), 0o600))
+
+	// write config file so all paths exist
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# test"), 0o600))
+
+	cfg := &Config{configDir: configDir}
+	require.NoError(t, cfg.installDefaults())
+
+	// verify custom content was preserved
+	data, err := os.ReadFile(filepath.Join(promptsDir, "my-prompt.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, customContent, string(data), "custom prompt file should be preserved")
+
+	// verify NO default prompts were added - we never add to existing prompt directories
+	entries, err := os.ReadDir(promptsDir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "should only have the custom prompt, no defaults added")
+}
+
 // --- parse tests ---
 
 func TestConfig_parseConfig_FullConfig(t *testing.T) {

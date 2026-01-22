@@ -48,6 +48,15 @@ docs/plans/         # plan files location
 - Custom prompts: `~/.config/ralphex/prompts/*.txt`
 - Custom agents: `~/.config/ralphex/agents/*.txt`
 
+### Config Defaults Behavior
+
+- **config file**: copied on first run, always exists
+- **scalars/colors**: per-field fallback to embedded defaults if missing
+- **prompts**: copied if dir empty, per-file fallback to embedded if deleted
+- **agents**: copied if dir empty, no fallback (user controls full set)
+- `*Set` flags (e.g., `CodexEnabledSet`) distinguish explicit `false`/`0` from "not set"
+- If ANY `.txt` exists in prompts/ or agents/, no defaults copied (user manages that dir)
+
 ### Agent System
 
 5 default agents are installed on first run to `~/.config/ralphex/agents/`:
