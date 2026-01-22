@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jessevdk/go-flags"
 
@@ -162,31 +163,11 @@ func run(ctx context.Context, o opts) error {
 	// wrap logger with broadcast logger if --serve is enabled
 	var runnerLog processor.Logger = baseLog
 	if o.Serve {
-		hub := web.NewHub()
-		buffer := web.NewBuffer(10000) // 10k event buffer
-
-		runnerLog = web.NewBroadcastLogger(baseLog, hub, buffer)
-
-		// extract plan name for display
-		planName := "(no plan)"
-		if planFile != "" {
-			planName = filepath.Base(planFile)
+		broadcastLog, err := startWebDashboard(ctx, baseLog, o.Port, planFile, branch, colors)
+		if err != nil {
+			return err
 		}
-
-		// create and start web server in background
-		srv := web.NewServer(web.ServerConfig{
-			Port:     o.Port,
-			PlanName: planName,
-			Branch:   branch,
-		}, hub, buffer)
-
-		go func() {
-			if srvErr := srv.Start(ctx); srvErr != nil {
-				fmt.Fprintf(os.Stderr, "web server error: %v\n", srvErr)
-			}
-		}()
-
-		colors.Info().Printf("web dashboard: http://localhost:%d\n", o.Port)
+		runnerLog = broadcastLog
 	}
 
 	// print startup info
@@ -455,4 +436,48 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 	colors.Info().Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, info.MaxIterations, modeStr)
 	colors.Info().Printf("branch: %s\n", info.Branch)
 	colors.Info().Printf("progress log: %s\n\n", info.ProgressPath)
+}
+
+// startWebDashboard creates the web server and broadcast logger, starting the server in background.
+// returns the broadcast logger to use for execution, or error if server fails to start.
+func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, planFile, branch string, colors *progress.Colors) (processor.Logger, error) {
+	hub := web.NewHub()
+	buffer := web.NewBuffer(10000) // 10k event buffer
+
+	broadcastLog := web.NewBroadcastLogger(baseLog, hub, buffer)
+
+	// extract plan name for display
+	planName := "(no plan)"
+	if planFile != "" {
+		planName = filepath.Base(planFile)
+	}
+
+	// create and start web server in background
+	srv := web.NewServer(web.ServerConfig{
+		Port:     port,
+		PlanName: planName,
+		Branch:   branch,
+	}, hub, buffer)
+
+	// use channel to detect startup success/failure
+	srvErrCh := make(chan error, 1)
+	go func() {
+		if srvErr := srv.Start(ctx); srvErr != nil {
+			srvErrCh <- srvErr
+		}
+		close(srvErrCh)
+	}()
+
+	// give the server a moment to start or fail
+	select {
+	case srvErr := <-srvErrCh:
+		if srvErr != nil {
+			return nil, fmt.Errorf("web server failed to start on port %d: %w", port, srvErr)
+		}
+	case <-time.After(100 * time.Millisecond):
+		// server started successfully (no immediate error)
+	}
+
+	colors.Info().Printf("web dashboard: http://localhost:%d\n", port)
+	return broadcastLog, nil
 }
