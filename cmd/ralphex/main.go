@@ -190,6 +190,13 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	colors.Info().Printf("\ncompleted in %s\n", baseLog.Elapsed())
+
+	// keep web dashboard running after execution completes
+	if o.Serve {
+		colors.Info().Printf("web dashboard still running at http://localhost:%d (press Ctrl+C to exit)\n", o.Port)
+		<-ctx.Done()
+	}
+
 	return nil
 }
 
@@ -457,6 +464,7 @@ func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, 
 		Port:     port,
 		PlanName: planName,
 		Branch:   branch,
+		PlanFile: planFile,
 	}, hub, buffer)
 
 	// use channel to detect startup success/failure

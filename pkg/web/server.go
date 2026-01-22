@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"log"
 	"net/http"
+	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -19,6 +22,7 @@ type ServerConfig struct {
 	Port     int    // port to listen on
 	PlanName string // plan name to display in dashboard
 	Branch   string // git branch name
+	PlanFile string // path to plan file for /api/plan endpoint
 }
 
 // Server provides HTTP server for the real-time dashboard.
@@ -27,6 +31,10 @@ type Server struct {
 	hub    *Hub
 	buffer *Buffer
 	srv    *http.Server
+
+	// plan caching - set after first successful load
+	planMu    sync.Mutex
+	planCache *Plan
 }
 
 // NewServer creates a new web server.
@@ -46,6 +54,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// register routes
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/events", s.handleEvents)
+	mux.HandleFunc("/api/plan", s.handlePlan)
 
 	// static files
 	staticFS, err := fs.Sub(content, "static")
@@ -129,6 +138,62 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "template execution error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// handlePlan serves the parsed plan as JSON.
+// caches the result (success or failure) of the first load attempt to survive file moves.
+// once cached, subsequent requests return the cached result without re-reading the file.
+// thread-safe via sync.Once for concurrent request handling.
+func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.cfg.PlanFile == "" {
+		http.Error(w, "no plan file configured", http.StatusNotFound)
+		return
+	}
+
+	plan, err := s.loadPlan()
+	if err != nil {
+		log.Printf("[WARN] failed to load plan file %s: %v", s.cfg.PlanFile, err)
+		http.Error(w, "unable to load plan", http.StatusInternalServerError)
+		return
+	}
+
+	data, err := plan.JSON()
+	if err != nil {
+		log.Printf("[WARN] failed to encode plan: %v", err)
+		http.Error(w, "unable to encode plan", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+}
+
+// loadPlan returns a cached plan or loads it from disk (with completed/ fallback).
+func (s *Server) loadPlan() (*Plan, error) {
+	s.planMu.Lock()
+	defer s.planMu.Unlock()
+
+	if s.planCache != nil {
+		return s.planCache, nil
+	}
+
+	plan, err := ParsePlanFile(s.cfg.PlanFile)
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		completedPath := filepath.Join(filepath.Dir(s.cfg.PlanFile), "completed", filepath.Base(s.cfg.PlanFile))
+		plan, err = ParsePlanFile(completedPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	s.planCache = plan
+	return plan, nil
 }
 
 // handleEvents serves the SSE stream.

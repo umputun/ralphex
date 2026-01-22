@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -242,4 +244,141 @@ func TestServer_SSE_LateJoiningClient(t *testing.T) {
 	assert.Contains(t, body, "event 1")
 	assert.Contains(t, body, "Review Section")
 	assert.Contains(t, body, "event 2")
+}
+
+func TestServer_HandlePlan(t *testing.T) {
+	t.Run("returns plan JSON", func(t *testing.T) {
+		hub := NewHub()
+		buffer := NewBuffer(100)
+
+		// create a temp plan file
+		tmpDir := t.TempDir()
+		planFile := tmpDir + "/test-plan.md"
+		content := `# Test Plan
+
+### Task 1: First Task
+
+- [ ] Item 1
+- [x] Item 2
+`
+		require.NoError(t, os.WriteFile(planFile, []byte(content), 0o600))
+
+		srv := NewServer(ServerConfig{
+			Port:     8080,
+			PlanFile: planFile,
+		}, hub, buffer)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		assert.Contains(t, string(body), "Test Plan")
+		assert.Contains(t, string(body), "First Task")
+	})
+
+	t.Run("returns 404 when no plan file", func(t *testing.T) {
+		hub := NewHub()
+		buffer := NewBuffer(100)
+		srv := NewServer(ServerConfig{Port: 8080}, hub, buffer)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("returns 500 for invalid plan file", func(t *testing.T) {
+		hub := NewHub()
+		buffer := NewBuffer(100)
+		srv := NewServer(ServerConfig{
+			Port:     8080,
+			PlanFile: "/nonexistent/plan.md",
+		}, hub, buffer)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+		// verify error message is sanitized (no file path leaked)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.NotContains(t, string(body), "/nonexistent/plan.md")
+		assert.Contains(t, string(body), "unable to load plan")
+	})
+
+	t.Run("loads plan from completed directory", func(t *testing.T) {
+		hub := NewHub()
+		buffer := NewBuffer(100)
+
+		tmpDir := t.TempDir()
+		planFile := filepath.Join(tmpDir, "plan.md")
+		completedDir := filepath.Join(tmpDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+		completedPlan := filepath.Join(completedDir, "plan.md")
+		content := `# Completed Plan
+
+### Task 1: Done
+
+- [x] Item
+`
+		require.NoError(t, os.WriteFile(completedPlan, []byte(content), 0o600))
+
+		srv := NewServer(ServerConfig{
+			Port:     8080,
+			PlanFile: planFile,
+		}, hub, buffer)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "Completed Plan")
+	})
+
+	t.Run("rejects non-GET methods", func(t *testing.T) {
+		hub := NewHub()
+		buffer := NewBuffer(100)
+		srv := NewServer(ServerConfig{Port: 8080}, hub, buffer)
+
+		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/plan", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handlePlan(w, req)
+
+			resp := w.Result()
+			resp.Body.Close()
+
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode, "method %s should be rejected", method)
+			assert.Equal(t, http.MethodGet, resp.Header.Get("Allow"))
+		}
+	})
 }

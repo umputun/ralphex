@@ -239,3 +239,108 @@ func TestFormatText(t *testing.T) {
 		})
 	}
 }
+
+func TestBroadcastLogger_PrintSection_TaskBoundaryEvents(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		PrintSectionFunc: func(string) {},
+	}
+	hub := NewHub()
+	buffer := NewBuffer(100)
+	bl := NewBroadcastLogger(mockLogger, hub, buffer)
+
+	ch := hub.Subscribe()
+
+	// emit task iteration section - should emit task start + section events
+	bl.PrintSection("task iteration 1")
+
+	// should receive task_start event first
+	e1 := <-ch
+	assert.Equal(t, EventTypeTaskStart, e1.Type)
+	assert.Equal(t, 1, e1.TaskNum)
+	assert.Equal(t, "task iteration 1", e1.Text)
+
+	// then section event
+	e2 := <-ch
+	assert.Equal(t, EventTypeSection, e2.Type)
+	assert.Equal(t, "task iteration 1", e2.Section)
+
+	// emit another task iteration - should emit task end for previous, then task start
+	bl.PrintSection("task iteration 2")
+
+	// should receive task_end event for task 1
+	e3 := <-ch
+	assert.Equal(t, EventTypeTaskEnd, e3.Type)
+	assert.Equal(t, 1, e3.TaskNum)
+
+	// then task_start for task 2
+	e4 := <-ch
+	assert.Equal(t, EventTypeTaskStart, e4.Type)
+	assert.Equal(t, 2, e4.TaskNum)
+
+	// then section event
+	e5 := <-ch
+	assert.Equal(t, EventTypeSection, e5.Type)
+}
+
+func TestBroadcastLogger_PrintSection_IterationEvents(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		PrintSectionFunc: func(string) {},
+		SetPhaseFunc:     func(progress.Phase) {},
+	}
+	hub := NewHub()
+	buffer := NewBuffer(100)
+	bl := NewBroadcastLogger(mockLogger, hub, buffer)
+
+	ch := hub.Subscribe()
+
+	// test claude review iteration pattern
+	bl.SetPhase(progress.PhaseReview)
+	bl.PrintSection("claude review 3: critical/major")
+
+	e1 := <-ch
+	assert.Equal(t, EventTypeIterationStart, e1.Type)
+	assert.Equal(t, 3, e1.IterationNum)
+	assert.Equal(t, progress.PhaseReview, e1.Phase)
+
+	e2 := <-ch
+	assert.Equal(t, EventTypeSection, e2.Type)
+
+	// test codex iteration pattern
+	bl.SetPhase(progress.PhaseCodex)
+	bl.PrintSection("codex iteration 5")
+
+	e3 := <-ch
+	assert.Equal(t, EventTypeIterationStart, e3.Type)
+	assert.Equal(t, 5, e3.IterationNum)
+	assert.Equal(t, progress.PhaseCodex, e3.Phase)
+
+	e4 := <-ch
+	assert.Equal(t, EventTypeSection, e4.Type)
+}
+
+func TestBroadcastLogger_PrintSection_NoExtraEvents(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		PrintSectionFunc: func(string) {},
+	}
+	hub := NewHub()
+	buffer := NewBuffer(100)
+	bl := NewBroadcastLogger(mockLogger, hub, buffer)
+
+	ch := hub.Subscribe()
+
+	// regular section that doesn't match any pattern
+	bl.PrintSection("review: all findings")
+
+	// should only receive section event
+	e1 := <-ch
+	assert.Equal(t, EventTypeSection, e1.Type)
+	assert.Equal(t, "review: all findings", e1.Section)
+
+	// verify no more events
+	select {
+	case <-ch:
+		t.Fatal("received unexpected event")
+	case <-time.After(50 * time.Millisecond):
+		// expected - no more events
+	}
+}

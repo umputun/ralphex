@@ -11,7 +11,9 @@
         <div class="header-top">
             <h1>Ralphex Dashboard</h1>
             <div class="status-area">
-                <span class="status" id="status">connecting...</span>
+                <span class="elapsed-time" id="elapsed-time"></span>
+                <span class="status-badge" id="status-badge">CONNECTING</span>
+                <button class="export-btn" id="export-btn" title="Export session as HTML">Export</button>
             </div>
         </div>
         <div class="info">
@@ -22,19 +24,34 @@
 
     <nav class="phase-nav">
         <button class="phase-tab active" data-phase="all">All</button>
-        <button class="phase-tab" data-phase="task">Task</button>
-        <button class="phase-tab" data-phase="review">Review</button>
-        <button class="phase-tab" data-phase="codex">Codex</button>
+        <button class="phase-tab" data-phase="task">Implementation</button>
+        <button class="phase-tab" data-phase="review">Claude Review</button>
+        <button class="phase-tab" data-phase="codex">Codex Review</button>
+        <span class="nav-separator"></span>
+        <button class="collapse-btn" id="expand-all" title="Expand all sections">Expand All</button>
+        <button class="collapse-btn" id="collapse-all" title="Collapse all sections">Collapse All</button>
     </nav>
 
     <div class="search-bar">
         <input type="text" id="search" placeholder="Search... (press / to focus)" autocomplete="off">
-        <span class="search-hint">Press Escape to clear</span>
+        <span class="search-hint">Press Escape to clear, P to toggle plan</span>
     </div>
 
-    <main>
-        <div id="output"></div>
-    </main>
+    <div class="main-container">
+        <aside class="plan-panel" id="plan-panel">
+            <div class="plan-panel-header">
+                <span class="plan-panel-title">Plan</span>
+                <button class="plan-toggle" id="plan-toggle" title="Toggle plan panel (P)">◀</button>
+            </div>
+            <div class="plan-content" id="plan-content">
+                <div class="plan-loading">Loading plan...</div>
+            </div>
+        </aside>
+
+        <main class="output-panel">
+            <div id="output"></div>
+        </main>
+    </div>
 
     <div class="scroll-indicator" id="scroll-indicator">
         <button id="scroll-to-bottom">Scroll to bottom</button>

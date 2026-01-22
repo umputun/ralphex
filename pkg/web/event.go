@@ -14,21 +14,26 @@ type EventType string
 
 // event type constants for SSE streaming.
 const (
-	EventTypeOutput  EventType = "output"  // regular output line
-	EventTypeSection EventType = "section" // section header
-	EventTypeError   EventType = "error"   // error message
-	EventTypeWarn    EventType = "warn"    // warning message
-	EventTypeSignal  EventType = "signal"  // completion/failure signal
+	EventTypeOutput         EventType = "output"          // regular output line
+	EventTypeSection        EventType = "section"         // section header
+	EventTypeError          EventType = "error"           // error message
+	EventTypeWarn           EventType = "warn"            // warning message
+	EventTypeSignal         EventType = "signal"          // completion/failure signal
+	EventTypeTaskStart      EventType = "task_start"      // task execution started
+	EventTypeTaskEnd        EventType = "task_end"        // task execution ended
+	EventTypeIterationStart EventType = "iteration_start" // review/codex iteration started
 )
 
 // Event represents a single event to be streamed to web clients.
 type Event struct {
-	Type      EventType      `json:"type"`
-	Phase     progress.Phase `json:"phase"`
-	Section   string         `json:"section,omitempty"`
-	Text      string         `json:"text"`
-	Timestamp time.Time      `json:"timestamp"`
-	Signal    string         `json:"signal,omitempty"`
+	Type         EventType      `json:"type"`
+	Phase        progress.Phase `json:"phase"`
+	Section      string         `json:"section,omitempty"`
+	Text         string         `json:"text"`
+	Timestamp    time.Time      `json:"timestamp"`
+	Signal       string         `json:"signal,omitempty"`
+	TaskNum      int            `json:"task_num,omitempty"`      // 1-based task index from plan (matches plan.tasks[].number)
+	IterationNum int            `json:"iteration_num,omitempty"` // 1-based iteration index for review/codex phases
 }
 
 // NewOutputEvent creates an output event with current timestamp.
@@ -80,6 +85,39 @@ func NewSignalEvent(phase progress.Phase, signal string) Event {
 		Text:      signal,
 		Signal:    signal,
 		Timestamp: time.Now(),
+	}
+}
+
+// NewTaskStartEvent creates a task start boundary event.
+func NewTaskStartEvent(phase progress.Phase, taskNum int, text string) Event {
+	return Event{
+		Type:      EventTypeTaskStart,
+		Phase:     phase,
+		Text:      text,
+		TaskNum:   taskNum,
+		Timestamp: time.Now(),
+	}
+}
+
+// NewTaskEndEvent creates a task end boundary event.
+func NewTaskEndEvent(phase progress.Phase, taskNum int, text string) Event {
+	return Event{
+		Type:      EventTypeTaskEnd,
+		Phase:     phase,
+		Text:      text,
+		TaskNum:   taskNum,
+		Timestamp: time.Now(),
+	}
+}
+
+// NewIterationStartEvent creates an iteration start event.
+func NewIterationStartEvent(phase progress.Phase, iterationNum int, text string) Event {
+	return Event{
+		Type:         EventTypeIterationStart,
+		Phase:        phase,
+		Text:         text,
+		IterationNum: iterationNum,
+		Timestamp:    time.Now(),
 	}
 }
 
