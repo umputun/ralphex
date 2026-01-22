@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/progress"
@@ -37,6 +38,7 @@ type Tailer struct {
 	reader   *bufio.Reader
 	offset   int64
 	running  bool
+	stopped  atomic.Bool // guards against double-stop panic
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 	eventCh  chan Event
@@ -110,16 +112,30 @@ func (t *Tailer) Start(fromStart bool) error {
 
 // Stop stops the tailer and closes resources.
 // blocks until the tail loop has fully stopped.
+// safe to call multiple times concurrently.
 func (t *Tailer) Stop() {
+	// use atomic to prevent double-close of stopCh
+	if t.stopped.Swap(true) {
+		// already stopped or stopping, wait for completion
+		t.mu.Lock()
+		doneCh := t.doneCh
+		t.mu.Unlock()
+		if doneCh != nil {
+			<-doneCh
+		}
+		return
+	}
+
 	t.mu.Lock()
 	if !t.running {
 		t.mu.Unlock()
 		return
 	}
 	close(t.stopCh)
+	doneCh := t.doneCh
 	t.mu.Unlock()
 
-	<-t.doneCh
+	<-doneCh
 }
 
 // IsRunning returns whether the tailer is currently active.

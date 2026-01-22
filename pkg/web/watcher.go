@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -67,6 +68,9 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// start tailing for active sessions
 	w.sm.StartTailingActive()
+
+	// start periodic state refresh to detect completed sessions
+	go w.refreshLoop(ctx)
 
 	// run the watch loop
 	return w.run(ctx)
@@ -182,6 +186,22 @@ func (w *Watcher) startTailingIfNeeded(id string) {
 	}
 	if err := session.StartTailing(true); err != nil {
 		log.Printf("[WARN] failed to start tailing for session %s: %v", id, err)
+	}
+}
+
+// refreshLoop periodically checks for session state changes (active->completed).
+// runs until context is canceled.
+func (w *Watcher) refreshLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.sm.RefreshStates()
+		}
 	}
 }
 
