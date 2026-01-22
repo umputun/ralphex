@@ -19,6 +19,7 @@ import (
 	"github.com/umputun/ralphex/pkg/git"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/web"
 )
 
 // opts holds all command-line options.
@@ -29,6 +30,8 @@ type opts struct {
 	Debug         bool `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor       bool `long:"no-color" description:"disable color output"`
 	Version       bool `short:"v" long:"version" description:"print version and exit"`
+	Serve         bool `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
+	Port          int  `short:"p" long:"port" default:"8080" description:"web dashboard port"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
 }
@@ -145,7 +148,7 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// create progress logger
-	log, err := progress.NewLogger(progress.Config{
+	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: planFile,
 		Mode:     string(mode),
 		Branch:   branch,
@@ -154,16 +157,46 @@ func run(ctx context.Context, o opts) error {
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
-	defer log.Close()
+	defer baseLog.Close()
+
+	// wrap logger with broadcast logger if --serve is enabled
+	var runnerLog processor.Logger = baseLog
+	if o.Serve {
+		hub := web.NewHub()
+		buffer := web.NewBuffer(10000) // 10k event buffer
+
+		runnerLog = web.NewBroadcastLogger(baseLog, hub, buffer)
+
+		// extract plan name for display
+		planName := "(no plan)"
+		if planFile != "" {
+			planName = filepath.Base(planFile)
+		}
+
+		// create and start web server in background
+		srv := web.NewServer(web.ServerConfig{
+			Port:     o.Port,
+			PlanName: planName,
+			Branch:   branch,
+		}, hub, buffer)
+
+		go func() {
+			if srvErr := srv.Start(ctx); srvErr != nil {
+				fmt.Fprintf(os.Stderr, "web server error: %v\n", srvErr)
+			}
+		}()
+
+		colors.Info().Printf("web dashboard: http://localhost:%d\n", o.Port)
+	}
 
 	// print startup info
 	printStartupInfo(startupInfo{
 		PlanFile: planFile, Branch: branch, Mode: mode,
-		MaxIterations: o.MaxIterations, ProgressPath: log.Path(),
+		MaxIterations: o.MaxIterations, ProgressPath: baseLog.Path(),
 	}, colors)
 
 	// create and run the runner
-	r := createRunner(cfg, o, planFile, mode, log)
+	r := createRunner(cfg, o, planFile, mode, runnerLog)
 	if runErr := r.Run(ctx); runErr != nil {
 		return fmt.Errorf("runner: %w", runErr)
 	}
@@ -175,7 +208,7 @@ func run(ctx context.Context, o opts) error {
 		}
 	}
 
-	colors.Info().Printf("\ncompleted in %s\n", log.Elapsed())
+	colors.Info().Printf("\ncompleted in %s\n", baseLog.Elapsed())
 	return nil
 }
 
@@ -201,7 +234,7 @@ func determineMode(o opts) processor.Mode {
 }
 
 // createRunner creates a processor.Runner with the given configuration.
-func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mode, log *progress.Logger) *processor.Runner {
+func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mode, log processor.Logger) *processor.Runner {
 	// --codex-only mode forces codex enabled regardless of config
 	codexEnabled := cfg.CodexEnabled
 	if mode == processor.ModeCodexOnly {

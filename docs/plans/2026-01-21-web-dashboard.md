@@ -44,12 +44,12 @@ Build the web UI using Go templates, htmx for SSE, and vanilla JavaScript. Funct
 
 Add text search with highlighting and integrate the web server into the main CLI with `--serve` flag.
 
-- [ ] Implement in-browser search with debounced input and regex-safe highlighting
-- [ ] Add keyboard shortcut `/` to focus search, Escape to clear
-- [ ] Add `--serve` and `--port` flags to cmd/ralphex/main.go using go-flags
-- [ ] When `--serve` is passed, create web server and wrap Logger with BroadcastLogger
-- [ ] Start HTTP server in goroutine, print "web dashboard: http://localhost:PORT" message
-- [ ] Verify existing file + stdout logging still works with --serve
+- [x] Implement in-browser search with debounced input and regex-safe highlighting
+- [x] Add keyboard shortcut `/` to focus search, Escape to clear
+- [x] Add `--serve` and `--port` flags to cmd/ralphex/main.go using go-flags
+- [x] When `--serve` is passed, create web server and wrap Logger with BroadcastLogger
+- [x] Start HTTP server in goroutine, print "web dashboard: http://localhost:PORT" message
+- [x] Verify existing file + stdout logging still works with --serve
 
 ### Task 5: Testing and Documentation
 
