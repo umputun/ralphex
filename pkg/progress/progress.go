@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -155,6 +156,13 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 	f, err := os.Create(progressPath) //nolint:gosec // path derived from plan filename
 	if err != nil {
 		return nil, fmt.Errorf("create progress file: %w", err)
+	}
+
+	// acquire exclusive lock on progress file to signal active session
+	// the lock is held for the duration of execution and released on Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("acquire file lock: %w", err)
 	}
 
 	l := &Logger{
@@ -424,7 +432,7 @@ func (l *Logger) Elapsed() string {
 	return humanize.RelTime(l.startTime, time.Now(), "", "")
 }
 
-// Close writes footer and closes the progress file.
+// Close writes footer, releases the file lock, and closes the progress file.
 func (l *Logger) Close() error {
 	if l.file == nil {
 		return nil
@@ -432,6 +440,9 @@ func (l *Logger) Close() error {
 
 	l.writeFile("\n%s\n", strings.Repeat("-", 60))
 	l.writeFile("Completed: %s (%s)\n", time.Now().Format("2006-01-02 15:04:05"), l.Elapsed())
+
+	// release file lock before closing
+	_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
 
 	if err := l.file.Close(); err != nil {
 		return fmt.Errorf("close progress file: %w", err)

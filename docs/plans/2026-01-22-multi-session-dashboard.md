@@ -11,13 +11,13 @@ Decouple the web dashboard from plan execution to enable standalone monitoring o
 
 Implement the core session management layer that discovers progress files and determines their state. This creates the foundation for multi-session support by replacing the single-execution model with a registry of sessions.
 
-- [ ] Create `pkg/web/session.go` with Session struct (ID, path, metadata, active flag, Buffer, Hub)
-- [ ] Create `pkg/web/session_manager.go` with SessionManager that holds session registry
-- [ ] Implement `Discover()` method that globs `progress-*.txt` in a directory
-- [ ] Implement flock-based `IsActive()` detection using `syscall.Flock` with `LOCK_EX|LOCK_NB`
-- [ ] Parse progress file headers to extract metadata (plan path, branch, mode, start time)
-- [ ] Update `pkg/progress/logger.go` to acquire flock on progress file during execution
-- [ ] Add unit tests for session discovery and state detection
+- [x] Create `pkg/web/session.go` with Session struct (ID, path, metadata, active flag, Buffer, Hub)
+- [x] Create `pkg/web/session_manager.go` with SessionManager that holds session registry
+- [x] Implement `Discover()` method that globs `progress-*.txt` in a directory
+- [x] Implement flock-based `IsActive()` detection using `syscall.Flock` with `LOCK_EX|LOCK_NB`
+- [x] Parse progress file headers to extract metadata (plan path, branch, mode, start time)
+- [x] Update `pkg/progress/logger.go` to acquire flock on progress file during execution
+- [x] Add unit tests for session discovery and state detection
 
 ### Task 2: File Tailing & Event Streaming
 
