@@ -34,12 +34,12 @@ Implement file tailing for active sessions to stream log lines as events. This e
 
 Extend the web server API to support multiple sessions. Clients can list available sessions, then connect to a specific session's event stream or fetch its plan.
 
-- [ ] Add `GET /api/sessions` endpoint returning list of sessions with metadata
-- [ ] Update `GET /events` to accept `?session=<id>` query parameter
-- [ ] Update `GET /api/plan` to accept `?session=<id>` query parameter
-- [ ] Modify Server to use SessionManager instead of single Buffer/Hub
-- [ ] Handle session not found errors with appropriate HTTP status
-- [ ] Add endpoint tests for session-aware API
+- [x] Add `GET /api/sessions` endpoint returning list of sessions with metadata
+- [x] Update `GET /events` to accept `?session=<id>` query parameter
+- [x] Update `GET /api/plan` to accept `?session=<id>` query parameter
+- [x] Modify Server to use SessionManager instead of single Buffer/Hub
+- [x] Handle session not found errors with appropriate HTTP status
+- [x] Add endpoint tests for session-aware API
 
 ### Task 4: Watch Mode with fsnotify
 

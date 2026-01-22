@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -418,5 +419,321 @@ func TestServer_HandlePlan(t *testing.T) {
 			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode, "method %s should be rejected", method)
 			assert.Equal(t, http.MethodGet, resp.Header.Get("Allow"))
 		}
+	})
+}
+
+func TestNewServerWithSessions(t *testing.T) {
+	sm := NewSessionManager()
+	cfg := ServerConfig{
+		Port:     8080,
+		PlanName: "test-plan",
+		Branch:   "main",
+	}
+
+	srv, err := NewServerWithSessions(cfg, sm)
+	require.NoError(t, err)
+
+	assert.NotNil(t, srv)
+	assert.Nil(t, srv.Hub())   // no direct hub in multi-session mode
+	assert.Nil(t, srv.Buffer()) // no direct buffer in multi-session mode
+}
+
+func TestServer_HandleSessions(t *testing.T) {
+	t.Run("returns empty list in single-session mode", func(t *testing.T) {
+		hub := NewHub()
+		buffer := NewBuffer(100)
+		srv, err := NewServer(ServerConfig{Port: 8080}, hub, buffer)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleSessions(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "[]", string(body))
+	})
+
+	t.Run("returns sessions list in multi-session mode", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// create progress files
+		progressContent := `# Ralphex Progress Log
+Plan: docs/plans/test-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+[10:30:00] Starting execution
+`
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "progress-test-plan.txt"), []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/sessions", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleSessions(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var sessions []SessionInfo
+		require.NoError(t, json.Unmarshal(body, &sessions))
+
+		require.Len(t, sessions, 1)
+		assert.Equal(t, "test-plan", sessions[0].ID)
+		assert.Equal(t, SessionStateCompleted, sessions[0].State)
+		assert.Equal(t, "docs/plans/test-plan.md", sessions[0].PlanPath)
+		assert.Equal(t, "feature-branch", sessions[0].Branch)
+		assert.Equal(t, "full", sessions[0].Mode)
+	})
+
+	t.Run("rejects non-GET methods", func(t *testing.T) {
+		sm := NewSessionManager()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/sessions", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleSessions(w, req)
+
+			resp := w.Result()
+			resp.Body.Close()
+
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode, "method %s should be rejected", method)
+			assert.Equal(t, http.MethodGet, resp.Header.Get("Allow"))
+		}
+	})
+}
+
+func TestServer_HandleEvents_WithSession(t *testing.T) {
+	t.Run("returns 404 for unknown session", func(t *testing.T) {
+		sm := NewSessionManager()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/events?session=nonexistent", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleEvents(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("returns 404 in multi-session mode without session param", func(t *testing.T) {
+		sm := NewSessionManager()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleEvents(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("streams events for valid session", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// create progress file
+		progressContent := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+`
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "progress-mysession.txt"), []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		// add event to session buffer
+		session := sm.Get("mysession")
+		require.NotNil(t, session)
+		session.Buffer.Add(NewOutputEvent(progress.PhaseTask, "test event"))
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		req := httptest.NewRequest(http.MethodGet, "/events?session=mysession", http.NoBody).WithContext(ctx)
+		w := httptest.NewRecorder()
+
+		srv.handleEvents(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+		body := w.Body.String()
+		assert.Contains(t, body, "test event")
+	})
+}
+
+func TestServer_HandlePlan_WithSession(t *testing.T) {
+	t.Run("returns 404 for unknown session", func(t *testing.T) {
+		sm := NewSessionManager()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session=nonexistent", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		assert.Contains(t, string(body), "session not found")
+	})
+
+	t.Run("returns 404 when session has no plan path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// create progress file without plan path
+		progressContent := `# Ralphex Progress Log
+Branch: main
+Mode: review
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+`
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "progress-noplan.txt"), []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session=noplan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		assert.Contains(t, string(body), "no plan file for session")
+	})
+
+	t.Run("returns plan JSON for valid session", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// create plan file
+		planContent := `# Session Plan
+
+### Task 1: Test Task
+
+- [ ] Item 1
+- [x] Item 2
+`
+		planPath := filepath.Join(tmpDir, "test-plan.md")
+		require.NoError(t, os.WriteFile(planPath, []byte(planContent), 0o600))
+
+		// create progress file referencing the plan
+		progressContent := "# Ralphex Progress Log\nPlan: " + planPath + "\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "progress-withplan.txt"), []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session=withplan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "Session Plan")
+		assert.Contains(t, string(body), "Test Task")
+	})
+
+	t.Run("falls back to completed directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		plansDir := filepath.Join(tmpDir, "plans")
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+
+		// create plan in completed directory
+		planContent := `# Completed Session Plan
+
+### Task 1: Done
+
+- [x] Finished
+`
+		completedPlanPath := filepath.Join(completedDir, "done-plan.md")
+		require.NoError(t, os.WriteFile(completedPlanPath, []byte(planContent), 0o600))
+
+		// create progress file referencing original (non-existent) path
+		originalPlanPath := filepath.Join(plansDir, "done-plan.md")
+		progressContent := "# Ralphex Progress Log\nPlan: " + originalPlanPath + "\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "progress-fallback.txt"), []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session=fallback", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "Completed Session Plan")
 	})
 }

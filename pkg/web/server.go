@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -28,17 +30,18 @@ type ServerConfig struct {
 // Server provides HTTP server for the real-time dashboard.
 type Server struct {
 	cfg    ServerConfig
-	hub    *Hub
-	buffer *Buffer
+	hub    *Hub            // used for single-session mode (direct execution)
+	buffer *Buffer         // used for single-session mode (direct execution)
+	sm     *SessionManager // used for multi-session mode (dashboard)
 	srv    *http.Server
 	tmpl   *template.Template
 
-	// plan caching - set after first successful load
+	// plan caching - set after first successful load (single-session mode)
 	planMu    sync.Mutex
 	planCache *Plan
 }
 
-// NewServer creates a new web server.
+// NewServer creates a new web server for single-session mode (direct execution).
 // returns an error if the embedded template fails to parse.
 func NewServer(cfg ServerConfig, hub *Hub, buffer *Buffer) (*Server, error) {
 	tmpl, err := template.ParseFS(embeddedFS, "templates/base.html")
@@ -54,6 +57,21 @@ func NewServer(cfg ServerConfig, hub *Hub, buffer *Buffer) (*Server, error) {
 	}, nil
 }
 
+// NewServerWithSessions creates a new web server for multi-session mode (dashboard).
+// returns an error if the embedded template fails to parse.
+func NewServerWithSessions(cfg ServerConfig, sm *SessionManager) (*Server, error) {
+	tmpl, err := template.ParseFS(embeddedFS, "templates/base.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse template: %w", err)
+	}
+
+	return &Server{
+		cfg:  cfg,
+		sm:   sm,
+		tmpl: tmpl,
+	}, nil
+}
+
 // Start begins listening for HTTP requests.
 // blocks until the server is stopped or an error occurs.
 func (s *Server) Start(ctx context.Context) error {
@@ -63,6 +81,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/api/plan", s.handlePlan)
+	mux.HandleFunc("/api/sessions", s.handleSessions)
 
 	// static files
 	staticFS, err := fs.Sub(embeddedFS, "static")
@@ -142,9 +161,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePlan serves the parsed plan as JSON.
-// caches the result (success or failure) of the first load attempt to survive file moves.
-// once cached, subsequent requests return the cached result without re-reading the file.
-// thread-safe via sync.Once for concurrent request handling.
+// in single-session mode, uses the server's configured plan file with caching.
+// in multi-session mode, accepts ?session=<id> to load plan from session metadata.
 func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -152,6 +170,42 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionID := r.URL.Query().Get("session")
+
+	// multi-session mode with session ID
+	if s.sm != nil && sessionID != "" {
+		session := s.sm.Get(sessionID)
+		if session == nil {
+			http.Error(w, "session not found: "+sessionID, http.StatusNotFound)
+			return
+		}
+
+		meta := session.GetMetadata()
+		if meta.PlanPath == "" {
+			http.Error(w, "no plan file for session", http.StatusNotFound)
+			return
+		}
+
+		plan, err := loadPlanWithFallback(meta.PlanPath)
+		if err != nil {
+			log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
+			http.Error(w, "unable to load plan", http.StatusInternalServerError)
+			return
+		}
+
+		data, err := plan.JSON()
+		if err != nil {
+			log.Printf("[WARN] failed to encode plan: %v", err)
+			http.Error(w, "unable to encode plan", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+		return
+	}
+
+	// single-session mode - use cached server plan
 	if s.cfg.PlanFile == "" {
 		http.Error(w, "no plan file configured", http.StatusNotFound)
 		return
@@ -197,8 +251,27 @@ func (s *Server) loadPlan() (*Plan, error) {
 	return plan, nil
 }
 
+// loadPlanWithFallback loads a plan from disk with completed/ directory fallback.
+// does not cache - each call reads from disk.
+func loadPlanWithFallback(path string) (*Plan, error) {
+	plan, err := ParsePlanFile(path)
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		completedPath := filepath.Join(filepath.Dir(path), "completed", filepath.Base(path))
+		plan, err = ParsePlanFile(completedPath)
+	}
+	return plan, err
+}
+
 // handleEvents serves the SSE stream.
+// in multi-session mode, accepts ?session=<id> query parameter.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	// get session-specific hub and buffer
+	hub, buffer, err := s.getSessionResources(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
 	// set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -213,15 +286,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// subscribe to hub
-	eventCh, err := s.hub.Subscribe()
+	eventCh, err := hub.Subscribe()
 	if err != nil {
 		http.Error(w, "too many connections", http.StatusServiceUnavailable)
 		return
 	}
-	defer s.hub.Unsubscribe(eventCh)
+	defer hub.Unsubscribe(eventCh)
 
 	// send history first
-	for _, event := range s.buffer.All() {
+	for _, event := range buffer.All() {
 		data, err := event.JSON()
 		if err != nil {
 			continue
@@ -248,4 +321,86 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// getSessionResources returns the hub and buffer for the request.
+// in single-session mode, returns the server's hub/buffer.
+// in multi-session mode, looks up the session by ID from query parameter.
+func (s *Server) getSessionResources(r *http.Request) (*Hub, *Buffer, error) {
+	sessionID := r.URL.Query().Get("session")
+
+	// single-session mode (no session manager or no session ID)
+	if s.sm == nil || sessionID == "" {
+		if s.hub == nil || s.buffer == nil {
+			return nil, nil, errors.New("no session specified")
+		}
+		return s.hub, s.buffer, nil
+	}
+
+	// multi-session mode - look up session
+	session := s.sm.Get(sessionID)
+	if session == nil {
+		return nil, nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	return session.Hub, session.Buffer, nil
+}
+
+// SessionInfo represents session data for the API response.
+type SessionInfo struct {
+	ID           string       `json:"id"`
+	State        SessionState `json:"state"`
+	PlanPath     string       `json:"planPath,omitempty"`
+	Branch       string       `json:"branch,omitempty"`
+	Mode         string       `json:"mode,omitempty"`
+	StartTime    time.Time    `json:"startTime"`
+	LastModified time.Time    `json:"lastModified"`
+}
+
+// handleSessions returns a list of all discovered sessions.
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// single-session mode - return empty list
+	if s.sm == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+		return
+	}
+
+	sessions := s.sm.All()
+
+	// sort by last modified (most recent first)
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].GetLastModified().After(sessions[j].GetLastModified())
+	})
+
+	// convert to API response format
+	infos := make([]SessionInfo, 0, len(sessions))
+	for _, session := range sessions {
+		meta := session.GetMetadata()
+		infos = append(infos, SessionInfo{
+			ID:           session.ID,
+			State:        session.GetState(),
+			PlanPath:     meta.PlanPath,
+			Branch:       meta.Branch,
+			Mode:         meta.Mode,
+			StartTime:    meta.StartTime,
+			LastModified: session.GetLastModified(),
+		})
+	}
+
+	data, err := json.Marshal(infos)
+	if err != nil {
+		log.Printf("[WARN] failed to encode sessions: %v", err)
+		http.Error(w, "unable to encode sessions", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
 }
