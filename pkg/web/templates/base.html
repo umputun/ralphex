@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ralphex Dashboard - {{.PlanName}}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <div class="header-top">
+            <h1>Ralphex Dashboard</h1>
+            <div class="status-area">
+                <span class="status" id="status">connecting...</span>
+            </div>
+        </div>
+        <div class="info">
+            <span class="plan" title="Plan">{{.PlanName}}</span>
+            <span class="branch" title="Branch">{{.Branch}}</span>
+        </div>
+    </header>
+
+    <nav class="phase-nav">
+        <button class="phase-tab active" data-phase="all">All</button>
+        <button class="phase-tab" data-phase="task">Task</button>
+        <button class="phase-tab" data-phase="review">Review</button>
+        <button class="phase-tab" data-phase="codex">Codex</button>
+    </nav>
+
+    <div class="search-bar">
+        <input type="text" id="search" placeholder="Search... (press / to focus)" autocomplete="off">
+        <span class="search-hint">Press Escape to clear</span>
+    </div>
+
+    <main>
+        <div id="output"></div>
+    </main>
+
+    <div class="scroll-indicator" id="scroll-indicator">
+        <button id="scroll-to-bottom">Scroll to bottom</button>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

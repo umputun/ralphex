@@ -33,12 +33,12 @@ Implement the streaming infrastructure that connects execution output to web cli
 
 Build the web UI using Go templates, htmx for SSE, and vanilla JavaScript. Functional-first design with monospace font, dark theme, and phase-based color coding matching terminal output.
 
-- [ ] Create `pkg/web/templates/base.html` with header (plan name, branch, status), phase nav tabs, search input, output area
-- [ ] Create `pkg/web/static/styles.css` with dark theme and phase colors (task=green, review=cyan, codex=magenta)
-- [ ] Create `pkg/web/static/app.js` with EventSource SSE handling and output rendering
-- [ ] Implement phase navigation (All/Task/Review/Codex tabs) filtering sections by phase
-- [ ] Implement collapsible sections using `<details>` elements for each execution section
-- [ ] Add auto-scroll to bottom with click-to-stop behavior
+- [x] Create `pkg/web/templates/base.html` with header (plan name, branch, status), phase nav tabs, search input, output area
+- [x] Create `pkg/web/static/styles.css` with dark theme and phase colors (task=green, review=cyan, codex=magenta)
+- [x] Create `pkg/web/static/app.js` with EventSource SSE handling and output rendering
+- [x] Implement phase navigation (All/Task/Review/Codex tabs) filtering sections by phase
+- [x] Implement collapsible sections using `<details>` elements for each execution section
+- [x] Add auto-scroll to bottom with click-to-stop behavior
 
 ### Task 4: Search and CLI Integration
 

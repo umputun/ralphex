@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"html/template"
 	"io/fs"
 	"net/http"
 	"time"
@@ -97,6 +98,12 @@ func (s *Server) Buffer() *Buffer {
 	return s.buffer
 }
 
+// templateData holds data for the dashboard template.
+type templateData struct {
+	PlanName string
+	Branch   string
+}
+
 // handleIndex serves the main dashboard page.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -104,30 +111,24 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// for now, serve a minimal HTML page that connects to SSE
-	// full template implementation will be in Task 3
+	// parse template from embedded filesystem
+	tmpl, err := template.ParseFS(content, "templates/base.html")
+	if err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>Ralphex Dashboard - %s</title>
-    <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-    <header>
-        <h1>Ralphex Dashboard</h1>
-        <div class="info">
-            <span class="plan">%s</span>
-            <span class="branch">%s</span>
-            <span class="status" id="status">connecting...</span>
-        </div>
-    </header>
-    <main>
-        <div id="output"></div>
-    </main>
-    <script src="/static/app.js"></script>
-</body>
-</html>`, s.cfg.PlanName, s.cfg.PlanName, s.cfg.Branch)
+
+	data := templateData{
+		PlanName: s.cfg.PlanName,
+		Branch:   s.cfg.Branch,
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, "template execution error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleEvents serves the SSE stream.
