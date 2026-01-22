@@ -1,0 +1,1 @@
+placeholder for templates directory - templates will be added in Task 3
