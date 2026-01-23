@@ -67,7 +67,12 @@
         reconnectDelay: SSE_INITIAL_RECONNECT_MS,
         currentEventSource: null,
         isFirstConnect: true,
-        resetOnNextEvent: false
+        resetOnNextEvent: false,
+
+        // event batching state for performance
+        eventQueue: [],
+        isProcessingQueue: false,
+        pendingScrollRestore: false
     };
 
     // initialize plan panel state
@@ -80,6 +85,41 @@
     if (state.sidebarCollapsed) {
         document.body.classList.add('sidebar-collapsed');
         sidebarToggle.textContent = '▶';
+    }
+
+    // batch size for event queue processing
+    var BATCH_SIZE = 100;
+
+    // process event queue in batches using requestAnimationFrame
+    // this prevents layout thrashing when loading sessions with many events
+    function processEventQueue() {
+        if (state.isProcessingQueue || state.eventQueue.length === 0) return;
+        state.isProcessingQueue = true;
+
+        var shouldRestoreScroll = state.pendingScrollRestore;
+        state.pendingScrollRestore = false;
+        var savedAutoScroll = state.autoScroll;
+        state.autoScroll = false; // disable per-event scrolling during batch
+
+        requestAnimationFrame(function processBatch() {
+            var batch = state.eventQueue.splice(0, BATCH_SIZE);
+            for (var i = 0; i < batch.length; i++) {
+                renderEvent(batch[i]);
+            }
+            if (state.eventQueue.length > 0) {
+                requestAnimationFrame(processBatch);
+            } else {
+                state.autoScroll = savedAutoScroll;
+                if (shouldRestoreScroll) {
+                    if (!restoreScrollPosition(state.currentSessionId)) {
+                        outputPanel.scrollTop = outputPanel.scrollHeight;
+                    }
+                } else if (state.autoScroll) {
+                    outputPanel.scrollTop = outputPanel.scrollHeight;
+                }
+                state.isProcessingQueue = false;
+            }
+        });
     }
 
     // initialize current session from URL hash or localStorage
@@ -494,7 +534,9 @@
                     resetOutputState();
                     state.resetOnNextEvent = false;
                 }
-                renderEvent(event);
+                // queue event for batch processing to avoid layout thrashing
+                state.eventQueue.push(event);
+                processEventQueue();
             } catch (err) {
                 console.error('parse error:', err);
             }
@@ -696,6 +738,24 @@
         return filename.replace(/\.md$/i, '');
     }
 
+    // save scroll position for a session to localStorage
+    function saveScrollPosition(sessionId) {
+        if (sessionId) {
+            localStorage.setItem('scroll_' + sessionId, outputPanel.scrollTop);
+        }
+    }
+
+    // restore scroll position for a session from localStorage
+    // returns true if position was restored, false otherwise
+    function restoreScrollPosition(sessionId) {
+        var saved = localStorage.getItem('scroll_' + sessionId);
+        if (saved !== null) {
+            outputPanel.scrollTop = parseInt(saved, 10);
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Render session list to sidebar.
      * XSS-safe: uses textContent for all user-provided text.
@@ -779,6 +839,9 @@
             return; // already selected
         }
 
+        // save scroll position of current session before switching
+        saveScrollPosition(state.currentSessionId);
+
         state.currentSessionId = sessionId;
 
         // persist selection
@@ -833,6 +896,7 @@
         resetOutputState();
         state.isFirstConnect = true;
         state.reconnectDelay = SSE_INITIAL_RECONNECT_MS;
+        state.pendingScrollRestore = true; // restore scroll position after events load
 
         // connect to new session
         connect();
@@ -892,6 +956,8 @@
         state.sectionStartTimes = {};
         state.sectionCounter = 0;
         state.executionStartTime = null;
+        state.eventQueue = [];
+        state.isProcessingQueue = false;
         if (state.elapsedTimerInterval) {
             clearInterval(state.elapsedTimerInterval);
             state.elapsedTimerInterval = null;
@@ -1051,6 +1117,9 @@
 
     // cleanup on page unload to prevent memory leaks
     window.addEventListener('beforeunload', function() {
+        // save scroll position before leaving
+        saveScrollPosition(state.currentSessionId);
+
         if (state.elapsedTimerInterval) {
             clearInterval(state.elapsedTimerInterval);
             state.elapsedTimerInterval = null;
