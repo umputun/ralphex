@@ -246,8 +246,7 @@ func (r *Runner) runCodexOnly(ctx context.Context) error {
 // runTaskPhase executes tasks until completion or max iterations.
 // executes ONE Task section per iteration.
 func (r *Runner) runTaskPhase(ctx context.Context) error {
-	progressPath := r.log.Path()
-	prompt := r.buildTaskPrompt(progressPath)
+	prompt := r.buildTaskPrompt()
 	retryCount := 0
 
 	for i := 1; i <= r.cfg.MaxIterations; i++ {

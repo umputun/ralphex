@@ -4,12 +4,15 @@
 #
 # available variables:
 #   {{PLAN_FILE}} - path to the plan file being executed
+#   {{PROGRESS_FILE}} - path to the progress log (task execution + previous reviews)
 #   {{GOAL}} - human-readable goal description
 #   {{agent:name}} - expands to Task tool instructions for the named agent
 #
 # agents are defined in ~/.config/ralphex/agents/ (user) or pkg/config/defaults/agents/ (builtin)
 
 Code review of: {{GOAL}}
+
+Progress log: {{PROGRESS_FILE}} (contains task execution and previous review iterations)
 
 ## Step 1: Get Branch Diff
 
