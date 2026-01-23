@@ -14,9 +14,11 @@ Second code review pass of: {{GOAL}}
 
 Progress log: {{PROGRESS_FILE}} (contains task execution and previous review iterations)
 
-## Step 1: Get Branch Diff
+## Step 1: Get Branch Context
 
-Run: `git diff master...HEAD`
+Run both commands to understand what was done:
+- `git log master..HEAD --oneline` - see commit history (what was implemented)
+- `git diff master...HEAD` - see actual code changes
 
 ## Step 2: Launch Review Agents IN PARALLEL
 
