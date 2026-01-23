@@ -209,6 +209,7 @@ func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mo
 	}
 	return processor.New(processor.Config{
 		PlanFile:         planFile,
+		ProgressPath:     log.Path(),
 		Mode:             mode,
 		MaxIterations:    o.MaxIterations,
 		Debug:            o.Debug,
