@@ -163,31 +163,57 @@ func TestBroadcastLogger_PrintAligned(t *testing.T) {
 }
 
 func TestBroadcastLogger_PrintAligned_Signal(t *testing.T) {
-	mockLogger := &mocks.LoggerMock{
-		PrintAlignedFunc: func(string) {},
+	cases := []struct {
+		name   string
+		text   string
+		signal string
+	}{
+		{
+			name:   "completed",
+			text:   "task done <<<RALPHEX:ALL_TASKS_DONE>>>",
+			signal: "COMPLETED",
+		},
+		{
+			name:   "review-done",
+			text:   "review done <<<RALPHEX:REVIEW_DONE>>>",
+			signal: "REVIEW_DONE",
+		},
+		{
+			name:   "codex-review-done",
+			text:   "codex done <<<RALPHEX:CODEX_REVIEW_DONE>>>",
+			signal: "CODEX_REVIEW_DONE",
+		},
 	}
-	hub := NewHub()
-	buffer := NewBuffer(100)
-	bl := NewBroadcastLogger(mockLogger, hub, buffer)
 
-	ch, err := hub.Subscribe()
-	require.NoError(t, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockLogger := &mocks.LoggerMock{
+				PrintAlignedFunc: func(string) {},
+			}
+			hub := NewHub()
+			buffer := NewBuffer(100)
+			bl := NewBroadcastLogger(mockLogger, hub, buffer)
 
-	bl.PrintAligned("task done <<<RALPHEX:ALL_TASKS_DONE>>>")
+			ch, err := hub.Subscribe()
+			require.NoError(t, err)
 
-	select {
-	case e1 := <-ch:
-		assert.Equal(t, EventTypeOutput, e1.Type)
-	case <-time.After(time.Second):
-		t.Fatal("did not receive output event")
-	}
+			bl.PrintAligned(tc.text)
 
-	select {
-	case e2 := <-ch:
-		assert.Equal(t, EventTypeSignal, e2.Type)
-		assert.Equal(t, "COMPLETED", e2.Signal)
-	case <-time.After(time.Second):
-		t.Fatal("did not receive signal event")
+			select {
+			case e1 := <-ch:
+				assert.Equal(t, EventTypeOutput, e1.Type)
+			case <-time.After(time.Second):
+				t.Fatal("did not receive output event")
+			}
+
+			select {
+			case e2 := <-ch:
+				assert.Equal(t, EventTypeSignal, e2.Type)
+				assert.Equal(t, tc.signal, e2.Signal)
+			case <-time.After(time.Second):
+				t.Fatal("did not receive signal event")
+			}
+		})
 	}
 }
 

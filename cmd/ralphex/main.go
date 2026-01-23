@@ -135,25 +135,8 @@ func run(ctx context.Context, o opts) error {
 		return err
 	}
 
-	// create branch if on main/master
-	if planFile != "" {
-		if branchErr := createBranchIfNeeded(gitOps, planFile, colors); branchErr != nil {
-			return branchErr
-		}
-	}
-
-	// ensure progress files are gitignored
-	if gitErr := ensureGitignore(gitOps, colors); gitErr != nil {
-		return gitErr
-	}
-
 	mode := determineMode(o)
-
-	// get current branch for logging
-	branch, err := gitOps.CurrentBranch()
-	if err != nil || branch == "" {
-		branch = "unknown"
-	}
+	branch := getCurrentBranch(gitOps)
 
 	// create progress logger
 	baseLog, err := progress.NewLogger(progress.Config{
@@ -165,23 +148,20 @@ func run(ctx context.Context, o opts) error {
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
+	baseLogClosed := false
 	defer func() {
-		if baseLog == nil {
+		if baseLogClosed {
 			return
 		}
-		if err := baseLog.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", err)
+		if closeErr := baseLog.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", closeErr)
 		}
 	}()
 
 	// wrap logger with broadcast logger if --serve is enabled
-	var runnerLog processor.Logger = baseLog
-	if o.Serve {
-		broadcastLog, err := startWebDashboard(ctx, baseLog, o.Port, planFile, branch, o.Watch, cfg.WatchDirs, colors)
-		if err != nil {
-			return err
-		}
-		runnerLog = broadcastLog
+	runnerLog, err := setupRunnerLogger(ctx, o, baseLog, planFile, branch, cfg.WatchDirs, colors)
+	if err != nil {
+		return err
 	}
 
 	// print startup info
@@ -196,12 +176,8 @@ func run(ctx context.Context, o opts) error {
 		return fmt.Errorf("runner: %w", runErr)
 	}
 
-	// move completed plan to completed/ directory
-	if planFile != "" && mode == processor.ModeFull {
-		if moveErr := movePlanToCompleted(gitOps, planFile, colors); moveErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
-		}
-	}
+	// handle post-execution tasks
+	handlePostExecution(gitOps, planFile, mode, colors)
 
 	elapsed := baseLog.Elapsed()
 	colors.Info().Printf("\ncompleted in %s\n", elapsed)
@@ -211,12 +187,40 @@ func run(ctx context.Context, o opts) error {
 		if err := baseLog.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", err)
 		}
-		baseLog = nil
+		baseLogClosed = true
 		colors.Info().Printf("web dashboard still running at http://localhost:%d (press Ctrl+C to exit)\n", o.Port)
 		<-ctx.Done()
 	}
 
 	return nil
+}
+
+// getCurrentBranch returns the current git branch name or "unknown" if unavailable.
+func getCurrentBranch(gitOps *git.Repo) string {
+	branch, err := gitOps.CurrentBranch()
+	if err != nil || branch == "" {
+		return "unknown"
+	}
+	return branch
+}
+
+// setupRunnerLogger creates the appropriate logger for the runner.
+// if --serve is enabled, wraps the base logger with a broadcast logger.
+func setupRunnerLogger(ctx context.Context, o opts, baseLog *progress.Logger, planFile, branch string, configWatchDirs []string, colors *progress.Colors) (processor.Logger, error) {
+	if !o.Serve {
+		return baseLog, nil
+	}
+	return startWebDashboard(ctx, baseLog, o.Port, planFile, branch, o.Watch, configWatchDirs, colors)
+}
+
+// handlePostExecution handles tasks after runner completion.
+func handlePostExecution(gitOps *git.Repo, planFile string, mode processor.Mode, colors *progress.Colors) {
+	// move completed plan to completed/ directory
+	if planFile != "" && mode == processor.ModeFull {
+		if moveErr := movePlanToCompleted(gitOps, planFile, colors); moveErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
+		}
+	}
 }
 
 // checkClaudeDep checks that the claude command is available in PATH.
@@ -243,11 +247,6 @@ func checkClaudeDep(cfg *config.Config) error {
 // example: ralphex --serve --watch ~/projects --watch /tmp
 func isWatchOnlyMode(o opts, configWatchDirs []string) bool {
 	return o.Serve && o.PlanFile == "" && (len(o.Watch) > 0 || len(configWatchDirs) > 0)
-}
-
-// shouldSkipTasks returns true if task execution should be skipped (review or codex-only mode).
-func shouldSkipTasks(o opts) bool {
-	return o.Review || o.CodexOnly
 }
 
 // determineMode returns the execution mode based on CLI flags.
@@ -496,14 +495,30 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 		return errors.New("no watch directories configured")
 	}
 
+	// setup server and watcher
+	srvErrCh, watchErrCh, err := setupWatchMode(ctx, o.Port, dirs)
+	if err != nil {
+		return err
+	}
+
+	// print startup info
+	printWatchModeInfo(dirs, o.Port, colors)
+
+	// monitor for errors until shutdown
+	return monitorWatchMode(ctx, srvErrCh, watchErrCh, colors)
+}
+
+// setupWatchMode creates and starts the web server and file watcher for watch-only mode.
+// returns error channels for monitoring both components.
+func setupWatchMode(ctx context.Context, port int, dirs []string) (chan error, chan error, error) {
 	sm := web.NewSessionManager()
 	watcher, err := web.NewWatcher(dirs, sm)
 	if err != nil {
-		return fmt.Errorf("create watcher: %w", err)
+		return nil, nil, fmt.Errorf("create watcher: %w", err)
 	}
 
 	serverCfg := web.ServerConfig{
-		Port:     o.Port,
+		Port:     port,
 		PlanName: "(watch mode)",
 		Branch:   "",
 		PlanFile: "",
@@ -511,7 +526,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 
 	srv, err := web.NewServerWithSessions(serverCfg, sm)
 	if err != nil {
-		return fmt.Errorf("create web server: %w", err)
+		return nil, nil, fmt.Errorf("create web server: %w", err)
 	}
 
 	// start server in background
@@ -536,29 +551,49 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 	select {
 	case srvErr := <-srvErrCh:
 		if srvErr != nil {
-			return fmt.Errorf("web server failed to start on port %d: %w", o.Port, srvErr)
+			return nil, nil, fmt.Errorf("web server failed to start on port %d: %w", port, srvErr)
 		}
 	case <-time.After(100 * time.Millisecond):
 		// server started successfully
 	}
 
+	return srvErrCh, watchErrCh, nil
+}
+
+// printWatchModeInfo prints startup information for watch-only mode.
+func printWatchModeInfo(dirs []string, port int, colors *progress.Colors) {
 	colors.Info().Printf("watch-only mode: monitoring %d directories\n", len(dirs))
 	for _, dir := range dirs {
 		colors.Info().Printf("  %s\n", dir)
 	}
-	colors.Info().Printf("web dashboard: http://localhost:%d\n", o.Port)
+	colors.Info().Printf("web dashboard: http://localhost:%d\n", port)
 	colors.Info().Printf("press Ctrl+C to exit\n")
+}
 
-	// monitor for errors until shutdown
+// monitorWatchMode monitors server and watcher error channels until shutdown.
+func monitorWatchMode(ctx context.Context, srvErrCh, watchErrCh chan error, colors *progress.Colors) error {
 	for {
+		// exit when both channels are nil (closed and handled)
+		if srvErrCh == nil && watchErrCh == nil {
+			return nil
+		}
+
 		select {
 		case <-ctx.Done():
 			return nil
-		case srvErr := <-srvErrCh:
+		case srvErr, ok := <-srvErrCh:
+			if !ok {
+				srvErrCh = nil
+				continue
+			}
 			if srvErr != nil && ctx.Err() == nil {
 				colors.Error().Printf("web server error: %v\n", srvErr)
 			}
-		case watchErr := <-watchErrCh:
+		case watchErr, ok := <-watchErrCh:
+			if !ok {
+				watchErrCh = nil
+				continue
+			}
 			if watchErr != nil && ctx.Err() == nil {
 				colors.Error().Printf("file watcher error: %v\n", watchErr)
 			}

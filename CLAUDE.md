@@ -45,6 +45,11 @@ docs/plans/         # plan files location
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
 
+## Platform Support
+
+- **Linux/macOS:** fully supported
+- **Windows:** not supported (uses `syscall.Flock` for progress file locking)
+
 ## Configuration
 
 - Global config location: `~/.config/ralphex/`

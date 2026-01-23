@@ -330,7 +330,7 @@
         statusBadge.className = 'status-badge';
 
         if (event.type === 'signal') {
-            if (event.signal === 'COMPLETED' || event.signal === 'REVIEW_DONE') {
+            if (event.signal === 'COMPLETED' || event.signal === 'REVIEW_DONE' || event.signal === 'CODEX_REVIEW_DONE') {
                 statusBadge.textContent = 'COMPLETED';
                 statusBadge.classList.add('completed');
                 // stop the timer

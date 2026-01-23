@@ -123,6 +123,10 @@ func extractTerminalSignal(text string) string {
 		return "COMPLETED"
 	case strings.Contains(text, processor.SignalFailed):
 		return "FAILED"
+	case strings.Contains(text, processor.SignalReviewDone):
+		return "REVIEW_DONE"
+	case strings.Contains(text, processor.SignalCodexDone):
+		return "CODEX_REVIEW_DONE"
 	default:
 		return ""
 	}
