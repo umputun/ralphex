@@ -2,7 +2,9 @@ package web
 
 import (
 	"errors"
+	"log"
 	"sync"
+	"sync/atomic"
 )
 
 // MaxClients is the maximum number of concurrent SSE connections allowed.
@@ -15,8 +17,9 @@ var ErrMaxClientsExceeded = errors.New("max clients exceeded")
 // Hub manages SSE client subscriptions and broadcasts events.
 // thread-safe for concurrent subscribe/unsubscribe/broadcast operations.
 type Hub struct {
-	mu      sync.RWMutex
-	clients map[chan Event]struct{}
+	mu            sync.RWMutex
+	clients       map[chan Event]struct{}
+	droppedEvents atomic.Int64 // counter for dropped events due to slow clients
 }
 
 // NewHub creates a new SSE hub.
@@ -58,7 +61,7 @@ func (h *Hub) Unsubscribe(ch chan Event) {
 
 // Broadcast sends an event to all subscribed clients.
 // uses non-blocking send to prevent slow clients from blocking.
-// events are dropped for clients with full buffers.
+// events are dropped for clients with full buffers (tracked and logged periodically).
 func (h *Hub) Broadcast(e Event) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -70,6 +73,11 @@ func (h *Hub) Broadcast(e Event) {
 		default:
 			// client buffer full, drop event
 			// this prevents slow clients from blocking the broadcast
+			dropped := h.droppedEvents.Add(1)
+			// log every 100 dropped events to avoid log spam
+			if dropped%100 == 0 {
+				log.Printf("[WARN] SSE hub dropped %d events total (slow clients)", dropped)
+			}
 		}
 	}
 }
@@ -80,6 +88,11 @@ func (h *Hub) ClientCount() int {
 	defer h.mu.RUnlock()
 
 	return len(h.clients)
+}
+
+// DroppedEvents returns the total number of events dropped due to slow clients.
+func (h *Hub) DroppedEvents() int64 {
+	return h.droppedEvents.Load()
 }
 
 // Close unsubscribes all clients and closes their channels.

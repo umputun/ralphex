@@ -138,12 +138,12 @@ func run(ctx context.Context, o opts) error {
 	mode := determineMode(o)
 	if planFile != "" {
 		if mode == processor.ModeFull {
-			if err := createBranchIfNeeded(gitOps, planFile, colors); err != nil {
-				return err
+			if branchErr := createBranchIfNeeded(gitOps, planFile, colors); branchErr != nil {
+				return branchErr
 			}
 		}
-		if err := ensureGitignore(gitOps, colors); err != nil {
-			return err
+		if gitignoreErr := ensureGitignore(gitOps, colors); gitignoreErr != nil {
+			return gitignoreErr
 		}
 	}
 	branch := getCurrentBranch(gitOps)

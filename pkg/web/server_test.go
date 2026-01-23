@@ -673,7 +673,15 @@ Started: 2026-01-22 10:30:00
 	t.Run("returns plan JSON for valid session", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
-		// create plan file
+		// save and restore working directory
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		require.NoError(t, os.Chdir(tmpDir))
+
+		// create plan file in a plans subdirectory (relative path)
+		plansDir := filepath.Join(tmpDir, "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
 		planContent := `# Session Plan
 
 ### Task 1: Test Task
@@ -681,16 +689,16 @@ Started: 2026-01-22 10:30:00
 - [ ] Item 1
 - [x] Item 2
 `
-		planPath := filepath.Join(tmpDir, "test-plan.md")
+		planPath := filepath.Join(plansDir, "test-plan.md")
 		require.NoError(t, os.WriteFile(planPath, []byte(planContent), 0o600))
 
-		// create progress file referencing the plan
+		// create progress file referencing the plan with relative path
 		progressPath := filepath.Join(tmpDir, "progress-withplan.txt")
-		progressContent := "# Ralphex Progress Log\nPlan: " + planPath + "\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
+		progressContent := "# Ralphex Progress Log\nPlan: plans/test-plan.md\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
 		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
 
 		sm := NewSessionManager()
-		_, err := sm.Discover(tmpDir)
+		_, err = sm.Discover(tmpDir)
 		require.NoError(t, err)
 
 		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
@@ -716,6 +724,13 @@ Started: 2026-01-22 10:30:00
 
 	t.Run("falls back to completed directory", func(t *testing.T) {
 		tmpDir := t.TempDir()
+
+		// save and restore working directory
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		require.NoError(t, os.Chdir(tmpDir))
+
 		plansDir := filepath.Join(tmpDir, "plans")
 		completedDir := filepath.Join(plansDir, "completed")
 		require.NoError(t, os.MkdirAll(completedDir, 0o750))
@@ -730,14 +745,13 @@ Started: 2026-01-22 10:30:00
 		completedPlanPath := filepath.Join(completedDir, "done-plan.md")
 		require.NoError(t, os.WriteFile(completedPlanPath, []byte(planContent), 0o600))
 
-		// create progress file referencing original (non-existent) path
-		originalPlanPath := filepath.Join(plansDir, "done-plan.md")
+		// create progress file referencing original (non-existent) path with relative path
 		progressPath := filepath.Join(tmpDir, "progress-fallback.txt")
-		progressContent := "# Ralphex Progress Log\nPlan: " + originalPlanPath + "\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
+		progressContent := "# Ralphex Progress Log\nPlan: plans/done-plan.md\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
 		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
 
 		sm := NewSessionManager()
-		_, err := sm.Discover(tmpDir)
+		_, err = sm.Discover(tmpDir)
 		require.NoError(t, err)
 
 		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
@@ -757,6 +771,64 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, err)
 		assert.Contains(t, string(body), "Completed Session Plan")
 	})
+}
+
+func TestValidatePlanPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{name: "valid relative path", path: "docs/plans/feature.md", wantErr: false},
+		{name: "valid simple path", path: "plan.md", wantErr: false},
+		{name: "valid nested path", path: "a/b/c/plan.md", wantErr: false},
+		{name: "empty path", path: "", wantErr: true},
+		{name: "absolute path", path: "/etc/passwd", wantErr: true},
+		{name: "absolute path to plan", path: "/home/user/docs/plan.md", wantErr: true},
+		{name: "path traversal with ..", path: "../../../etc/passwd", wantErr: true},
+		{name: "path traversal embedded", path: "docs/../../../etc/passwd", wantErr: true},
+		{name: "single dot is ok", path: "./plan.md", wantErr: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePlanPath(tt.path)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestServer_HandlePlan_RejectsPathTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// create progress file with malicious path
+	progressPath := filepath.Join(tmpDir, "progress-malicious.txt")
+	progressContent := "# Ralphex Progress Log\nPlan: ../../../etc/passwd\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
+	require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+	sm := NewSessionManager()
+	_, err := sm.Discover(tmpDir)
+	require.NoError(t, err)
+
+	srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+	require.NoError(t, err)
+
+	sessionID := sessionIDFromPath(progressPath)
+	req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionID, http.NoBody)
+	w := httptest.NewRecorder()
+
+	srv.handlePlan(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	assert.Contains(t, string(body), "invalid plan path")
 }
 
 func TestLoadPlanWithFallback(t *testing.T) {

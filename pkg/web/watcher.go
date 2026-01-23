@@ -93,7 +93,9 @@ func (w *Watcher) addRecursive(dir string) error {
 				return filepath.SkipDir
 			}
 			// best-effort: continue walking even if we can't watch a specific directory
-			_ = w.watcher.Add(path)
+			if err := w.watcher.Add(path); err != nil {
+				log.Printf("[WARN] failed to watch directory %s: %v", path, err)
+			}
 		}
 		return nil
 	})
@@ -242,6 +244,7 @@ func ResolveWatchDirs(cliDirs, configDirs []string) []string {
 }
 
 // normalizeDirs converts relative paths to absolute and removes duplicates.
+// logs warnings for invalid directories to help users debug configuration issues.
 func normalizeDirs(dirs []string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(dirs))
@@ -250,6 +253,7 @@ func normalizeDirs(dirs []string) []string {
 		// convert to absolute path
 		abs, err := filepath.Abs(dir)
 		if err != nil {
+			log.Printf("[WARN] failed to resolve path %q: %v", dir, err)
 			abs = dir
 		}
 
@@ -260,13 +264,21 @@ func normalizeDirs(dirs []string) []string {
 		seen[abs] = true
 
 		// verify directory exists
-		if info, err := os.Stat(abs); err == nil && info.IsDir() {
-			result = append(result, abs)
+		info, err := os.Stat(abs)
+		if err != nil {
+			log.Printf("[WARN] watch directory %q does not exist: %v", abs, err)
+			continue
 		}
+		if !info.IsDir() {
+			log.Printf("[WARN] watch path %q is not a directory", abs)
+			continue
+		}
+		result = append(result, abs)
 	}
 
 	// fallback to current directory if all specified dirs are invalid
 	if len(result) == 0 {
+		log.Printf("[WARN] all watch directories invalid, falling back to current directory")
 		cwd, err := os.Getwd()
 		if err != nil {
 			return []string{"."}

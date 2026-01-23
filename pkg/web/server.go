@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -178,34 +179,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 
 	// multi-session mode with session ID
 	if s.sm != nil && sessionID != "" {
-		session := s.sm.Get(sessionID)
-		if session == nil {
-			http.Error(w, "session not found: "+sessionID, http.StatusNotFound)
-			return
-		}
-
-		meta := session.GetMetadata()
-		if meta.PlanPath == "" {
-			http.Error(w, "no plan file for session", http.StatusNotFound)
-			return
-		}
-
-		plan, err := loadPlanWithFallback(meta.PlanPath)
-		if err != nil {
-			log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
-			http.Error(w, "unable to load plan", http.StatusInternalServerError)
-			return
-		}
-
-		data, err := plan.JSON()
-		if err != nil {
-			log.Printf("[WARN] failed to encode plan: %v", err)
-			http.Error(w, "unable to encode plan", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(data)
+		s.handleSessionPlan(w, sessionID)
 		return
 	}
 
@@ -218,6 +192,45 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	plan, err := s.loadPlan()
 	if err != nil {
 		log.Printf("[WARN] failed to load plan file %s: %v", s.cfg.PlanFile, err)
+		http.Error(w, "unable to load plan", http.StatusInternalServerError)
+		return
+	}
+
+	data, err := plan.JSON()
+	if err != nil {
+		log.Printf("[WARN] failed to encode plan: %v", err)
+		http.Error(w, "unable to encode plan", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+}
+
+// handleSessionPlan handles plan requests for a specific session in multi-session mode.
+func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
+	session := s.sm.Get(sessionID)
+	if session == nil {
+		http.Error(w, "session not found: "+sessionID, http.StatusNotFound)
+		return
+	}
+
+	meta := session.GetMetadata()
+	if meta.PlanPath == "" {
+		http.Error(w, "no plan file for session", http.StatusNotFound)
+		return
+	}
+
+	// validate plan path to prevent path traversal attacks
+	if err := validatePlanPath(meta.PlanPath); err != nil {
+		log.Printf("[WARN] invalid plan path for session %s: %v", sessionID, err)
+		http.Error(w, "invalid plan path", http.StatusBadRequest)
+		return
+	}
+
+	plan, err := loadPlanWithFallback(meta.PlanPath)
+	if err != nil {
+		log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
 		http.Error(w, "unable to load plan", http.StatusInternalServerError)
 		return
 	}
@@ -264,6 +277,28 @@ func loadPlanWithFallback(path string) (*Plan, error) {
 		plan, err = ParsePlanFile(completedPath)
 	}
 	return plan, err
+}
+
+// validatePlanPath checks if a plan path is safe to read.
+// rejects absolute paths and paths containing ".." to prevent path traversal attacks.
+// plan paths in progress files should always be relative to the project directory.
+func validatePlanPath(path string) error {
+	if path == "" {
+		return errors.New("empty path")
+	}
+
+	// reject absolute paths - plan paths should always be relative
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("absolute paths not allowed: %s", path)
+	}
+
+	// reject paths containing ".." components
+	cleaned := filepath.Clean(path)
+	if strings.HasPrefix(cleaned, "..") || strings.Contains(cleaned, string(filepath.Separator)+"..") {
+		return fmt.Errorf("path traversal not allowed: %s", path)
+	}
+
+	return nil
 }
 
 // handleEvents serves the SSE stream.
