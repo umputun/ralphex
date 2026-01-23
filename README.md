@@ -284,6 +284,25 @@ ralphex uses a configuration directory at `~/.config/ralphex/` with the followin
 
 On first run, ralphex creates this directory with default configuration.
 
+### Local Project Config
+
+Projects can override global settings with a `.ralphex/` directory in the project root:
+
+```
+project/
+├── .ralphex/           # optional, project-local config
+│   ├── config          # overrides specific settings
+│   ├── prompts/        # custom prompts for this project
+│   └── agents/         # custom agents for this project
+```
+
+**Priority:** CLI flags > local `.ralphex/` > global `~/.config/ralphex/` > embedded defaults
+
+**Merge behavior:**
+- **Config file**: per-field override (local values override global, missing fields fall back)
+- **Prompts**: per-file fallback (local → global → embedded for each prompt file)
+- **Agents**: replace entirely (if local `agents/` has `.txt` files, use ONLY local agents)
+
 ### Configuration options
 
 | Option | Description | Default |

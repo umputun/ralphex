@@ -45,12 +45,32 @@ docs/plans/         # plan files location
 
 ## Configuration
 
-- Config location: `~/.config/ralphex/`
+- Global config location: `~/.config/ralphex/`
+- Local config location: `.ralphex/` (per-project, optional)
 - Config file format: INI (using gopkg.in/ini.v1)
 - Embedded defaults in `pkg/config/defaults/`
-- Precedence: CLI flags > user config > embedded defaults
-- Custom prompts: `~/.config/ralphex/prompts/*.txt`
-- Custom agents: `~/.config/ralphex/agents/*.txt`
+- Precedence: CLI flags > local config > global config > embedded defaults
+- Custom prompts: `~/.config/ralphex/prompts/*.txt` or `.ralphex/prompts/*.txt`
+- Custom agents: `~/.config/ralphex/agents/*.txt` or `.ralphex/agents/*.txt`
+
+### Local Project Config (.ralphex/)
+
+Projects can have local configuration that overrides global settings:
+
+```
+project/
+├── .ralphex/           # optional, project-local config
+│   ├── config          # overrides specific settings (per-field merge)
+│   ├── prompts/        # per-file fallback: local → global → embedded
+│   │   └── task.txt    # only override task prompt
+│   └── agents/         # replaces global if has files (no merge)
+│       └── custom.txt  # project-specific agent
+```
+
+**Merge strategy:**
+- **Config file**: per-field override (local values override global, missing fields fall back)
+- **Prompts**: per-file fallback (local → global → embedded for each prompt file)
+- **Agents**: replace entirely (if local agents/ has .txt files, use ONLY local agents)
 
 ### Config Defaults Behavior
 

@@ -2,7 +2,7 @@
 # copy this file to ~/.config/ralphex/config and modify as needed
 #
 # config values in this file can be overridden by CLI flags.
-# precedence (highest to lowest): CLI flags > user config > embedded defaults
+# precedence (highest to lowest): CLI flags > local config (.ralphex/) > global config (~/.config/ralphex/) > embedded defaults
 #
 # NOTE: inline comments (e.g., "key = value # comment") are NOT supported.
 # use full-line comments starting with # on a separate line instead.
