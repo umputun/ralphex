@@ -158,7 +158,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 
 	// phase 2: first review pass - address ALL findings
 	r.log.SetPhase(progress.PhaseReview)
-	r.log.PrintSection("review: all findings")
+	r.log.PrintSection("claude review 0: all findings")
 
 	if err := r.runClaudeReview(ctx, r.buildFirstReviewPrompt()); err != nil {
 		return fmt.Errorf("first review: %w", err)
@@ -192,7 +192,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 func (r *Runner) runReviewOnly(ctx context.Context) error {
 	// phase 1: first review
 	r.log.SetPhase(progress.PhaseReview)
-	r.log.PrintSection("review: all findings")
+	r.log.PrintSection("claude review 0: all findings")
 
 	if err := r.runClaudeReview(ctx, r.buildFirstReviewPrompt()); err != nil {
 		return fmt.Errorf("first review: %w", err)
