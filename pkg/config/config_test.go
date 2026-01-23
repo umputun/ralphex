@@ -11,8 +11,8 @@ import (
 
 // --- embedded filesystem tests ---
 
-func TestDefaultsFS(t *testing.T) {
-	fs := DefaultsFS()
+func Test_defaultsFS(t *testing.T) {
+	fs := defaultsFS
 
 	data, err := fs.ReadFile("defaults/config")
 	require.NoError(t, err)
@@ -21,8 +21,8 @@ func TestDefaultsFS(t *testing.T) {
 	assert.Contains(t, string(data), "iteration_delay_ms")
 }
 
-func TestDefaultsFS_PromptFiles(t *testing.T) {
-	fs := DefaultsFS()
+func Test_defaultsFS_PromptFiles(t *testing.T) {
+	fs := defaultsFS
 
 	testCases := []struct {
 		file     string
@@ -46,8 +46,8 @@ func TestDefaultsFS_PromptFiles(t *testing.T) {
 	}
 }
 
-func TestDefaultsFS_AllFilesPresent(t *testing.T) {
-	fs := DefaultsFS()
+func Test_defaultsFS_AllFilesPresent(t *testing.T) {
+	fs := defaultsFS
 
 	expectedFiles := []string{
 		"defaults/config",
@@ -65,8 +65,8 @@ func TestDefaultsFS_AllFilesPresent(t *testing.T) {
 	}
 }
 
-func TestEmbeddedAgentsExist(t *testing.T) {
-	fs := DefaultsFS()
+func Test_defaultsFS_EmbeddedAgentsExist(t *testing.T) {
+	fs := defaultsFS
 
 	expectedAgents := []string{
 		"defaults/agents/implementation.txt",

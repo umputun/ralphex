@@ -8,28 +8,36 @@ import (
 	"strings"
 )
 
-// loadAgents loads custom agent files from config directories.
+// agentLoader loads custom agent files from config directories.
+type agentLoader struct{}
+
+// newAgentLoader creates a new agentLoader.
+func newAgentLoader() *agentLoader {
+	return &agentLoader{}
+}
+
+// Load loads custom agent files from config directories.
 // it uses replace behavior: if local agents dir has any .txt files,
 // use ONLY local agents; otherwise fall back to global agents.
-func loadAgents(localDir, globalDir string) ([]CustomAgent, error) {
+func (al *agentLoader) Load(localDir, globalDir string) ([]CustomAgent, error) {
 	// check if local agents dir has any .txt files
 	if localDir != "" {
-		hasAgentFiles, err := dirHasAgentFiles(localDir)
+		hasAgentFiles, err := al.dirHasAgentFiles(localDir)
 		if err != nil {
 			return nil, err
 		}
 		if hasAgentFiles {
 			// use ONLY local agents
-			return loadAgentsFromDir(localDir)
+			return al.loadFromDir(localDir)
 		}
 	}
 
 	// fall back to global agents
-	return loadAgentsFromDir(globalDir)
+	return al.loadFromDir(globalDir)
 }
 
 // dirHasAgentFiles checks if a directory has any .txt files.
-func dirHasAgentFiles(dir string) (bool, error) {
+func (al *agentLoader) dirHasAgentFiles(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -46,8 +54,8 @@ func dirHasAgentFiles(dir string) (bool, error) {
 	return false, nil
 }
 
-// loadAgentsFromDir loads agent files from a specific directory.
-func loadAgentsFromDir(agentsDir string) ([]CustomAgent, error) {
+// loadFromDir loads agent files from a specific directory.
+func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -62,7 +70,7 @@ func loadAgentsFromDir(agentsDir string) ([]CustomAgent, error) {
 			continue
 		}
 
-		prompt, err := loadAgentFile(filepath.Join(agentsDir, entry.Name()))
+		prompt, err := al.loadFile(filepath.Join(agentsDir, entry.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -82,9 +90,9 @@ func loadAgentsFromDir(agentsDir string) ([]CustomAgent, error) {
 	return agents, nil
 }
 
-// loadAgentFile reads an agent file from disk.
+// loadFile reads an agent file from disk.
 // comment lines (starting with #) are stripped.
-func loadAgentFile(path string) (string, error) {
+func (al *agentLoader) loadFile(path string) (string, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed internally
 	if err != nil {
 		return "", fmt.Errorf("read agent file %s: %w", path, err)

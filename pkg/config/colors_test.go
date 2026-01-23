@@ -10,12 +10,12 @@ import (
 )
 
 func Test_newColorLoader(t *testing.T) {
-	loader := newColorLoader(DefaultsFS())
+	loader := newColorLoader(defaultsFS)
 	assert.NotNil(t, loader)
 }
 
 func TestColorLoader_Load_EmbeddedOnly(t *testing.T) {
-	loader := newColorLoader(DefaultsFS())
+	loader := newColorLoader(defaultsFS)
 	colors, err := loader.Load("", "")
 	require.NoError(t, err)
 
@@ -41,7 +41,7 @@ color_error = #00ff00
 `
 	require.NoError(t, os.WriteFile(globalConfig, []byte(configContent), 0o600))
 
-	loader := newColorLoader(DefaultsFS())
+	loader := newColorLoader(defaultsFS)
 	colors, err := loader.Load("", globalConfig)
 	require.NoError(t, err)
 
@@ -70,7 +70,7 @@ color_task = #0000ff
 `
 	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
 
-	loader := newColorLoader(DefaultsFS())
+	loader := newColorLoader(defaultsFS)
 	colors, err := loader.Load(localConfig, globalConfig)
 	require.NoError(t, err)
 
@@ -85,7 +85,7 @@ color_task = #0000ff
 }
 
 func TestColorLoader_Load_NonExistentFiles(t *testing.T) {
-	loader := newColorLoader(DefaultsFS())
+	loader := newColorLoader(defaultsFS)
 	colors, err := loader.Load("/nonexistent/local", "/nonexistent/global")
 	require.NoError(t, err)
 
@@ -111,7 +111,7 @@ func TestColorLoader_Load_InvalidColor(t *testing.T) {
 			configPath := filepath.Join(tmpDir, "config")
 			require.NoError(t, os.WriteFile(configPath, []byte(tc.config), 0o600))
 
-			loader := newColorLoader(DefaultsFS())
+			loader := newColorLoader(defaultsFS)
 			_, err := loader.Load("", configPath)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errPart)
@@ -136,7 +136,7 @@ color_info = #191a1b
 `
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
-	loader := newColorLoader(DefaultsFS())
+	loader := newColorLoader(defaultsFS)
 	colors, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
@@ -152,7 +152,7 @@ color_info = #191a1b
 }
 
 func TestColorLoader_parseColorsFromBytes(t *testing.T) {
-	cl := &colorLoader{embedFS: DefaultsFS()}
+	cl := &colorLoader{embedFS: defaultsFS}
 
 	t.Run("full color config", func(t *testing.T) {
 		data := []byte(`
@@ -334,7 +334,7 @@ func TestColorLoader_parseColorsFromFile_PermissionDenied(t *testing.T) {
 	require.NoError(t, os.Chmod(configPath, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(configPath, 0o600) })
 
-	cl := &colorLoader{embedFS: DefaultsFS()}
+	cl := &colorLoader{embedFS: defaultsFS}
 	_, err := cl.parseColorsFromFile(configPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read config")

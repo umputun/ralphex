@@ -10,12 +10,12 @@ import (
 )
 
 func Test_newValuesLoader(t *testing.T) {
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	assert.NotNil(t, loader)
 }
 
 func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", "")
 	require.NoError(t, err)
 
@@ -46,7 +46,7 @@ iteration_delay_ms = 5000
 `
 	require.NoError(t, os.WriteFile(globalConfig, []byte(configContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", globalConfig)
 	require.NoError(t, err)
 
@@ -81,7 +81,7 @@ plans_dir = local/plans
 `
 	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load(localConfig, globalConfig)
 	require.NoError(t, err)
 
@@ -102,7 +102,7 @@ func TestValuesLoader_Load_PartialConfigs(t *testing.T) {
 	globalContent := `plans_dir = custom/plans`
 	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", globalConfig)
 	require.NoError(t, err)
 
@@ -136,7 +136,7 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 			configPath := filepath.Join(tmpDir, "config")
 			require.NoError(t, os.WriteFile(configPath, []byte(tc.config), 0o600))
 
-			loader := newValuesLoader(DefaultsFS())
+			loader := newValuesLoader(defaultsFS)
 			_, err := loader.Load("", configPath)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errPart)
@@ -145,7 +145,7 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 }
 
 func TestValuesLoader_Load_NonExistentFile(t *testing.T) {
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("/nonexistent/local", "/nonexistent/global")
 	require.NoError(t, err)
 
@@ -161,7 +161,7 @@ func TestValuesLoader_Load_ExplicitFalseCodexEnabled(t *testing.T) {
 	configContent := `codex_enabled = false`
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
@@ -177,7 +177,7 @@ func TestValuesLoader_Load_ExplicitZeroTaskRetryCount(t *testing.T) {
 	configContent := `task_retry_count = 0`
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
@@ -193,7 +193,7 @@ func TestValuesLoader_Load_ExplicitZeroCodexTimeoutMs(t *testing.T) {
 	configContent := `codex_timeout_ms = 0`
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
@@ -209,7 +209,7 @@ func TestValuesLoader_Load_ExplicitZeroIterationDelayMs(t *testing.T) {
 	configContent := `iteration_delay_ms = 0`
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
@@ -226,7 +226,7 @@ func TestValuesLoader_Load_LocalOverridesCodexEnabled(t *testing.T) {
 	require.NoError(t, os.WriteFile(globalConfig, []byte(`codex_enabled = true`), 0o600))
 	require.NoError(t, os.WriteFile(localConfig, []byte(`codex_enabled = false`), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load(localConfig, globalConfig)
 	require.NoError(t, err)
 
@@ -242,7 +242,7 @@ func TestValuesLoader_Load_LocalOverridesTaskRetryCount(t *testing.T) {
 	require.NoError(t, os.WriteFile(globalConfig, []byte(`task_retry_count = 5`), 0o600))
 	require.NoError(t, os.WriteFile(localConfig, []byte(`task_retry_count = 0`), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load(localConfig, globalConfig)
 	require.NoError(t, err)
 
@@ -269,7 +269,7 @@ plans_dir = my/plans
 `
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
-	loader := newValuesLoader(DefaultsFS())
+	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
@@ -379,7 +379,7 @@ func TestValues_mergeFrom(t *testing.T) {
 }
 
 func TestValuesLoader_parseValuesFromBytes(t *testing.T) {
-	vl := &valuesLoader{embedFS: DefaultsFS()}
+	vl := &valuesLoader{embedFS: defaultsFS}
 
 	t.Run("full config", func(t *testing.T) {
 		data := []byte(`
@@ -458,14 +458,14 @@ func TestValuesLoader_parseValuesFromFile_PermissionDenied(t *testing.T) {
 	require.NoError(t, os.Chmod(configPath, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(configPath, 0o600) })
 
-	vl := &valuesLoader{embedFS: DefaultsFS()}
+	vl := &valuesLoader{embedFS: defaultsFS}
 	_, err := vl.parseValuesFromFile(configPath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read config")
 }
 
 func TestValuesLoader_parseValuesFromBytes_InvalidINI(t *testing.T) {
-	vl := &valuesLoader{embedFS: DefaultsFS()}
+	vl := &valuesLoader{embedFS: defaultsFS}
 
 	// malformed INI syntax (unclosed section)
 	_, err := vl.parseValuesFromBytes([]byte("[unclosed"))

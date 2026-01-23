@@ -79,11 +79,6 @@ type ColorConfig struct {
 	Info       string // informational messages
 }
 
-// DefaultsFS returns the embedded filesystem containing default config files.
-func DefaultsFS() embed.FS {
-	return defaultsFS
-}
-
 // Load loads all configuration from the specified directory.
 // If configDir is empty, uses the default location (~/.config/ralphex/).
 // It also auto-detects .ralphex/ in the current working directory for local overrides.
@@ -112,7 +107,7 @@ func Load(configDir string) (*Config, error) {
 // local config (.ralphex/) overrides global config (~/.config/ralphex/) per-field.
 // if localDir is empty, only global config is used.
 func loadWithLocal(globalDir, localDir string) (*Config, error) {
-	embedFS := DefaultsFS()
+	embedFS := defaultsFS
 
 	// install defaults
 	installer := newDefaultsInstaller(embedFS)
@@ -159,7 +154,8 @@ func loadWithLocal(globalDir, localDir string) (*Config, error) {
 		localAgentsPath = filepath.Join(localDir, "agents")
 	}
 	globalAgentsPath = filepath.Join(globalDir, "agents")
-	agents, err := loadAgents(localAgentsPath, globalAgentsPath)
+	al := newAgentLoader()
+	agents, err := al.Load(localAgentsPath, globalAgentsPath)
 	if err != nil {
 		return nil, fmt.Errorf("load agents: %w", err)
 	}

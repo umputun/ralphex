@@ -11,7 +11,7 @@ import (
 )
 
 func Test_newPromptLoader(t *testing.T) {
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	assert.NotNil(t, loader)
 }
 
@@ -25,7 +25,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_second.txt"), []byte("custom second review"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex.txt"), []byte("custom codex prompt"), 0o600))
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
 	require.NoError(t, err)
 
@@ -42,7 +42,7 @@ func TestPromptLoader_Load_PartialUserFiles(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte("user task prompt"), 0o600))
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
 	require.NoError(t, err)
 
@@ -55,7 +55,7 @@ func TestPromptLoader_Load_NoUserDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalDir := filepath.Join(tmpDir, "nonexistent")
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
 	require.NoError(t, err)
 
@@ -71,7 +71,7 @@ func TestPromptLoader_Load_EmptyUserFile(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte(""), 0o600))
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
 	require.NoError(t, err)
 
@@ -93,7 +93,7 @@ func TestPromptLoader_Load_LocalOverridesGlobal(t *testing.T) {
 	// local prompt overrides task.txt only
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "task.txt"), []byte("local task prompt"), 0o600))
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load(localDir, globalDir)
 	require.NoError(t, err)
 
@@ -116,7 +116,7 @@ func TestPromptLoader_Load_LocalFallbackToEmbedded(t *testing.T) {
 
 	// global is empty - no prompts
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load(localDir, globalDir)
 	require.NoError(t, err)
 
@@ -144,7 +144,7 @@ func TestPromptLoader_Load_PartialLocalPrompts(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "task.txt"), []byte("local task"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "review_second.txt"), []byte("local review second"), 0o600))
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load(localDir, globalDir)
 	require.NoError(t, err)
 
@@ -166,7 +166,7 @@ func TestPromptLoader_Load_NoLocalPromptsDir(t *testing.T) {
 	// global has prompts
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte("global task"), 0o600))
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load(localDir, globalDir)
 	require.NoError(t, err)
 
@@ -181,7 +181,7 @@ func TestPromptLoader_loadPromptWithLocalFallback_AllLevels(t *testing.T) {
 	require.NoError(t, os.MkdirAll(localDir, 0o700))
 	require.NoError(t, os.MkdirAll(globalDir, 0o700))
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 
 	// test local takes precedence over global
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "task.txt"), []byte("local"), 0o600))
@@ -214,7 +214,7 @@ func TestPromptLoader_loadPromptWithLocalFallback_EmptyLocalDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(globalDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte("global task"), 0o600))
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 
 	// empty localDir skips local lookup
 	content, err := pl.loadPromptWithLocalFallback("", globalDir, "task.txt")
@@ -227,14 +227,14 @@ func TestPromptLoader_loadPromptFile_Success(t *testing.T) {
 	promptFile := filepath.Join(tmpDir, "test.txt")
 	require.NoError(t, os.WriteFile(promptFile, []byte("test content\nwith newline"), 0o600))
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptFile(promptFile)
 	require.NoError(t, err)
 	assert.Equal(t, "test content\nwith newline", content)
 }
 
 func TestPromptLoader_loadPromptFile_NotExists(t *testing.T) {
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptFile("/nonexistent/path/file.txt")
 	require.NoError(t, err)
 	assert.Empty(t, content)
@@ -245,7 +245,7 @@ func TestPromptLoader_loadPromptFile_WhitespaceHandling(t *testing.T) {
 	promptFile := filepath.Join(tmpDir, "test.txt")
 	require.NoError(t, os.WriteFile(promptFile, []byte("  content with spaces  \n\n"), 0o600))
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptFile(promptFile)
 	require.NoError(t, err)
 	assert.Equal(t, "content with spaces", content)
@@ -257,21 +257,21 @@ func TestPromptLoader_loadPromptFile_StripsComments(t *testing.T) {
 	content := "# this is a comment\nkeep this line\n  # indented comment\nalso keep this"
 	require.NoError(t, os.WriteFile(promptFile, []byte(content), 0o600))
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	result, err := pl.loadPromptFile(promptFile)
 	require.NoError(t, err)
 	assert.Equal(t, "keep this line\nalso keep this", result)
 }
 
 func TestPromptLoader_loadPromptFromEmbedFS(t *testing.T) {
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptFromEmbedFS("defaults/config")
 	require.NoError(t, err)
 	assert.Contains(t, content, "claude_command")
 }
 
 func TestPromptLoader_loadPromptFromEmbedFS_NotFound(t *testing.T) {
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptFromEmbedFS("nonexistent/file.txt")
 	require.NoError(t, err)
 	assert.Empty(t, content)
@@ -292,14 +292,14 @@ func TestPromptLoader_loadPromptWithFallback(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "task.txt"), []byte("user prompt"), 0o600))
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptWithFallback(filepath.Join(promptsDir, "task.txt"), "defaults/prompts/task.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "user prompt", content)
 }
 
 func TestPromptLoader_loadPromptWithFallback_FallsBackToEmbed(t *testing.T) {
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptWithFallback("/nonexistent/path.txt", "defaults/prompts/task.txt")
 	require.NoError(t, err)
 	assert.Contains(t, content, "{{PLAN_FILE}}")
@@ -311,7 +311,7 @@ func TestPromptLoader_loadPromptWithFallback_EmptyUserFileUsesDefault(t *testing
 	emptyFile := filepath.Join(tmpDir, "empty.txt")
 	require.NoError(t, os.WriteFile(emptyFile, []byte(""), 0o600))
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptWithFallback(emptyFile, "defaults/prompts/task.txt")
 	require.NoError(t, err)
 	assert.Contains(t, content, "{{PLAN_FILE}}")
@@ -357,7 +357,7 @@ func TestPromptLoader_loadPromptFile_PermissionDenied(t *testing.T) {
 	require.NoError(t, os.Chmod(promptFile, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(promptFile, 0o600) })
 
-	pl := &promptLoader{embedFS: DefaultsFS()}
+	pl := &promptLoader{embedFS: defaultsFS}
 	_, err := pl.loadPromptFile(promptFile)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read prompt file")
@@ -371,7 +371,7 @@ func TestPromptLoader_Load_PromptWithOnlyComments(t *testing.T) {
 	// create prompt file with only comments
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte("# comment only\n# another comment"), 0o600))
 
-	loader := newPromptLoader(DefaultsFS())
+	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
 	require.NoError(t, err)
 

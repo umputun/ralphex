@@ -10,7 +10,7 @@ import (
 )
 
 func Test_newDefaultsInstaller(t *testing.T) {
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	assert.NotNil(t, installer)
 }
 
@@ -21,7 +21,7 @@ func TestDefaultsInstaller_Install_CreatesConfigDir(t *testing.T) {
 	_, err := os.Stat(configDir)
 	require.True(t, os.IsNotExist(err))
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	info, err := os.Stat(configDir)
@@ -39,7 +39,7 @@ func TestDefaultsInstaller_Install_ExistingDir(t *testing.T) {
 	configDir := filepath.Join(tmpDir, "ralphex")
 	require.NoError(t, os.MkdirAll(configDir, 0o700))
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	_, err := os.Stat(filepath.Join(configDir, "config"))
@@ -56,7 +56,7 @@ func TestDefaultsInstaller_Install_ExistingConfigFile(t *testing.T) {
 	existingContent := "# my custom config\nclaude_command = custom"
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(existingContent), 0o600))
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	data, err := os.ReadFile(filepath.Join(configDir, "config")) //nolint:gosec // test
@@ -68,7 +68,7 @@ func TestDefaultsInstaller_Install_CreatesPromptsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	info, err := os.Stat(filepath.Join(configDir, "prompts"))
@@ -80,7 +80,7 @@ func TestDefaultsInstaller_Install_CreatesAgentsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	info, err := os.Stat(filepath.Join(configDir, "agents"))
@@ -99,7 +99,7 @@ func TestDefaultsInstaller_Install_SkipsWhenAllPathsExist(t *testing.T) {
 	customContent := "# custom\nclaude_command = my-claude"
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(customContent), 0o600))
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	// config should not be overwritten
@@ -143,7 +143,7 @@ func TestDefaultsInstaller_Install_InstallsIfPromptsOrAgentsMissing(t *testing.T
 				}
 			}
 
-			installer := newDefaultsInstaller(DefaultsFS())
+			installer := newDefaultsInstaller(defaultsFS)
 			require.NoError(t, installer.Install(configDir))
 
 			for _, p := range []string{"config", "prompts", "agents"} {
@@ -158,7 +158,7 @@ func TestDefaultsInstaller_Install_InstallsAgentFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	agentsDir := filepath.Join(configDir, "agents")
@@ -188,7 +188,7 @@ func TestDefaultsInstaller_Install_NeverOverwritesAgents(t *testing.T) {
 	// write config file so all paths exist
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# test"), 0o600))
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	// verify custom content was preserved
@@ -207,7 +207,7 @@ func TestDefaultsInstaller_installDefaultFiles_Agents(t *testing.T) {
 	agentsDir := filepath.Join(tmpDir, "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0o700))
 
-	installer := &defaultsInstaller{embedFS: DefaultsFS()}
+	installer := &defaultsInstaller{embedFS: defaultsFS}
 	require.NoError(t, installer.installDefaultFiles(agentsDir, "defaults/agents", "agent"))
 
 	expectedAgents := []string{"implementation.txt", "quality.txt", "documentation.txt", "simplification.txt", "testing.txt"}
@@ -230,7 +230,7 @@ func TestDefaultsInstaller_installDefaultFiles_AgentsSkipsNonEmptyDir(t *testing
 	customContent := "user's custom agent"
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "my-custom.txt"), []byte(customContent), 0o600))
 
-	installer := &defaultsInstaller{embedFS: DefaultsFS()}
+	installer := &defaultsInstaller{embedFS: defaultsFS}
 	require.NoError(t, installer.installDefaultFiles(agentsDir, "defaults/agents", "agent"))
 
 	// verify custom content was preserved
@@ -249,7 +249,7 @@ func TestDefaultsInstaller_installDefaultFiles_Prompts(t *testing.T) {
 	promptsDir := filepath.Join(tmpDir, "prompts")
 	require.NoError(t, os.MkdirAll(promptsDir, 0o700))
 
-	installer := &defaultsInstaller{embedFS: DefaultsFS()}
+	installer := &defaultsInstaller{embedFS: defaultsFS}
 	require.NoError(t, installer.installDefaultFiles(promptsDir, "defaults/prompts", "prompt"))
 
 	expectedPrompts := []string{"task.txt", "review_first.txt", "review_second.txt", "codex.txt"}
@@ -272,7 +272,7 @@ func TestDefaultsInstaller_installDefaultFiles_PromptsSkipsNonEmptyDir(t *testin
 	customContent := "user's custom prompt"
 	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "my-custom.txt"), []byte(customContent), 0o600))
 
-	installer := &defaultsInstaller{embedFS: DefaultsFS()}
+	installer := &defaultsInstaller{embedFS: defaultsFS}
 	require.NoError(t, installer.installDefaultFiles(promptsDir, "defaults/prompts", "prompt"))
 
 	// verify custom content was preserved
@@ -290,7 +290,7 @@ func TestDefaultsInstaller_Install_InstallsPromptFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	promptsDir := filepath.Join(configDir, "prompts")
@@ -320,7 +320,7 @@ func TestDefaultsInstaller_Install_NeverOverwritesPrompts(t *testing.T) {
 	// write config file so all paths exist
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# test"), 0o600))
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
 	// verify custom content was preserved
@@ -341,7 +341,7 @@ func TestDefaultsInstaller_Install_MkdirAllFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(blockingFile, []byte("file"), 0o600))
 
 	// try to create directory inside a file - should fail
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	err := installer.Install(filepath.Join(blockingFile, "subdir"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create config dir")
@@ -358,7 +358,7 @@ func TestDefaultsInstaller_Install_WriteFileFailure(t *testing.T) {
 	require.NoError(t, os.Chmod(configDir, 0o500))       //nolint:gosec // intentional for test
 	t.Cleanup(func() { _ = os.Chmod(configDir, 0o700) }) //nolint:gosec // test cleanup
 
-	installer := newDefaultsInstaller(DefaultsFS())
+	installer := newDefaultsInstaller(defaultsFS)
 	err := installer.Install(configDir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write config file")
@@ -373,7 +373,7 @@ func TestDefaultsInstaller_installDefaultFiles_ReadDirPermissionDenied(t *testin
 	require.NoError(t, os.Chmod(destDir, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(destDir, 0o700) }) //nolint:gosec // test cleanup
 
-	installer := &defaultsInstaller{embedFS: DefaultsFS()}
+	installer := &defaultsInstaller{embedFS: defaultsFS}
 	err := installer.installDefaultFiles(destDir, "defaults/prompts", "prompt")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read prompt dir")
@@ -388,7 +388,7 @@ func TestDefaultsInstaller_installDefaultFiles_WriteFilePermissionDenied(t *test
 	require.NoError(t, os.Chmod(destDir, 0o500))       //nolint:gosec // intentional for test
 	t.Cleanup(func() { _ = os.Chmod(destDir, 0o700) }) //nolint:gosec // test cleanup
 
-	installer := &defaultsInstaller{embedFS: DefaultsFS()}
+	installer := &defaultsInstaller{embedFS: defaultsFS}
 	err := installer.installDefaultFiles(destDir, "defaults/prompts", "prompt")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write prompt file")
