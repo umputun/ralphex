@@ -263,6 +263,11 @@ func normalizeDirs(dirs []string) []string {
 			abs = dir
 		}
 
+		// resolve symlinks for consistent deduplication (macOS has /var -> /private/var)
+		if resolved, evalErr := filepath.EvalSymlinks(abs); evalErr == nil {
+			abs = resolved
+		}
+
 		// skip duplicates
 		if seen[abs] {
 			continue
