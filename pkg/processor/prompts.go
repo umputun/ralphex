@@ -23,6 +23,22 @@ func (r *Runner) getGoal() string {
 	return "implementation of plan at " + r.cfg.PlanFile
 }
 
+// getPlanFileRef returns plan file reference or fallback text for prompts.
+func (r *Runner) getPlanFileRef() string {
+	if r.cfg.PlanFile == "" {
+		return "(no plan file - reviewing current branch)"
+	}
+	return r.cfg.PlanFile
+}
+
+// getProgressFileRef returns progress file reference or fallback text for prompts.
+func (r *Runner) getProgressFileRef() string {
+	if r.cfg.ProgressPath == "" {
+		return "(no progress file available)"
+	}
+	return r.cfg.ProgressPath
+}
+
 // expandAgentReferences replaces {{agent:name}} patterns with Task tool instructions.
 // returns prompt unchanged if AppConfig is nil or no agents are configured.
 // missing agents log a warning and leave the reference as-is for visibility.
@@ -58,10 +74,10 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 // replacePromptVariables replaces template variables in custom prompts.
 // supported variables: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{agent:name}}
 // note: {{CODEX_OUTPUT}} is handled separately in buildCodexEvaluationPrompt
-func (r *Runner) replacePromptVariables(prompt, progressPath string) string {
+func (r *Runner) replacePromptVariables(prompt string) string {
 	result := prompt
-	result = strings.ReplaceAll(result, "{{PLAN_FILE}}", r.cfg.PlanFile)
-	result = strings.ReplaceAll(result, "{{PROGRESS_FILE}}", progressPath)
+	result = strings.ReplaceAll(result, "{{PLAN_FILE}}", r.getPlanFileRef())
+	result = strings.ReplaceAll(result, "{{PROGRESS_FILE}}", r.getProgressFileRef())
 	result = strings.ReplaceAll(result, "{{GOAL}}", r.getGoal())
 
 	// expand agent references
@@ -73,28 +89,28 @@ func (r *Runner) replacePromptVariables(prompt, progressPath string) string {
 // buildTaskPrompt creates the prompt for executing a single task.
 // uses the task prompt loaded from config (either user-provided or embedded default).
 // agent references ({{agent:name}}) are expanded via replacePromptVariables.
-func (r *Runner) buildTaskPrompt(progressPath string) string {
-	return r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt, progressPath)
+func (r *Runner) buildTaskPrompt() string {
+	return r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt)
 }
 
 // buildFirstReviewPrompt creates the prompt for first review pass - address all findings.
 // uses the loaded prompt template (user-provided or embedded default).
 // agent references ({{agent:name}}) are expanded via replacePromptVariables.
 func (r *Runner) buildFirstReviewPrompt() string {
-	return r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt, "")
+	return r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)
 }
 
 // buildSecondReviewPrompt creates the prompt for second review pass - critical/major only.
 // uses the second review prompt loaded from config (either user-provided or embedded default).
 // agent references ({{agent:name}}) are expanded via replacePromptVariables.
 func (r *Runner) buildSecondReviewPrompt() string {
-	return r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt, "")
+	return r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt)
 }
 
 // buildCodexEvaluationPrompt creates the prompt for claude to evaluate codex review output.
 // uses the codex prompt loaded from config (either user-provided or embedded default).
 // agent references ({{agent:name}}) are expanded via replacePromptVariables.
 func (r *Runner) buildCodexEvaluationPrompt(codexOutput string) string {
-	prompt := r.replacePromptVariables(r.cfg.AppConfig.CodexPrompt, "")
+	prompt := r.replacePromptVariables(r.cfg.AppConfig.CodexPrompt)
 	return strings.ReplaceAll(prompt, "{{CODEX_OUTPUT}}", codexOutput)
 }
