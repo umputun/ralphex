@@ -166,8 +166,11 @@ func run(ctx context.Context, o opts) error {
 
 	// print startup info
 	printStartupInfo(startupInfo{
-		PlanFile: planFile, Branch: branch, Mode: mode,
-		MaxIterations: o.MaxIterations, ProgressPath: baseLog.Path(),
+		PlanFile:      planFile,
+		Branch:        branch,
+		Mode:          mode,
+		MaxIterations: o.MaxIterations,
+		ProgressPath:  baseLog.Path(),
 	}, colors)
 
 	// create and run the runner
