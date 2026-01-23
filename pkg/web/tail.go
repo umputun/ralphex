@@ -75,6 +75,7 @@ func (t *Tailer) Events() <-chan Event {
 
 // Start begins tailing the file from the current position.
 // if fromStart is true, reads from the beginning; otherwise reads from current end.
+// note: Tailer is not reusable after Stop() - create a new instance instead.
 func (t *Tailer) Start(fromStart bool) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

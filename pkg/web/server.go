@@ -228,7 +228,12 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 		return
 	}
 
-	plan, err := loadPlanWithFallback(meta.PlanPath)
+	// resolve plan path relative to the session's directory (where progress file lives)
+	// this ensures correct resolution when watching sessions across multiple repos
+	sessionDir := filepath.Dir(session.Path)
+	planPath := filepath.Join(sessionDir, meta.PlanPath)
+
+	plan, err := loadPlanWithFallback(planPath)
 	if err != nil {
 		log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
 		http.Error(w, "unable to load plan", http.StatusInternalServerError)
@@ -328,6 +333,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// snapshot history before subscribing to avoid duplicate events.
+	// events broadcast between subscribe and snapshot would appear twice otherwise.
+	events := buffer.All()
+
 	// subscribe to hub
 	eventCh, err := hub.Subscribe()
 	if err != nil {
@@ -341,7 +350,6 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// send history first (with periodic flushes for large buffers)
-	events := buffer.All()
 	log.Printf("[SSE] sending %d history events: session=%s", len(events), sessionID)
 	for i, event := range events {
 		data, err := event.JSON()

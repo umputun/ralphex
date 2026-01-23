@@ -88,8 +88,14 @@ func (w *Watcher) addRecursive(dir string) error {
 		}
 
 		if d.IsDir() {
+			name := d.Name()
 			// skip hidden directories
-			if strings.HasPrefix(d.Name(), ".") && path != dir {
+			if strings.HasPrefix(name, ".") && path != dir {
+				return filepath.SkipDir
+			}
+			// skip directories that typically contain many subdirs and no progress files
+			switch name {
+			case "node_modules", "vendor", "__pycache__", "target", "build", "dist":
 				return filepath.SkipDir
 			}
 			// best-effort: continue walking even if we can't watch a specific directory
