@@ -44,6 +44,42 @@ func TestBroadcastLogger_SetPhase(t *testing.T) {
 	assert.Equal(t, processor.PhaseReview, mockLogger.SetPhaseCalls()[0].Phase)
 }
 
+func TestBroadcastLogger_SetPhase_EmitsTaskEnd(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		SetPhaseFunc:     func(processor.Phase) {},
+		PrintSectionFunc: func(processor.Section) {},
+	}
+	hub := NewHub()
+	buffer := NewBuffer(100)
+	bl := NewBroadcastLogger(mockLogger, hub, buffer)
+
+	// subscribe to receive events
+	ch, err := hub.Subscribe()
+	require.NoError(t, err)
+
+	// set task phase and start a task
+	bl.SetPhase(processor.PhaseTask)
+	bl.PrintSection(processor.NewTaskIterationSection(1))
+
+	// drain the task_start and section events from PrintSection
+	<-ch // task_start
+	<-ch // section
+
+	// transition away from task phase - should emit task_end
+	bl.SetPhase(processor.PhaseReview)
+
+	// should receive task_end event
+	select {
+	case evt := <-ch:
+		assert.Equal(t, EventTypeTaskEnd, evt.Type)
+		assert.Equal(t, 1, evt.TaskNum)
+	default:
+		t.Fatal("expected task_end event")
+	}
+
+	assert.Equal(t, 0, bl.currentTask)
+}
+
 func TestBroadcastLogger_Print(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
 		PrintFunc: func(string, ...any) {},

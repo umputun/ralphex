@@ -437,3 +437,25 @@ func TestExtractSignalFromText(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeTokenSignal(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"ALL_TASKS_DONE", "COMPLETED"},
+		{"TASK_FAILED", "FAILED"},
+		{"ALL_TASKS_FAILED", "FAILED"},
+		{"REVIEW_DONE", "REVIEW_DONE"},
+		{"CODEX_REVIEW_DONE", "CODEX_REVIEW_DONE"},
+		{"UNKNOWN_SIGNAL", "UNKNOWN_SIGNAL"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := normalizeTokenSignal(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
