@@ -638,3 +638,86 @@ color_task = #0000ff
 	assert.Equal(t, "custom", cfg.CustomAgents[0].Name)
 	assert.Equal(t, "local custom agent", cfg.CustomAgents[0].Prompt)
 }
+
+func TestLoad_SymlinkedConfigDir(t *testing.T) {
+	// simulates real-world scenario where ~/.config/ralphex is symlinked from another repo
+	tmpDir := t.TempDir()
+
+	// create real config directory with content
+	realDir := filepath.Join(tmpDir, "dotfiles-repo", "ralphex-config")
+	require.NoError(t, os.MkdirAll(filepath.Join(realDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(realDir, "agents"), 0o700))
+
+	configContent := `
+claude_command = symlink-claude
+iteration_delay_ms = 2500
+color_task = #123456
+`
+	require.NoError(t, os.WriteFile(filepath.Join(realDir, "config"), []byte(configContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(realDir, "prompts", "task.txt"), []byte("symlinked task prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(realDir, "agents", "custom.txt"), []byte("symlinked agent"), 0o600))
+
+	// create symlink (like ln -s dotfiles-repo/ralphex-config ~/.config/ralphex)
+	symlinkDir := filepath.Join(tmpDir, "config-symlink")
+	require.NoError(t, os.Symlink(realDir, symlinkDir))
+
+	// load config through symlink
+	cfg, err := loadWithLocal(symlinkDir, "")
+	require.NoError(t, err)
+
+	// verify values loaded correctly through symlink
+	assert.Equal(t, "symlink-claude", cfg.ClaudeCommand)
+	assert.Equal(t, 2500, cfg.IterationDelayMs)
+	assert.Equal(t, "18,52,86", cfg.Colors.Task) // #123456 converted to RGB
+
+	// verify prompts loaded through symlink
+	assert.Equal(t, "symlinked task prompt", cfg.TaskPrompt)
+
+	// verify agents loaded through symlink
+	require.Len(t, cfg.CustomAgents, 1)
+	assert.Equal(t, "custom", cfg.CustomAgents[0].Name)
+	assert.Equal(t, "symlinked agent", cfg.CustomAgents[0].Prompt)
+
+	// verify configDir is the symlink path (not resolved real path)
+	assert.Equal(t, symlinkDir, cfg.configDir)
+}
+
+func TestLoad_SymlinkedLocalDir(t *testing.T) {
+	// simulates local .ralphex being a symlink to shared project config
+	tmpDir := t.TempDir()
+
+	// global config
+	globalDir := filepath.Join(tmpDir, "global")
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	globalConfig := `
+claude_command = global-claude
+iteration_delay_ms = 1000
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+
+	// real local config in another location (like a shared repo)
+	realLocalDir := filepath.Join(tmpDir, "shared-configs", "project-a")
+	require.NoError(t, os.MkdirAll(realLocalDir, 0o700))
+	localConfig := `
+claude_command = local-symlinked-claude
+`
+	require.NoError(t, os.WriteFile(filepath.Join(realLocalDir, "config"), []byte(localConfig), 0o600))
+
+	// create symlink for local dir (like ln -s shared-configs/project-a .ralphex)
+	symlinkLocalDir := filepath.Join(tmpDir, ".ralphex-symlink")
+	require.NoError(t, os.Symlink(realLocalDir, symlinkLocalDir))
+
+	// load with symlinked local dir
+	cfg, err := loadWithLocal(globalDir, symlinkLocalDir)
+	require.NoError(t, err)
+
+	// verify local override works through symlink
+	assert.Equal(t, "local-symlinked-claude", cfg.ClaudeCommand)
+
+	// verify global fallback still works
+	assert.Equal(t, 1000, cfg.IterationDelayMs)
+
+	// verify localDir is the symlink path
+	assert.Equal(t, symlinkLocalDir, cfg.LocalDir())
+}

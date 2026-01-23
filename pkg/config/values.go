@@ -100,7 +100,7 @@ func (vl *valuesLoader) parseValuesFromEmbedded() (Values, error) {
 
 // parseValuesFromBytes parses configuration from a byte slice into Values.
 func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
-	// ignoreInlineComment: true is needed to allow # in values (e.g., color_task = #00ff00)
+	// ignoreInlineComment: true prevents # from being treated as inline comment marker
 	cfg, err := ini.LoadSources(ini.LoadOptions{IgnoreInlineComment: true}, data)
 	if err != nil {
 		return Values{}, fmt.Errorf("parse config: %w", err)
