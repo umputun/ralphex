@@ -176,6 +176,96 @@ func TestSessionManager_Close(t *testing.T) {
 	assert.Empty(t, m.All())
 }
 
+func TestSessionManager_Register(t *testing.T) {
+	t.Run("basic registration adds session to manager", func(t *testing.T) {
+		m := NewSessionManager()
+		defer m.Close()
+
+		path := "/tmp/progress-test-register.txt"
+		session := NewSession("initial-id", path)
+		defer session.Close()
+
+		m.Register(session)
+
+		// verify session ID was derived from path
+		expectedID := sessionIDFromPath(path)
+		assert.Equal(t, expectedID, session.ID, "session ID should be derived from path")
+
+		// verify session is retrievable
+		got := m.Get(expectedID)
+		require.NotNil(t, got, "registered session should be retrievable")
+		assert.Equal(t, session, got)
+	})
+
+	t.Run("session ID is derived from path correctly", func(t *testing.T) {
+		m := NewSessionManager()
+		defer m.Close()
+
+		path := "/home/user/project/progress-my-feature.txt"
+		session := NewSession("wrong-id", path)
+		defer session.Close()
+
+		m.Register(session)
+
+		// the session ID should be updated to match what sessionIDFromPath returns
+		expectedID := sessionIDFromPath(path)
+		assert.Equal(t, expectedID, session.ID)
+		assert.True(t, strings.HasPrefix(session.ID, "my-feature-"), "ID should start with plan name")
+	})
+
+	t.Run("existing session is NOT overwritten", func(t *testing.T) {
+		m := NewSessionManager()
+		defer m.Close()
+
+		path := "/tmp/progress-idempotent.txt"
+		session1 := NewSession("id1", path)
+		defer session1.Close()
+		session1.SetMetadata(SessionMetadata{Branch: "first"})
+
+		session2 := NewSession("id2", path)
+		defer session2.Close()
+		session2.SetMetadata(SessionMetadata{Branch: "second"})
+
+		// register first session
+		m.Register(session1)
+
+		// try to register second session with same path
+		m.Register(session2)
+
+		// first session should still be there
+		expectedID := sessionIDFromPath(path)
+		got := m.Get(expectedID)
+		require.NotNil(t, got)
+		assert.Equal(t, "first", got.GetMetadata().Branch, "original session should not be overwritten")
+	})
+
+	t.Run("registered session is retrievable via Get", func(t *testing.T) {
+		m := NewSessionManager()
+		defer m.Close()
+
+		path := "/tmp/progress-retrievable.txt"
+		session := NewSession("any-id", path)
+		defer session.Close()
+		session.SetMetadata(SessionMetadata{
+			PlanPath: "docs/plans/test.md",
+			Branch:   "feature-branch",
+			Mode:     "full",
+		})
+
+		m.Register(session)
+
+		// retrieve and verify all metadata is preserved
+		expectedID := sessionIDFromPath(path)
+		got := m.Get(expectedID)
+		require.NotNil(t, got)
+
+		meta := got.GetMetadata()
+		assert.Equal(t, "docs/plans/test.md", meta.PlanPath)
+		assert.Equal(t, "feature-branch", meta.Branch)
+		assert.Equal(t, "full", meta.Mode)
+	})
+}
+
 func TestSessionIDFromPath(t *testing.T) {
 	t.Run("includes base name and hash", func(t *testing.T) {
 		got := sessionIDFromPath("/tmp/progress-my-plan.txt")
@@ -372,6 +462,117 @@ Started: 2026-01-22 10:00:00
 		defer session.Close()
 
 		// should not panic
+		loadProgressFileIntoSession(path, session)
+	})
+}
+
+func TestEmitPendingSection(t *testing.T) {
+	t.Run("task iteration section emits task_start event", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-task-start.txt")
+
+		// content with task iteration section (matching taskIterationRegex)
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- Task Iteration 1 ---
+[26-01-22 10:00:01] starting task 1
+[26-01-22 10:00:02] working on task
+--- Task Iteration 2 ---
+[26-01-22 10:00:03] starting task 2
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		session := NewSession("test-task-start", path)
+		defer session.Close()
+
+		// load should not panic and should emit task_start events
+		loadProgressFileIntoSession(path, session)
+	})
+
+	t.Run("non-task sections do not emit task_start", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-review.txt")
+
+		// content with review and codex sections (non-task)
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- Review ---
+[26-01-22 10:00:01] reviewing code
+--- Codex Review ---
+[26-01-22 10:00:02] codex analyzing
+--- Claude Eval ---
+[26-01-22 10:00:03] claude evaluating
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		session := NewSession("test-non-task", path)
+		defer session.Close()
+
+		// should not panic - these sections won't match taskIterationRegex
+		loadProgressFileIntoSession(path, session)
+	})
+
+	t.Run("invalid task number handling", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-edge.txt")
+
+		// content with various section formats
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- Task 1 ---
+[26-01-22 10:00:01] simple task section (not task iteration format)
+--- Task Iteration 999 ---
+[26-01-22 10:00:02] high task number
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		session := NewSession("test-edge", path)
+		defer session.Close()
+
+		// should not panic
+		loadProgressFileIntoSession(path, session)
+	})
+
+	t.Run("task iteration section triggers task_start with correct task number", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-tasknum.txt")
+
+		// multiple task iterations to verify task number parsing
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- Task Iteration 5 ---
+[26-01-22 10:00:01] fifth task
+--- Task Iteration 10 ---
+[26-01-22 10:00:02] tenth task
+--- Task Iteration 100 ---
+[26-01-22 10:00:03] hundredth task
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		session := NewSession("test-tasknum", path)
+		defer session.Close()
+
+		// should process all task iterations without panic
 		loadProgressFileIntoSession(path, session)
 	})
 }

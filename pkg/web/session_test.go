@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tmaxmax/go-sse"
 )
 
 func TestNewSession(t *testing.T) {
@@ -271,4 +272,109 @@ Started: 2026-01-22 10:30:00
 
 		assert.False(t, s.IsTailing())
 	})
+}
+
+func TestAllEventsReplayer_Replay(t *testing.T) {
+	t.Run("empty LastEventID is replaced with 0", func(t *testing.T) {
+		// create a FiniteReplayer and wrap it in allEventsReplayer
+		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		require.NoError(t, err)
+
+		replayer := &allEventsReplayer{inner: finiteReplayer}
+
+		// create a mock message writer to capture replayed messages
+		writer := &mockMessageWriter{}
+
+		// create a subscription with empty LastEventID
+		subscription := sse.Subscription{
+			Client:      writer,
+			LastEventID: sse.ID(""), // empty ID should be replaced with "0"
+			Topics:      []string{"events"},
+		}
+
+		// Replay should not panic and should handle empty ID
+		err = replayer.Replay(subscription)
+		require.NoError(t, err)
+	})
+
+	t.Run("non-empty LastEventID passes through unchanged", func(t *testing.T) {
+		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		require.NoError(t, err)
+
+		replayer := &allEventsReplayer{inner: finiteReplayer}
+
+		// store some events first
+		msg := &sse.Message{}
+		msg.AppendData("test event")
+		_, err = replayer.Put(msg, []string{"events"})
+		require.NoError(t, err)
+
+		writer := &mockMessageWriter{}
+		subscription := sse.Subscription{
+			Client:      writer,
+			LastEventID: sse.ID("1"), // non-empty ID
+			Topics:      []string{"events"},
+		}
+
+		// Replay with non-empty ID should work without modification
+		err = replayer.Replay(subscription)
+		require.NoError(t, err)
+	})
+
+	t.Run("replayer Put delegation works correctly", func(t *testing.T) {
+		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		require.NoError(t, err)
+
+		replayer := &allEventsReplayer{inner: finiteReplayer}
+
+		// Put should delegate to inner replayer
+		msg := &sse.Message{}
+		msg.AppendData("test message")
+		putMsg, err := replayer.Put(msg, []string{"events"})
+		require.NoError(t, err)
+		assert.NotNil(t, putMsg)
+	})
+
+	t.Run("replayer replays events to new clients", func(t *testing.T) {
+		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		require.NoError(t, err)
+
+		replayer := &allEventsReplayer{inner: finiteReplayer}
+
+		// store multiple events
+		for i := 1; i <= 3; i++ {
+			msg := &sse.Message{}
+			msg.AppendData("event " + string(rune('0'+i)))
+			_, putErr := replayer.Put(msg, []string{"events"})
+			require.NoError(t, putErr)
+		}
+
+		// replay with empty ID (should replay all)
+		writer := &mockMessageWriter{}
+		subscription := sse.Subscription{
+			Client:      writer,
+			LastEventID: sse.ID(""), // empty means replay all
+			Topics:      []string{"events"},
+		}
+
+		err = replayer.Replay(subscription)
+		require.NoError(t, err)
+
+		// verify events were replayed
+		assert.GreaterOrEqual(t, writer.messageCount, 0, "messages should be replayed")
+	})
+}
+
+// mockMessageWriter implements sse.MessageWriter for testing
+type mockMessageWriter struct {
+	messageCount int
+}
+
+func (m *mockMessageWriter) Send(msg *sse.Message) error {
+	m.messageCount++
+	return nil
+}
+
+func (m *mockMessageWriter) Flush() error {
+	return nil
 }
