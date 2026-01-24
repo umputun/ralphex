@@ -59,9 +59,12 @@
 
         // timing state
         executionStartTime: null,
+        lastEventTimestamp: null, // tracks most recent event timestamp for duration calculations
         sectionStartTimes: {},
         elapsedTimerInterval: null,
         sectionCounter: 0, // monotonically increasing counter for unique section IDs
+        isTerminalState: false, // true when COMPLETED/FAILED signal received
+        seenSections: {}, // track seen sections to avoid duplicates
 
         // SSE connection state
         reconnectDelay: SSE_INITIAL_RECONNECT_MS,
@@ -300,11 +303,16 @@
     }
 
     // update section duration display - uses direct selector for O(1) lookup
-    function updateSectionDuration(sectionId) {
+    // endTimestamp is optional - if provided, uses it instead of calculating from session state
+    function updateSectionDuration(sectionId, endTimestamp) {
         var startTime = state.sectionStartTimes[sectionId];
         if (!startTime) return;
 
-        const duration = Date.now() - startTime;
+        // use provided endTimestamp, or Date.now() for live sessions, or lastEventTimestamp for historical
+        var endTime = endTimestamp || (isLiveSession() ? Date.now() : (state.lastEventTimestamp || Date.now()));
+        const duration = endTime - startTime;
+        if (duration < 0) return; // guard against negative durations
+
         const section = output.querySelector('.section-header[data-section-id="' + CSS.escape(sectionId) + '"]');
         if (section) {
             const durationEl = section.querySelector('.section-duration');
@@ -315,11 +323,12 @@
     }
 
     // finalize section duration when a new section starts
+    // endTimestamp is the new section's start time (used for accurate duration)
     // also cleans up sectionStartTimes to prevent memory growth
-    function finalizePreviousSectionDuration() {
+    function finalizePreviousSectionDuration(endTimestamp) {
         if (state.currentSection) {
             var sectionId = state.currentSection.dataset.sectionId;
-            updateSectionDuration(sectionId);
+            updateSectionDuration(sectionId, endTimestamp);
             // clean up the start time entry to prevent memory growth
             delete state.sectionStartTimes[sectionId];
         }
@@ -327,13 +336,20 @@
 
     // update status badge based on event
     function updateStatusBadge(event) {
+        // don't update badge after terminal state reached
+        if (state.isTerminalState) {
+            return;
+        }
+
         statusBadge.className = 'status-badge';
 
         if (event.type === 'signal') {
             if (event.signal === 'COMPLETED' || event.signal === 'REVIEW_DONE' || event.signal === 'CODEX_REVIEW_DONE') {
                 statusBadge.textContent = 'COMPLETED';
                 statusBadge.classList.add('completed');
-                // stop the timer
+                state.isTerminalState = true;
+                // update timers one final time before stopping
+                updateTimers();
                 if (state.elapsedTimerInterval) {
                     clearInterval(state.elapsedTimerInterval);
                     state.elapsedTimerInterval = null;
@@ -341,7 +357,9 @@
             } else if (event.signal === 'FAILED') {
                 statusBadge.textContent = 'FAILED';
                 statusBadge.classList.add('failed');
-                // stop the timer
+                state.isTerminalState = true;
+                // update timers one final time before stopping
+                updateTimers();
                 if (state.elapsedTimerInterval) {
                     clearInterval(state.elapsedTimerInterval);
                     state.elapsedTimerInterval = null;
@@ -371,10 +389,23 @@
         }
     }
 
+    // check if current session is live (active and events are recent)
+    function isLiveSession() {
+        if (state.isTerminalState) return false;
+        // check if we have recent events (within last 60 seconds)
+        if (state.lastEventTimestamp) {
+            var age = Date.now() - state.lastEventTimestamp;
+            return age < 60000; // consider live if last event was within 60s
+        }
+        return false;
+    }
+
     // update elapsed time display and current section duration
     function updateTimers() {
         if (!state.executionStartTime) return;
-        var elapsed = Date.now() - state.executionStartTime;
+        // for live sessions use Date.now(), for historical use lastEventTimestamp
+        var endTime = isLiveSession() ? Date.now() : (state.lastEventTimestamp || Date.now());
+        var elapsed = endTime - state.executionStartTime;
         elapsedTimeEl.textContent = formatDuration(elapsed);
 
         // update current section duration
@@ -438,11 +469,16 @@
 
     // render event to output
     function renderEvent(event) {
+        var eventTimestamp = new Date(event.timestamp).getTime();
+
         // track execution start time
         if (!state.executionStartTime) {
-            state.executionStartTime = new Date(event.timestamp).getTime();
+            state.executionStartTime = eventTimestamp;
             startElapsedTimer();
         }
+
+        // always update lastEventTimestamp for duration calculations
+        state.lastEventTimestamp = eventTimestamp;
 
         // update status badge
         updateStatusBadge(event);
@@ -462,8 +498,15 @@
         }
 
         if (event.type === 'section') {
-            // finalize previous section duration
-            finalizePreviousSectionDuration();
+            // deduplicate sections (can happen when BroadcastLogger and Tailer both emit)
+            var sectionKey = event.section + '|' + event.timestamp;
+            if (state.seenSections[sectionKey]) {
+                return; // skip duplicate section
+            }
+            state.seenSections[sectionKey] = true;
+
+            // finalize previous section duration using this section's timestamp as end time
+            finalizePreviousSectionDuration(eventTimestamp);
             // create new collapsible section
             state.currentSection = createSectionHeader(event);
             output.appendChild(state.currentSection);
@@ -950,6 +993,9 @@
         state.sectionStartTimes = {};
         state.sectionCounter = 0;
         state.executionStartTime = null;
+        state.lastEventTimestamp = null;
+        state.isTerminalState = false;
+        state.seenSections = {};
         state.eventQueue = [];
         state.isProcessingQueue = false;
         if (state.elapsedTimerInterval) {
