@@ -207,3 +207,51 @@ func TestEvent_JSON_TaskAndIterationFields(t *testing.T) {
 		assert.False(t, hasIterationNum, "iteration_num should be omitted when zero")
 	})
 }
+
+func TestEvent_ToSSEMessage(t *testing.T) {
+	t.Run("converts output event to SSE message", func(t *testing.T) {
+		e := NewOutputEvent(processor.PhaseTask, "test message")
+		msg := e.ToSSEMessage()
+
+		// no SSE event type set (onmessage only catches typeless events)
+		assert.Empty(t, msg.Type.String())
+
+		// verify the message can be serialized with JSON data
+		data, err := msg.MarshalText()
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "test message")
+		assert.Contains(t, string(data), `"type":"output"`) // type is in JSON payload
+	})
+
+	t.Run("converts signal event to SSE message", func(t *testing.T) {
+		e := NewSignalEvent(processor.PhaseTask, "COMPLETED")
+		msg := e.ToSSEMessage()
+
+		data, err := msg.MarshalText()
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "COMPLETED")
+		assert.Contains(t, string(data), `"type":"signal"`)
+	})
+
+	t.Run("converts section event to SSE message", func(t *testing.T) {
+		e := NewSectionEvent(processor.PhaseReview, "Review Section")
+		msg := e.ToSSEMessage()
+
+		data, err := msg.MarshalText()
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "Review Section")
+		assert.Contains(t, string(data), `"type":"section"`)
+	})
+
+	t.Run("data field contains full JSON event", func(t *testing.T) {
+		e := NewTaskStartEvent(processor.PhaseTask, 3, "task iteration 3")
+		msg := e.ToSSEMessage()
+
+		data, err := msg.MarshalText()
+		require.NoError(t, err)
+
+		// should contain JSON with task_num field
+		assert.Contains(t, string(data), "task_num")
+		assert.Contains(t, string(data), "task_start")
+	})
+}

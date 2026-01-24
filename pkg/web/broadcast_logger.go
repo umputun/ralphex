@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/umputun/ralphex/pkg/processor"
@@ -12,23 +13,21 @@ import (
 // while also being converted to events for web streaming.
 //
 // Thread safety: BroadcastLogger is NOT goroutine-safe. All methods must be called
-// from a single goroutine (typically the main execution loop). The Hub and Buffer
-// it writes to are thread-safe for concurrent reads by SSE clients.
+// from a single goroutine (typically the main execution loop). The SSE server
+// it writes to handles concurrent access from SSE clients.
 type BroadcastLogger struct {
 	inner       processor.Logger
-	hub         *Hub
-	buffer      *Buffer
+	session     *Session
 	phase       processor.Phase
 	currentTask int // tracks current task number for boundary events
 }
 
-// NewBroadcastLogger creates a logger that wraps inner and broadcasts to hub/buffer.
-func NewBroadcastLogger(inner processor.Logger, hub *Hub, buffer *Buffer) *BroadcastLogger {
+// NewBroadcastLogger creates a logger that wraps inner and broadcasts to the session's SSE server.
+func NewBroadcastLogger(inner processor.Logger, session *Session) *BroadcastLogger {
 	return &BroadcastLogger{
-		inner:  inner,
-		hub:    hub,
-		buffer: buffer,
-		phase:  processor.PhaseTask,
+		inner:   inner,
+		session: session,
+		phase:   processor.PhaseTask,
 	}
 }
 
@@ -103,10 +102,12 @@ func (b *BroadcastLogger) Path() string {
 	return b.inner.Path()
 }
 
-// broadcast sends an event to both the buffer (for late-joining clients) and the hub (for live clients).
+// broadcast sends an event to the session's SSE server for live streaming and replay.
+// errors are logged but not propagated since logging is the primary operation.
 func (b *BroadcastLogger) broadcast(e Event) {
-	b.buffer.Add(e)
-	b.hub.Broadcast(e)
+	if err := b.session.Publish(e); err != nil {
+		log.Printf("[WARN] failed to broadcast event: %v", err)
+	}
 }
 
 // formatText formats a string with args, like fmt.Sprintf.

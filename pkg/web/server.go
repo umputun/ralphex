@@ -12,17 +12,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
 
 //go:embed templates static
 var embeddedFS embed.FS
-
-// sseHistoryFlushInterval is the number of history events to send before flushing.
-// this prevents buffering too much data when sending large event histories to clients.
-const sseHistoryFlushInterval = 100
 
 // ServerConfig holds configuration for the web server.
 type ServerConfig struct {
@@ -34,12 +29,11 @@ type ServerConfig struct {
 
 // Server provides HTTP server for the real-time dashboard.
 type Server struct {
-	cfg    ServerConfig
-	hub    *Hub            // used for single-session mode (direct execution)
-	buffer *Buffer         // used for single-session mode (direct execution)
-	sm     *SessionManager // used for multi-session mode (dashboard)
-	srv    *http.Server
-	tmpl   *template.Template
+	cfg     ServerConfig
+	session *Session        // used for single-session mode (direct execution)
+	sm      *SessionManager // used for multi-session mode (dashboard)
+	srv     *http.Server
+	tmpl    *template.Template
 
 	// plan caching - set after first successful load (single-session mode)
 	planMu    sync.Mutex
@@ -48,17 +42,16 @@ type Server struct {
 
 // NewServer creates a new web server for single-session mode (direct execution).
 // returns an error if the embedded template fails to parse.
-func NewServer(cfg ServerConfig, hub *Hub, buffer *Buffer) (*Server, error) {
+func NewServer(cfg ServerConfig, session *Session) (*Server, error) {
 	tmpl, err := template.ParseFS(embeddedFS, "templates/base.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse template: %w", err)
 	}
 
 	return &Server{
-		cfg:    cfg,
-		hub:    hub,
-		buffer: buffer,
-		tmpl:   tmpl,
+		cfg:     cfg,
+		session: session,
+		tmpl:    tmpl,
 	}, nil
 }
 
@@ -129,14 +122,9 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// Hub returns the server's event hub.
-func (s *Server) Hub() *Hub {
-	return s.hub
-}
-
-// Buffer returns the server's event buffer.
-func (s *Server) Buffer() *Buffer {
-	return s.buffer
+// Session returns the server's session (for single-session mode).
+func (s *Server) Session() *Session {
+	return s.session
 }
 
 // templateData holds data for the dashboard template.
@@ -221,17 +209,14 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 		return
 	}
 
-	// validate plan path to prevent path traversal attacks
-	if err := validatePlanPath(meta.PlanPath); err != nil {
-		log.Printf("[WARN] invalid plan path for session %s: %v", sessionID, err)
-		http.Error(w, "invalid plan path", http.StatusBadRequest)
-		return
+	// resolve plan path: absolute paths used as-is, relative paths resolved from session directory
+	var planPath string
+	if filepath.IsAbs(meta.PlanPath) {
+		planPath = meta.PlanPath
+	} else {
+		sessionDir := filepath.Dir(session.Path)
+		planPath = filepath.Join(sessionDir, meta.PlanPath)
 	}
-
-	// resolve plan path relative to the session's directory (where progress file lives)
-	// this ensures correct resolution when watching sessions across multiple repos
-	sessionDir := filepath.Dir(session.Path)
-	planPath := filepath.Join(sessionDir, meta.PlanPath)
 
 	plan, err := loadPlanWithFallback(planPath)
 	if err != nil {
@@ -260,11 +245,7 @@ func (s *Server) loadPlan() (*Plan, error) {
 		return s.planCache, nil
 	}
 
-	plan, err := ParsePlanFile(s.cfg.PlanFile)
-	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		completedPath := filepath.Join(filepath.Dir(s.cfg.PlanFile), "completed", filepath.Base(s.cfg.PlanFile))
-		plan, err = ParsePlanFile(completedPath)
-	}
+	plan, err := loadPlanWithFallback(s.cfg.PlanFile)
 	if err != nil {
 		return nil, err
 	}
@@ -284,135 +265,51 @@ func loadPlanWithFallback(path string) (*Plan, error) {
 	return plan, err
 }
 
-// validatePlanPath checks if a plan path is safe to read.
-// rejects absolute paths and paths containing ".." to prevent path traversal attacks.
-// plan paths in progress files should always be relative to the project directory.
-func validatePlanPath(path string) error {
-	if path == "" {
-		return errors.New("empty path")
-	}
-
-	// reject absolute paths - plan paths should always be relative
-	if filepath.IsAbs(path) {
-		return fmt.Errorf("absolute paths not allowed: %s", path)
-	}
-
-	// reject paths containing ".." components
-	cleaned := filepath.Clean(path)
-	if strings.HasPrefix(cleaned, "..") || strings.Contains(cleaned, string(filepath.Separator)+"..") {
-		return fmt.Errorf("path traversal not allowed: %s", path)
-	}
-
-	return nil
-}
-
 // handleEvents serves the SSE stream.
 // in multi-session mode, accepts ?session=<id> query parameter.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session")
-	log.Printf("[SSE] connection start: session=%s", sessionID)
+	log.Printf("[SSE] connection request: session=%s", sessionID)
 
-	// get session-specific hub and buffer
-	hub, buffer, err := s.getSessionResources(r)
+	// get session for SSE handling
+	session, err := s.getSession(r)
 	if err != nil {
-		log.Printf("[SSE] session not found: %s", sessionID)
+		log.Printf("[SSE] session not found: %s - %v", sessionID, err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	// set SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
-
-	// ensure we can flush
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	// snapshot history before subscribing to avoid duplicate events.
-	// events broadcast between subscribe and snapshot would appear twice otherwise.
-	events := buffer.All()
-
-	// subscribe to hub
-	eventCh, err := hub.Subscribe()
-	if err != nil {
-		log.Printf("[SSE] subscribe failed: %v", err)
-		http.Error(w, "too many connections", http.StatusServiceUnavailable)
-		return
-	}
-	defer func() {
-		hub.Unsubscribe(eventCh)
-		log.Printf("[SSE] connection end: session=%s", sessionID)
-	}()
-
-	// send history first (with periodic flushes for large buffers)
-	log.Printf("[SSE] sending %d history events: session=%s", len(events), sessionID)
-	for i, event := range events {
-		data, err := event.JSON()
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		// flush periodically to avoid buffering too much
-		if (i+1)%sseHistoryFlushInterval == 0 {
-			flusher.Flush()
-		}
-	}
-	flusher.Flush()
-	log.Printf("[SSE] history sent, entering event loop: session=%s", sessionID)
-
-	// stream new events
-	for {
-		select {
-		case event, ok := <-eventCh:
-			if !ok {
-				return // channel closed
-			}
-			data, err := event.JSON()
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-
-		case <-r.Context().Done():
-			return
-		}
-	}
+	// delegate to go-sse Server which handles:
+	// - SSE protocol (headers, event formatting)
+	// - Connection management
+	// - History replay via FiniteReplayer
+	// - Graceful disconnection
+	session.SSE.ServeHTTP(w, r)
+	log.Printf("[SSE] connection closed: session=%s", sessionID)
 }
 
-// getSessionResources returns the hub and buffer for the request.
-// in single-session mode, returns the server's hub/buffer.
+// getSession returns the session for the request.
+// in single-session mode, returns the server's session.
 // in multi-session mode, looks up the session by ID from query parameter.
-func (s *Server) getSessionResources(r *http.Request) (*Hub, *Buffer, error) {
+func (s *Server) getSession(r *http.Request) (*Session, error) {
 	sessionID := r.URL.Query().Get("session")
 
 	// single-session mode (no session manager or no session ID)
 	if s.sm == nil || sessionID == "" {
-		if s.hub == nil || s.buffer == nil {
-			return nil, nil, errors.New("no session specified")
+		if s.session == nil {
+			return nil, errors.New("no session specified")
 		}
-		return s.hub, s.buffer, nil
+		return s.session, nil
 	}
 
 	// multi-session mode - look up session
 	session := s.sm.Get(sessionID)
 	if session == nil {
 		log.Printf("[SSE] session lookup failed: %s (not in manager)", sessionID)
-		return nil, nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 
-	// defensive check for nil hub/buffer
-	if session.Hub == nil || session.Buffer == nil {
-		log.Printf("[SSE] session has nil hub/buffer: %s", sessionID)
-		return nil, nil, fmt.Errorf("session not initialized: %s", sessionID)
-	}
-
-	return session.Hub, session.Buffer, nil
+	return session, nil
 }
 
 // SessionInfo represents session data for the API response.

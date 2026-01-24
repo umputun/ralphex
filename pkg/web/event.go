@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tmaxmax/go-sse"
 	"github.com/umputun/ralphex/pkg/processor"
 )
 
@@ -138,4 +139,20 @@ func (e Event) MarshalJSON() ([]byte, error) {
 // Deprecated: use json.Marshal(event) instead.
 func (e Event) JSON() ([]byte, error) {
 	return e.MarshalJSON()
+}
+
+// ToSSEMessage converts the event to a go-sse Message for streaming.
+// the event is serialized as JSON in the data field. we don't set the SSE event type
+// because browsers' onmessage handler only catches typeless events (or type "message").
+// the event type is already in the JSON payload for client-side processing.
+func (e Event) ToSSEMessage() *sse.Message {
+	msg := &sse.Message{}
+	jsonData, err := json.Marshal(e)
+	if err != nil {
+		// fallback to text field if JSON marshaling fails
+		msg.AppendData(e.Text)
+		return msg
+	}
+	msg.AppendData(string(jsonData))
+	return msg
 }

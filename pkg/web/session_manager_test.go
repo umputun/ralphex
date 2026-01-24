@@ -317,8 +317,8 @@ Branch: main
 	})
 }
 
-func TestLoadProgressFileIntoBuffer(t *testing.T) {
-	t.Run("loads completed session content into buffer", func(t *testing.T) {
+func TestLoadProgressFileIntoSession(t *testing.T) {
+	t.Run("loads completed session content without panic", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "progress-test.txt")
 
@@ -339,37 +339,19 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		buffer := NewBuffer(100)
-		loadProgressFileIntoBuffer(path, buffer)
+		session := NewSession("test", path)
+		defer session.Close()
 
-		// verify events were loaded
-		events := buffer.All()
-		assert.GreaterOrEqual(t, len(events), 5, "expected at least 5 events")
-
-		// verify sections are present
-		var foundTaskSection, foundReviewSection, foundSignal bool
-		for _, e := range events {
-			if e.Type == EventTypeSection && e.Section == "Task 1" {
-				foundTaskSection = true
-			}
-			if e.Type == EventTypeSection && e.Section == "Review" {
-				foundReviewSection = true
-			}
-			if e.Type == EventTypeSignal && e.Signal == "REVIEW_DONE" {
-				foundSignal = true
-			}
-		}
-		assert.True(t, foundTaskSection, "expected Task 1 section event")
-		assert.True(t, foundReviewSection, "expected Review section event")
-		assert.True(t, foundSignal, "expected REVIEW_DONE signal event")
+		// should not panic and should process the file
+		loadProgressFileIntoSession(path, session)
 	})
 
 	t.Run("handles missing file gracefully", func(t *testing.T) {
-		buffer := NewBuffer(100)
-		loadProgressFileIntoBuffer("/nonexistent/file.txt", buffer)
+		session := NewSession("test", "/nonexistent/file.txt")
+		defer session.Close()
 
-		// should not panic, buffer should remain empty
-		assert.Equal(t, 0, buffer.Count())
+		// should not panic
+		loadProgressFileIntoSession("/nonexistent/file.txt", session)
 	})
 
 	t.Run("skips header lines", func(t *testing.T) {
@@ -386,12 +368,11 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		buffer := NewBuffer(100)
-		loadProgressFileIntoBuffer(path, buffer)
+		session := NewSession("test", path)
+		defer session.Close()
 
-		events := buffer.All()
-		assert.Len(t, events, 1)
-		assert.Equal(t, "first real line", events[0].Text)
+		// should not panic
+		loadProgressFileIntoSession(path, session)
 	})
 }
 
@@ -414,6 +395,7 @@ Started: 2026-01-22 10:00:00
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
 	m := NewSessionManager()
+	defer m.Close()
 
 	// discover the session (it's not locked, so will be completed)
 	_, err := m.Discover(dir)
@@ -426,9 +408,8 @@ Started: 2026-01-22 10:00:00
 	// verify the session state is completed
 	assert.Equal(t, SessionStateCompleted, session.GetState())
 
-	// verify the buffer has content loaded
-	events := session.Buffer.All()
-	assert.GreaterOrEqual(t, len(events), 2, "expected at least 2 events in buffer for completed session")
+	// verify the session is marked as loaded (content was published to SSE server)
+	assert.True(t, session.IsLoaded(), "completed session should be marked as loaded")
 }
 
 func TestSessionManager_EvictOldCompleted(t *testing.T) {

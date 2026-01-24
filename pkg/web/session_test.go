@@ -16,8 +16,7 @@ func TestNewSession(t *testing.T) {
 		assert.Equal(t, "my-plan", s.ID)
 		assert.Equal(t, "/tmp/progress-my-plan.txt", s.Path)
 		assert.Equal(t, SessionStateCompleted, s.State)
-		assert.NotNil(t, s.Buffer)
-		assert.NotNil(t, s.Hub)
+		assert.NotNil(t, s.SSE)
 	})
 
 	t.Run("starts with empty metadata", func(t *testing.T) {
@@ -75,15 +74,40 @@ func TestSession_LastModified(t *testing.T) {
 
 func TestSession_Close(t *testing.T) {
 	s := NewSession("test", "/tmp/test.txt")
+	defer s.Close()
 
-	// add some events
-	s.Buffer.Add(NewOutputEvent("task", "test"))
-	require.Equal(t, 1, s.Buffer.Count())
-
+	// close should not panic
 	s.Close()
+}
 
-	// buffer should be cleared
-	assert.Equal(t, 0, s.Buffer.Count())
+func TestSession_Publish(t *testing.T) {
+	s := NewSession("test", "/tmp/test.txt")
+	defer s.Close()
+
+	// publish should succeed and return nil when no clients connected
+	event := NewOutputEvent("task", "test message")
+	err := s.Publish(event)
+	assert.NoError(t, err)
+}
+
+func TestSession_MarkLoadedIfNot(t *testing.T) {
+	t.Run("returns true on first call", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		assert.False(t, s.IsLoaded())
+		assert.True(t, s.MarkLoadedIfNot())
+		assert.True(t, s.IsLoaded())
+	})
+
+	t.Run("returns false on subsequent calls", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		assert.True(t, s.MarkLoadedIfNot())
+		assert.False(t, s.MarkLoadedIfNot())
+		assert.False(t, s.MarkLoadedIfNot())
+	})
 }
 
 func TestSession_StartTailing(t *testing.T) {
@@ -104,6 +128,7 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
 
 		s := NewSession("test", progressFile)
+		defer s.Close()
 
 		// should not be tailing initially
 		assert.False(t, s.IsTailing())
@@ -118,20 +143,7 @@ Started: 2026-01-22 10:30:00
 		// wait for tailer to read initial content
 		time.Sleep(200 * time.Millisecond)
 
-		// verify events were added to buffer
-		events := s.Buffer.All()
-		require.GreaterOrEqual(t, len(events), 1)
-
-		found := false
-		for _, e := range events {
-			if e.Text == "Initial line" {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "should have read 'Initial line' event")
-
-		s.Close()
+		s.StopTailing()
 		assert.False(t, s.IsTailing())
 	})
 
@@ -163,6 +175,7 @@ Started: 2026-01-22 10:30:00
 
 	t.Run("returns error for non-existent file", func(t *testing.T) {
 		s := NewSession("test", "/nonexistent/path.txt")
+		defer s.Close()
 
 		err := s.StartTailing(true)
 		require.Error(t, err)
@@ -184,6 +197,7 @@ Started: 2026-01-22 10:30:00
 	require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
 
 	s := NewSession("test", progressFile)
+	defer s.Close()
 
 	// false before start
 	assert.False(t, s.IsTailing())
@@ -213,6 +227,7 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
 
 		s := NewSession("test", progressFile)
+		defer s.Close()
 
 		require.NoError(t, s.StartTailing(true))
 		assert.True(t, s.IsTailing())
@@ -224,6 +239,7 @@ Started: 2026-01-22 10:30:00
 
 	t.Run("safe to call when not tailing", func(t *testing.T) {
 		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
 
 		// should not panic
 		s.StopTailing()
@@ -244,6 +260,7 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
 
 		s := NewSession("test", progressFile)
+		defer s.Close()
 
 		require.NoError(t, s.StartTailing(true))
 

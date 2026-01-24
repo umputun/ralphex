@@ -632,10 +632,9 @@ func monitorWatchMode(ctx context.Context, srvErrCh, watchErrCh chan error, colo
 // returns the broadcast logger to use for execution, or error if server fails to start.
 // when watchDirs is non-empty, creates multi-session mode with file watching.
 func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, planFile, branch string, watchDirs, configWatchDirs []string, colors *progress.Colors) (processor.Logger, error) {
-	hub := web.NewHub()
-	buffer := web.NewBuffer(10000) // 10k event buffer
-
-	broadcastLog := web.NewBroadcastLogger(baseLog, hub, buffer)
+	// create session for SSE streaming (handles both live streaming and history replay)
+	session := web.NewSession("main", baseLog.Path())
+	broadcastLog := web.NewBroadcastLogger(baseLog, session)
 
 	// extract plan name for display
 	planName := "(no plan)"
@@ -661,6 +660,10 @@ func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, 
 		// multi-session mode: use SessionManager and Watcher
 		sm := web.NewSessionManager()
 
+		// register the live execution session so dashboard uses it instead of creating a duplicate
+		// this ensures live events from BroadcastLogger go to the same session the dashboard displays
+		sm.Register(session)
+
 		// resolve watch directories (CLI > config > cwd)
 		dirs := web.ResolveWatchDirs(watchDirs, configWatchDirs)
 
@@ -675,9 +678,9 @@ func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, 
 			return nil, fmt.Errorf("create web server: %w", err)
 		}
 	} else {
-		// single-session mode: direct hub/buffer for current execution
+		// single-session mode: direct session for current execution
 		var err error
-		srv, err = web.NewServer(cfg, hub, buffer)
+		srv, err = web.NewServer(cfg, session)
 		if err != nil {
 			return nil, fmt.Errorf("create web server: %w", err)
 		}

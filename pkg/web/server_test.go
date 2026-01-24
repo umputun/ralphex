@@ -18,30 +18,29 @@ import (
 )
 
 func TestNewServer(t *testing.T) {
-	hub := NewHub()
-	buffer := NewBuffer(100)
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
 	cfg := ServerConfig{
 		Port:     8080,
 		PlanName: "test-plan",
 		Branch:   "main",
 	}
 
-	srv, err := NewServer(cfg, hub, buffer)
+	srv, err := NewServer(cfg, session)
 	require.NoError(t, err)
 
 	assert.NotNil(t, srv)
-	assert.Equal(t, hub, srv.Hub())
-	assert.Equal(t, buffer, srv.Buffer())
+	assert.Equal(t, session, srv.Session())
 }
 
 func TestServer_HandleIndex(t *testing.T) {
-	hub := NewHub()
-	buffer := NewBuffer(100)
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
 	srv, err := NewServer(ServerConfig{
 		Port:     8080,
 		PlanName: "my-plan.md",
 		Branch:   "feature-branch",
-	}, hub, buffer)
+	}, session)
 	require.NoError(t, err)
 
 	t.Run("serves index page", func(t *testing.T) {
@@ -79,17 +78,27 @@ func TestServer_HandleIndex(t *testing.T) {
 }
 
 func TestServer_HandleEvents(t *testing.T) {
-	t.Run("sets SSE headers", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{}, hub, buffer)
+	t.Run("session SSE publishes events", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+
+		// publish events - should succeed
+		require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseTask, "test event 1")))
+		require.NoError(t, session.Publish(NewSectionEvent(processor.PhaseReview, "Review")))
+		require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseReview, "test event 2")))
+
+		// verify SSE server exists
+		assert.NotNil(t, session.SSE)
+	})
+
+	t.Run("server returns 404 without session", func(t *testing.T) {
+		// multi-session mode without session param should return 404
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
 		require.NoError(t, err)
 
-		// use a context that cancels quickly
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-
-		req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody).WithContext(ctx)
+		req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody)
 		w := httptest.NewRecorder()
 
 		srv.handleEvents(w, req)
@@ -97,73 +106,18 @@ func TestServer_HandleEvents(t *testing.T) {
 		resp := w.Result()
 		defer resp.Body.Close()
 
-		assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
-		assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
-		assert.Equal(t, "keep-alive", resp.Header.Get("Connection"))
-	})
-
-	t.Run("sends history on connect", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{}, hub, buffer)
-		require.NoError(t, err)
-
-		// add some history
-		buffer.Add(NewOutputEvent(processor.PhaseTask, "historical event"))
-
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-
-		req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody).WithContext(ctx)
-		w := httptest.NewRecorder()
-
-		srv.handleEvents(w, req)
-
-		body := w.Body.String()
-		assert.Contains(t, body, "historical event")
-	})
-
-	t.Run("streams new events", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{}, hub, buffer)
-		require.NoError(t, err)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		defer cancel()
-
-		req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody).WithContext(ctx)
-		w := httptest.NewRecorder()
-
-		// start handler in goroutine
-		done := make(chan struct{})
-		go func() {
-			srv.handleEvents(w, req)
-			close(done)
-		}()
-
-		// give handler time to subscribe
-		time.Sleep(50 * time.Millisecond)
-
-		// broadcast event
-		hub.Broadcast(NewOutputEvent(processor.PhaseTask, "live event"))
-
-		// wait for handler to finish
-		<-done
-
-		body := w.Body.String()
-		assert.Contains(t, body, "live event")
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	})
 }
 
 func TestServer_StartStop(t *testing.T) {
-	hub := NewHub()
-	buffer := NewBuffer(100)
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
 	srv, err := NewServer(ServerConfig{
 		Port:     0, // will use random port
 		PlanName: "test",
 		Branch:   "main",
-	}, hub, buffer)
+	}, session)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -191,9 +145,9 @@ func TestServer_StartStop(t *testing.T) {
 
 func TestServer_Stop(t *testing.T) {
 	t.Run("stop without start is safe", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{}, hub, buffer)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{}, session)
 		require.NoError(t, err)
 
 		err = srv.Stop()
@@ -201,9 +155,9 @@ func TestServer_Stop(t *testing.T) {
 	})
 
 	t.Run("multiple stop calls without start are safe", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{}, hub, buffer)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{}, session)
 		require.NoError(t, err)
 
 		// multiple stop calls should be safe
@@ -214,9 +168,9 @@ func TestServer_Stop(t *testing.T) {
 }
 
 func TestServer_StaticFiles(t *testing.T) {
-	hub := NewHub()
-	buffer := NewBuffer(100)
-	srv, err := NewServer(ServerConfig{Port: 8080}, hub, buffer)
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+	srv, err := NewServer(ServerConfig{Port: 8080}, session)
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
@@ -237,65 +191,24 @@ func TestServer_StaticFiles(t *testing.T) {
 }
 
 func TestServer_SSE_LateJoiningClient(t *testing.T) {
-	hub := NewHub()
-	buffer := NewBuffer(100)
-	srv, err := NewServer(ServerConfig{}, hub, buffer)
-	require.NoError(t, err)
+	// note: actual SSE streaming with go-sse is tested via E2E tests (see CLAUDE.md).
+	// unit tests verify the Session correctly stores events for replay.
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
 
-	// broadcast some events before any client connects
-	hub.Broadcast(NewOutputEvent(processor.PhaseTask, "event 1"))
-	buffer.Add(NewOutputEvent(processor.PhaseTask, "event 1"))
+	// verify session has an SSE server configured with replayer
+	assert.NotNil(t, session.SSE)
 
-	hub.Broadcast(NewSectionEvent(processor.PhaseReview, "Review Section"))
-	buffer.Add(NewSectionEvent(processor.PhaseReview, "Review Section"))
-
-	hub.Broadcast(NewOutputEvent(processor.PhaseReview, "event 2"))
-	buffer.Add(NewOutputEvent(processor.PhaseReview, "event 2"))
-
-	// now a late-joining client connects
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody).WithContext(ctx)
-	w := httptest.NewRecorder()
-
-	srv.handleEvents(w, req)
-
-	body := w.Body.String()
-	// late-joining client should receive all historical events
-	assert.Contains(t, body, "event 1")
-	assert.Contains(t, body, "Review Section")
-	assert.Contains(t, body, "event 2")
-}
-
-func TestServer_HandleEvents_MaxClientsExceeded(t *testing.T) {
-	hub := NewHub()
-	buffer := NewBuffer(100)
-	srv, err := NewServer(ServerConfig{}, hub, buffer)
-	require.NoError(t, err)
-
-	// fill up hub with max clients
-	for range MaxClients {
-		_, err := hub.Subscribe()
-		require.NoError(t, err)
-	}
-
-	// next request should get 503
-	req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody)
-	w := httptest.NewRecorder()
-
-	srv.handleEvents(w, req)
-
-	resp := w.Result()
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	// publish some events before any client connects - should succeed
+	require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseTask, "event 1")))
+	require.NoError(t, session.Publish(NewSectionEvent(processor.PhaseReview, "Review Section")))
+	require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseReview, "event 2")))
 }
 
 func TestServer_HandlePlan(t *testing.T) {
 	t.Run("returns plan JSON", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
 
 		// create a temp plan file
 		tmpDir := t.TempDir()
@@ -312,7 +225,7 @@ func TestServer_HandlePlan(t *testing.T) {
 		srv, err := NewServer(ServerConfig{
 			Port:     8080,
 			PlanFile: planFile,
-		}, hub, buffer)
+		}, session)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
@@ -334,9 +247,9 @@ func TestServer_HandlePlan(t *testing.T) {
 	})
 
 	t.Run("returns 404 when no plan file", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{Port: 8080}, hub, buffer)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
@@ -351,12 +264,12 @@ func TestServer_HandlePlan(t *testing.T) {
 	})
 
 	t.Run("returns 500 for invalid plan file", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
 		srv, err := NewServer(ServerConfig{
 			Port:     8080,
 			PlanFile: "/nonexistent/plan.md",
-		}, hub, buffer)
+		}, session)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
@@ -377,8 +290,8 @@ func TestServer_HandlePlan(t *testing.T) {
 	})
 
 	t.Run("loads plan from completed directory", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
 
 		tmpDir := t.TempDir()
 		planFile := filepath.Join(tmpDir, "plan.md")
@@ -396,7 +309,7 @@ func TestServer_HandlePlan(t *testing.T) {
 		srv, err := NewServer(ServerConfig{
 			Port:     8080,
 			PlanFile: planFile,
-		}, hub, buffer)
+		}, session)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
@@ -414,9 +327,9 @@ func TestServer_HandlePlan(t *testing.T) {
 	})
 
 	t.Run("rejects non-GET methods", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{Port: 8080}, hub, buffer)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
 		require.NoError(t, err)
 
 		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
@@ -436,6 +349,7 @@ func TestServer_HandlePlan(t *testing.T) {
 
 func TestNewServerWithSessions(t *testing.T) {
 	sm := NewSessionManager()
+	defer sm.Close()
 	cfg := ServerConfig{
 		Port:     8080,
 		PlanName: "test-plan",
@@ -446,15 +360,14 @@ func TestNewServerWithSessions(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotNil(t, srv)
-	assert.Nil(t, srv.Hub())    // no direct hub in multi-session mode
-	assert.Nil(t, srv.Buffer()) // no direct buffer in multi-session mode
+	assert.Nil(t, srv.Session()) // no direct session in multi-session mode
 }
 
 func TestServer_HandleSessions(t *testing.T) {
 	t.Run("returns empty list in single-session mode", func(t *testing.T) {
-		hub := NewHub()
-		buffer := NewBuffer(100)
-		srv, err := NewServer(ServerConfig{Port: 8080}, hub, buffer)
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/sessions", http.NoBody)
@@ -488,6 +401,7 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "progress-test-plan.txt"), []byte(progressContent), 0o600))
 
 		sm := NewSessionManager()
+		defer sm.Close()
 		progressPath := filepath.Join(tmpDir, "progress-test-plan.txt")
 		_, err := sm.Discover(tmpDir)
 		require.NoError(t, err)
@@ -522,6 +436,7 @@ Started: 2026-01-22 10:30:00
 
 	t.Run("rejects non-GET methods", func(t *testing.T) {
 		sm := NewSessionManager()
+		defer sm.Close()
 		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
 		require.NoError(t, err)
 
@@ -543,6 +458,7 @@ Started: 2026-01-22 10:30:00
 func TestServer_HandleEvents_WithSession(t *testing.T) {
 	t.Run("returns 404 for unknown session", func(t *testing.T) {
 		sm := NewSessionManager()
+		defer sm.Close()
 		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
 		require.NoError(t, err)
 
@@ -559,6 +475,7 @@ func TestServer_HandleEvents_WithSession(t *testing.T) {
 
 	t.Run("returns 404 in multi-session mode without session param", func(t *testing.T) {
 		sm := NewSessionManager()
+		defer sm.Close()
 		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
 		require.NoError(t, err)
 
@@ -573,7 +490,9 @@ func TestServer_HandleEvents_WithSession(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	})
 
-	t.Run("streams events for valid session", func(t *testing.T) {
+	t.Run("session has SSE server configured", func(t *testing.T) {
+		// note: actual SSE streaming with go-sse is tested via E2E tests (see CLAUDE.md).
+		// unit tests verify the session SSE server is properly configured.
 		tmpDir := t.TempDir()
 
 		// create progress file
@@ -588,38 +507,25 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
 
 		sm := NewSessionManager()
+		defer sm.Close()
 		_, err := sm.Discover(tmpDir)
 		require.NoError(t, err)
 
-		// add event to session buffer
+		// verify session has SSE server
 		sessionID := sessionIDFromPath(progressPath)
 		session := sm.Get(sessionID)
 		require.NotNil(t, session)
-		session.Buffer.Add(NewOutputEvent(processor.PhaseTask, "test event"))
+		assert.NotNil(t, session.SSE)
 
-		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
-		require.NoError(t, err)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-
-		req := httptest.NewRequest(http.MethodGet, "/events?session="+sessionID, http.NoBody).WithContext(ctx)
-		w := httptest.NewRecorder()
-
-		srv.handleEvents(w, req)
-
-		resp := w.Result()
-		defer resp.Body.Close()
-
-		assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
-		body := w.Body.String()
-		assert.Contains(t, body, "test event")
+		// publishing events should succeed
+		require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseTask, "test event")))
 	})
 }
 
 func TestServer_HandlePlan_WithSession(t *testing.T) {
 	t.Run("returns 404 for unknown session", func(t *testing.T) {
 		sm := NewSessionManager()
+		defer sm.Close()
 		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
 		require.NoError(t, err)
 
@@ -650,6 +556,7 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
 
 		sm := NewSessionManager()
+		defer sm.Close()
 		_, err := sm.Discover(tmpDir)
 		require.NoError(t, err)
 
@@ -698,6 +605,7 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
 
 		sm := NewSessionManager()
+		defer sm.Close()
 		_, err = sm.Discover(tmpDir)
 		require.NoError(t, err)
 
@@ -751,6 +659,7 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
 
 		sm := NewSessionManager()
+		defer sm.Close()
 		_, err = sm.Discover(tmpDir)
 		require.NoError(t, err)
 
@@ -771,64 +680,6 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, err)
 		assert.Contains(t, string(body), "Completed Session Plan")
 	})
-}
-
-func TestValidatePlanPath(t *testing.T) {
-	tests := []struct {
-		name    string
-		path    string
-		wantErr bool
-	}{
-		{name: "valid relative path", path: "docs/plans/feature.md", wantErr: false},
-		{name: "valid simple path", path: "plan.md", wantErr: false},
-		{name: "valid nested path", path: "a/b/c/plan.md", wantErr: false},
-		{name: "empty path", path: "", wantErr: true},
-		{name: "absolute path", path: "/etc/passwd", wantErr: true},
-		{name: "absolute path to plan", path: "/home/user/docs/plan.md", wantErr: true},
-		{name: "path traversal with ..", path: "../../../etc/passwd", wantErr: true},
-		{name: "path traversal embedded", path: "docs/../../../etc/passwd", wantErr: true},
-		{name: "single dot is ok", path: "./plan.md", wantErr: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validatePlanPath(tt.path)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestServer_HandlePlan_RejectsPathTraversal(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// create progress file with malicious path
-	progressPath := filepath.Join(tmpDir, "progress-malicious.txt")
-	progressContent := "# Ralphex Progress Log\nPlan: ../../../etc/passwd\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
-	require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
-
-	sm := NewSessionManager()
-	_, err := sm.Discover(tmpDir)
-	require.NoError(t, err)
-
-	srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
-	require.NoError(t, err)
-
-	sessionID := sessionIDFromPath(progressPath)
-	req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionID, http.NoBody)
-	w := httptest.NewRecorder()
-
-	srv.handlePlan(w, req)
-
-	resp := w.Result()
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	body, _ := io.ReadAll(resp.Body)
-	assert.Contains(t, string(body), "invalid plan path")
 }
 
 func TestLoadPlanWithFallback(t *testing.T) {

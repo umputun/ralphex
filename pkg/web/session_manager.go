@@ -164,10 +164,11 @@ func (m *SessionManager) updateSession(session *Session) error {
 		}
 	}
 
-	// for completed sessions with empty buffer, load the file content once
-	// this handles sessions discovered after they finished
-	if newState == SessionStateCompleted && session.Buffer.Count() == 0 {
-		loadProgressFileIntoBuffer(session.Path, session.Buffer)
+	// for completed sessions that haven't been loaded yet, load the file content once
+	// this handles sessions discovered after they finished.
+	// MarkLoadedIfNot is atomic to prevent double-loading from concurrent goroutines.
+	if newState == SessionStateCompleted && session.MarkLoadedIfNot() {
+		loadProgressFileIntoSession(session.Path, session)
 	}
 
 	// parse metadata from file header
@@ -215,6 +216,25 @@ func (m *SessionManager) Remove(id string) {
 		session.Close()
 		delete(m.sessions, id)
 	}
+}
+
+// Register adds an externally-created session to the manager.
+// This is used when a session is created for live execution (BroadcastLogger)
+// and needs to be visible in the multi-session dashboard.
+// The session's ID is derived from its path using sessionIDFromPath.
+func (m *SessionManager) Register(session *Session) {
+	id := sessionIDFromPath(session.Path)
+	session.ID = id // ensure ID matches what SessionManager expects
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// don't overwrite existing session
+	if _, exists := m.sessions[id]; exists {
+		return
+	}
+
+	m.sessions[id] = session
 }
 
 // Close closes all sessions and clears the registry.
@@ -419,10 +439,10 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 	return meta, nil
 }
 
-// loadProgressFileIntoBuffer reads a progress file and populates the buffer with events.
+// loadProgressFileIntoSession reads a progress file and publishes events to the session's SSE server.
 // used for completed sessions that were discovered after they finished.
 // errors are silently ignored since this is best-effort loading.
-func loadProgressFileIntoBuffer(path string, buffer *Buffer) {
+func loadProgressFileIntoSession(path string, session *Session) {
 	f, err := os.Open(path) //nolint:gosec // path from user-controlled glob pattern, acceptable for session discovery
 	if err != nil {
 		return
@@ -432,6 +452,7 @@ func loadProgressFileIntoBuffer(path string, buffer *Buffer) {
 	scanner := bufio.NewScanner(f)
 	inHeader := true
 	phase := processor.PhaseTask
+	var pendingSection string // section header waiting for first timestamped event
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -456,13 +477,8 @@ func loadProgressFileIntoBuffer(path string, buffer *Buffer) {
 		if matches := sectionRegex.FindStringSubmatch(line); matches != nil {
 			sectionName := matches[1]
 			phase = phaseFromSection(sectionName)
-			buffer.Add(Event{
-				Type:      EventTypeSection,
-				Phase:     phase,
-				Section:   sectionName,
-				Text:      sectionName,
-				Timestamp: time.Now(),
-			})
+			// defer emitting section until we see a timestamped event
+			pendingSection = sectionName
 			continue
 		}
 
@@ -474,6 +490,18 @@ func loadProgressFileIntoBuffer(path string, buffer *Buffer) {
 			ts, err := time.Parse("06-01-02 15:04:05", matches[1])
 			if err != nil {
 				ts = time.Now()
+			}
+
+			// emit pending section with this event's timestamp (for accurate durations)
+			if pendingSection != "" {
+				_ = session.Publish(Event{
+					Type:      EventTypeSection,
+					Phase:     phase,
+					Section:   pendingSection,
+					Text:      pendingSection,
+					Timestamp: ts,
+				})
+				pendingSection = ""
 			}
 
 			eventType := detectEventType(text)
@@ -489,12 +517,12 @@ func loadProgressFileIntoBuffer(path string, buffer *Buffer) {
 				event.Type = EventTypeSignal
 			}
 
-			buffer.Add(event)
+			_ = session.Publish(event)
 			continue
 		}
 
 		// plain line (no timestamp)
-		buffer.Add(Event{
+		_ = session.Publish(Event{
 			Type:      EventTypeOutput,
 			Phase:     phase,
 			Text:      line,
