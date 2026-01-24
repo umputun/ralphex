@@ -113,7 +113,7 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor) *Runner {
 	// appConfig.TaskRetryCountSet means user explicitly set it (even to 0 for no retries)
 	retryCount := 1
 	if cfg.AppConfig != nil && cfg.AppConfig.TaskRetryCountSet {
-		retryCount = cfg.TaskRetryCount
+		retryCount = cfg.AppConfig.TaskRetryCount
 	} else if cfg.TaskRetryCount > 0 {
 		retryCount = cfg.TaskRetryCount
 	}
