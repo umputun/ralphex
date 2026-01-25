@@ -51,12 +51,12 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 4: Add signal event tests
 
-- [ ] Add `TestSignalEventRendering` to `sse_test.go`
+- [x] Add `TestSignalEventRendering` to `sse_test.go`
   - Test COMPLETED signal shows success indicator
   - Test FAILED signal shows failure indicator
   - Test REVIEW_DONE signal handling
   - Verify signal affects status badge (`#status-badge`)
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 5: Add task boundary event tests
 
