@@ -60,11 +60,11 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 5: Add task boundary event tests
 
-- [ ] Add `TestTaskBoundaryRendering` to `sse_test.go`
+- [x] Add `TestTaskBoundaryRendering` to `sse_test.go`
   - Verify task iteration headers render as section headers
   - Verify task number is displayed
   - Verify task sections are collapsible
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 6: Add iteration boundary event tests
 
