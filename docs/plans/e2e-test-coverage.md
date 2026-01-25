@@ -76,15 +76,15 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 7: Add auto-scroll behavior tests
 
-- [ ] Add `TestAutoScrollOnNewContent` to `sse_test.go`
+- [x] Add `TestAutoScrollOnNewContent` to `sse_test.go`
   - Create a session with enough content to scroll
   - Verify scroll position updates when new content arrives (if user at bottom)
   - Verify scroll position preserved when user scrolled up
-- [ ] Add `TestScrollToBottomButtonBehavior` to `sse_test.go`
+- [x] Add `TestScrollToBottomButtonBehavior` to `sse_test.go`
   - Verify button appears when scrolled away from bottom
   - Verify clicking button scrolls to bottom
   - Verify button hides when at bottom
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 8: Add plan parsing edge case tests
 

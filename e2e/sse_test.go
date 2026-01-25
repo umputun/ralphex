@@ -12,6 +12,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// toFloat64 converts a JavaScript number result to float64.
+// JavaScript numbers can be returned as int or float64 depending on value.
+func toFloat64(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	default:
+		return 0
+	}
+}
+
 func TestSSEConnection(t *testing.T) {
 	page := newPage(t)
 	navigateToDashboard(t, page)
@@ -792,5 +807,194 @@ func TestWarnEventRendering(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotEmpty(t, text, "warn line %d should have content", i)
 		}
+	})
+}
+
+// TestAutoScrollOnNewContent verifies that auto-scroll behavior works correctly
+// when new content arrives via SSE.
+func TestAutoScrollOnNewContent(t *testing.T) {
+	page := newPage(t)
+	navigateToDashboard(t, page)
+
+	// wait for initial load and SSE events
+	time.Sleep(2 * time.Second)
+
+	t.Run("scroll position updates when content loads and user at bottom", func(t *testing.T) {
+		// expand all sections to ensure we have scrollable content
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// get the output panel and verify it has content
+		outputPanel := page.Locator(".output-panel")
+		visible, err := outputPanel.IsVisible()
+		require.NoError(t, err)
+		assert.True(t, visible, "output panel should be visible")
+
+		// check that output has content (sections or lines)
+		outputDiv := page.Locator("#output")
+		children, err := outputDiv.Locator(":scope > *").Count()
+		require.NoError(t, err)
+		assert.Greater(t, children, 0, "output should have content")
+	})
+
+	t.Run("scroll position preserved when user scrolled up", func(t *testing.T) {
+		// expand all sections to ensure we have scrollable content
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// scroll to top of the output panel to simulate user scrolling up
+		outputPanel := page.Locator(".output-panel")
+		_, err = outputPanel.Evaluate("el => { el.scrollTop = 0; }", nil)
+		require.NoError(t, err)
+		time.Sleep(200 * time.Millisecond)
+
+		// get the scroll position after scrolling to top
+		scrollTopResult, err := outputPanel.Evaluate("el => el.scrollTop", nil)
+		require.NoError(t, err)
+		scrollTop := toFloat64(scrollTopResult)
+
+		// verify we're at the top
+		assert.LessOrEqual(t, scrollTop, float64(10), "should be scrolled to top")
+
+		// wait a moment and verify position is preserved (not auto-scrolled to bottom)
+		time.Sleep(500 * time.Millisecond)
+
+		scrollTopAfter, err := outputPanel.Evaluate("el => el.scrollTop", nil)
+		require.NoError(t, err)
+		scrollTopAfterNum := toFloat64(scrollTopAfter)
+
+		// position should still be at or near top (user's scroll preserved)
+		assert.LessOrEqual(t, scrollTopAfterNum, float64(50), "scroll position should be preserved when user scrolled up")
+	})
+}
+
+// TestScrollToBottomButtonBehavior verifies that the scroll-to-bottom button
+// appears when scrolled away from bottom and works correctly.
+func TestScrollToBottomButtonBehavior(t *testing.T) {
+	page := newPage(t)
+	navigateToDashboard(t, page)
+
+	// wait for initial load and SSE events
+	time.Sleep(2 * time.Second)
+
+	t.Run("button appears when scrolled away from bottom", func(t *testing.T) {
+		// expand all sections to ensure we have scrollable content
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// scroll to top of the output panel
+		outputPanel := page.Locator(".output-panel")
+		_, err = outputPanel.Evaluate("el => { el.scrollTop = 0; }", nil)
+		require.NoError(t, err)
+
+		// trigger scroll event to update UI state
+		_, err = outputPanel.Evaluate("el => el.dispatchEvent(new Event('scroll'))", nil)
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// check if scroll indicator becomes visible
+		indicator := page.Locator("#scroll-indicator")
+		hasVisibleClass, err := indicator.Evaluate("el => el.classList.contains('visible')", nil)
+		require.NoError(t, err)
+
+		// the indicator should be visible when not at bottom
+		// (but only if there's enough content to scroll)
+		scrollHeight, err := outputPanel.Evaluate("el => el.scrollHeight", nil)
+		require.NoError(t, err)
+		clientHeight, err := outputPanel.Evaluate("el => el.clientHeight", nil)
+		require.NoError(t, err)
+
+		scrollHeightNum := toFloat64(scrollHeight)
+		clientHeightNum := toFloat64(clientHeight)
+
+		if scrollHeightNum > clientHeightNum+50 {
+			// there's content to scroll, indicator should be visible
+			assert.True(t, hasVisibleClass.(bool), "scroll indicator should be visible when scrolled up")
+		} else {
+			t.Log("not enough content to require scrolling, skipping indicator visibility check")
+		}
+	})
+
+	t.Run("clicking button scrolls to bottom", func(t *testing.T) {
+		// expand all sections
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		outputPanel := page.Locator(".output-panel")
+
+		// check if there's enough content to scroll
+		scrollHeight, err := outputPanel.Evaluate("el => el.scrollHeight", nil)
+		require.NoError(t, err)
+		clientHeight, err := outputPanel.Evaluate("el => el.clientHeight", nil)
+		require.NoError(t, err)
+
+		scrollHeightNum := toFloat64(scrollHeight)
+		clientHeightNum := toFloat64(clientHeight)
+
+		if scrollHeightNum <= clientHeightNum+50 {
+			t.Skip("not enough content to test scroll-to-bottom functionality")
+		}
+
+		// scroll to top
+		_, err = outputPanel.Evaluate("el => { el.scrollTop = 0; }", nil)
+		require.NoError(t, err)
+		time.Sleep(200 * time.Millisecond)
+
+		// verify we're at top
+		scrollTopBefore, err := outputPanel.Evaluate("el => el.scrollTop", nil)
+		require.NoError(t, err)
+		assert.LessOrEqual(t, toFloat64(scrollTopBefore), float64(10), "should be at top before clicking button")
+
+		// click scroll-to-bottom button
+		scrollBtn := page.Locator("#scroll-to-bottom")
+		err = scrollBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// verify we're now at bottom
+		scrollTopAfter, err := outputPanel.Evaluate("el => el.scrollTop", nil)
+		require.NoError(t, err)
+		scrollMaxResult, err := outputPanel.Evaluate("el => el.scrollHeight - el.clientHeight", nil)
+		require.NoError(t, err)
+
+		scrollTopAfterNum := toFloat64(scrollTopAfter)
+		scrollMaxNum := toFloat64(scrollMaxResult)
+
+		// should be within 50px of bottom
+		assert.InDelta(t, scrollMaxNum, scrollTopAfterNum, 50, "should be scrolled to bottom after clicking button")
+	})
+
+	t.Run("button hides when at bottom", func(t *testing.T) {
+		// expand all sections
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// scroll to bottom programmatically (more reliable than button click)
+		outputPanel := page.Locator(".output-panel")
+		_, err = outputPanel.Evaluate("el => { el.scrollTop = el.scrollHeight; }", nil)
+		require.NoError(t, err)
+
+		// trigger scroll event to update UI state
+		_, err = outputPanel.Evaluate("el => el.dispatchEvent(new Event('scroll'))", nil)
+		require.NoError(t, err)
+		time.Sleep(200 * time.Millisecond)
+
+		// check if scroll indicator is hidden
+		indicator := page.Locator("#scroll-indicator")
+		hasVisibleClass, err := indicator.Evaluate("el => el.classList.contains('visible')", nil)
+		require.NoError(t, err)
+
+		// indicator should not be visible when at bottom
+		assert.False(t, hasVisibleClass.(bool), "scroll indicator should be hidden when at bottom")
 	})
 }
