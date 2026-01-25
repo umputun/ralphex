@@ -35,11 +35,11 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 2: Add error event rendering tests
 
-- [ ] Add `TestErrorEventRendering` to `sse_test.go`
+- [x] Add `TestErrorEventRendering` to `sse_test.go`
   - Verify error lines have `.error` or `.output-error` class
   - Verify error styling is visually distinct (check CSS class presence)
   - Verify multiple error events render correctly
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 3: Add warning event rendering tests
 

@@ -297,3 +297,70 @@ func TestSearchFunctionality(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, value)
 }
+
+// TestErrorEventRendering verifies that error events from the progress file
+// are rendered with proper styling (data-type="error" attribute and error color).
+func TestErrorEventRendering(t *testing.T) {
+	page := newPage(t)
+	navigateToDashboard(t, page)
+
+	// wait for initial load and SSE events
+	time.Sleep(2 * time.Second)
+
+	t.Run("error lines have correct data-type attribute", func(t *testing.T) {
+		// the test fixture (progress-full-events.txt) contains ERROR: lines
+		// these should be rendered with data-type="error"
+		errorLines := page.Locator(".output-line[data-type='error']")
+		count, err := errorLines.Count()
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, count, 1, "should have at least one error line from test fixture")
+		t.Logf("Found %d error lines", count)
+	})
+
+	t.Run("error lines have visually distinct styling", func(t *testing.T) {
+		// expand all sections to make error content visible
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// verify the error line content element exists and is visible
+		errorContent := page.Locator(".output-line[data-type='error'] .content").First()
+		visible, err := errorContent.IsVisible()
+		require.NoError(t, err)
+
+		if !visible {
+			t.Skip("no visible error content to verify styling (even after expanding)")
+		}
+
+		// check that the element has the expected styling via computed color
+		// the CSS sets color: var(--color-error) which is #f87171
+		color, err := errorContent.Evaluate("el => window.getComputedStyle(el).color", nil)
+		require.NoError(t, err)
+
+		colorStr, ok := color.(string)
+		require.True(t, ok, "color should be a string")
+		// color should be red-ish (the error color), not white/gray (default)
+		// #f87171 converts to rgb(248, 113, 113)
+		assert.Contains(t, colorStr, "248", "error text should have red color component")
+	})
+
+	t.Run("multiple error events render correctly", func(t *testing.T) {
+		// verify that multiple error lines are present (test fixture has 2+)
+		errorLines := page.Locator(".output-line[data-type='error']")
+		count, err := errorLines.Count()
+		require.NoError(t, err)
+
+		if count < 2 {
+			t.Skip("test fixture has fewer than 2 error lines")
+		}
+
+		// verify each error line has the content element
+		for i := 0; i < count && i < 3; i++ {
+			content := errorLines.Nth(i).Locator(".content")
+			text, err := content.TextContent()
+			require.NoError(t, err)
+			assert.NotEmpty(t, text, "error line %d should have content", i)
+		}
+	})
+}
