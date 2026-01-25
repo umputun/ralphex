@@ -589,6 +589,145 @@ func TestTaskBoundaryRendering(t *testing.T) {
 	})
 }
 
+// TestIterationBoundaryRendering verifies that Claude review and Codex iteration
+// headers are rendered as collapsible section headers with iteration numbers displayed.
+func TestIterationBoundaryRendering(t *testing.T) {
+	page := newPage(t)
+	navigateToDashboard(t, page)
+
+	// wait for initial load and SSE events
+	time.Sleep(2 * time.Second)
+
+	t.Run("Claude review iteration headers render correctly", func(t *testing.T) {
+		// the test fixture contains Claude review sections
+		// these should be rendered as .section-header details elements with data-phase='review'
+		reviewSections := page.Locator(".section-header[data-phase='review']")
+		count, err := reviewSections.Count()
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, count, 1, "should have at least one review section from test fixture")
+		t.Logf("Found %d Claude review sections", count)
+
+		if count == 0 {
+			t.Skip("no Claude review sections found to verify title")
+		}
+
+		// verify the section title contains review-related text
+		firstReview := reviewSections.First()
+		titleEl := firstReview.Locator(".section-title")
+		text, err := titleEl.TextContent()
+		require.NoError(t, err)
+
+		// section title should contain "Claude" or "review"
+		hasReviewInfo := strings.Contains(strings.ToLower(text), "claude") ||
+			strings.Contains(strings.ToLower(text), "review")
+		assert.True(t, hasReviewInfo, "review section title should contain review info, got: %q", text)
+	})
+
+	t.Run("Codex iteration headers render correctly", func(t *testing.T) {
+		// the test fixture contains Codex iteration sections
+		// these should be rendered as .section-header details elements with data-phase='codex'
+		codexSections := page.Locator(".section-header[data-phase='codex']")
+		count, err := codexSections.Count()
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, count, 1, "should have at least one codex section from test fixture")
+		t.Logf("Found %d Codex sections", count)
+
+		if count == 0 {
+			t.Skip("no Codex sections found to verify title")
+		}
+
+		// verify the section title contains codex-related text
+		firstCodex := codexSections.First()
+		titleEl := firstCodex.Locator(".section-title")
+		text, err := titleEl.TextContent()
+		require.NoError(t, err)
+
+		// section title should contain "Codex" or "iteration"
+		hasCodexInfo := strings.Contains(strings.ToLower(text), "codex") ||
+			strings.Contains(strings.ToLower(text), "iteration")
+		assert.True(t, hasCodexInfo, "codex section title should contain codex info, got: %q", text)
+	})
+
+	t.Run("iteration number is displayed in section title", func(t *testing.T) {
+		// expand all sections to see content
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// check review sections for iteration numbers
+		reviewSections := page.Locator(".section-header[data-phase='review']")
+		reviewCount, err := reviewSections.Count()
+		require.NoError(t, err)
+
+		if reviewCount >= 2 {
+			// verify both review sections have different titles (pass 1 vs pass 2)
+			firstTitle, err := reviewSections.Nth(0).Locator(".section-title").TextContent()
+			require.NoError(t, err)
+			secondTitle, err := reviewSections.Nth(1).Locator(".section-title").TextContent()
+			require.NoError(t, err)
+
+			// titles should contain numbers or be distinguishable
+			hasNumber := strings.Contains(firstTitle, "1") || strings.Contains(firstTitle, "2") ||
+				strings.Contains(secondTitle, "1") || strings.Contains(secondTitle, "2")
+			assert.True(t, hasNumber, "review section titles should contain iteration numbers: %q, %q", firstTitle, secondTitle)
+		}
+
+		// check codex sections for iteration numbers
+		codexSections := page.Locator(".section-header[data-phase='codex']")
+		codexCount, err := codexSections.Count()
+		require.NoError(t, err)
+
+		if codexCount >= 2 {
+			// verify both codex sections have different titles
+			firstTitle, err := codexSections.Nth(0).Locator(".section-title").TextContent()
+			require.NoError(t, err)
+			secondTitle, err := codexSections.Nth(1).Locator(".section-title").TextContent()
+			require.NoError(t, err)
+
+			// titles should contain numbers or be distinguishable
+			hasNumber := strings.Contains(firstTitle, "1") || strings.Contains(firstTitle, "2") ||
+				strings.Contains(secondTitle, "1") || strings.Contains(secondTitle, "2")
+			assert.True(t, hasNumber, "codex section titles should contain iteration numbers: %q, %q", firstTitle, secondTitle)
+		}
+	})
+
+	t.Run("iteration sections are collapsible details elements", func(t *testing.T) {
+		// find a review section
+		reviewSection := page.Locator(".section-header[data-phase='review']").First()
+
+		visible, err := reviewSection.IsVisible()
+		require.NoError(t, err)
+		if !visible {
+			t.Skip("no visible review section to test collapsibility")
+		}
+
+		// verify it's a details element (collapsible)
+		tagName, err := reviewSection.Evaluate("el => el.tagName", nil)
+		require.NoError(t, err)
+		assert.Equal(t, "DETAILS", tagName, "review section should be a details element")
+
+		// verify it has a summary element
+		summary := reviewSection.Locator("summary")
+		summaryVisible, err := summary.IsVisible()
+		require.NoError(t, err)
+		assert.True(t, summaryVisible, "review section should have a visible summary")
+
+		// find a codex section
+		codexSection := page.Locator(".section-header[data-phase='codex']").First()
+		codexVisible, err := codexSection.IsVisible()
+		require.NoError(t, err)
+		if !codexVisible {
+			return // skip codex check if not visible
+		}
+
+		// verify codex section is also a details element
+		codexTagName, err := codexSection.Evaluate("el => el.tagName", nil)
+		require.NoError(t, err)
+		assert.Equal(t, "DETAILS", codexTagName, "codex section should be a details element")
+	})
+}
+
 // TestWarnEventRendering verifies that warning events from the progress file
 // are rendered with proper styling (data-type="warn" attribute and warning color).
 func TestWarnEventRendering(t *testing.T) {

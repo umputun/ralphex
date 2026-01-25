@@ -68,11 +68,11 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 6: Add iteration boundary event tests
 
-- [ ] Add `TestIterationBoundaryRendering` to `sse_test.go`
+- [x] Add `TestIterationBoundaryRendering` to `sse_test.go`
   - Verify Claude review iteration headers render correctly
   - Verify Codex iteration headers render correctly
   - Verify iteration number is displayed
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 7: Add auto-scroll behavior tests
 
