@@ -502,6 +502,93 @@ func TestReviewDoneSignalHandling(t *testing.T) {
 	assert.Equal(t, "COMPLETED", text, "badge should show terminal state after all signals processed")
 }
 
+// TestTaskBoundaryRendering verifies that task iteration headers are rendered
+// as collapsible section headers with task numbers displayed.
+func TestTaskBoundaryRendering(t *testing.T) {
+	page := newPage(t)
+	navigateToDashboard(t, page)
+
+	// wait for initial load and SSE events
+	time.Sleep(2 * time.Second)
+
+	t.Run("task iteration headers render as section headers", func(t *testing.T) {
+		// the test fixture (progress-full-events.txt) contains task iteration markers
+		// these should be rendered as .section-header details elements
+		sections := page.Locator(".section-header")
+		count, err := sections.Count()
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, count, 1, "should have at least one section from test fixture")
+		t.Logf("Found %d section headers", count)
+
+		// verify at least one section has task phase
+		taskSections := page.Locator(".section-header[data-phase='task']")
+		taskCount, err := taskSections.Count()
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, taskCount, 1, "should have at least one task section")
+	})
+
+	t.Run("task number is displayed in section title", func(t *testing.T) {
+		// expand all sections to see task content
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// find task sections and verify they have task-related titles
+		taskSections := page.Locator(".section-header[data-phase='task']")
+		count, err := taskSections.Count()
+		require.NoError(t, err)
+
+		if count == 0 {
+			t.Skip("no task sections found to verify title")
+		}
+
+		// check first task section has a title containing "Task" or "iteration"
+		firstTask := taskSections.First()
+		titleEl := firstTask.Locator(".section-title")
+		text, err := titleEl.TextContent()
+		require.NoError(t, err)
+
+		// section title should contain either "Task" (with plan lookup) or "iteration" (raw)
+		hasTaskInfo := strings.Contains(strings.ToLower(text), "task") ||
+			strings.Contains(strings.ToLower(text), "iteration")
+		assert.True(t, hasTaskInfo, "task section title should contain task info, got: %q", text)
+	})
+
+	t.Run("task sections are collapsible details elements", func(t *testing.T) {
+		// find a task section
+		taskSection := page.Locator(".section-header[data-phase='task']").First()
+
+		visible, err := taskSection.IsVisible()
+		require.NoError(t, err)
+		if !visible {
+			t.Skip("no visible task section to test collapsibility")
+		}
+
+		// verify it's a details element (collapsible)
+		tagName, err := taskSection.Evaluate("el => el.tagName", nil)
+		require.NoError(t, err)
+		assert.Equal(t, "DETAILS", tagName, "task section should be a details element")
+
+		// verify it has a summary element
+		summary := taskSection.Locator("summary")
+		summaryVisible, err := summary.IsVisible()
+		require.NoError(t, err)
+		assert.True(t, summaryVisible, "task section should have a visible summary")
+
+		// test toggle behavior
+		initialOpen := isDetailsOpen(taskSection)
+
+		// click the summary to toggle
+		err = summary.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		newOpen := isDetailsOpen(taskSection)
+		assert.NotEqual(t, initialOpen, newOpen, "task section should toggle open/closed on click")
+	})
+}
+
 // TestWarnEventRendering verifies that warning events from the progress file
 // are rendered with proper styling (data-type="warn" attribute and warning color).
 func TestWarnEventRendering(t *testing.T) {
