@@ -43,11 +43,11 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 3: Add warning event rendering tests
 
-- [ ] Add `TestWarnEventRendering` to `sse_test.go`
+- [x] Add `TestWarnEventRendering` to `sse_test.go`
   - Verify warn lines have `.warn` or `.output-warn` class
   - Verify warning styling is visually distinct
   - Verify multiple warning events render correctly
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 4: Add signal event tests
 

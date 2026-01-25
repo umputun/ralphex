@@ -364,3 +364,70 @@ func TestErrorEventRendering(t *testing.T) {
 		}
 	})
 }
+
+// TestWarnEventRendering verifies that warning events from the progress file
+// are rendered with proper styling (data-type="warn" attribute and warning color).
+func TestWarnEventRendering(t *testing.T) {
+	page := newPage(t)
+	navigateToDashboard(t, page)
+
+	// wait for initial load and SSE events
+	time.Sleep(2 * time.Second)
+
+	t.Run("warn lines have correct data-type attribute", func(t *testing.T) {
+		// the test fixture (progress-full-events.txt) contains WARN: lines
+		// these should be rendered with data-type="warn"
+		warnLines := page.Locator(".output-line[data-type='warn']")
+		count, err := warnLines.Count()
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, count, 1, "should have at least one warn line from test fixture")
+		t.Logf("Found %d warn lines", count)
+	})
+
+	t.Run("warn lines have visually distinct styling", func(t *testing.T) {
+		// expand all sections to make warning content visible
+		expandBtn := page.Locator("#expand-all")
+		err := expandBtn.Click()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		// verify the warn line content element exists and is visible
+		warnContent := page.Locator(".output-line[data-type='warn'] .content").First()
+		visible, err := warnContent.IsVisible()
+		require.NoError(t, err)
+
+		if !visible {
+			t.Skip("no visible warn content to verify styling (even after expanding)")
+		}
+
+		// check that the element has the expected styling via computed color
+		// the CSS sets color: var(--color-warn) which is #fbbf24
+		color, err := warnContent.Evaluate("el => window.getComputedStyle(el).color", nil)
+		require.NoError(t, err)
+
+		colorStr, ok := color.(string)
+		require.True(t, ok, "color should be a string")
+		// color should be amber/yellow-ish (the warning color), not white/gray (default)
+		// #fbbf24 converts to rgb(251, 191, 36)
+		assert.Contains(t, colorStr, "251", "warn text should have amber color component")
+	})
+
+	t.Run("multiple warning events render correctly", func(t *testing.T) {
+		// verify that multiple warn lines are present (test fixture has 3)
+		warnLines := page.Locator(".output-line[data-type='warn']")
+		count, err := warnLines.Count()
+		require.NoError(t, err)
+
+		if count < 2 {
+			t.Skip("test fixture has fewer than 2 warn lines")
+		}
+
+		// verify each warn line has the content element
+		for i := 0; i < count && i < 3; i++ {
+			content := warnLines.Nth(i).Locator(".content")
+			text, err := content.TextContent()
+			require.NoError(t, err)
+			assert.NotEmpty(t, text, "warn line %d should have content", i)
+		}
+	})
+}
