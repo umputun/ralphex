@@ -24,6 +24,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_first.txt"), []byte("custom first review"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_second.txt"), []byte("custom second review"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex.txt"), []byte("custom codex prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte("custom make plan prompt"), 0o600))
 
 	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
@@ -33,6 +34,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	assert.Equal(t, "custom first review", prompts.ReviewFirst)
 	assert.Equal(t, "custom second review", prompts.ReviewSecond)
 	assert.Equal(t, "custom codex prompt", prompts.Codex)
+	assert.Equal(t, "custom make plan prompt", prompts.MakePlan)
 }
 
 func TestPromptLoader_Load_PartialUserFiles(t *testing.T) {
@@ -62,6 +64,7 @@ func TestPromptLoader_Load_NoUserDir(t *testing.T) {
 	// should fall back to embedded defaults
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}")
 	assert.Contains(t, prompts.ReviewFirst, "{{GOAL}}")
+	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}")
 }
 
 func TestPromptLoader_Load_EmptyUserFile(t *testing.T) {
@@ -377,4 +380,53 @@ func TestPromptLoader_Load_PromptWithOnlyComments(t *testing.T) {
 
 	// file with only comments should fall back to embedded default
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}")
+}
+
+func TestPromptLoader_Load_MakePlanPrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+
+	// test custom make_plan prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte("custom plan prompt with {{PLAN_DESCRIPTION}}"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom plan prompt with {{PLAN_DESCRIPTION}}", prompts.MakePlan)
+}
+
+func TestPromptLoader_Load_MakePlanPrompt_FallsBackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "nonexistent")
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	// should fall back to embedded make_plan prompt
+	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}")
+	assert.Contains(t, prompts.MakePlan, "{{PROGRESS_FILE}}")
+	assert.Contains(t, prompts.MakePlan, "RALPHEX:QUESTION")
+	assert.Contains(t, prompts.MakePlan, "RALPHEX:PLAN_READY")
+}
+
+func TestPromptLoader_Load_MakePlanPrompt_LocalOverridesGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global", "prompts")
+	localDir := filepath.Join(tmpDir, "local", "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	// global make_plan prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte("global make plan"), 0o600))
+	// local make_plan prompt
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "make_plan.txt"), []byte("local make plan"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load(localDir, globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "local make plan", prompts.MakePlan)
 }

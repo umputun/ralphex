@@ -28,15 +28,17 @@ type printCall struct {
 	Args   []any
 }
 
-func (s *stubLogger) SetPhase(_ Phase)       {}
+func (s *stubLogger) SetPhase(_ Phase) {}
 func (s *stubLogger) Print(f string, a ...any) {
 	s.printCalls = append(s.printCalls, printCall{Format: f, Args: a})
 }
-func (s *stubLogger) PrintRaw(_ string, _ ...any)   {}
-func (s *stubLogger) PrintSection(_ Section)        {}
-func (s *stubLogger) PrintAligned(_ string)         {}
-func (s *stubLogger) Path() string                  { return s.path }
-func (s *stubLogger) PrintCalls() []printCall       { return s.printCalls }
+func (s *stubLogger) PrintRaw(_ string, _ ...any)      {}
+func (s *stubLogger) PrintSection(_ Section)           {}
+func (s *stubLogger) PrintAligned(_ string)            {}
+func (s *stubLogger) LogQuestion(_ string, _ []string) {}
+func (s *stubLogger) LogAnswer(_ string)               {}
+func (s *stubLogger) Path() string                     { return s.path }
+func (s *stubLogger) PrintCalls() []printCall          { return s.printCalls }
 
 // newMockLogger creates a stub logger for internal tests.
 func newMockLogger(path string) *stubLogger { //nolint:unparam // path is used by callers

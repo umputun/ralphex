@@ -18,6 +18,7 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
+	"github.com/umputun/ralphex/pkg/input"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
 	"github.com/umputun/ralphex/pkg/web"
@@ -25,15 +26,16 @@ import (
 
 // opts holds all command-line options.
 type opts struct {
-	MaxIterations int      `short:"m" long:"max-iterations" default:"50" description:"maximum task iterations"`
-	Review        bool     `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
-	CodexOnly     bool     `short:"c" long:"codex-only" description:"skip tasks and first review, run only codex loop"`
-	Debug         bool     `short:"d" long:"debug" description:"enable debug logging"`
-	NoColor       bool     `long:"no-color" description:"disable color output"`
-	Version       bool     `short:"v" long:"version" description:"print version and exit"`
-	Serve         bool     `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
-	Port          int      `short:"p" long:"port" default:"8080" description:"web dashboard port"`
-	Watch         []string `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
+	MaxIterations   int      `short:"m" long:"max-iterations" default:"50" description:"maximum task iterations"`
+	Review          bool     `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
+	CodexOnly       bool     `short:"c" long:"codex-only" description:"skip tasks and first review, run only codex loop"`
+	PlanDescription string   `long:"plan" description:"create plan interactively (enter plan description)"`
+	Debug           bool     `short:"d" long:"debug" description:"enable debug logging"`
+	NoColor         bool     `long:"no-color" description:"disable color output"`
+	Version         bool     `short:"v" long:"version" description:"print version and exit"`
+	Serve           bool     `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
+	Port            int      `short:"p" long:"port" default:"8080" description:"web dashboard port"`
+	Watch           []string `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
 }
@@ -55,6 +57,26 @@ type planSelector struct {
 	Optional bool
 	PlansDir string
 	Colors   *progress.Colors
+}
+
+// executePlanRequest holds parameters for plan execution.
+type executePlanRequest struct {
+	PlanFile string
+	Mode     processor.Mode
+	GitOps   *git.Repo
+	Config   *config.Config
+	Colors   *progress.Colors
+}
+
+// webDashboardParams holds parameters for web dashboard setup.
+type webDashboardParams struct {
+	BaseLog         processor.Logger
+	Port            int
+	PlanFile        string
+	Branch          string
+	WatchDirs       []string // CLI watch dirs
+	ConfigWatchDirs []string // config watch dirs
+	Colors          *progress.Colors
 }
 
 func main() {
@@ -93,6 +115,11 @@ func main() {
 }
 
 func run(ctx context.Context, o opts) error {
+	// validate conflicting flags
+	if err := validateFlags(o); err != nil {
+		return err
+	}
+
 	// load config first to get custom command paths
 	cfg, err := config.Load("") // empty string uses default location
 	if err != nil {
@@ -124,7 +151,19 @@ func run(ctx context.Context, o opts) error {
 		return fmt.Errorf("open git repo: %w", err)
 	}
 
-	// select and prepare plan file
+	mode := determineMode(o)
+
+	// plan mode has different flow - doesn't require plan file selection
+	if mode == processor.ModePlan {
+		return runPlanMode(ctx, o, executePlanRequest{
+			Mode:   processor.ModePlan,
+			GitOps: gitOps,
+			Config: cfg,
+			Colors: colors,
+		})
+	}
+
+	// select and prepare plan file (not needed for plan mode)
 	planFile, err := preparePlanFile(ctx, planSelector{
 		PlanFile: o.PlanFile,
 		Optional: o.Review || o.CodexOnly,
@@ -135,26 +174,59 @@ func run(ctx context.Context, o opts) error {
 		return err
 	}
 
-	mode := determineMode(o)
-	if planFile != "" {
-		if mode == processor.ModeFull {
-			if branchErr := createBranchIfNeeded(gitOps, planFile, colors); branchErr != nil {
-				return branchErr
-			}
-		}
-		if gitignoreErr := ensureGitignore(gitOps, colors); gitignoreErr != nil {
-			return gitignoreErr
+	if setupErr := setupGitForExecution(gitOps, planFile, mode, colors); setupErr != nil {
+		return setupErr
+	}
+
+	return executePlan(ctx, o, executePlanRequest{
+		PlanFile: planFile,
+		Mode:     mode,
+		GitOps:   gitOps,
+		Config:   cfg,
+		Colors:   colors,
+	})
+}
+
+// getCurrentBranch returns the current git branch name or "unknown" if unavailable.
+func getCurrentBranch(gitOps *git.Repo) string {
+	branch, err := gitOps.CurrentBranch()
+	if err != nil || branch == "" {
+		return "unknown"
+	}
+	return branch
+}
+
+// setupRunnerLogger creates the appropriate logger for the runner.
+// if --serve is enabled, wraps the base logger with a broadcast logger.
+func setupRunnerLogger(ctx context.Context, o opts, params webDashboardParams) (processor.Logger, error) {
+	if !o.Serve {
+		return params.BaseLog, nil
+	}
+	return startWebDashboard(ctx, params)
+}
+
+// handlePostExecution handles tasks after runner completion.
+func handlePostExecution(gitOps *git.Repo, planFile string, mode processor.Mode, colors *progress.Colors) {
+	// move completed plan to completed/ directory
+	if planFile != "" && mode == processor.ModeFull {
+		if moveErr := movePlanToCompleted(gitOps, planFile, colors); moveErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
 	}
-	branch := getCurrentBranch(gitOps)
+}
+
+// executePlan runs the main execution loop for a plan file.
+// handles progress logging, web dashboard, runner execution, and post-execution tasks.
+func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
+	branch := getCurrentBranch(req.GitOps)
 
 	// create progress logger
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanFile: planFile,
-		Mode:     string(mode),
+		PlanFile: req.PlanFile,
+		Mode:     string(req.Mode),
 		Branch:   branch,
 		NoColor:  o.NoColor,
-	}, colors)
+	}, req.Colors)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
@@ -169,31 +241,39 @@ func run(ctx context.Context, o opts) error {
 	}()
 
 	// wrap logger with broadcast logger if --serve is enabled
-	runnerLog, err := setupRunnerLogger(ctx, o, baseLog, planFile, branch, cfg.WatchDirs, colors)
+	runnerLog, err := setupRunnerLogger(ctx, o, webDashboardParams{
+		BaseLog:         baseLog,
+		Port:            o.Port,
+		PlanFile:        req.PlanFile,
+		Branch:          branch,
+		WatchDirs:       o.Watch,
+		ConfigWatchDirs: req.Config.WatchDirs,
+		Colors:          req.Colors,
+	})
 	if err != nil {
 		return err
 	}
 
 	// print startup info
 	printStartupInfo(startupInfo{
-		PlanFile:      planFile,
+		PlanFile:      req.PlanFile,
 		Branch:        branch,
-		Mode:          mode,
+		Mode:          req.Mode,
 		MaxIterations: o.MaxIterations,
 		ProgressPath:  baseLog.Path(),
-	}, colors)
+	}, req.Colors)
 
 	// create and run the runner
-	r := createRunner(cfg, o, planFile, mode, runnerLog)
+	r := createRunner(req.Config, o, req.PlanFile, req.Mode, runnerLog)
 	if runErr := r.Run(ctx); runErr != nil {
 		return fmt.Errorf("runner: %w", runErr)
 	}
 
 	// handle post-execution tasks
-	handlePostExecution(gitOps, planFile, mode, colors)
+	handlePostExecution(req.GitOps, req.PlanFile, req.Mode, req.Colors)
 
 	elapsed := baseLog.Elapsed()
-	colors.Info().Printf("\ncompleted in %s\n", elapsed)
+	req.Colors.Info().Printf("\ncompleted in %s\n", elapsed)
 
 	// keep web dashboard running after execution completes
 	if o.Serve {
@@ -201,39 +281,24 @@ func run(ctx context.Context, o opts) error {
 			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", err)
 		}
 		baseLogClosed = true
-		colors.Info().Printf("web dashboard still running at http://localhost:%d (press Ctrl+C to exit)\n", o.Port)
+		req.Colors.Info().Printf("web dashboard still running at http://localhost:%d (press Ctrl+C to exit)\n", o.Port)
 		<-ctx.Done()
 	}
 
 	return nil
 }
 
-// getCurrentBranch returns the current git branch name or "unknown" if unavailable.
-func getCurrentBranch(gitOps *git.Repo) string {
-	branch, err := gitOps.CurrentBranch()
-	if err != nil || branch == "" {
-		return "unknown"
+// setupGitForExecution prepares git state for execution (branch, gitignore).
+func setupGitForExecution(gitOps *git.Repo, planFile string, mode processor.Mode, colors *progress.Colors) error {
+	if planFile == "" {
+		return nil
 	}
-	return branch
-}
-
-// setupRunnerLogger creates the appropriate logger for the runner.
-// if --serve is enabled, wraps the base logger with a broadcast logger.
-func setupRunnerLogger(ctx context.Context, o opts, baseLog *progress.Logger, planFile, branch string, configWatchDirs []string, colors *progress.Colors) (processor.Logger, error) {
-	if !o.Serve {
-		return baseLog, nil
-	}
-	return startWebDashboard(ctx, baseLog, o.Port, planFile, branch, o.Watch, configWatchDirs, colors)
-}
-
-// handlePostExecution handles tasks after runner completion.
-func handlePostExecution(gitOps *git.Repo, planFile string, mode processor.Mode, colors *progress.Colors) {
-	// move completed plan to completed/ directory
-	if planFile != "" && mode == processor.ModeFull {
-		if moveErr := movePlanToCompleted(gitOps, planFile, colors); moveErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
+	if mode == processor.ModeFull {
+		if err := createBranchIfNeeded(gitOps, planFile, colors); err != nil {
+			return err
 		}
 	}
+	return ensureGitignore(gitOps, colors)
 }
 
 // checkClaudeDep checks that the claude command is available in PATH.
@@ -259,12 +324,14 @@ func checkClaudeDep(cfg *config.Config) error {
 //
 // example: ralphex --serve --watch ~/projects --watch /tmp
 func isWatchOnlyMode(o opts, configWatchDirs []string) bool {
-	return o.Serve && o.PlanFile == "" && (len(o.Watch) > 0 || len(configWatchDirs) > 0)
+	return o.Serve && o.PlanFile == "" && o.PlanDescription == "" && (len(o.Watch) > 0 || len(configWatchDirs) > 0)
 }
 
 // determineMode returns the execution mode based on CLI flags.
 func determineMode(o opts) processor.Mode {
 	switch {
+	case o.PlanDescription != "":
+		return processor.ModePlan
 	case o.CodexOnly:
 		return processor.ModeCodexOnly
 	case o.Review:
@@ -272,6 +339,14 @@ func determineMode(o opts) processor.Mode {
 	default:
 		return processor.ModeFull
 	}
+}
+
+// validateFlags checks for conflicting CLI flags.
+func validateFlags(o opts) error {
+	if o.PlanDescription != "" && o.PlanFile != "" {
+		return errors.New("--plan flag conflicts with plan file argument; use one or the other")
+	}
+	return nil
 }
 
 // createRunner creates a processor.Runner with the given configuration.
@@ -628,30 +703,182 @@ func monitorWatchMode(ctx context.Context, srvErrCh, watchErrCh chan error, colo
 	}
 }
 
+// runPlanMode executes interactive plan creation mode.
+// creates input collector, progress logger, and runs the plan creation loop.
+// after plan creation, prompts user to continue with implementation or exit.
+func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
+	// ensure gitignore has progress files
+	if gitignoreErr := ensureGitignore(req.GitOps, req.Colors); gitignoreErr != nil {
+		return gitignoreErr
+	}
+
+	branch := getCurrentBranch(req.GitOps)
+
+	// create progress logger for plan mode
+	baseLog, err := progress.NewLogger(progress.Config{
+		PlanDescription: o.PlanDescription,
+		Mode:            string(processor.ModePlan),
+		Branch:          branch,
+		NoColor:         o.NoColor,
+	}, req.Colors)
+	if err != nil {
+		return fmt.Errorf("create progress logger: %w", err)
+	}
+	defer func() {
+		if closeErr := baseLog.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", closeErr)
+		}
+	}()
+
+	// print startup info for plan mode
+	printPlanModeInfo(o.PlanDescription, branch, o.MaxIterations, baseLog.Path(), req.Colors)
+
+	// create input collector
+	collector := input.NewTerminalCollector()
+
+	// record start time for finding the created plan
+	startTime := time.Now()
+
+	// create and configure runner
+	r := processor.New(processor.Config{
+		PlanDescription:  o.PlanDescription,
+		ProgressPath:     baseLog.Path(),
+		Mode:             processor.ModePlan,
+		MaxIterations:    o.MaxIterations,
+		Debug:            o.Debug,
+		NoColor:          o.NoColor,
+		IterationDelayMs: req.Config.IterationDelayMs,
+		AppConfig:        req.Config,
+	}, baseLog)
+	r.SetInputCollector(collector)
+
+	// run the plan creation loop
+	if runErr := r.Run(ctx); runErr != nil {
+		return fmt.Errorf("plan creation: %w", runErr)
+	}
+
+	// find the newly created plan file
+	planFile := findRecentPlan(req.Config.PlansDir, startTime)
+	elapsed := baseLog.Elapsed()
+
+	// print completion message with plan file path if found
+	if planFile != "" {
+		relPath, relErr := filepath.Rel(".", planFile)
+		if relErr != nil {
+			relPath = planFile
+		}
+		req.Colors.Info().Printf("\nplan creation completed in %s, created %s\n", elapsed, relPath)
+	} else {
+		req.Colors.Info().Printf("\nplan creation completed in %s\n", elapsed)
+	}
+
+	// if no plan file found, can't continue to implementation
+	if planFile == "" {
+		return nil
+	}
+
+	// ask user if they want to continue with plan implementation
+	answer, askErr := collector.AskQuestion(ctx, "Continue with plan implementation?",
+		[]string{"Yes, execute plan", "No, exit"})
+	if askErr != nil {
+		// user canceled or error - treat as exit (context canceled is expected)
+		if ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "warning: input error: %v\n", askErr)
+		}
+		return nil
+	}
+
+	// check if user wants to continue
+	if !strings.HasPrefix(answer, "Yes") {
+		return nil
+	}
+
+	return continuePlanExecution(ctx, o, executePlanRequest{
+		PlanFile: planFile,
+		Mode:     processor.ModeFull,
+		GitOps:   req.GitOps,
+		Config:   req.Config,
+		Colors:   req.Colors,
+	})
+}
+
+// continuePlanExecution runs full execution mode after plan creation completes.
+// creates branch and delegates to executePlan for the main execution loop.
+func continuePlanExecution(ctx context.Context, o opts, req executePlanRequest) error {
+	req.Colors.Info().Printf("\ncontinuing with plan implementation...\n")
+
+	// create branch if needed
+	if branchErr := createBranchIfNeeded(req.GitOps, req.PlanFile, req.Colors); branchErr != nil {
+		return branchErr
+	}
+
+	return executePlan(ctx, o, req)
+}
+
+// findRecentPlan finds the most recently modified .md file in plansDir
+// that was modified after startTime. Returns empty string if none found.
+func findRecentPlan(plansDir string, startTime time.Time) string {
+	// find all .md files in plansDir (excluding completed/ subdirectory)
+	pattern := filepath.Join(plansDir, "*.md")
+	plans, err := filepath.Glob(pattern)
+	if err != nil || len(plans) == 0 {
+		return ""
+	}
+
+	var recentPlan string
+	var recentTime time.Time
+
+	for _, plan := range plans {
+		info, statErr := os.Stat(plan)
+		if statErr != nil {
+			continue
+		}
+		// file must be modified after startTime
+		if info.ModTime().Before(startTime) {
+			continue
+		}
+		// find the most recent one
+		if recentPlan == "" || info.ModTime().After(recentTime) {
+			recentPlan = plan
+			recentTime = info.ModTime()
+		}
+	}
+
+	return recentPlan
+}
+
+// printPlanModeInfo prints startup information for plan creation mode.
+func printPlanModeInfo(description, branch string, maxIterations int, progressPath string, colors *progress.Colors) {
+	colors.Info().Printf("starting interactive plan creation\n")
+	colors.Info().Printf("request: %s\n", description)
+	colors.Info().Printf("branch: %s (max %d iterations)\n", branch, maxIterations)
+	colors.Info().Printf("progress log: %s\n\n", progressPath)
+}
+
 // startWebDashboard creates the web server and broadcast logger, starting the server in background.
 // returns the broadcast logger to use for execution, or error if server fails to start.
 // when watchDirs is non-empty, creates multi-session mode with file watching.
-func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, planFile, branch string, watchDirs, configWatchDirs []string, colors *progress.Colors) (processor.Logger, error) {
+func startWebDashboard(ctx context.Context, p webDashboardParams) (processor.Logger, error) {
 	// create session for SSE streaming (handles both live streaming and history replay)
-	session := web.NewSession("main", baseLog.Path())
-	broadcastLog := web.NewBroadcastLogger(baseLog, session)
+	session := web.NewSession("main", p.BaseLog.Path())
+	broadcastLog := web.NewBroadcastLogger(p.BaseLog, session)
 
 	// extract plan name for display
 	planName := "(no plan)"
-	if planFile != "" {
-		planName = filepath.Base(planFile)
+	if p.PlanFile != "" {
+		planName = filepath.Base(p.PlanFile)
 	}
 
 	cfg := web.ServerConfig{
-		Port:     port,
+		Port:     p.Port,
 		PlanName: planName,
-		Branch:   branch,
-		PlanFile: planFile,
+		Branch:   p.Branch,
+		PlanFile: p.PlanFile,
 	}
 
 	// determine if we should use multi-session mode
 	// multi-session mode is enabled when watch dirs are provided via CLI or config
-	useMultiSession := len(watchDirs) > 0 || len(configWatchDirs) > 0
+	useMultiSession := len(p.WatchDirs) > 0 || len(p.ConfigWatchDirs) > 0
 
 	var srv *web.Server
 	var watcher *web.Watcher
@@ -665,7 +892,7 @@ func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, 
 		sm.Register(session)
 
 		// resolve watch directories (CLI > config > cwd)
-		dirs := web.ResolveWatchDirs(watchDirs, configWatchDirs)
+		dirs := web.ResolveWatchDirs(p.WatchDirs, p.ConfigWatchDirs)
 
 		var err error
 		watcher, err = web.NewWatcher(dirs, sm)
@@ -687,7 +914,7 @@ func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, 
 	}
 
 	// start server with startup check
-	srvErrCh, err := startServerAsync(ctx, srv, port)
+	srvErrCh, err := startServerAsync(ctx, srv, p.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -710,6 +937,6 @@ func startWebDashboard(ctx context.Context, baseLog processor.Logger, port int, 
 		}
 	}()
 
-	colors.Info().Printf("web dashboard: http://localhost:%d\n", port)
+	p.Colors.Info().Printf("web dashboard: http://localhost:%d\n", p.Port)
 	return broadcastLog, nil
 }

@@ -17,6 +17,7 @@ const (
 	reviewFirstPromptFile  = "review_first.txt"
 	reviewSecondPromptFile = "review_second.txt"
 	codexPromptFile        = "codex.txt"
+	makePlanPromptFile     = "make_plan.txt"
 )
 
 // Config holds all configuration settings for ralphex.
@@ -58,6 +59,7 @@ type Config struct {
 	ReviewFirstPrompt  string `json:"-"`
 	ReviewSecondPrompt string `json:"-"`
 	CodexPrompt        string `json:"-"`
+	MakePlanPrompt     string `json:"-"`
 
 	// custom agents (loaded separately from files)
 	CustomAgents []CustomAgent `json:"-"`
@@ -190,6 +192,7 @@ func loadWithLocal(globalDir, localDir string) (*Config, error) {
 		ReviewFirstPrompt:    prompts.ReviewFirst,
 		ReviewSecondPrompt:   prompts.ReviewSecond,
 		CodexPrompt:          prompts.Codex,
+		MakePlanPrompt:       prompts.MakePlan,
 		CustomAgents:         agents,
 		configDir:            globalDir,
 		localDir:             localDir,

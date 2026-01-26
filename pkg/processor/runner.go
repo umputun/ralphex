@@ -24,11 +24,13 @@ const (
 	ModeFull      Mode = "full"       // full execution: tasks + reviews + codex
 	ModeReview    Mode = "review"     // skip tasks, run full review pipeline
 	ModeCodexOnly Mode = "codex-only" // skip tasks and first review, run only codex loop
+	ModePlan      Mode = "plan"       // interactive plan creation mode
 )
 
 // Config holds runner configuration.
 type Config struct {
 	PlanFile         string         // path to plan file (required for full mode)
+	PlanDescription  string         // plan description for interactive plan creation mode
 	ProgressPath     string         // path to progress file
 	Mode             Mode           // execution mode
 	MaxIterations    int            // maximum iterations for task phase
@@ -42,6 +44,7 @@ type Config struct {
 
 //go:generate moq -out mocks/executor.go -pkg mocks -skip-ensure -fmt goimports . Executor
 //go:generate moq -out mocks/logger.go -pkg mocks -skip-ensure -fmt goimports . Logger
+//go:generate moq -out mocks/input_collector.go -pkg mocks -skip-ensure -fmt goimports . InputCollector
 
 // Executor runs CLI commands and returns results.
 type Executor interface {
@@ -55,7 +58,14 @@ type Logger interface {
 	PrintRaw(format string, args ...any)
 	PrintSection(section Section)
 	PrintAligned(text string)
+	LogQuestion(question string, options []string)
+	LogAnswer(answer string)
 	Path() string
+}
+
+// InputCollector provides interactive input collection for plan creation.
+type InputCollector interface {
+	AskQuestion(ctx context.Context, question string, options []string) (string, error)
 }
 
 // Runner orchestrates the execution loop.
@@ -64,6 +74,7 @@ type Runner struct {
 	log            Logger
 	claude         Executor
 	codex          Executor
+	inputCollector InputCollector
 	iterationDelay time.Duration
 	taskRetryCount int
 }
@@ -127,6 +138,11 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor) *Runner {
 	}
 }
 
+// SetInputCollector sets the input collector for plan creation mode.
+func (r *Runner) SetInputCollector(c InputCollector) {
+	r.inputCollector = c
+}
+
 // Run executes the main loop based on configured mode.
 func (r *Runner) Run(ctx context.Context) error {
 	switch r.cfg.Mode {
@@ -136,6 +152,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		return r.runReviewOnly(ctx)
 	case ModeCodexOnly:
 		return r.runCodexOnly(ctx)
+	case ModePlan:
+		return r.runPlanCreation(ctx)
 	default:
 		return fmt.Errorf("unknown mode: %s", r.cfg.Mode)
 	}
@@ -509,4 +527,75 @@ func (r *Runner) showCodexSummary(output string) {
 		}
 		r.log.PrintAligned("  " + line)
 	}
+}
+
+// runPlanCreation executes the interactive plan creation loop.
+// the loop continues until PLAN_READY signal or max iterations reached.
+func (r *Runner) runPlanCreation(ctx context.Context) error {
+	if r.cfg.PlanDescription == "" {
+		return errors.New("plan description required for plan mode")
+	}
+	if r.inputCollector == nil {
+		return errors.New("input collector required for plan mode")
+	}
+
+	r.log.SetPhase(PhasePlan)
+	r.log.PrintRaw("starting interactive plan creation\n")
+	r.log.Print("plan request: %s", r.cfg.PlanDescription)
+
+	// plan iterations use 20% of max_iterations (min 5)
+	maxPlanIterations := max(5, r.cfg.MaxIterations/5)
+
+	for i := 1; i <= maxPlanIterations; i++ {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plan creation: %w", ctx.Err())
+		default:
+		}
+
+		r.log.PrintSection(NewPlanIterationSection(i))
+
+		prompt := r.buildPlanPrompt()
+		result := r.claude.Run(ctx, prompt)
+		if result.Error != nil {
+			return fmt.Errorf("claude execution: %w", result.Error)
+		}
+
+		if result.Signal == SignalFailed {
+			return errors.New("plan creation failed (FAILED signal received)")
+		}
+
+		// check for PLAN_READY signal
+		if IsPlanReady(result.Signal) {
+			r.log.Print("plan creation completed")
+			return nil
+		}
+
+		// check for QUESTION signal
+		question, err := ParseQuestionPayload(result.Output)
+		if err == nil {
+			// got a question - ask user and log answer
+			r.log.LogQuestion(question.Question, question.Options)
+
+			answer, askErr := r.inputCollector.AskQuestion(ctx, question.Question, question.Options)
+			if askErr != nil {
+				return fmt.Errorf("collect answer: %w", askErr)
+			}
+
+			r.log.LogAnswer(answer)
+
+			time.Sleep(r.iterationDelay)
+			continue
+		}
+
+		// log malformed question signals (but not "no question signal" which is expected)
+		if !errors.Is(err, ErrNoQuestionSignal) {
+			r.log.Print("warning: %v", err)
+		}
+
+		// no question and no completion - continue
+		time.Sleep(r.iterationDelay)
+	}
+
+	return fmt.Errorf("max plan iterations (%d) reached without completion", maxPlanIterations)
 }

@@ -114,3 +114,13 @@ func (r *Runner) buildCodexEvaluationPrompt(codexOutput string) string {
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.CodexPrompt)
 	return strings.ReplaceAll(prompt, "{{CODEX_OUTPUT}}", codexOutput)
 }
+
+// buildPlanPrompt creates the prompt for interactive plan creation.
+// uses the make_plan prompt loaded from config (either user-provided or embedded default).
+// replaces {{PLAN_DESCRIPTION}} and {{PROGRESS_FILE}} variables.
+func (r *Runner) buildPlanPrompt() string {
+	prompt := r.cfg.AppConfig.MakePlanPrompt
+	prompt = strings.ReplaceAll(prompt, "{{PLAN_DESCRIPTION}}", r.cfg.PlanDescription)
+	prompt = strings.ReplaceAll(prompt, "{{PROGRESS_FILE}}", r.getProgressFileRef())
+	return prompt
+}

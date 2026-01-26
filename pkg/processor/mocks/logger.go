@@ -15,6 +15,12 @@ import (
 //
 //		// make and configure a mocked processor.Logger
 //		mockedLogger := &LoggerMock{
+//			LogAnswerFunc: func(answer string)  {
+//				panic("mock out the LogAnswer method")
+//			},
+//			LogQuestionFunc: func(question string, options []string)  {
+//				panic("mock out the LogQuestion method")
+//			},
 //			PathFunc: func() string {
 //				panic("mock out the Path method")
 //			},
@@ -40,6 +46,12 @@ import (
 //
 //	}
 type LoggerMock struct {
+	// LogAnswerFunc mocks the LogAnswer method.
+	LogAnswerFunc func(answer string)
+
+	// LogQuestionFunc mocks the LogQuestion method.
+	LogQuestionFunc func(question string, options []string)
+
 	// PathFunc mocks the Path method.
 	PathFunc func() string
 
@@ -60,6 +72,18 @@ type LoggerMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// LogAnswer holds details about calls to the LogAnswer method.
+		LogAnswer []struct {
+			// Answer is the answer argument value.
+			Answer string
+		}
+		// LogQuestion holds details about calls to the LogQuestion method.
+		LogQuestion []struct {
+			// Question is the question argument value.
+			Question string
+			// Options is the options argument value.
+			Options []string
+		}
 		// Path holds details about calls to the Path method.
 		Path []struct {
 		}
@@ -93,12 +117,82 @@ type LoggerMock struct {
 			Phase processor.Phase
 		}
 	}
+	lockLogAnswer    sync.RWMutex
+	lockLogQuestion  sync.RWMutex
 	lockPath         sync.RWMutex
 	lockPrint        sync.RWMutex
 	lockPrintAligned sync.RWMutex
 	lockPrintRaw     sync.RWMutex
 	lockPrintSection sync.RWMutex
 	lockSetPhase     sync.RWMutex
+}
+
+// LogAnswer calls LogAnswerFunc.
+func (mock *LoggerMock) LogAnswer(answer string) {
+	if mock.LogAnswerFunc == nil {
+		panic("LoggerMock.LogAnswerFunc: method is nil but Logger.LogAnswer was just called")
+	}
+	callInfo := struct {
+		Answer string
+	}{
+		Answer: answer,
+	}
+	mock.lockLogAnswer.Lock()
+	mock.calls.LogAnswer = append(mock.calls.LogAnswer, callInfo)
+	mock.lockLogAnswer.Unlock()
+	mock.LogAnswerFunc(answer)
+}
+
+// LogAnswerCalls gets all the calls that were made to LogAnswer.
+// Check the length with:
+//
+//	len(mockedLogger.LogAnswerCalls())
+func (mock *LoggerMock) LogAnswerCalls() []struct {
+	Answer string
+} {
+	var calls []struct {
+		Answer string
+	}
+	mock.lockLogAnswer.RLock()
+	calls = mock.calls.LogAnswer
+	mock.lockLogAnswer.RUnlock()
+	return calls
+}
+
+// LogQuestion calls LogQuestionFunc.
+func (mock *LoggerMock) LogQuestion(question string, options []string) {
+	if mock.LogQuestionFunc == nil {
+		panic("LoggerMock.LogQuestionFunc: method is nil but Logger.LogQuestion was just called")
+	}
+	callInfo := struct {
+		Question string
+		Options  []string
+	}{
+		Question: question,
+		Options:  options,
+	}
+	mock.lockLogQuestion.Lock()
+	mock.calls.LogQuestion = append(mock.calls.LogQuestion, callInfo)
+	mock.lockLogQuestion.Unlock()
+	mock.LogQuestionFunc(question, options)
+}
+
+// LogQuestionCalls gets all the calls that were made to LogQuestion.
+// Check the length with:
+//
+//	len(mockedLogger.LogQuestionCalls())
+func (mock *LoggerMock) LogQuestionCalls() []struct {
+	Question string
+	Options  []string
+} {
+	var calls []struct {
+		Question string
+		Options  []string
+	}
+	mock.lockLogQuestion.RLock()
+	calls = mock.calls.LogQuestion
+	mock.lockLogQuestion.RUnlock()
+	return calls
 }
 
 // Path calls PathFunc.

@@ -158,6 +158,12 @@ func TestClaudeExecutor_parseStream(t *testing.T) {
 			wantSignal: "<<<RALPHEX:CODEX_REVIEW_DONE>>>",
 		},
 		{
+			name:       "plan ready signal",
+			input:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Plan complete. <<<RALPHEX:PLAN_READY>>>"}}`,
+			wantOutput: "Plan complete. <<<RALPHEX:PLAN_READY>>>",
+			wantSignal: "<<<RALPHEX:PLAN_READY>>>",
+		},
+		{
 			name:       "result type",
 			input:      `{"type":"result","result":{"output":"Final output"}}`,
 			wantOutput: "Final output",

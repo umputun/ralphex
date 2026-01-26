@@ -48,6 +48,8 @@ func newMockLogger(path string) *mocks.LoggerMock {
 		PrintRawFunc:     func(_ string, _ ...any) {},
 		PrintSectionFunc: func(_ processor.Section) {},
 		PrintAlignedFunc: func(_ string) {},
+		LogQuestionFunc:  func(_ string, _ []string) {},
+		LogAnswerFunc:    func(_ string) {},
 		PathFunc:         func() string { return path },
 	}
 }
@@ -435,4 +437,233 @@ func TestRunner_TaskRetryCount_UsedCorrectly(t *testing.T) {
 	assert.Contains(t, err.Error(), "FAILED signal")
 	// should have tried 3 times: initial + 2 retries
 	assert.Len(t, claude.RunCalls(), 3)
+}
+
+// newMockInputCollector creates a mock input collector with predefined answers.
+func newMockInputCollector(answers []string) *mocks.InputCollectorMock {
+	idx := 0
+	return &mocks.InputCollectorMock{
+		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) {
+			if idx >= len(answers) {
+				return "", errors.New("no more mock answers")
+			}
+			answer := answers[idx]
+			idx++
+			return answer, nil
+		},
+	}
+}
+
+func TestRunner_RunPlan_Success(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "plan created", Signal: processor.SignalPlanReady},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "add health check endpoint",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 1)
+}
+
+func TestRunner_RunPlan_WithQuestion(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	questionSignal := `Let me ask a question.
+
+<<<RALPHEX:QUESTION>>>
+{"question": "Which cache backend?", "options": ["Redis", "In-memory", "File-based"]}
+<<<RALPHEX:END>>>`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: questionSignal},                                    // first iteration - asks question
+		{Output: "plan created", Signal: processor.SignalPlanReady}, // second iteration - completes
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector([]string{"Redis"})
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "add caching layer",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 2)
+	assert.Len(t, inputCollector.AskQuestionCalls(), 1)
+	assert.Equal(t, "Which cache backend?", inputCollector.AskQuestionCalls()[0].Question)
+	assert.Equal(t, []string{"Redis", "In-memory", "File-based"}, inputCollector.AskQuestionCalls()[0].Options)
+}
+
+func TestRunner_RunPlan_NoPlanDescription(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	cfg := processor.Config{Mode: processor.ModePlan, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plan description required")
+}
+
+func TestRunner_RunPlan_NoInputCollector(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModePlan, PlanDescription: "test", AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	// don't set input collector
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "input collector required")
+}
+
+func TestRunner_RunPlan_FailedSignal(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "error", Signal: processor.SignalFailed},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FAILED signal")
+}
+
+func TestRunner_RunPlan_MaxIterations(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "exploring..."},
+		{Output: "still exploring..."},
+		{Output: "more exploring..."},
+		{Output: "continuing..."},
+		{Output: "still going..."},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	// maxPlanIterations = max(5, 10/5) = 5
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    10,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max plan iterations")
+}
+
+func TestRunner_RunPlan_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(ctx)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestRunner_RunPlan_ClaudeError(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Error: errors.New("claude error")},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "claude execution")
+}
+
+func TestRunner_RunPlan_InputCollectorError(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	questionSignal := `<<<RALPHEX:QUESTION>>>
+{"question": "Which backend?", "options": ["A", "B"]}
+<<<RALPHEX:END>>>`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: questionSignal},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := &mocks.InputCollectorMock{
+		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) {
+			return "", errors.New("input error")
+		},
+	}
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "collect answer")
 }

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -42,6 +44,9 @@ func TestDetermineMode(t *testing.T) {
 		{name: "review_flag", opts: opts{Review: true}, expected: processor.ModeReview},
 		{name: "codex_only_flag", opts: opts{CodexOnly: true}, expected: processor.ModeCodexOnly},
 		{name: "codex_only_takes_precedence", opts: opts{Review: true, CodexOnly: true}, expected: processor.ModeCodexOnly},
+		{name: "plan_flag", opts: opts{PlanDescription: "add caching"}, expected: processor.ModePlan},
+		{name: "plan_takes_precedence_over_review", opts: opts{PlanDescription: "add caching", Review: true}, expected: processor.ModePlan},
+		{name: "plan_takes_precedence_over_codex", opts: opts{PlanDescription: "add caching", CodexOnly: true}, expected: processor.ModePlan},
 	}
 
 	for _, tc := range tests {
@@ -50,6 +55,138 @@ func TestDetermineMode(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func TestIsWatchOnlyMode(t *testing.T) {
+	tests := []struct {
+		name            string
+		opts            opts
+		configWatchDirs []string
+		expected        bool
+	}{
+		{name: "serve_with_watch_and_no_plan", opts: opts{Serve: true, Watch: []string{"/tmp"}}, configWatchDirs: nil, expected: true},
+		{name: "serve_with_config_watch_and_no_plan", opts: opts{Serve: true}, configWatchDirs: []string{"/home"}, expected: true},
+		{name: "serve_without_watch", opts: opts{Serve: true}, configWatchDirs: nil, expected: false},
+		{name: "no_serve_with_watch", opts: opts{Watch: []string{"/tmp"}}, configWatchDirs: nil, expected: false},
+		{name: "serve_with_plan_file", opts: opts{Serve: true, Watch: []string{"/tmp"}, PlanFile: "plan.md"}, configWatchDirs: nil, expected: false},
+		{name: "serve_with_plan_description", opts: opts{Serve: true, Watch: []string{"/tmp"}, PlanDescription: "add feature"}, configWatchDirs: nil, expected: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := isWatchOnlyMode(tc.opts, tc.configWatchDirs)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestPlanFlagConflict(t *testing.T) {
+	t.Run("returns_error_when_plan_and_planfile_both_set", func(t *testing.T) {
+		o := opts{
+			PlanDescription: "add caching",
+			PlanFile:        "docs/plans/some-plan.md",
+		}
+		err := run(context.Background(), o)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--plan flag conflicts")
+	})
+
+	t.Run("no_error_when_only_plan_flag_set", func(t *testing.T) {
+		// this test will fail at a later point (missing git repo etc), but not at validation
+		o := opts{PlanDescription: "add caching"}
+		err := run(context.Background(), o)
+		// should fail at git repo check, not at validation
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "--plan flag conflicts")
+	})
+
+	t.Run("no_error_when_only_planfile_set", func(t *testing.T) {
+		// this test will fail at a later point (file not found etc), but not at validation
+		o := opts{PlanFile: "nonexistent-plan.md"}
+		err := run(context.Background(), o)
+		// should fail at git repo check, not at validation
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "--plan flag conflicts")
+	})
+}
+
+func TestPlanModeIntegration(t *testing.T) {
+	t.Run("plan_mode_requires_git_repo", func(t *testing.T) {
+		// skip if claude not installed - this test requires claude to pass dependency check
+		if _, err := exec.LookPath("claude"); err != nil {
+			t.Skip("claude not installed")
+		}
+
+		// run from a non-git directory
+		tmpDir := t.TempDir()
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(tmpDir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		o := opts{PlanDescription: "add caching feature"}
+		err = run(context.Background(), o)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no .git directory")
+	})
+
+	t.Run("plan_mode_runs_from_git_repo", func(t *testing.T) {
+		// create a test git repo
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// run in plan mode - will fail at claude execution but should pass validation and setup
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately to stop execution
+
+		o := opts{PlanDescription: "add caching feature", MaxIterations: 1}
+		err = run(ctx, o)
+
+		// should fail with context canceled, not validation errors
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "--plan flag conflicts")
+		assert.NotContains(t, err.Error(), "no .git directory")
+	})
+
+	t.Run("plan_mode_progress_file_naming", func(t *testing.T) {
+		// skip if claude not installed - this test requires claude to pass dependency check
+		if _, err := exec.LookPath("claude"); err != nil {
+			t.Skip("claude not installed")
+		}
+
+		// test that progress filename is generated correctly for plan mode
+		// the actual file creation is tested by the integration test with real runner
+
+		// verify progress filename function handles plan mode correctly
+		// note: progressFilename is not exported, but progress.Config with PlanDescription
+		// is used in runPlanMode - this test verifies the wiring is correct by checking
+		// that the run() routes to runPlanMode without validation errors
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create docs/plans directory to avoid config loading errors
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+
+		// run with immediate cancel - should fail at executor, not validation
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		o := opts{PlanDescription: "test plan description", MaxIterations: 1}
+		err = run(ctx, o)
+
+		// error should be from plan creation (context canceled), not from config or validation
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "plan creation")
+	})
 }
 
 func TestCheckClaudeDep(t *testing.T) {
@@ -566,6 +703,95 @@ func TestEnsureGitignore(t *testing.T) {
 		content, err := os.ReadFile(gitignore) //nolint:gosec // test file in temp dir
 		require.NoError(t, err)
 		assert.Contains(t, string(content), "progress*.txt")
+	})
+}
+
+func TestFindRecentPlan(t *testing.T) {
+	t.Run("finds_recently_modified_file", func(t *testing.T) {
+		dir := t.TempDir()
+		startTime := time.Now()
+
+		// create a plan file
+		planFile := filepath.Join(dir, "new-plan.md")
+		err := os.WriteFile(planFile, []byte("# New Plan"), 0o600)
+		require.NoError(t, err)
+
+		// explicitly set mod time to be after startTime
+		futureTime := startTime.Add(time.Second)
+		err = os.Chtimes(planFile, futureTime, futureTime)
+		require.NoError(t, err)
+
+		result := findRecentPlan(dir, startTime)
+		assert.Equal(t, planFile, result)
+	})
+
+	t.Run("returns_empty_for_old_files", func(t *testing.T) {
+		dir := t.TempDir()
+		startTime := time.Now()
+
+		// create a plan file
+		planFile := filepath.Join(dir, "old-plan.md")
+		err := os.WriteFile(planFile, []byte("# Old Plan"), 0o600)
+		require.NoError(t, err)
+
+		// set mod time to be before startTime
+		pastTime := startTime.Add(-time.Hour)
+		err = os.Chtimes(planFile, pastTime, pastTime)
+		require.NoError(t, err)
+
+		result := findRecentPlan(dir, startTime)
+		assert.Empty(t, result)
+	})
+
+	t.Run("returns_most_recent_of_multiple_files", func(t *testing.T) {
+		dir := t.TempDir()
+		startTime := time.Now()
+
+		// create first file with earlier mod time
+		plan1 := filepath.Join(dir, "plan1.md")
+		err := os.WriteFile(plan1, []byte("# Plan 1"), 0o600)
+		require.NoError(t, err)
+		time1 := startTime.Add(time.Second)
+		err = os.Chtimes(plan1, time1, time1)
+		require.NoError(t, err)
+
+		// create second file with later mod time
+		plan2 := filepath.Join(dir, "plan2.md")
+		err = os.WriteFile(plan2, []byte("# Plan 2"), 0o600)
+		require.NoError(t, err)
+		time2 := startTime.Add(2 * time.Second)
+		err = os.Chtimes(plan2, time2, time2)
+		require.NoError(t, err)
+
+		result := findRecentPlan(dir, startTime)
+		assert.Equal(t, plan2, result)
+	})
+
+	t.Run("returns_empty_for_nonexistent_directory", func(t *testing.T) {
+		result := findRecentPlan("/nonexistent/directory", time.Now())
+		assert.Empty(t, result)
+	})
+
+	t.Run("returns_empty_for_empty_directory", func(t *testing.T) {
+		dir := t.TempDir()
+		result := findRecentPlan(dir, time.Now())
+		assert.Empty(t, result)
+	})
+
+	t.Run("ignores_non_md_files", func(t *testing.T) {
+		dir := t.TempDir()
+		startTime := time.Now()
+
+		// create non-md file with future mod time
+		txtFile := filepath.Join(dir, "notes.txt")
+		err := os.WriteFile(txtFile, []byte("notes"), 0o600)
+		require.NoError(t, err)
+		futureTime := startTime.Add(time.Second)
+		err = os.Chtimes(txtFile, futureTime, futureTime)
+		require.NoError(t, err)
+
+		result := findRecentPlan(dir, startTime)
+		assert.Empty(t, result)
 	})
 }
 

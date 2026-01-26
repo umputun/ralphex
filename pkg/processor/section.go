@@ -11,6 +11,7 @@ const (
 	PhaseReview     Phase = "review"      // code review phase (cyan)
 	PhaseCodex      Phase = "codex"       // codex analysis phase (magenta)
 	PhaseClaudeEval Phase = "claude-eval" // claude evaluating codex (bright cyan)
+	PhasePlan       Phase = "plan"        // plan creation phase (info color)
 )
 
 // SectionType represents the semantic type of a section header.
@@ -38,6 +39,8 @@ const (
 	SectionCodexIteration
 	// SectionClaudeEval represents Claude evaluating codex findings.
 	SectionClaudeEval
+	// SectionPlanIteration represents a plan creation iteration.
+	SectionPlanIteration
 )
 
 // Section carries structured information about a section header.
@@ -93,5 +96,14 @@ func NewGenericSection(label string) Section {
 	return Section{
 		Type:  SectionGeneric,
 		Label: label,
+	}
+}
+
+// NewPlanIterationSection creates a section for plan creation iteration.
+func NewPlanIterationSection(iteration int) Section {
+	return Section{
+		Type:      SectionPlanIteration,
+		Iteration: iteration,
+		Label:     fmt.Sprintf("plan iteration %d", iteration),
 	}
 }

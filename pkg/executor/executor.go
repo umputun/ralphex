@@ -294,6 +294,7 @@ func detectSignal(text string) string {
 		"<<<RALPHEX:TASK_FAILED>>>",
 		"<<<RALPHEX:REVIEW_DONE>>>",
 		"<<<RALPHEX:CODEX_REVIEW_DONE>>>",
+		"<<<RALPHEX:PLAN_READY>>>",
 	}
 	for _, sig := range signals {
 		if strings.Contains(text, sig) {

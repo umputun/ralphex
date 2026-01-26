@@ -1,0 +1,107 @@
+# plan creation prompt
+# this prompt is used for interactive plan creation mode
+# claude explores the codebase, asks clarifying questions, and creates a plan
+#
+# available variables:
+#   {{PLAN_DESCRIPTION}} - user's original request for what to implement
+#   {{PROGRESS_FILE}} - path to progress file with Q&A history
+
+You are helping create an implementation plan for: {{PLAN_DESCRIPTION}}
+
+Progress log: {{PROGRESS_FILE}} (contains previous Q&A from this session)
+
+IMPORTANT: Read the progress file first to see any questions you already asked and answers provided. Do not repeat questions.
+
+## Step 1: Read Progress File
+
+Read {{PROGRESS_FILE}} to understand:
+- What questions you have already asked
+- What answers the user provided
+- Any exploration notes from previous iterations
+
+## Step 2: Explore the Codebase
+
+If this is your first iteration (no Q&A in progress file):
+- Search for relevant files and patterns
+- Understand the project structure
+- Identify existing conventions and patterns
+- Find related code that will inform the implementation
+
+## Step 3: Ask Clarifying Questions (if needed)
+
+If you need user input to create a good plan, emit a QUESTION signal:
+
+<<<RALPHEX:QUESTION>>>
+{"question": "Your question here?", "options": ["Option 1", "Option 2", "Option 3"]}
+<<<RALPHEX:END>>>
+
+Rules for questions:
+- Ask ONE question at a time
+- Provide 2-4 concrete options (not vague like "other")
+- Only ask if you genuinely need clarification
+- Do not ask about implementation details you can decide yourself
+- Focus on architectural choices, feature scope, and user preferences
+
+After emitting QUESTION, STOP immediately. Do not continue. The loop will collect the answer and run another iteration.
+
+## Step 4: Create the Plan (when ready)
+
+When you have enough information to create a complete plan:
+
+1. Create a plan file at docs/plans/YYYY-MM-DD-<slug>.md where <slug> is derived from the description
+2. Use this structure:
+
+---
+# <Title>
+
+## Overview
+<Brief description of what will be implemented>
+
+## Context
+- Files involved: <list relevant files>
+- Related patterns: <existing patterns to follow>
+- Dependencies: <external dependencies if any>
+
+## Development Approach
+- **Testing approach**: Regular (code first, then tests) or TDD (test first)
+- Complete each task fully before moving to the next
+- <Any project-specific approaches>
+- **CRITICAL: every task MUST include new/updated tests**
+- **CRITICAL: all tests must pass before starting next task**
+
+## Implementation Steps
+
+### Task 1: <Title>
+
+**Files:**
+- Modify: `path/to/file.go`
+- Create: `path/to/new_file.go` (if any)
+
+- [ ] first implementation step
+- [ ] second implementation step
+- [ ] write tests for this task
+- [ ] run `go test ./...` - must pass before task 2
+
+### Task 2: <Title>
+...
+
+(continue for all tasks)
+
+### Task N: Verify acceptance criteria
+
+- [ ] manual test: <key user-facing test>
+- [ ] run full test suite: `go test ./...`
+- [ ] run linter: `golangci-lint run`
+- [ ] verify test coverage meets 80%+
+
+### Task N+1: Update documentation
+
+- [ ] update README.md if user-facing changes
+- [ ] update CLAUDE.md if internal patterns changed
+- [ ] move this plan to `docs/plans/completed/`
+---
+
+3. After creating the plan file, output exactly:
+<<<RALPHEX:PLAN_READY>>>
+
+OUTPUT FORMAT: No markdown formatting in your response text (no **bold**, `code`, # headers). Plain text and - lists are fine. The plan FILE should use markdown.
