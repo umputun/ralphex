@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,60 @@ func testColors() *progress.Colors {
 		Timestamp:  "138,138,138",
 		Info:       "180,180,180",
 	})
+}
+
+func TestPromptPlanDescription(t *testing.T) {
+	colors := testColors()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "normal_input", input: "add user authentication\n", expected: "add user authentication"},
+		{name: "input_with_whitespace", input: "  add caching  \n", expected: "add caching"},
+		{name: "empty_input", input: "\n", expected: ""},
+		{name: "only_whitespace", input: "   \n", expected: ""},
+		{name: "multiword_description", input: "implement health check endpoint with metrics\n", expected: "implement health check endpoint with metrics"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := strings.NewReader(tc.input)
+			result := promptPlanDescription(reader, colors)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+
+	t.Run("eof_returns_empty", func(t *testing.T) {
+		// empty reader simulates EOF (Ctrl+D)
+		reader := strings.NewReader("")
+		result := promptPlanDescription(reader, colors)
+		assert.Empty(t, result)
+	})
+}
+
+func TestIsMainBranch(t *testing.T) {
+	tests := []struct {
+		name     string
+		branch   string
+		expected bool
+	}{
+		{name: "main_is_main_branch", branch: "main", expected: true},
+		{name: "master_is_main_branch", branch: "master", expected: true},
+		{name: "feature_branch_is_not_main", branch: "feature-x", expected: false},
+		{name: "develop_is_not_main", branch: "develop", expected: false},
+		{name: "empty_is_not_main", branch: "", expected: false},
+		{name: "main_prefixed_is_not_main", branch: "main-feature", expected: false},
+		{name: "master_prefixed_is_not_main", branch: "master-fix", expected: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := isMainBranch(tc.branch)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }
 
 func TestDetermineMode(t *testing.T) {
@@ -189,6 +244,95 @@ func TestPlanModeIntegration(t *testing.T) {
 	})
 }
 
+func TestAutoPlanModeDetection(t *testing.T) {
+	t.Run("feature_branch_with_no_plans_still_errors", func(t *testing.T) {
+		// skip if claude not installed
+		if _, err := exec.LookPath("claude"); err != nil {
+			t.Skip("claude not installed")
+		}
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create empty plans dir
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+
+		// create and switch to a feature branch
+		gitOps, err := git.Open(".")
+		require.NoError(t, err)
+		require.NoError(t, gitOps.CreateBranch("feature-test"))
+
+		// run without arguments - should error because we're on feature branch
+		o := opts{MaxIterations: 1}
+		err = run(context.Background(), o)
+		require.Error(t, err)
+		// should still get the no plans found error, not auto-plan-mode
+		assert.ErrorIs(t, err, errNoPlansFound, "should return errNoPlansFound on feature branch")
+	})
+
+	t.Run("review_mode_skips_auto_plan_mode", func(t *testing.T) {
+		// skip if claude not installed
+		if _, err := exec.LookPath("claude"); err != nil {
+			t.Skip("claude not installed")
+		}
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create empty plans dir
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+
+		// run in review mode with canceled context - should not trigger auto-plan-mode
+		// plan is optional in review mode, so it proceeds (then fails on canceled context)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately to avoid actual execution
+
+		o := opts{Review: true, MaxIterations: 1}
+		err = run(ctx, o)
+		// error should be from context cancellation or runner, not "no plans found"
+		// this verifies auto-plan-mode is skipped for --review flag
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, errNoPlansFound, "review mode should skip auto-plan-mode")
+	})
+
+	t.Run("codex_only_mode_skips_auto_plan_mode", func(t *testing.T) {
+		// skip if claude not installed
+		if _, err := exec.LookPath("claude"); err != nil {
+			t.Skip("claude not installed")
+		}
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create empty plans dir
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+
+		// run in codex-only mode with canceled context - should not trigger auto-plan-mode
+		// plan is optional in codex-only mode, so it proceeds (then fails on canceled context)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately to avoid actual execution
+
+		o := opts{CodexOnly: true, MaxIterations: 1}
+		err = run(ctx, o)
+		// error should be from context cancellation or runner, not "no plans found"
+		// this verifies auto-plan-mode is skipped for --codex-only flag
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, errNoPlansFound, "codex-only mode should skip auto-plan-mode")
+	})
+}
+
 func TestCheckClaudeDep(t *testing.T) {
 	t.Run("uses_configured_command", func(t *testing.T) {
 		cfg := &config.Config{ClaudeCommand: "nonexistent-command-12345"}
@@ -229,7 +373,8 @@ func TestPreparePlanFile(t *testing.T) {
 			PlanFile: "", Optional: false, PlansDir: tmpDir, Colors: colors,
 		})
 		require.Error(t, err)
-		// error comes from selectPlanWithFzf when no .md files found
+		// error should be errNoPlansFound sentinel
+		require.ErrorIs(t, err, errNoPlansFound, "error should be errNoPlansFound")
 		assert.Contains(t, err.Error(), "no plans found")
 	})
 
@@ -313,10 +458,19 @@ func TestSelectPlan(t *testing.T) {
 func TestSelectPlanWithFzf(t *testing.T) {
 	colors := testColors()
 
-	t.Run("returns error if plans directory not found", func(t *testing.T) {
+	t.Run("returns_sentinel_error_if_plans_directory_missing", func(t *testing.T) {
 		_, err := selectPlanWithFzf(context.Background(), "/nonexistent/plans", colors)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "plans directory not found")
+		require.ErrorIs(t, err, errNoPlansFound, "missing dir should return errNoPlansFound")
+		assert.Contains(t, err.Error(), "directory missing")
+	})
+
+	t.Run("returns_sentinel_error_when_no_plans", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		_, err := selectPlanWithFzf(context.Background(), tmpDir, colors)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errNoPlansFound, "should return errNoPlansFound sentinel")
+		assert.Contains(t, err.Error(), tmpDir, "error should contain directory path")
 	})
 
 	t.Run("auto-selects single plan file", func(t *testing.T) {

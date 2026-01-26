@@ -124,6 +124,7 @@ Plans can be created in several ways:
 - **[Claude Code](#claude-code-integration-optional)** - use slash commands like `/ralphex-plan` or your own planning workflows
 - **Manually** - write markdown files directly in `docs/plans/`
 - **`--plan` flag** - integrated option that handles the entire flow
+- **Auto-detection** - running `ralphex` without arguments on master/main prompts for plan creation if no plans exist
 
 The `--plan` flag provides a simpler integrated experience:
 
@@ -181,7 +182,7 @@ Download the appropriate binary from [releases](https://github.com/umputun/ralph
 # execute plan with task loop + reviews
 ralphex docs/plans/feature.md
 
-# use fzf to select plan
+# select plan with fzf, or create one interactively if none exist
 ralphex
 
 # review-only mode (skip task execution)

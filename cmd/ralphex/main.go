@@ -2,9 +2,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -44,6 +46,9 @@ var revision = "unknown"
 
 // datePrefixRe matches date-like prefixes in plan filenames (e.g., "2024-01-15-").
 var datePrefixRe = regexp.MustCompile(`^[\d-]+`)
+
+// errNoPlansFound is returned when no plan files exist in the plans directory.
+var errNoPlansFound = errors.New("no plans found")
 
 // startupInfo holds parameters for printing startup information.
 type startupInfo struct {
@@ -179,6 +184,11 @@ func run(ctx context.Context, o opts) error {
 		Colors:   colors,
 	})
 	if err != nil {
+		// check for auto-plan-mode: no plans found on main/master branch
+		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, gitOps, cfg, colors)
+		if handled {
+			return autoPlanErr
+		}
 		return err
 	}
 
@@ -202,6 +212,53 @@ func getCurrentBranch(gitOps *git.Repo) string {
 		return "unknown"
 	}
 	return branch
+}
+
+// isMainBranch returns true if the branch name is "main" or "master".
+func isMainBranch(branch string) bool {
+	return branch == "main" || branch == "master"
+}
+
+// promptPlanDescription prompts the user for a plan description when no plans are found.
+// returns the trimmed description, or empty string if user cancels (Ctrl+D/EOF or empty input).
+func promptPlanDescription(r io.Reader, colors *progress.Colors) string {
+	colors.Info().Printf("no plans found. what would you like to implement?\n")
+	colors.Info().Printf("(enter description or press Ctrl+D to cancel): ")
+
+	reader := bufio.NewReader(r)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		// EOF (Ctrl+D) is graceful cancel
+		return ""
+	}
+
+	return strings.TrimSpace(line)
+}
+
+// tryAutoPlanMode attempts to switch to plan mode when no plans are found on main/master.
+// returns (true, nil) if user canceled, (true, err) if plan mode was attempted, or (false, nil) if auto-plan-mode doesn't apply.
+func tryAutoPlanMode(ctx context.Context, err error, o opts, gitOps *git.Repo, cfg *config.Config, colors *progress.Colors) (bool, error) {
+	if !errors.Is(err, errNoPlansFound) || o.Review || o.CodexOnly {
+		return false, nil
+	}
+
+	branch, branchErr := gitOps.CurrentBranch()
+	if branchErr != nil || !isMainBranch(branch) {
+		return false, nil //nolint:nilerr // branchErr is intentionally ignored - if we can't get branch, skip auto-plan-mode
+	}
+
+	description := promptPlanDescription(os.Stdin, colors)
+	if description == "" {
+		return true, nil // user canceled
+	}
+
+	o.PlanDescription = description
+	return true, runPlanMode(ctx, o, executePlanRequest{
+		Mode:   processor.ModePlan,
+		GitOps: gitOps,
+		Config: cfg,
+		Colors: colors,
+	})
 }
 
 // setupRunnerLogger creates the appropriate logger for the runner.
@@ -416,13 +473,13 @@ func selectPlan(ctx context.Context, sel planSelector) (string, error) {
 
 func selectPlanWithFzf(ctx context.Context, plansDir string, colors *progress.Colors) (string, error) {
 	if _, err := os.Stat(plansDir); err != nil {
-		return "", fmt.Errorf("plans directory not found: %s", plansDir)
+		return "", fmt.Errorf("%w: %s (directory missing)", errNoPlansFound, plansDir)
 	}
 
 	// find plan files (excluding completed/)
 	plans, err := filepath.Glob(filepath.Join(plansDir, "*.md"))
 	if err != nil || len(plans) == 0 {
-		return "", fmt.Errorf("no plans found in %s", plansDir)
+		return "", fmt.Errorf("%w: %s", errNoPlansFound, plansDir)
 	}
 
 	// auto-select if single plan (no fzf needed)
