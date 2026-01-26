@@ -110,9 +110,9 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 10: Verify all tests pass together
 
-- [ ] Run full e2e test suite: `go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...`
-- [ ] Verify no flaky tests (run 3 times)
-- [ ] Run linter: `make lint`
+- [x] Run full e2e test suite: `go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...`
+- [x] Verify no flaky tests (run 3 times)
+- [x] Run linter: `make lint`
 
 ### Task 11: Update documentation
 
