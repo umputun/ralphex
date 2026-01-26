@@ -88,14 +88,14 @@ Started: 2026-01-25 10:30:00
 **Files:**
 - Modify: `pkg/processor/signals.go`
 
-- [ ] add `SignalQuestion = "QUESTION"` constant
-- [ ] add `SignalPlanReady = "PLAN_READY"` constant
-- [ ] add `QuestionPayload` struct with `Question` and `Options` fields
-- [ ] add `ParseQuestionPayload(output string) (*QuestionPayload, error)` function
-- [ ] write tests for `ParseQuestionPayload` with valid JSON
-- [ ] write tests for `ParseQuestionPayload` with malformed JSON
-- [ ] write tests for `ParseQuestionPayload` when no question signal present
-- [ ] run `go test ./pkg/processor/...` - must pass before task 2
+- [x] add `SignalQuestion = "QUESTION"` constant
+- [x] add `SignalPlanReady = "PLAN_READY"` constant
+- [x] add `QuestionPayload` struct with `Question` and `Options` fields
+- [x] add `ParseQuestionPayload(output string) (*QuestionPayload, error)` function
+- [x] write tests for `ParseQuestionPayload` with valid JSON
+- [x] write tests for `ParseQuestionPayload` with malformed JSON
+- [x] write tests for `ParseQuestionPayload` when no question signal present
+- [x] run `go test ./pkg/processor/...` - must pass before task 2
 
 ### Task 2: Add ModePlan and CLI flag
 
@@ -103,14 +103,14 @@ Started: 2026-01-25 10:30:00
 - Modify: `pkg/processor/runner.go`
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] add `ModePlan Mode = "plan"` constant in runner.go
-- [ ] add `--plan` string flag in opts struct (plan description)
-- [ ] add `PlanDescription` field to `processor.Config`
-- [ ] update `determineMode()` to return `ModePlan` when `--plan` is set
-- [ ] add validation: `--plan` conflicts with positional plan file argument
-- [ ] write tests for mode determination with `--plan` flag
-- [ ] write tests for conflict validation
-- [ ] run `go test ./...` - must pass before task 3
+- [x] add `ModePlan Mode = "plan"` constant in runner.go
+- [x] add `--plan` string flag in opts struct (plan description)
+- [x] add `PlanDescription` field to `processor.Config`
+- [x] update `determineMode()` to return `ModePlan` when `--plan` is set
+- [x] add validation: `--plan` conflicts with positional plan file argument
+- [x] write tests for mode determination with `--plan` flag
+- [x] write tests for conflict validation
+- [x] run `go test ./...` - must pass before task 3
 
 ### Task 3: Add make_plan prompt
 
@@ -118,16 +118,16 @@ Started: 2026-01-25 10:30:00
 - Create: `pkg/config/defaults/prompts/make_plan.txt`
 - Modify: `pkg/config/prompts.go`
 
-- [ ] create `make_plan.txt` prompt with instructions for:
+- [x] create `make_plan.txt` prompt with instructions for:
   - reading progress file for context
   - exploring codebase to understand structure
   - asking clarifying questions via QUESTION signal
   - emitting PLAN_READY when done
-- [ ] add `MakePlan` field to `Prompts` struct
-- [ ] update `promptLoader.Load()` to load make_plan.txt
-- [ ] add template variables: `{{PLAN_DESCRIPTION}}`, `{{PROGRESS_FILE}}`
-- [ ] write tests for prompt loading
-- [ ] run `go test ./pkg/config/...` - must pass before task 4
+- [x] add `MakePlan` field to `Prompts` struct
+- [x] update `promptLoader.Load()` to load make_plan.txt
+- [x] add template variables: `{{PLAN_DESCRIPTION}}`, `{{PROGRESS_FILE}}`
+- [x] write tests for prompt loading
+- [x] run `go test ./pkg/config/...` - must pass before task 4
 
 ### Task 4: Add terminal input collector
 
@@ -135,76 +135,76 @@ Started: 2026-01-25 10:30:00
 - Create: `pkg/input/input.go`
 - Create: `pkg/input/input_test.go`
 
-- [ ] create `Collector` interface with `AskQuestion(question string, options []string) (string, error)`
-- [ ] implement `TerminalCollector` that:
+- [x] create `Collector` interface with `AskQuestion(question string, options []string) (string, error)`
+- [x] implement `TerminalCollector` that:
   - tries fzf first if available
   - falls back to numbered selection with stdin
-- [ ] implement fzf-based selection using `exec.Command`
-- [ ] implement fallback numbered selection for no-fzf environments
-- [ ] write tests for `TerminalCollector` with mock stdin (fallback mode)
-- [ ] run `go test ./pkg/input/...` - must pass before task 5
+- [x] implement fzf-based selection using `exec.Command`
+- [x] implement fallback numbered selection for no-fzf environments
+- [x] write tests for `TerminalCollector` with mock stdin (fallback mode)
+- [x] run `go test ./pkg/input/...` - must pass before task 5
 
 ### Task 5: Implement plan creation loop in Runner
 
 **Files:**
 - Modify: `pkg/processor/runner.go`
 
-- [ ] add `runPlanCreation(ctx context.Context) error` method
-- [ ] implement loop:
+- [x] add `runPlanCreation(ctx context.Context) error` method
+- [x] implement loop:
   - build prompt with `{{PLAN_DESCRIPTION}}` and `{{PROGRESS_FILE}}`
   - run claude executor
   - check for QUESTION signal → call input collector → log answer
   - check for PLAN_READY signal → exit loop
   - continue until max iterations or completion
-- [ ] add `PhasePlan Phase = "plan"` for progress coloring
-- [ ] add `SectionPlanIteration` section type
-- [ ] update `Run()` to route `ModePlan` to `runPlanCreation()`
-- [ ] write tests for plan creation loop with mock executor
-- [ ] write tests for question detection and answer logging
-- [ ] write tests for PLAN_READY completion
-- [ ] run `go test ./pkg/processor/...` - must pass before task 6
+- [x] add `PhasePlan Phase = "plan"` for progress coloring
+- [x] add `SectionPlanIteration` section type
+- [x] update `Run()` to route `ModePlan` to `runPlanCreation()`
+- [x] write tests for plan creation loop with mock executor
+- [x] write tests for question detection and answer logging
+- [x] write tests for PLAN_READY completion
+- [x] run `go test ./pkg/processor/...` - must pass before task 6
 
 ### Task 6: Update progress logger for plan mode
 
 **Files:**
 - Modify: `pkg/progress/progress.go`
 
-- [ ] update `progressFileName()` to handle plan mode: `progress-plan-<name>.txt`
-- [ ] add `LogQuestion(question string, options []string)` method
-- [ ] add `LogAnswer(answer string)` method
-- [ ] write tests for plan mode progress filename
-- [ ] write tests for question/answer logging format
-- [ ] run `go test ./pkg/progress/...` - must pass before task 7
+- [x] update `progressFileName()` to handle plan mode: `progress-plan-<name>.txt`
+- [x] add `LogQuestion(question string, options []string)` method
+- [x] add `LogAnswer(answer string)` method
+- [x] write tests for plan mode progress filename
+- [x] write tests for question/answer logging format
+- [x] run `go test ./pkg/progress/...` - must pass before task 7
 
 ### Task 7: Wire up main.go for plan mode
 
 **Files:**
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] create input collector in `run()` when plan mode
-- [ ] pass collector to Runner via new config field or method
-- [ ] handle plan mode progress file naming
-- [ ] add startup info for plan mode
-- [ ] write integration test for plan flag parsing
-- [ ] run `go test ./cmd/ralphex/...` - must pass before task 8
+- [x] create input collector in `run()` when plan mode
+- [x] pass collector to Runner via new config field or method
+- [x] handle plan mode progress file naming
+- [x] add startup info for plan mode
+- [x] write integration test for plan flag parsing
+- [x] run `go test ./cmd/ralphex/...` - must pass before task 8
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] manual test: `ralphex --plan "add health check endpoint"` starts plan loop
-- [ ] manual test: question appears with fzf picker (or numbered fallback)
-- [ ] manual test: answer logged to progress file
-- [ ] manual test: loop continues after answer
-- [ ] manual test: PLAN_READY creates plan file in docs/plans/
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run`
-- [ ] verify test coverage meets 80%+
+- [x] manual test: `ralphex --plan "add health check endpoint"` starts plan loop
+- [x] manual test: question appears with fzf picker (or numbered fallback)
+- [x] manual test: answer logged to progress file
+- [x] manual test: loop continues after answer
+- [x] manual test: PLAN_READY creates plan file in docs/plans/
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `golangci-lint run`
+- [x] verify test coverage meets 80%+
 
 ### Task 9: Update documentation
 
-- [ ] update README.md with `--plan` flag usage
-- [ ] update CLAUDE.md with plan mode details
-- [ ] add example plan creation workflow
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update README.md with `--plan` flag usage
+- [x] update CLAUDE.md with plan mode details
+- [x] add example plan creation workflow
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

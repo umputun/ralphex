@@ -38,12 +38,31 @@ docs/plans/         # plan files location
 ## Key Patterns
 
 - Signal-based completion detection (COMPLETED, FAILED, REVIEW_DONE signals)
+- Plan creation signals: QUESTION (with JSON payload) and PLAN_READY
 - Streaming output with timestamps
 - Progress logging to files
 - Progress file locking (flock) for active session detection
-- Multiple execution modes: full, review-only, codex-only
+- Multiple execution modes: full, review-only, codex-only, plan creation
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
+
+### Plan Creation Mode
+
+The `--plan "description"` flag enables interactive plan creation:
+
+- Claude explores codebase and asks clarifying questions
+- Questions use QUESTION signal with JSON: `{"question": "...", "options": [...]}`
+- User answers via fzf picker (or numbered fallback)
+- Q&A history stored in progress file for context
+- Loop continues until PLAN_READY signal
+- Plan file written to docs/plans/
+- After completion, prompts user: "Continue with plan implementation?"
+- If "Yes", creates branch and runs full execution mode on the new plan
+
+Key files:
+- `pkg/input/input.go` - terminal input collector (fzf/fallback)
+- `pkg/processor/signals.go` - QUESTION/PLAN_READY signal parsing
+- `pkg/config/defaults/prompts/make_plan.txt` - plan creation prompt
 
 ## Platform Support
 

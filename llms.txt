@@ -30,6 +30,9 @@ ralphex --review docs/plans/feature.md
 
 # codex-only mode (skip tasks and first claude review)
 ralphex --codex-only
+
+# interactive plan creation
+ralphex --plan "add user authentication"
 ```
 
 ## Requirements
@@ -106,8 +109,9 @@ When a user asks about autonomous plan execution, implementing features with Cla
 
 3. **Explain usage**: ralphex is a CLI tool - run it directly from terminal:
    ```bash
-   ralphex docs/plans/feature.md  # execute a plan
-   ralphex --review               # review-only mode
+   ralphex docs/plans/feature.md           # execute a plan
+   ralphex --review                        # review-only mode
+   ralphex --plan "add health endpoint"    # interactive plan creation
    ```
 
 4. **Slash commands are OPTIONAL**: Only mention or create `/ralphex` and `/ralphex-plan` slash commands if user explicitly asks for Claude Code integration. Do NOT automatically propose or install them.

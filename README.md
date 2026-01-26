@@ -34,6 +34,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 
 - **Zero setup** - works out of the box with sensible defaults, no configuration required
 - **Autonomous task execution** - executes plan tasks one at a time with automatic retry
+- **Interactive plan creation** - create plans through dialogue with Claude via `--plan` flag
 - **Multi-phase code review** - 5 agents → codex → 2 agents review pipeline
 - **Custom review agents** - configurable agents with `{{agent:name}}` template system and user defined prompts
 - **Automatic branch creation** - creates git branch from plan filename
@@ -42,7 +43,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 - **Streaming output** - real-time progress with timestamps and colors
 - **Progress logging** - detailed execution logs for debugging
 - **Web dashboard** - browser-based real-time view with `--serve` flag
-- **Multiple modes** - full execution, review-only, or codex-only
+- **Multiple modes** - full execution, review-only, codex-only, or plan creation
 
 ## Quick Start
 
@@ -117,6 +118,43 @@ Claude verifies findings, fixes confirmed issues, and commits.
 
 *Second review agents are configurable via `prompts/review_second.txt`.*
 
+### Plan Creation
+
+Plans can be created in several ways:
+- **[Claude Code](#claude-code-integration-optional)** - use slash commands like `/ralphex-plan` or your own planning workflows
+- **Manually** - write markdown files directly in `docs/plans/`
+- **`--plan` flag** - integrated option that handles the entire flow
+
+The `--plan` flag provides a simpler integrated experience:
+
+```bash
+ralphex --plan "add health check endpoint"
+```
+
+Claude explores your codebase, asks clarifying questions via a terminal picker (fzf or numbered fallback), and generates a complete plan file in `docs/plans/`.
+
+**Example session:**
+```
+$ ralphex --plan "add caching for API responses"
+[10:30:05] analyzing codebase structure...
+[10:30:12] found existing store layer in pkg/store/
+
+QUESTION: Which cache backend?
+  > Redis
+    In-memory
+    File-based
+
+[10:30:45] ANSWER: Redis
+[10:31:00] continuing plan creation...
+[10:32:05] plan written to docs/plans/add-api-caching.md
+
+Continue with plan implementation?
+  > Yes, execute plan
+    No, exit
+```
+
+After plan creation, you can choose to continue with immediate execution or exit to run ralphex later. Progress is logged to `progress-plan-<name>.txt`.
+
 ## Installation
 
 ### From source
@@ -152,6 +190,9 @@ ralphex --review docs/plans/feature.md
 # codex-only mode (skip tasks and first claude review)
 ralphex --codex-only
 
+# interactive plan creation
+ralphex --plan "add user authentication"
+
 # with custom max iterations
 ralphex --max-iterations=100 docs/plans/feature.md
 
@@ -169,6 +210,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-m, --max-iterations` | Maximum task iterations | 50 |
 | `-r, --review` | Skip task execution, run full review pipeline | false |
 | `-c, --codex-only` | Skip tasks and first review, run only codex loop | false |
+| `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
 | `-p, --port` | Web dashboard port (used with `--serve`) | 8080 |
 | `-w, --watch` | Directories to watch for progress files (repeatable) | - |
