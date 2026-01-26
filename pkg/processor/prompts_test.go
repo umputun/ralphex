@@ -402,3 +402,68 @@ func TestRunner_expandAgentReferences_PercentInPrompt(t *testing.T) {
 	assert.Contains(t, result, "90%")
 	assert.NotContains(t, result, "{{agent:perf}}")
 }
+
+func TestRunner_buildPlanPrompt(t *testing.T) {
+	t.Run("substitutes plan description and progress file", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanDescription: "add user authentication with OAuth",
+			ProgressPath:    "progress-plan-test.txt",
+			AppConfig:       appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildPlanPrompt()
+
+		// verify template substitution
+		assert.Contains(t, prompt, "add user authentication with OAuth")
+		assert.Contains(t, prompt, "progress-plan-test.txt")
+		// verify no unsubstituted variables
+		assert.NotContains(t, prompt, "{{PLAN_DESCRIPTION}}")
+		assert.NotContains(t, prompt, "{{PROGRESS_FILE}}")
+	})
+
+	t.Run("uses progress file fallback when empty", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanDescription: "add feature",
+			ProgressPath:    "", // empty progress path
+			AppConfig:       appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildPlanPrompt()
+
+		assert.Contains(t, prompt, "add feature")
+		assert.Contains(t, prompt, "(no progress file available)")
+	})
+
+	t.Run("preserves prompt structure", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanDescription: "test plan",
+			ProgressPath:    "progress.txt",
+			AppConfig:       appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildPlanPrompt()
+
+		// verify key structural elements from make_plan.txt are present
+		assert.Contains(t, prompt, "QUESTION")
+		assert.Contains(t, prompt, "PLAN_READY")
+		assert.Contains(t, prompt, "docs/plans/")
+	})
+
+	t.Run("custom prompt", func(t *testing.T) {
+		appCfg := &config.Config{
+			MakePlanPrompt: "Create plan for: {{PLAN_DESCRIPTION}}\nLog: {{PROGRESS_FILE}}",
+		}
+		r := &Runner{cfg: Config{
+			PlanDescription: "custom feature",
+			ProgressPath:    "custom-progress.txt",
+			AppConfig:       appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildPlanPrompt()
+
+		assert.Equal(t, "Create plan for: custom feature\nLog: custom-progress.txt", prompt)
+	})
+}

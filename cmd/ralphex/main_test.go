@@ -706,6 +706,271 @@ func TestEnsureGitignore(t *testing.T) {
 	})
 }
 
+func TestSetupRunnerLogger(t *testing.T) {
+	t.Run("returns_base_logger_when_serve_disabled", func(t *testing.T) {
+		colors := testColors()
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "",
+			Mode:     "test",
+			Branch:   "test",
+			NoColor:  true,
+		}, colors)
+		require.NoError(t, err)
+		defer baseLog.Close()
+
+		o := opts{Serve: false}
+		params := webDashboardParams{
+			BaseLog: baseLog,
+			Port:    8080,
+			Colors:  colors,
+		}
+
+		result, err := setupRunnerLogger(context.Background(), o, params)
+		require.NoError(t, err)
+		assert.Equal(t, baseLog, result, "should return the base logger unchanged")
+	})
+
+	t.Run("returns_broadcast_logger_when_serve_enabled", func(t *testing.T) {
+		colors := testColors()
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "",
+			Mode:     "test",
+			Branch:   "test",
+			NoColor:  true,
+		}, colors)
+		require.NoError(t, err)
+		defer baseLog.Close()
+
+		o := opts{Serve: true, Port: 0} // port 0 to let system assign available port
+		params := webDashboardParams{
+			BaseLog:  baseLog,
+			Port:     0, // system-assigned port
+			PlanFile: "",
+			Branch:   "test",
+			Colors:   colors,
+		}
+
+		result, err := setupRunnerLogger(t.Context(), o, params)
+		require.NoError(t, err)
+		// result should be different from baseLog (it's a BroadcastLogger wrapper)
+		assert.NotEqual(t, baseLog, result, "should return a broadcast logger, not the base logger")
+	})
+}
+
+func TestGetCurrentBranch(t *testing.T) {
+	t.Run("returns_branch_name", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		branch := getCurrentBranch(repo)
+		assert.Equal(t, "master", branch)
+	})
+
+	t.Run("returns_unknown_on_error", func(t *testing.T) {
+		// create a repo but then break it by removing .git
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// close and remove git dir to simulate error
+		require.NoError(t, os.RemoveAll(filepath.Join(dir, ".git")))
+
+		// getCurrentBranch should return "unknown" on error
+		branch := getCurrentBranch(repo)
+		assert.Equal(t, "unknown", branch)
+	})
+}
+
+func TestSetupGitForExecution(t *testing.T) {
+	colors := testColors()
+
+	t.Run("returns_nil_for_empty_plan_file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		err = setupGitForExecution(repo, "", processor.ModeFull, colors)
+		require.NoError(t, err)
+	})
+
+	t.Run("creates_branch_for_full_mode", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// change to test repo dir for gitignore
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		err = setupGitForExecution(repo, "docs/plans/new-feature.md", processor.ModeFull, colors)
+		require.NoError(t, err)
+
+		// verify branch was created
+		branch, err := repo.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "new-feature", branch)
+	})
+
+	t.Run("skips_branch_for_review_mode", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// change to test repo dir for gitignore
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		err = setupGitForExecution(repo, "docs/plans/some-plan.md", processor.ModeReview, colors)
+		require.NoError(t, err)
+
+		// verify still on master (no branch created)
+		branch, err := repo.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "master", branch)
+	})
+}
+
+func TestHandlePostExecution(t *testing.T) {
+	colors := testColors()
+
+	t.Run("moves_plan_on_full_mode_completion", func(t *testing.T) {
+		dir := setupTestRepo(t)
+
+		// change to test repo dir
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		repo, err := git.Open(".")
+		require.NoError(t, err)
+
+		// create plan file
+		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
+		require.NoError(t, err)
+		planFile := filepath.Join("docs", "plans", "test-feature.md")
+		err = os.WriteFile(planFile, []byte("# Test Plan\n"), 0o600)
+		require.NoError(t, err)
+
+		// stage and commit
+		err = repo.Add(planFile)
+		require.NoError(t, err)
+		err = repo.Commit("add plan")
+		require.NoError(t, err)
+
+		// handlePostExecution should move the plan
+		handlePostExecution(repo, planFile, processor.ModeFull, colors)
+
+		// verify plan was moved
+		_, err = os.Stat(planFile)
+		assert.True(t, os.IsNotExist(err), "original plan should be gone")
+
+		completedFile := filepath.Join("docs", "plans", "completed", "test-feature.md")
+		_, err = os.Stat(completedFile)
+		require.NoError(t, err, "plan should be in completed dir")
+	})
+
+	t.Run("skips_move_on_review_mode", func(t *testing.T) {
+		dir := setupTestRepo(t)
+
+		// change to test repo dir
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		repo, err := git.Open(".")
+		require.NoError(t, err)
+
+		// create plan file
+		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
+		require.NoError(t, err)
+		planFile := filepath.Join("docs", "plans", "review-test.md")
+		err = os.WriteFile(planFile, []byte("# Test Plan\n"), 0o600)
+		require.NoError(t, err)
+
+		// handlePostExecution with review mode should NOT move the plan
+		handlePostExecution(repo, planFile, processor.ModeReview, colors)
+
+		// verify plan was NOT moved
+		_, err = os.Stat(planFile)
+		require.NoError(t, err, "plan should still exist in original location")
+	})
+
+	t.Run("skips_move_on_empty_plan_file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// handlePostExecution with empty plan should not panic
+		handlePostExecution(repo, "", processor.ModeFull, colors)
+		// no error means success
+	})
+}
+
+func TestValidateFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    opts
+		wantErr bool
+		errMsg  string
+	}{
+		{name: "no_flags_is_valid", opts: opts{}, wantErr: false},
+		{name: "plan_flag_only_is_valid", opts: opts{PlanDescription: "add feature"}, wantErr: false},
+		{name: "plan_file_only_is_valid", opts: opts{PlanFile: "docs/plans/test.md"}, wantErr: false},
+		{name: "both_plan_and_planfile_conflicts", opts: opts{PlanDescription: "add feature", PlanFile: "docs/plans/test.md"}, wantErr: true, errMsg: "conflicts"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateFlags(tc.opts)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestPrintStartupInfo(t *testing.T) {
+	colors := testColors()
+
+	t.Run("prints_plan_info_for_full_mode", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+		}
+		// this doesn't return anything, just verify it doesn't panic
+		printStartupInfo(info, colors)
+	})
+
+	t.Run("prints_no_plan_for_review_mode", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:      "",
+			Branch:        "test-branch",
+			Mode:          processor.ModeReview,
+			MaxIterations: 50,
+			ProgressPath:  "progress-review.txt",
+		}
+		// verify it doesn't panic with empty plan
+		printStartupInfo(info, colors)
+	})
+}
+
 func TestFindRecentPlan(t *testing.T) {
 	t.Run("finds_recently_modified_file", func(t *testing.T) {
 		dir := t.TempDir()
