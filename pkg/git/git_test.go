@@ -627,6 +627,142 @@ func TestRepo_IsIgnored(t *testing.T) {
 	})
 }
 
+func TestRepo_HasChangesOtherThan(t *testing.T) {
+	t.Run("returns false when no changes", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		hasOther, err := repo.HasChangesOtherThan(filepath.Join(dir, "nonexistent.md"))
+		require.NoError(t, err)
+		assert.False(t, hasOther)
+	})
+
+	t.Run("returns false when only target file is untracked", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		hasOther, err := repo.HasChangesOtherThan(planFile)
+		require.NoError(t, err)
+		assert.False(t, hasOther)
+	})
+
+	t.Run("returns true when other file is untracked", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o600))
+
+		hasOther, err := repo.HasChangesOtherThan(planFile)
+		require.NoError(t, err)
+		assert.True(t, hasOther)
+	})
+
+	t.Run("returns true when tracked file is modified", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		// modify tracked file
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified"), 0o600))
+
+		hasOther, err := repo.HasChangesOtherThan(planFile)
+		require.NoError(t, err)
+		assert.True(t, hasOther)
+	})
+
+	t.Run("returns true when only other file changes no plan", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// only other file has changes, plan doesn't exist
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o600))
+
+		hasOther, err := repo.HasChangesOtherThan(filepath.Join(dir, "nonexistent.md"))
+		require.NoError(t, err)
+		assert.True(t, hasOther)
+	})
+}
+
+func TestRepo_FileHasChanges(t *testing.T) {
+	t.Run("returns false for committed file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		hasChanges, err := repo.FileHasChanges(filepath.Join(dir, "README.md"))
+		require.NoError(t, err)
+		assert.False(t, hasChanges)
+	})
+
+	t.Run("returns true for untracked file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		hasChanges, err := repo.FileHasChanges(planFile)
+		require.NoError(t, err)
+		assert.True(t, hasChanges)
+	})
+
+	t.Run("returns true for modified file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// modify tracked file
+		readme := filepath.Join(dir, "README.md")
+		require.NoError(t, os.WriteFile(readme, []byte("# Modified"), 0o600))
+
+		hasChanges, err := repo.FileHasChanges(readme)
+		require.NoError(t, err)
+		assert.True(t, hasChanges)
+	})
+
+	t.Run("returns true for staged file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		require.NoError(t, repo.Add(filepath.Join("docs", "plans", "feature.md")))
+
+		hasChanges, err := repo.FileHasChanges(planFile)
+		require.NoError(t, err)
+		assert.True(t, hasChanges)
+	})
+
+	t.Run("returns false for nonexistent file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		hasChanges, err := repo.FileHasChanges(filepath.Join(dir, "nonexistent.md"))
+		require.NoError(t, err)
+		assert.False(t, hasChanges)
+	})
+}
+
 // setupTestRepo creates a test git repository with an initial commit.
 func setupTestRepo(t *testing.T) string {
 	t.Helper()

@@ -451,7 +451,7 @@ Progress file (`progress-*.txt`) is a real-time execution log—tail it to monit
 
 **Do I need to commit changes before running ralphex?**
 
-No, but recommended. Ralphex creates a new branch and commits per-task. Pre-existing uncommitted changes stay untouched but may cause confusion about what's part of the plan.
+It depends. If the plan file is the only uncommitted change, ralphex auto-commits it after creating the feature branch and continues execution. If other files have uncommitted changes, ralphex shows a helpful error with options: stash temporarily (`git stash`), commit first (`git commit -am "wip"`), or use review-only mode (`ralphex --review`).
 
 **What's the difference between agents/ and prompts/?**
 

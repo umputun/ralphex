@@ -313,3 +313,77 @@ func (r *Repo) IsDirty() (bool, error) {
 
 	return false, nil
 }
+
+// HasChangesOtherThan returns true if there are uncommitted changes to files other than the given file.
+// this includes modified/deleted tracked files, staged changes, and untracked files.
+func (r *Repo) HasChangesOtherThan(filePath string) (bool, error) {
+	wt, err := r.repo.Worktree()
+	if err != nil {
+		return false, fmt.Errorf("get worktree: %w", err)
+	}
+
+	status, err := wt.Status()
+	if err != nil {
+		return false, fmt.Errorf("get status: %w", err)
+	}
+
+	relPath, err := r.normalizeToRelative(filePath)
+	if err != nil {
+		return false, err
+	}
+
+	for path, s := range status {
+		if path == relPath {
+			continue // skip the target file
+		}
+		if r.fileHasChanges(s) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// FileHasChanges returns true if the given file has uncommitted changes.
+// this includes untracked, modified, deleted, or staged states.
+func (r *Repo) FileHasChanges(filePath string) (bool, error) {
+	wt, err := r.repo.Worktree()
+	if err != nil {
+		return false, fmt.Errorf("get worktree: %w", err)
+	}
+
+	status, err := wt.Status()
+	if err != nil {
+		return false, fmt.Errorf("get status: %w", err)
+	}
+
+	relPath, err := r.normalizeToRelative(filePath)
+	if err != nil {
+		return false, err
+	}
+
+	if s, ok := status[relPath]; ok {
+		return r.fileHasChanges(s), nil
+	}
+
+	return false, nil
+}
+
+// normalizeToRelative converts a file path to be relative to the repository root.
+func (r *Repo) normalizeToRelative(filePath string) (string, error) {
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", fmt.Errorf("get absolute path: %w", err)
+	}
+	relPath, err := filepath.Rel(r.path, absPath)
+	if err != nil {
+		return "", fmt.Errorf("get relative path: %w", err)
+	}
+	return relPath, nil
+}
+
+// fileHasChanges checks if a file status indicates uncommitted changes.
+func (r *Repo) fileHasChanges(s *git.FileStatus) bool {
+	return s.Staging != git.Unmodified ||
+		s.Worktree == git.Modified || s.Worktree == git.Deleted || s.Worktree == git.Untracked
+}

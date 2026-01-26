@@ -344,6 +344,30 @@ func TestCheckDependencies(t *testing.T) {
 	})
 }
 
+func TestExtractBranchName(t *testing.T) {
+	tests := []struct {
+		name     string
+		planFile string
+		expected string
+	}{
+		{name: "simple_filename", planFile: "add-feature.md", expected: "add-feature"},
+		{name: "with_path", planFile: "docs/plans/add-feature.md", expected: "add-feature"},
+		{name: "date_prefix", planFile: "2024-01-15-feature.md", expected: "feature"},
+		{name: "complex_date_prefix", planFile: "2024-01-15-12-30-my-feature.md", expected: "my-feature"},
+		{name: "numeric_only_keeps_name", planFile: "12345.md", expected: "12345"},
+		{name: "with_path_and_date", planFile: "docs/plans/2024-01-15-add-tests.md", expected: "add-tests"},
+		{name: "trailing_dashes_trimmed", planFile: "2024---feature.md", expected: "feature"},
+		{name: "all_numeric_returns_original", planFile: "2024-01-15.md", expected: "2024-01-15"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractBranchName(tc.planFile)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
 func TestCreateBranchIfNeeded(t *testing.T) {
 	colors := testColors()
 
@@ -447,6 +471,75 @@ func TestCreateBranchIfNeeded(t *testing.T) {
 		branch, err := repo.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "my-feature", branch)
+	})
+
+	t.Run("auto_commits_plan_when_only_uncommitted_file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// create plan file as the only uncommitted file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "auto-commit-test.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Auto Commit Test Plan\n"), 0o600))
+
+		// should create branch and auto-commit the plan
+		err = createBranchIfNeeded(repo, planFile, colors)
+		require.NoError(t, err)
+
+		// verify we're on the new branch
+		branch, err := repo.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "auto-commit-test", branch)
+
+		// verify plan was committed (worktree should be clean)
+		dirty, err := repo.IsDirty()
+		require.NoError(t, err)
+		assert.False(t, dirty, "worktree should be clean after auto-commit")
+	})
+
+	t.Run("returns_error_with_helpful_message_when_other_files_uncommitted", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// create plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "error-test.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Error Test Plan\n"), 0o600))
+
+		// create another uncommitted file
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other content"), 0o600))
+
+		// should return an error with helpful message
+		err = createBranchIfNeeded(repo, planFile, colors)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot create branch")
+		assert.Contains(t, err.Error(), "uncommitted changes")
+		assert.Contains(t, err.Error(), "git stash")
+		assert.Contains(t, err.Error(), "ralphex --review")
+	})
+
+	t.Run("returns_error_when_tracked_file_modified", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// create plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "modified-test.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Modified Test Plan\n"), 0o600))
+
+		// modify an existing tracked file
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified\n"), 0o600))
+
+		// should return an error
+		err = createBranchIfNeeded(repo, planFile, colors)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "uncommitted changes")
 	})
 }
 

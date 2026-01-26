@@ -42,6 +42,9 @@ type opts struct {
 
 var revision = "unknown"
 
+// datePrefixRe matches date-like prefixes in plan filenames (e.g., "2024-01-15-").
+var datePrefixRe = regexp.MustCompile(`^[\d-]+`)
+
 // startupInfo holds parameters for printing startup information.
 type startupInfo struct {
 	PlanFile      string
@@ -445,8 +448,18 @@ func selectPlanWithFzf(ctx context.Context, plansDir string, colors *progress.Co
 	return strings.TrimSpace(string(out)), nil
 }
 
+// extractBranchName derives a branch name from a plan file path.
+// removes the .md extension and strips any leading date prefix (e.g., "2024-01-15-").
+func extractBranchName(planFile string) string {
+	name := strings.TrimSuffix(filepath.Base(planFile), ".md")
+	branchName := strings.TrimLeft(datePrefixRe.ReplaceAllString(name, ""), "-")
+	if branchName == "" {
+		return name
+	}
+	return branchName
+}
+
 func createBranchIfNeeded(gitOps *git.Repo, planFile string, colors *progress.Colors) error {
-	// get current branch
 	currentBranch, err := gitOps.CurrentBranch()
 	if err != nil {
 		return fmt.Errorf("get current branch: %w", err)
@@ -456,36 +469,53 @@ func createBranchIfNeeded(gitOps *git.Repo, planFile string, colors *progress.Co
 		return nil // already on feature branch
 	}
 
-	// check for uncommitted changes before switching branches
-	dirty, err := gitOps.IsDirty()
+	branchName := extractBranchName(planFile)
+
+	// check for uncommitted changes to files other than the plan
+	hasOtherChanges, err := gitOps.HasChangesOtherThan(planFile)
 	if err != nil {
-		return fmt.Errorf("check worktree status: %w", err)
-	}
-	if dirty {
-		return errors.New("worktree has uncommitted changes, commit or stash before running ralphex")
+		return fmt.Errorf("check uncommitted files: %w", err)
 	}
 
-	// extract branch name from filename
-	name := strings.TrimSuffix(filepath.Base(planFile), ".md")
-	// remove date prefix like "2024-01-15-"
-	re := regexp.MustCompile(`^[\d-]+`)
-	branchName := strings.TrimLeft(re.ReplaceAllString(name, ""), "-")
-	if branchName == "" {
-		branchName = name
+	if hasOtherChanges {
+		// other files have uncommitted changes - show helpful error
+		return fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+
+			"ralphex needs to create a feature branch from %s to isolate plan work.\n\n"+
+			"options:\n"+
+			"  git stash && ralphex %s && git stash pop   # stash changes temporarily\n"+
+			"  git commit -am \"wip\"                       # commit changes first\n"+
+			"  ralphex --review                           # skip branch creation (review-only mode)",
+			branchName, currentBranch, planFile)
 	}
 
-	// check if branch already exists
+	// check if plan file needs to be committed (untracked, modified, or staged)
+	planHasChanges, err := gitOps.FileHasChanges(planFile)
+	if err != nil {
+		return fmt.Errorf("check plan file status: %w", err)
+	}
+
+	// create or switch to branch
 	if gitOps.BranchExists(branchName) {
 		colors.Info().Printf("switching to existing branch: %s\n", branchName)
 		if err := gitOps.CheckoutBranch(branchName); err != nil {
 			return fmt.Errorf("checkout branch %s: %w", branchName, err)
 		}
-		return nil
+	} else {
+		colors.Info().Printf("creating branch: %s\n", branchName)
+		if err := gitOps.CreateBranch(branchName); err != nil {
+			return fmt.Errorf("create branch %s: %w", branchName, err)
+		}
 	}
 
-	colors.Info().Printf("creating branch: %s\n", branchName)
-	if err := gitOps.CreateBranch(branchName); err != nil {
-		return fmt.Errorf("create branch %s: %w", branchName, err)
+	// auto-commit plan file if it was the only uncommitted file
+	if planHasChanges {
+		colors.Info().Printf("committing plan file: %s\n", filepath.Base(planFile))
+		if err := gitOps.Add(planFile); err != nil {
+			return fmt.Errorf("stage plan file: %w", err)
+		}
+		if err := gitOps.Commit("add plan: " + branchName); err != nil {
+			return fmt.Errorf("commit plan file: %w", err)
+		}
 	}
 
 	return nil
