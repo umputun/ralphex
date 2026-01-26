@@ -314,14 +314,17 @@ func (s *Server) getSession(r *http.Request) (*Session, error) {
 
 // SessionInfo represents session data for the API response.
 type SessionInfo struct {
-	ID           string       `json:"id"`
-	State        SessionState `json:"state"`
-	Dir          string       `json:"dir"`
-	PlanPath     string       `json:"planPath,omitempty"`
-	Branch       string       `json:"branch,omitempty"`
-	Mode         string       `json:"mode,omitempty"`
-	StartTime    time.Time    `json:"startTime"`
-	LastModified time.Time    `json:"lastModified"`
+	ID    string       `json:"id"`
+	State SessionState `json:"state"`
+	// Dir is the short display name for the project (last path segment of session directory).
+	Dir string `json:"dir"`
+	// DirPath is the full filesystem path to the session directory (used for grouping and copy-to-clipboard).
+	DirPath      string    `json:"dirPath,omitempty"`
+	PlanPath     string    `json:"planPath,omitempty"`
+	Branch       string    `json:"branch,omitempty"`
+	Mode         string    `json:"mode,omitempty"`
+	StartTime    time.Time `json:"startTime"`
+	LastModified time.Time `json:"lastModified"`
 }
 
 // handleSessions returns a list of all discovered sessions.
@@ -350,10 +353,20 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	infos := make([]SessionInfo, 0, len(sessions))
 	for _, session := range sessions {
 		meta := session.GetMetadata()
+		var dirPath string
+		if absPath, err := filepath.Abs(session.Path); err == nil {
+			dirPath = filepath.Dir(absPath)
+		} else {
+			dirPath = filepath.Dir(session.Path)
+			if dirPath == "." || dirPath == ".." {
+				dirPath = ""
+			}
+		}
 		infos = append(infos, SessionInfo{
 			ID:           session.ID,
 			State:        session.GetState(),
 			Dir:          extractProjectDir(session.Path),
+			DirPath:      dirPath,
 			PlanPath:     meta.PlanPath,
 			Branch:       meta.Branch,
 			Mode:         meta.Mode,

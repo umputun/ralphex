@@ -17,6 +17,7 @@
                 <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar (S)">◀</button>
             </div>
         </div>
+        <div class="sidebar-collapsed-label">Sessions</div>
         <div class="session-list" id="session-list">
             <div class="session-loading">Loading sessions...</div>
         </div>
@@ -30,9 +31,14 @@
                     <span class="elapsed-time" id="elapsed-time"></span>
                     <span class="status-badge" id="status-badge"></span>
                     <button class="export-btn" id="export-btn" title="Export session as HTML">Export</button>
+                    <button class="help-btn" id="help-btn" title="Keyboard shortcuts (?)" aria-label="Show keyboard shortcuts">?</button>
                 </div>
             </div>
             <div class="info">
+                <div class="project-wrap is-hidden" id="project-wrap">
+                    <span class="project" id="project-path" title="Project"></span>
+                    <button class="project-copy" id="project-copy" title="Copy full path" aria-label="Copy project path">Copy</button>
+                </div>
                 <span class="plan" id="plan-name" title="Plan">{{.PlanName}}</span>
                 <span class="branch" id="branch-name" title="Branch">{{.Branch}}</span>
             </div>
@@ -50,7 +56,6 @@
 
         <div class="search-bar">
             <input type="text" id="search" placeholder="Search... (press / to focus)" autocomplete="off">
-            <span class="search-hint">? for keyboard shortcuts</span>
         </div>
 
         <div class="main-container">
@@ -59,6 +64,7 @@
                     <span class="plan-panel-title">Plan</span>
                     <button class="plan-toggle" id="plan-toggle" title="Toggle plan panel (P)">▶</button>
                 </div>
+                <div class="plan-collapsed-label">Plan</div>
                 <div class="plan-content" id="plan-content">
                     <div class="plan-loading">Loading plan...</div>
                 </div>

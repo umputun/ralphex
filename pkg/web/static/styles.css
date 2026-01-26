@@ -45,6 +45,8 @@
     /* panel sizing */
     --plan-panel-width: 320px;
     --sidebar-width: 260px;
+    --plan-panel-collapsed-width: 48px;
+    --sidebar-collapsed-width: 48px;
 
     /* typography scale */
     --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -106,6 +108,12 @@ body::before {
 
 /* ═══════════════════════════════════════════════════════════════
    SESSION SIDEBAR
+
+   Collapsed behavior:
+   - Desktop: sidebar shrinks to a narrow rail (--sidebar-collapsed-width)
+     showing only the toggle button and a vertical "Sessions" label
+   - Mobile (<768px): sidebar is position:fixed and slides in/out via
+     translateX, with the collapsed rail always visible at screen edge
    ═══════════════════════════════════════════════════════════════ */
 
 .session-sidebar {
@@ -122,9 +130,9 @@ body::before {
 }
 
 .sidebar-collapsed .session-sidebar {
-    width: 0;
-    min-width: 0;
-    opacity: 0;
+    width: var(--sidebar-collapsed-width);
+    min-width: var(--sidebar-collapsed-width);
+    opacity: 1;
     overflow: hidden;
 }
 
@@ -147,15 +155,18 @@ body::before {
 }
 
 .sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-family: var(--font-mono);
     font-size: 11px;
     padding: var(--space-xs) var(--space-sm);
     border: 1px solid var(--border-default);
     border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
+    background: var(--bg-tertiary);
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     line-height: 1;
 }
 
@@ -163,15 +174,6 @@ body::before {
     background: var(--bg-elevated);
     color: var(--text-primary);
     border-color: var(--border-strong);
-}
-
-.sidebar-collapsed .sidebar-toggle {
-    position: fixed;
-    left: var(--space-sm);
-    top: var(--space-md);
-    z-index: 100;
-    opacity: 1;
-    background: var(--bg-tertiary);
 }
 
 .sidebar-controls {
@@ -213,6 +215,45 @@ body::before {
 
 .sidebar-collapsed .view-toggle {
     display: none;
+}
+
+.sidebar-collapsed .sidebar-title {
+    display: none;
+}
+
+.sidebar-collapsed .sidebar-header {
+    justify-content: center;
+    padding: var(--space-sm);
+}
+
+.sidebar-collapsed .sidebar-controls {
+    width: 100%;
+    justify-content: center;
+}
+
+.sidebar-collapsed .session-list {
+    display: none;
+}
+
+.sidebar-collapsed-label,
+.plan-collapsed-label {
+    display: none;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    flex: 1 1 auto;
+    align-self: center;
+    padding: var(--space-md) 0;
+}
+
+.sidebar-collapsed .sidebar-collapsed-label {
+    display: block;
 }
 
 .project-group {
@@ -282,9 +323,7 @@ body::before {
 }
 
 .session-item {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-md);
+    display: block;
     padding: var(--space-md) var(--space-md);
     border-radius: var(--radius-md);
     cursor: pointer;
@@ -307,7 +346,6 @@ body::before {
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
-    margin-top: 6px;
 }
 
 .session-indicator.active {
@@ -324,6 +362,9 @@ body::before {
     flex: 1;
     min-width: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .session-name {
@@ -331,32 +372,57 @@ body::before {
     font-weight: 500;
     font-size: 13px;
     color: var(--text-primary);
-    margin-bottom: 2px;
+    flex: 1;
     /* better truncation with word breaking */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.session-meta {
+.session-row {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: var(--space-sm);
+}
+
+.session-row-top {
+    align-items: center;
+}
+
+.session-row-meta,
+.session-row-branch {
+    padding-left: calc(8px + var(--space-sm));
+}
+
+.session-row-meta {
     font-size: 11px;
     color: var(--text-muted);
+}
+
+.session-project {
+    color: var(--phase-task);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .session-branch {
     color: var(--phase-review);
     font-family: var(--font-mono);
-    font-size: 10px;
-    background: var(--phase-review-muted);
-    padding: 1px 6px;
-    border-radius: var(--radius-sm);
+    font-size: 11px;
 }
 
 .session-time {
     color: var(--text-faint);
+}
+
+.session-time-top {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -486,6 +552,26 @@ header h1 {
     border-color: var(--border-strong);
 }
 
+.help-btn {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.help-btn:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
 .info {
     display: flex;
     gap: var(--space-xl);
@@ -493,11 +579,53 @@ header h1 {
     color: var(--text-secondary);
 }
 
+.project-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.project-wrap.is-hidden {
+    display: none;
+}
+
 .info span::before {
     font-family: var(--font-sans);
     color: var(--text-muted);
     margin-right: var(--space-sm);
     font-weight: 500;
+}
+
+.project::before {
+    content: 'Project';
+}
+
+.project:empty {
+    display: none;
+}
+
+.project-copy {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    line-height: 1.2;
+}
+
+.project-copy:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+.project-copy.copied {
+    color: var(--phase-task);
+    border-color: var(--phase-task);
 }
 
 .plan::before {
@@ -628,12 +756,6 @@ header h1 {
     color: var(--text-faint);
 }
 
-.search-hint {
-    font-family: var(--font-sans);
-    font-size: 11px;
-    color: var(--text-faint);
-}
-
 /* ═══════════════════════════════════════════════════════════════
    MAIN CONTAINER - GRID LAYOUT
    ═══════════════════════════════════════════════════════════════ */
@@ -650,11 +772,18 @@ header h1 {
 }
 
 .main-container.plan-collapsed {
-    grid-template-columns: 1fr 0;
+    grid-template-columns: 1fr var(--plan-panel-collapsed-width);
 }
 
 /* ═══════════════════════════════════════════════════════════════
    PLAN PANEL (right side)
+
+   Collapsed behavior:
+   - Desktop: panel shrinks to a narrow rail (--plan-panel-collapsed-width)
+     showing only the toggle button and a vertical "Plan" label; grid
+     column adjusts to accommodate the rail width
+   - Mobile (<768px): panel is position:fixed and slides in/out via
+     translateX; grid column is set to 0 since the panel overlays content
    ═══════════════════════════════════════════════════════════════ */
 
 .plan-panel {
@@ -672,9 +801,9 @@ header h1 {
 }
 
 .main-container.plan-collapsed .plan-panel {
-    opacity: 0;
-    transform: translateX(100%);
-    pointer-events: none;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
 }
 
 .plan-panel-header {
@@ -696,15 +825,18 @@ header h1 {
 }
 
 .plan-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-family: var(--font-mono);
     font-size: 11px;
     padding: var(--space-xs) var(--space-sm);
     border: 1px solid var(--border-default);
     border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
+    background: var(--bg-tertiary);
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     line-height: 1;
 }
 
@@ -714,23 +846,29 @@ header h1 {
     border-color: var(--border-strong);
 }
 
-.main-container.plan-collapsed .plan-toggle {
-    position: fixed;
-    right: var(--space-sm);
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 100;
-    opacity: 1;
-    pointer-events: auto;
-    background: var(--bg-tertiary);
-}
-
 .plan-content {
     flex: 1 1 0;
     overflow-y: auto;
     overflow-x: hidden;
     padding: var(--space-lg);
     min-height: 0; /* critical for flex overflow */
+}
+
+.main-container.plan-collapsed .plan-panel-header {
+    justify-content: center;
+    padding: var(--space-sm);
+}
+
+.main-container.plan-collapsed .plan-panel-title {
+    display: none;
+}
+
+.main-container.plan-collapsed .plan-collapsed-label {
+    display: block;
+}
+
+.main-container.plan-collapsed .plan-content {
+    display: none;
 }
 
 .plan-loading {
@@ -1085,7 +1223,7 @@ header h1 {
 }
 
 body.plan-collapsed .scroll-indicator {
-    right: var(--space-xl);
+    right: calc(var(--plan-panel-collapsed-width) + var(--space-xl));
 }
 
 .scroll-indicator.visible {
@@ -1158,24 +1296,13 @@ body.plan-collapsed .scroll-indicator {
         bottom: 0;
         width: var(--sidebar-width);
         z-index: 1001;
-        transform: translateX(-100%);
-        opacity: 0;
+        transform: translateX(calc(-100% + var(--sidebar-collapsed-width)));
+        opacity: 1;
     }
 
     body:not(.sidebar-collapsed) .session-sidebar {
         transform: translateX(0);
         opacity: 1;
-    }
-
-    .sidebar-toggle {
-        position: fixed;
-        left: var(--space-sm);
-        top: var(--space-md);
-        z-index: 100;
-    }
-
-    body:not(.sidebar-collapsed) .sidebar-toggle {
-        left: calc(var(--sidebar-width) + var(--space-sm));
     }
 
     .main-wrapper {
@@ -1186,6 +1313,10 @@ body.plan-collapsed .scroll-indicator {
         grid-template-columns: 1fr 0;
     }
 
+    .main-container.plan-collapsed {
+        grid-template-columns: 1fr 0;
+    }
+
     .plan-panel {
         position: fixed;
         right: 0;
@@ -1193,25 +1324,18 @@ body.plan-collapsed .scroll-indicator {
         bottom: 0;
         width: var(--plan-panel-width);
         z-index: 1000;
-        transform: translateX(100%);
-        opacity: 0;
+        transform: translateX(calc(100% - var(--plan-panel-collapsed-width)));
+        opacity: 1;
     }
 
     .main-container:not(.plan-collapsed) .plan-panel {
         transform: translateX(0);
         opacity: 1;
     }
-
-    .plan-toggle {
-        position: fixed;
-        right: var(--space-sm);
-        top: 50%;
-        transform: translateY(-50%);
-        z-index: 100;
-    }
-
-    .main-container:not(.plan-collapsed) .plan-toggle {
-        right: calc(var(--plan-panel-width) + var(--space-sm));
+    
+    .main-container.plan-collapsed .plan-panel {
+        transform: translateX(calc(100% - var(--plan-panel-collapsed-width)));
+        opacity: 1;
     }
 
     .scroll-indicator {
@@ -1353,10 +1477,6 @@ body.plan-collapsed .scroll-indicator {
     .info {
         flex-wrap: wrap;
         gap: var(--space-sm);
-    }
-
-    .search-hint {
-        display: none;
     }
 
     #search {
