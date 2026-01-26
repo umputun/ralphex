@@ -131,6 +131,26 @@ func TestPlanModeIntegration(t *testing.T) {
 		assert.Contains(t, err.Error(), "no .git directory")
 	})
 
+	t.Run("plan_mode_requires_at_least_one_commit", func(t *testing.T) {
+		// skip if claude not installed - this test requires claude to pass dependency check
+		if _, err := exec.LookPath("claude"); err != nil {
+			t.Skip("claude not installed")
+		}
+
+		// create empty git repo without any commits
+		dir := setupEmptyTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		o := opts{PlanDescription: "add feature"}
+		err = run(context.Background(), o)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repository has no commits")
+	})
+
 	t.Run("plan_mode_runs_from_git_repo", func(t *testing.T) {
 		// create a test git repo
 		dir := setupTestRepo(t)
@@ -1178,6 +1198,17 @@ func setupTestRepo(t *testing.T) string {
 	_, err = wt.Commit("initial commit", &gogit.CommitOptions{
 		Author: &object.Signature{Name: "test", Email: "test@test.com"},
 	})
+	require.NoError(t, err)
+
+	return dir
+}
+
+// setupEmptyTestRepo creates a test git repository without any commits.
+func setupEmptyTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	_, err := gogit.PlainInit(dir, false)
 	require.NoError(t, err)
 
 	return dir

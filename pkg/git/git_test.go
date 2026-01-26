@@ -148,6 +148,24 @@ func TestRepo_CurrentBranch(t *testing.T) {
 	})
 }
 
+func TestRepo_HasCommits(t *testing.T) {
+	t.Run("returns true for repo with commits", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		assert.True(t, repo.HasCommits())
+	})
+
+	t.Run("returns false for empty repo", func(t *testing.T) {
+		dir := setupEmptyTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		assert.False(t, repo.HasCommits())
+	})
+}
+
 func TestRepo_CreateBranch(t *testing.T) {
 	t.Run("creates and switches to branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
@@ -787,6 +805,17 @@ func setupTestRepo(t *testing.T) string {
 	_, err = wt.Commit("initial commit", &git.CommitOptions{
 		Author: &object.Signature{Name: "test", Email: "test@test.com"},
 	})
+	require.NoError(t, err)
+
+	return dir
+}
+
+// setupEmptyTestRepo creates a test git repository without any commits.
+func setupEmptyTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	_, err := git.PlainInit(dir, false)
 	require.NoError(t, err)
 
 	return dir

@@ -154,6 +154,14 @@ func run(ctx context.Context, o opts) error {
 		return fmt.Errorf("open git repo: %w", err)
 	}
 
+	// require at least one commit - branches need a commit to point to
+	if !gitOps.HasCommits() {
+		return fmt.Errorf("repository has no commits\n\n" +
+			"ralphex needs at least one commit to create feature branches.\n\n" +
+			"create an initial commit first:\n" +
+			"  git add . && git commit -m \"initial commit\"")
+	}
+
 	mode := determineMode(o)
 
 	// plan mode has different flow - doesn't require plan file selection

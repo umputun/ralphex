@@ -74,6 +74,12 @@ func Open(path string) (*Repo, error) {
 	return &Repo{repo: repo, path: wt.Filesystem.Root()}, nil
 }
 
+// HasCommits returns true if the repository has at least one commit.
+func (r *Repo) HasCommits() bool {
+	_, err := r.repo.Head()
+	return err == nil
+}
+
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD state.
 func (r *Repo) CurrentBranch() (string, error) {
 	head, err := r.repo.Head()
