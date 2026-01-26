@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -280,23 +281,66 @@ func (r *Repo) getAuthor() *object.Signature {
 }
 
 // IsIgnored checks if a path is ignored by gitignore rules.
-// Returns false, nil if no .gitignore exists or cannot be read.
+// Checks local .gitignore files, global gitignore (from core.excludesfile or default
+// XDG location ~/.config/git/ignore), and system gitignore (/etc/gitconfig).
+// Returns false, nil if no gitignore rules exist.
 func (r *Repo) IsIgnored(path string) (bool, error) {
 	wt, err := r.repo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("get worktree: %w", err)
 	}
 
-	// read gitignore patterns from the worktree
-	patterns, err := gitignore.ReadPatterns(wt.Filesystem, nil)
-	if err != nil {
-		// if no .gitignore, nothing is ignored
-		return false, nil //nolint:nilerr // intentional - no gitignore means nothing is ignored
+	// read gitignore patterns from the worktree (.gitignore files)
+	patterns, _ := gitignore.ReadPatterns(wt.Filesystem, nil)
+
+	// load global patterns from ~/.gitconfig's core.excludesfile
+	rootFS := osfs.New("/")
+	if globalPatterns, err := gitignore.LoadGlobalPatterns(rootFS); err == nil && len(globalPatterns) > 0 {
+		patterns = append(patterns, globalPatterns...)
+	} else {
+		// fallback to default XDG location if core.excludesfile not set
+		// git uses $XDG_CONFIG_HOME/git/ignore (defaults to ~/.config/git/ignore)
+		patterns = append(patterns, loadXDGGlobalPatterns()...)
+	}
+
+	// load system patterns from /etc/gitconfig's core.excludesfile
+	if systemPatterns, err := gitignore.LoadSystemPatterns(rootFS); err == nil {
+		patterns = append(patterns, systemPatterns...)
 	}
 
 	matcher := gitignore.NewMatcher(patterns)
 	pathParts := strings.Split(filepath.ToSlash(path), "/")
 	return matcher.Match(pathParts, false), nil
+}
+
+// loadXDGGlobalPatterns loads gitignore patterns from the default XDG location.
+// Git checks $XDG_CONFIG_HOME/git/ignore, defaulting to ~/.config/git/ignore.
+func loadXDGGlobalPatterns() []gitignore.Pattern {
+	// check XDG_CONFIG_HOME first, fall back to ~/.config
+	configHome := os.Getenv("XDG_CONFIG_HOME")
+	if configHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		configHome = filepath.Join(home, ".config")
+	}
+
+	ignorePath := filepath.Join(configHome, "git", "ignore")
+	data, err := os.ReadFile(ignorePath) //nolint:gosec // user's gitignore file
+	if err != nil {
+		return nil
+	}
+
+	var patterns []gitignore.Pattern
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, gitignore.ParsePattern(line, nil))
+	}
+	return patterns
 }
 
 // IsDirty returns true if the worktree has uncommitted changes
@@ -352,7 +396,8 @@ func (r *Repo) HasChangesOtherThan(filePath string) (bool, error) {
 			continue
 		}
 		// for untracked files, check if they're gitignored
-		if s.Worktree == git.Untracked && s.Staging == git.Unmodified {
+		// note: go-git sets both Staging and Worktree to Untracked for untracked files
+		if s.Worktree == git.Untracked {
 			ignored, err := r.IsIgnored(path)
 			if err != nil {
 				return false, fmt.Errorf("check ignored: %w", err)
