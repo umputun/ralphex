@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // CodexStreams holds both stderr and stdout from codex command.
@@ -27,7 +28,12 @@ type CodexRunner interface {
 type execCodexRunner struct{}
 
 func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) (CodexStreams, func() error, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	// use exec.Command (not CommandContext) because we handle cancellation ourselves
+	// to ensure the entire process group is killed, not just the direct child
+	cmd := exec.Command(name, args...) //nolint:noctx // intentional: we handle context cancellation via process group kill
+
+	// create new process group so we can kill all descendants on cleanup
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -43,7 +49,33 @@ func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) 
 		return CodexStreams{}, nil, fmt.Errorf("start command: %w", err)
 	}
 
-	return CodexStreams{Stderr: stderr, Stdout: stdout}, cmd.Wait, nil
+	// channel to signal process completion (avoids goroutine leak)
+	done := make(chan struct{})
+
+	// monitor context cancellation in background
+	go func() {
+		select {
+		case <-ctx.Done():
+			if cmd.Process != nil {
+				// kill entire process group (negative PID kills the group)
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+		case <-done:
+			// process completed normally, goroutine exits
+		}
+	}()
+
+	// wrap wait to close done channel and prevent goroutine leak
+	wait := func() error {
+		err := cmd.Wait()
+		close(done)
+		if err != nil {
+			return fmt.Errorf("command wait: %w", err)
+		}
+		return nil
+	}
+
+	return CodexStreams{Stderr: stderr, Stdout: stdout}, wait, nil
 }
 
 // CodexExecutor runs codex CLI commands and filters output.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 //go:generate moq -out mocks/command_runner.go -pkg mocks -skip-ensure -fmt goimports . CommandRunner
@@ -31,10 +32,15 @@ type CommandRunner interface {
 type execClaudeRunner struct{}
 
 func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	// use exec.Command (not CommandContext) because we handle cancellation ourselves
+	// to ensure the entire process group is killed, not just the direct child
+	cmd := exec.Command(name, args...) //nolint:noctx // intentional: we handle context cancellation via process group kill
 
 	// filter out ANTHROPIC_API_KEY from environment (claude uses different auth)
 	cmd.Env = filterEnv(os.Environ(), "ANTHROPIC_API_KEY")
+
+	// create new process group so we can kill all descendants on cleanup
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -45,7 +51,34 @@ func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string)
 	if err := cmd.Start(); err != nil {
 		return nil, nil, fmt.Errorf("start command: %w", err)
 	}
-	return stdout, cmd.Wait, nil
+
+	// channel to signal process completion (avoids goroutine leak)
+	done := make(chan struct{})
+
+	// monitor context cancellation in background
+	go func() {
+		select {
+		case <-ctx.Done():
+			if cmd.Process != nil {
+				// kill entire process group (negative PID kills the group)
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+		case <-done:
+			// process completed normally, goroutine exits
+		}
+	}()
+
+	// wrap wait to close done channel and prevent goroutine leak
+	wait := func() error {
+		err := cmd.Wait()
+		close(done)
+		if err != nil {
+			return fmt.Errorf("command wait: %w", err)
+		}
+		return nil
+	}
+
+	return stdout, wait, nil
 }
 
 // splitArgs splits a space-separated argument string into a slice.
