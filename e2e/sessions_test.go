@@ -14,6 +14,7 @@ import (
 )
 
 // createTestSession creates a progress file for a test session.
+// registers cleanup to remove the file when the test completes.
 func createTestSession(t *testing.T, name string) string {
 	t.Helper()
 	filename := "progress-" + name + ".txt"
@@ -33,6 +34,10 @@ Started: 2026-01-22 11:00:00
 `
 	err := os.WriteFile(path, []byte(content), 0o600)
 	require.NoError(t, err, "create session progress file")
+
+	t.Cleanup(func() {
+		os.Remove(path)
+	})
 
 	return filename
 }
@@ -132,11 +137,9 @@ func TestSessionStateIndicator(t *testing.T) {
 	class, err := indicator.GetAttribute("class")
 	require.NoError(t, err)
 
-	hasState := false
-	if class != "" {
-		hasState = true
-	}
-	assert.True(t, hasState, "indicator should have a state class")
+	// verify indicator has a valid state class (active or completed)
+	hasValidState := strings.Contains(class, "active") || strings.Contains(class, "completed")
+	assert.True(t, hasValidState, "indicator should have 'active' or 'completed' class, got: %q", class)
 }
 
 func TestSidebarToggle(t *testing.T) {
@@ -255,16 +258,12 @@ func TestSessionDiscoveryOnNewFile(t *testing.T) {
 
 	// should have one more session
 	assert.Equal(t, initialCount+1, newCount, "should discover new session")
-
-	// clean up the new session file
-	os.Remove(filepath.Join(testTmpDir, "progress-"+newSessionName+".txt"))
 }
 
 func TestSessionSwitchingUpdatesHeader(t *testing.T) {
 	// create a second session
 	secondSessionName := "second-session"
 	createTestSession(t, secondSessionName)
-	defer os.Remove(filepath.Join(testTmpDir, "progress-"+secondSessionName+".txt"))
 
 	// wait for file system to settle
 	time.Sleep(500 * time.Millisecond)

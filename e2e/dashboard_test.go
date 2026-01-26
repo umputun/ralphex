@@ -288,9 +288,11 @@ func TestKeyboardShortcutSlashFocusesSearch(t *testing.T) {
 
 	// search should not be focused initially
 	searchInput := page.Locator("#search")
-	focused, err := searchInput.Evaluate("el => document.activeElement === el", nil)
+	focusedResult, err := searchInput.Evaluate("el => document.activeElement === el", nil)
 	require.NoError(t, err)
-	assert.False(t, focused.(bool), "search should not be focused initially")
+	focused, ok := focusedResult.(bool)
+	require.True(t, ok, "expected bool from focus check evaluation")
+	assert.False(t, focused, "search should not be focused initially")
 
 	// press / to focus search
 	err = page.Keyboard().Press("/")
@@ -299,9 +301,11 @@ func TestKeyboardShortcutSlashFocusesSearch(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// search should now be focused
-	focused, err = searchInput.Evaluate("el => document.activeElement === el", nil)
+	focusedResult, err = searchInput.Evaluate("el => document.activeElement === el", nil)
 	require.NoError(t, err)
-	assert.True(t, focused.(bool), "search should be focused after pressing /")
+	focused, ok = focusedResult.(bool)
+	require.True(t, ok, "expected bool from focus check evaluation")
+	assert.True(t, focused, "search should be focused after pressing /")
 }
 
 func TestKeyboardShortcutPTogglesPlanPanel(t *testing.T) {
@@ -501,10 +505,16 @@ func TestScrollToBottomButton(t *testing.T) {
 	}`, nil)
 	require.NoError(t, err)
 
-	resultMap := result.(map[string]interface{})
-	assert.True(t, resultMap["exists"].(bool), "scroll to bottom button should exist in DOM")
+	resultMap, ok := result.(map[string]interface{})
+	require.True(t, ok, "expected map from JavaScript evaluation")
 
-	if resultMap["visible"].(bool) {
+	exists, ok := resultMap["exists"].(bool)
+	require.True(t, ok, "expected 'exists' to be boolean")
+	assert.True(t, exists, "scroll to bottom button should exist in DOM")
+
+	visible, ok := resultMap["visible"].(bool)
+	require.True(t, ok, "expected 'visible' to be boolean")
+	if visible {
 		t.Log("scroll button is visible")
 	} else {
 		t.Log("scroll button exists but is hidden (content fits in viewport)")

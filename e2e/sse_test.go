@@ -527,7 +527,7 @@ func TestTaskBoundaryRendering(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	t.Run("task iteration headers render as section headers", func(t *testing.T) {
-		// the test fixture (progress-full-events.txt) contains task iteration markers
+		// the test fixture (progress-test.txt) contains task iteration markers
 		// these should be rendered as .section-header details elements
 		sections := page.Locator(".section-header")
 		count, err := sections.Count()
@@ -915,7 +915,9 @@ func TestScrollToBottomButtonBehavior(t *testing.T) {
 
 		if scrollHeightNum > clientHeightNum+50 {
 			// there's content to scroll, indicator should be visible
-			assert.True(t, hasVisibleClass.(bool), "scroll indicator should be visible when scrolled up")
+			visible, ok := hasVisibleClass.(bool)
+			require.True(t, ok, "expected bool from classList.contains evaluation")
+			assert.True(t, visible, "scroll indicator should be visible when scrolled up")
 		} else {
 			t.Log("not enough content to require scrolling, skipping indicator visibility check")
 		}
@@ -995,7 +997,9 @@ func TestScrollToBottomButtonBehavior(t *testing.T) {
 		require.NoError(t, err)
 
 		// indicator should not be visible when at bottom
-		assert.False(t, hasVisibleClass.(bool), "scroll indicator should be hidden when at bottom")
+		hidden, ok := hasVisibleClass.(bool)
+		require.True(t, ok, "expected bool from classList.contains evaluation")
+		assert.False(t, hidden, "scroll indicator should be hidden when at bottom")
 	})
 }
 

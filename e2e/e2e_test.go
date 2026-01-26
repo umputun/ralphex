@@ -128,6 +128,13 @@ func copyTestData() error {
 		return fmt.Errorf("copy malformed plan file: %w", err)
 	}
 
+	// copy full events progress file for iteration/boundary tests
+	fullEventsSrc := filepath.Join(testDataPath, "progress-full-events.txt")
+	fullEventsDst := filepath.Join(testTmpDir, "progress-full-events.txt")
+	if err := copyFile(fullEventsSrc, fullEventsDst); err != nil {
+		return fmt.Errorf("copy full events progress file: %w", err)
+	}
+
 	return nil
 }
 
