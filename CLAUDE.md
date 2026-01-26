@@ -204,7 +204,7 @@ go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...
 E2E_HEADLESS=false go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...
 ```
 
-Tests cover: dashboard loading, SSE connection, phase sections, plan panel, session sidebar, keyboard shortcuts.
+Tests cover: dashboard loading, SSE connection and reconnection, phase sections, plan panel, session sidebar, keyboard shortcuts, error/warning event rendering, signal events (COMPLETED/FAILED/REVIEW_DONE), task and iteration boundary rendering, auto-scroll behavior, plan parsing edge cases.
 
 ## End-to-End Testing
 
