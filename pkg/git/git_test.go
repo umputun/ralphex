@@ -862,6 +862,76 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, hasOther)
 	})
+
+	t.Run("returns false when only gitignored file exists", func(t *testing.T) {
+		// reproduces issue: go-git reports gitignored files as untracked changes
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create .gitignore with pattern for progress files
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		err = os.WriteFile(gitignorePath, []byte("progress*.txt\n"), 0o600)
+		require.NoError(t, err)
+
+		// commit gitignore so it takes effect
+		err = repo.Add(".gitignore")
+		require.NoError(t, err)
+		err = repo.Commit("add gitignore")
+		require.NoError(t, err)
+
+		// create the plan file (the one we're checking "other than")
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		// create a gitignored progress file (like ralphex creates)
+		progressFile := filepath.Join(dir, "progress-feature.txt")
+		err = os.WriteFile(progressFile, []byte("progress content"), 0o600)
+		require.NoError(t, err)
+
+		// the gitignored file should NOT count as a change
+		hasOther, err := repo.HasChangesOtherThan(planFile)
+		require.NoError(t, err)
+		assert.False(t, hasOther, "gitignored files should not count as changes")
+	})
+
+	t.Run("returns true when gitignored and non-gitignored files exist", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create .gitignore with pattern for progress files
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		err = os.WriteFile(gitignorePath, []byte("progress*.txt\n"), 0o600)
+		require.NoError(t, err)
+
+		// commit gitignore
+		err = repo.Add(".gitignore")
+		require.NoError(t, err)
+		err = repo.Commit("add gitignore")
+		require.NoError(t, err)
+
+		// create the plan file
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		// create a gitignored progress file
+		progressFile := filepath.Join(dir, "progress-feature.txt")
+		err = os.WriteFile(progressFile, []byte("progress content"), 0o600)
+		require.NoError(t, err)
+
+		// also create a non-gitignored file
+		otherFile := filepath.Join(dir, "other.txt")
+		err = os.WriteFile(otherFile, []byte("other content"), 0o600)
+		require.NoError(t, err)
+
+		// should return true because of the non-gitignored file
+		hasOther, err := repo.HasChangesOtherThan(planFile)
+		require.NoError(t, err)
+		assert.True(t, hasOther, "non-gitignored files should count as changes")
+	})
 }
 
 func TestRepo_FileHasChanges(t *testing.T) {

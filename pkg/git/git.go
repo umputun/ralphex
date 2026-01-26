@@ -327,7 +327,7 @@ func (r *Repo) IsDirty() (bool, error) {
 }
 
 // HasChangesOtherThan returns true if there are uncommitted changes to files other than the given file.
-// this includes modified/deleted tracked files, staged changes, and untracked files.
+// this includes modified/deleted tracked files, staged changes, and untracked files (excluding gitignored).
 func (r *Repo) HasChangesOtherThan(filePath string) (bool, error) {
 	wt, err := r.repo.Worktree()
 	if err != nil {
@@ -349,6 +349,16 @@ func (r *Repo) HasChangesOtherThan(filePath string) (bool, error) {
 			continue // skip the target file
 		}
 		if r.fileHasChanges(s) {
+			// for untracked files, check if they're gitignored
+			if s.Worktree == git.Untracked && s.Staging == git.Unmodified {
+				ignored, err := r.IsIgnored(path)
+				if err != nil {
+					return false, fmt.Errorf("check ignored: %w", err)
+				}
+				if ignored {
+					continue // skip gitignored untracked files
+				}
+			}
 			return true, nil
 		}
 	}
