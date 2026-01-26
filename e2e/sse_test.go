@@ -503,15 +503,27 @@ func TestReviewDoneSignalHandling(t *testing.T) {
 	page := newPage(t)
 	navigateToDashboard(t, page)
 
-	// wait for initial load - the fixture has multiple REVIEW_DONE signals
-	time.Sleep(2 * time.Second)
-
 	// REVIEW_DONE is treated as a success signal but doesn't change badge to COMPLETED
 	// unless it's the final signal. The fixture ends with ALL_TASKS_DONE,
 	// so we verify the badge shows COMPLETED (the final terminal state)
 	badge := page.Locator("#status-badge")
-	text, err := badge.TextContent()
-	require.NoError(t, err)
+
+	// wait for badge to be visible first
+	err := badge.WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateVisible,
+		Timeout: playwright.Float(15000),
+	})
+	require.NoError(t, err, "badge should be visible")
+
+	// poll until badge shows COMPLETED or timeout (SSE processing is async)
+	var text string
+	for i := 0; i < 100; i++ { // 10 second timeout (100 * 100ms)
+		text, _ = badge.TextContent()
+		if text == "COMPLETED" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	// the badge should show COMPLETED since ALL_TASKS_DONE comes after REVIEW_DONE
 	assert.Equal(t, "COMPLETED", text, "badge should show terminal state after all signals processed")

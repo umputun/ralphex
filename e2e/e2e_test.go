@@ -158,6 +158,43 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
+// atomicWriteFile writes content to a file atomically using a temp file and rename.
+// this prevents fsnotify from seeing partial writes when the server is watching the directory.
+func atomicWriteFile(path string, content []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	// ensure cleanup on error
+	defer func() {
+		if tmpPath != "" {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	// atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp to target: %w", err)
+	}
+	tmpPath = "" // prevent deferred cleanup
+	return nil
+}
+
 func startServer() error {
 	serverCmd = exec.Command(binaryPath,
 		"--serve",

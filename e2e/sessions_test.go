@@ -32,7 +32,7 @@ Started: 2026-01-22 11:00:00
 [26-01-22 11:00:01] Working on ` + name + `
 [26-01-22 11:00:02] Processing ` + name + `
 `
-	err := os.WriteFile(path, []byte(content), 0o600)
+	err := atomicWriteFile(path, []byte(content), 0o600)
 	require.NoError(t, err, "create session progress file")
 
 	t.Cleanup(func() {

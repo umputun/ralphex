@@ -583,7 +583,7 @@ Started: 2026-01-22 12:00:00
 --- Task iteration 1 ---
 [26-01-22 12:00:01] Working on session ` + sessionName + `
 `
-	err := os.WriteFile(path, []byte(content), 0o600)
+	err := atomicWriteFile(path, []byte(content), 0o600)
 	require.NoError(t, err, "create session progress file")
 
 	t.Cleanup(func() {
