@@ -88,14 +88,14 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 8: Add plan parsing edge case tests
 
-- [ ] Create `e2e/testdata/test-plan-malformed.md` with edge cases:
+- [x] Create `e2e/testdata/test-plan-malformed.md` with edge cases:
   - Empty plan
   - Plan with no tasks
   - Plan with unclosed checkboxes
-- [ ] Add `TestPlanParsingEdgeCases` to `dashboard_test.go`
+- [x] Add `TestPlanParsingEdgeCases` to `dashboard_test.go`
   - Test graceful handling of missing plan
   - Test display when plan has no tasks
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 9: Add SSE connection handling tests
 
