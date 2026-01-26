@@ -121,6 +121,13 @@ func copyTestData() error {
 		return fmt.Errorf("copy plan file: %w", err)
 	}
 
+	// copy malformed plan file for edge case tests
+	malformedSrc := filepath.Join(testDataPath, "test-plan-malformed.md")
+	malformedDst := filepath.Join(testTmpDir, "test-plan-malformed.md")
+	if err := copyFile(malformedSrc, malformedDst); err != nil {
+		return fmt.Errorf("copy malformed plan file: %w", err)
+	}
+
 	return nil
 }
 

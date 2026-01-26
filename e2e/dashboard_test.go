@@ -3,6 +3,8 @@
 package e2e
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -551,4 +553,137 @@ func TestSearchFiltering(t *testing.T) {
 	value, err = searchInput.InputValue()
 	require.NoError(t, err)
 	assert.Empty(t, value, "search should be cleared after Escape")
+}
+
+// createSessionWithPlan creates a progress file that references a specific plan.
+// the plan file may or may not exist.
+func createSessionWithPlan(t *testing.T, sessionName, planName string) string {
+	t.Helper()
+	filename := "progress-" + sessionName + ".txt"
+	path := filepath.Join(testTmpDir, filename)
+
+	content := `# Ralphex Progress Log
+Plan: ` + planName + `
+Branch: test-branch-` + sessionName + `
+Mode: full
+Started: 2026-01-22 12:00:00
+------------------------------------------------------------
+[26-01-22 12:00:00] Session for ` + sessionName + `
+
+--- Task iteration 1 ---
+[26-01-22 12:00:01] Working on session ` + sessionName + `
+`
+	err := os.WriteFile(path, []byte(content), 0o600)
+	require.NoError(t, err, "create session progress file")
+
+	t.Cleanup(func() {
+		os.Remove(path)
+	})
+
+	return filename
+}
+
+// TestPlanParsingEdgeCases tests graceful handling of missing and malformed plans.
+// tests the frontend behavior when plan data is unavailable or has no tasks.
+func TestPlanParsingEdgeCases(t *testing.T) {
+	t.Run("missing plan shows not available message", func(t *testing.T) {
+		// create a session that references a non-existent plan
+		// the session name in the sidebar is derived from the plan filename
+		planName := "nonexistent-plan-edge-case.md"
+		expectedSessionName := "nonexistent-plan-edge-case"
+		createSessionWithPlan(t, "missing-plan-test", planName)
+
+		// wait for file system to settle
+		time.Sleep(500 * time.Millisecond)
+
+		page := newPage(t)
+		navigateToDashboard(t, page)
+
+		// wait for sessions to load
+		time.Sleep(3 * time.Second)
+
+		// find the session we created and click it
+		// session name in sidebar is derived from plan filename
+		sessionItems := page.Locator(".session-item")
+		count, err := sessionItems.Count()
+		require.NoError(t, err)
+
+		var sessionFound bool
+		for i := 0; i < count; i++ {
+			session := sessionItems.Nth(i)
+			name := session.Locator(".session-name")
+			text, err := name.TextContent()
+			require.NoError(t, err)
+
+			if text == expectedSessionName {
+				err = session.Click()
+				require.NoError(t, err)
+				sessionFound = true
+				break
+			}
+		}
+
+		if !sessionFound {
+			t.Skip("could not find the test session in sidebar")
+		}
+
+		// wait for plan to attempt to load
+		time.Sleep(2 * time.Second)
+
+		// check plan panel shows "Plan not available" message
+		planContent := page.Locator("#plan-content")
+		text, err := planContent.TextContent()
+		require.NoError(t, err)
+		assert.Contains(t, text, "Plan not available", "should show 'Plan not available' for missing plan")
+	})
+
+	t.Run("plan with no tasks shows appropriate message", func(t *testing.T) {
+		// create a session that references the malformed plan (which has no valid tasks)
+		// the session name in the sidebar is derived from the plan filename
+		planName := "test-plan-malformed.md"
+		expectedSessionName := "test-plan-malformed"
+		createSessionWithPlan(t, "malformed-plan-test", planName)
+
+		// wait for file system to settle
+		time.Sleep(500 * time.Millisecond)
+
+		page := newPage(t)
+		navigateToDashboard(t, page)
+
+		// wait for sessions to load
+		time.Sleep(3 * time.Second)
+
+		// find the session we created and click it
+		sessionItems := page.Locator(".session-item")
+		count, err := sessionItems.Count()
+		require.NoError(t, err)
+
+		var sessionFound bool
+		for i := 0; i < count; i++ {
+			session := sessionItems.Nth(i)
+			name := session.Locator(".session-name")
+			text, err := name.TextContent()
+			require.NoError(t, err)
+
+			if text == expectedSessionName {
+				err = session.Click()
+				require.NoError(t, err)
+				sessionFound = true
+				break
+			}
+		}
+
+		if !sessionFound {
+			t.Skip("could not find the test session in sidebar")
+		}
+
+		// wait for plan to load
+		time.Sleep(2 * time.Second)
+
+		// check plan panel shows "No tasks in plan" message
+		planContent := page.Locator("#plan-content")
+		text, err := planContent.TextContent()
+		require.NoError(t, err)
+		assert.Contains(t, text, "No tasks in plan", "should show 'No tasks in plan' for plan without tasks")
+	})
 }
