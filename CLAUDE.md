@@ -67,7 +67,26 @@ Key files:
 ## Platform Support
 
 - **Linux/macOS:** fully supported
-- **Windows:** not supported (uses `syscall.Flock` for progress file locking)
+- **Windows:** builds and runs, but with limitations:
+  - Process group signals not available (graceful shutdown kills direct process only, not child processes)
+  - File locking not available (active session detection disabled)
+
+### Cross-Platform Development
+
+When adding platform-specific code (syscalls, signals, file locking):
+1. Use build tags: `//go:build !windows` for Unix-only code, `//go:build windows` for Windows stubs
+2. Create separate files: `foo_unix.go` and `foo_windows.go`
+3. Keep common code in the main file, extract platform-specific functions
+4. Windows stubs can be no-ops where functionality is optional
+
+Example files:
+- `pkg/executor/procgroup_unix.go` / `procgroup_windows.go` - process group management
+- `pkg/progress/flock_unix.go` / `flock_windows.go` - file locking helpers
+
+Cross-compile to verify Windows builds:
+```bash
+GOOS=windows GOARCH=amd64 go build ./...
+```
 
 ## Configuration
 

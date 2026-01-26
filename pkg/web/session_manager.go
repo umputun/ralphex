@@ -2,7 +2,6 @@ package web
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -12,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/processor"
@@ -373,18 +371,14 @@ func IsActive(path string) (bool, error) {
 	defer f.Close()
 
 	// try to acquire exclusive lock non-blocking
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	gotLock, err := progress.TryLockFile(f)
 	if err != nil {
-		// EWOULDBLOCK means file is locked by another process
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return true, nil
-		}
 		return false, fmt.Errorf("flock: %w", err)
 	}
 
-	// we got the lock, release it immediately
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	return false, nil
+	// if we got the lock, file is not active
+	// if we didn't get the lock, file is locked by another process (active)
+	return !gotLock, nil
 }
 
 // ParseProgressHeader reads the header section of a progress file and extracts metadata.

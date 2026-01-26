@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -166,7 +165,7 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 
 	// acquire exclusive lock on progress file to signal active session
 	// the lock is held for the duration of execution and released on Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFile(f); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("acquire file lock: %w", err)
 	}
@@ -476,7 +475,7 @@ func (l *Logger) Close() error {
 	l.writeFile("Completed: %s (%s)\n", time.Now().Format("2006-01-02 15:04:05"), l.Elapsed())
 
 	// release file lock before closing
-	_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
+	_ = unlockFile(l.file)
 	unregisterActiveLock(l.file.Name())
 
 	if err := l.file.Close(); err != nil {
