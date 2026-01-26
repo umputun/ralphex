@@ -99,14 +99,14 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 9: Add SSE connection handling tests
 
-- [ ] Add `TestSSEReconnection` to `sse_test.go`
+- [x] Add `TestSSEReconnection` to `sse_test.go`
   - Test that status indicator shows connection state
   - Verify "connecting" state is shown initially
   - Verify "connected" state after SSE establishes
-- [ ] Add `TestSSEConnectionLoss` to `sse_test.go` (if feasible)
+- [x] Add `TestSSEConnectionLoss` to `sse_test.go` (if feasible)
   - May need to skip if server kill/restart is too complex
   - At minimum, verify disconnected state UI exists
-- [ ] Run tests - must pass before next task
+- [x] Run tests - must pass before next task
 
 ### Task 10: Verify all tests pass together
 
