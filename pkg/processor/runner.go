@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -80,6 +81,7 @@ type Runner struct {
 }
 
 // New creates a new Runner with the given configuration.
+// If codex is enabled but the binary is not found in PATH, it is automatically disabled with a warning.
 func New(cfg Config, log Logger) *Runner {
 	// build claude executor with config values
 	claudeExec := &executor.ClaudeExecutor{
@@ -106,6 +108,18 @@ func New(cfg Config, log Logger) *Runner {
 		codexExec.ReasoningEffort = cfg.AppConfig.CodexReasoningEffort
 		codexExec.TimeoutMs = cfg.AppConfig.CodexTimeoutMs
 		codexExec.Sandbox = cfg.AppConfig.CodexSandbox
+	}
+
+	// auto-disable codex if the binary is not installed
+	if cfg.CodexEnabled {
+		codexCmd := codexExec.Command
+		if codexCmd == "" {
+			codexCmd = "codex"
+		}
+		if _, err := exec.LookPath(codexCmd); err != nil {
+			log.Print("warning: codex not found (%s: %v), disabling codex review phase", codexCmd, err)
+			cfg.CodexEnabled = false
+		}
 	}
 
 	return NewWithExecutors(cfg, log, claudeExec, codexExec)

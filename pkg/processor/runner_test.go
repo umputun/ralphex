@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -666,4 +667,35 @@ func TestRunner_RunPlan_InputCollectorError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "collect answer")
+}
+
+func TestRunner_New_CodexNotInstalled_AutoDisables(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	appCfg := testAppConfig(t)
+	appCfg.CodexCommand = "/nonexistent/path/to/codex" // command that doesn't exist
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  true,
+		AppConfig:     appCfg,
+	}
+
+	// use processor.New (not NewWithExecutors) to trigger LookPath check
+	r := processor.New(cfg, log)
+
+	// verify warning was logged with error details
+	var foundWarning bool
+	for _, call := range log.PrintCalls() {
+		// format includes %v for error, so check format string
+		if strings.Contains(call.Format, "codex not found") && strings.Contains(call.Format, "%v") {
+			foundWarning = true
+			break
+		}
+	}
+	assert.True(t, foundWarning, "should log warning about codex not found with error details")
+
+	// verify runner was created (auto-disable happens at construction time)
+	assert.NotNil(t, r, "runner should be created even when codex not found")
 }
