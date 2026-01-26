@@ -521,7 +521,9 @@
         statusBadge.className = 'status-badge';
 
         if (event.type === 'signal') {
-            var isSuccess = event.signal === 'COMPLETED' || event.signal === 'REVIEW_DONE' || event.signal === 'CODEX_REVIEW_DONE';
+            // only COMPLETED (from ALL_TASKS_DONE) is a terminal success signal
+            // REVIEW_DONE and CODEX_REVIEW_DONE mark end of review passes, not end of execution
+            var isSuccess = event.signal === 'COMPLETED';
             var isFailed = event.signal === 'FAILED';
 
             if (isSuccess || isFailed) {
