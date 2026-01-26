@@ -16,7 +16,7 @@ import (
 
 // TailerConfig holds configuration for the Tailer.
 type TailerConfig struct {
-	PollInterval time.Duration // how often to check for new content (default: 100ms)
+	PollInterval time.Duration   // how often to check for new content (default: 100ms)
 	InitialPhase processor.Phase // phase to use for events (default: PhaseTask)
 }
 

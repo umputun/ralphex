@@ -30,6 +30,7 @@ const (
 	PhaseReview     = processor.PhaseReview
 	PhaseCodex      = processor.PhaseCodex
 	PhaseClaudeEval = processor.PhaseClaudeEval
+	PhasePlan       = processor.PhasePlan
 )
 
 // Colors holds all color configuration for output formatting.
@@ -66,6 +67,7 @@ func NewColors(cfg config.ColorConfig) *Colors {
 	c.phases[PhaseReview] = c.review
 	c.phases[PhaseCodex] = c.codex
 	c.phases[PhaseClaudeEval] = c.claudeEval
+	c.phases[PhasePlan] = c.task // plan phase uses task color (green)
 
 	return c
 }
@@ -133,10 +135,11 @@ type Logger struct {
 
 // Config holds logger configuration.
 type Config struct {
-	PlanFile string // plan filename (used to derive progress filename)
-	Mode     string // execution mode: full, review, codex-only
-	Branch   string // current git branch
-	NoColor  bool   // disable color output (sets color.NoColor globally)
+	PlanFile        string // plan filename (used to derive progress filename)
+	PlanDescription string // plan description for plan mode (used for filename)
+	Mode            string // execution mode: full, review, codex-only, plan
+	Branch          string // current git branch
+	NoColor         bool   // disable color output (sets color.NoColor globally)
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
@@ -147,7 +150,7 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 		color.NoColor = true
 	}
 
-	progressPath := progressFilename(cfg.PlanFile, cfg.Mode)
+	progressPath := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode)
 
 	// ensure progress files are tracked by creating parent dir
 	if dir := filepath.Dir(progressPath); dir != "." {
@@ -431,6 +434,33 @@ func (l *Logger) Warn(format string, args ...any) {
 	l.writeStdout("%s %s\n", tsStr, warnStr)
 }
 
+// LogQuestion logs a question and its options for plan creation mode.
+// format: QUESTION: <question>\n OPTIONS: <opt1>, <opt2>, ...
+func (l *Logger) LogQuestion(question string, options []string) {
+	timestamp := time.Now().Format(timestampFormat)
+
+	l.writeFile("[%s] QUESTION: %s\n", timestamp, question)
+	l.writeFile("[%s] OPTIONS: %s\n", timestamp, strings.Join(options, ", "))
+
+	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	questionStr := l.colors.Info().Sprintf("QUESTION: %s", question)
+	optionsStr := l.colors.Info().Sprintf("OPTIONS: %s", strings.Join(options, ", "))
+	l.writeStdout("%s %s\n", tsStr, questionStr)
+	l.writeStdout("%s %s\n", tsStr, optionsStr)
+}
+
+// LogAnswer logs the user's answer for plan creation mode.
+// format: ANSWER: <answer>
+func (l *Logger) LogAnswer(answer string) {
+	timestamp := time.Now().Format(timestampFormat)
+
+	l.writeFile("[%s] ANSWER: %s\n", timestamp, answer)
+
+	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	answerStr := l.colors.Info().Sprintf("ANSWER: %s", answer)
+	l.writeStdout("%s %s\n", tsStr, answerStr)
+}
+
 // Elapsed returns formatted elapsed time since start.
 func (l *Logger) Elapsed() string {
 	return humanize.RelTime(l.startTime, time.Now(), "", "")
@@ -466,7 +496,13 @@ func (l *Logger) writeStdout(format string, args ...any) {
 }
 
 // getProgressFilename returns progress file path based on plan and mode.
-func progressFilename(planFile, mode string) string {
+func progressFilename(planFile, planDescription, mode string) string {
+	// plan mode uses sanitized plan description
+	if mode == "plan" && planDescription != "" {
+		sanitized := sanitizePlanName(planDescription)
+		return fmt.Sprintf("progress-plan-%s.txt", sanitized)
+	}
+
 	if planFile != "" {
 		stem := strings.TrimSuffix(filepath.Base(planFile), ".md")
 		switch mode {
@@ -484,7 +520,46 @@ func progressFilename(planFile, mode string) string {
 		return "progress-codex.txt"
 	case "review":
 		return "progress-review.txt"
+	case "plan":
+		return "progress-plan.txt"
 	default:
 		return "progress.txt"
 	}
+}
+
+// sanitizePlanName converts plan description to a safe filename component.
+// replaces spaces with dashes, removes special characters, and limits length.
+func sanitizePlanName(desc string) string {
+	// lowercase and replace spaces with dashes
+	result := strings.ToLower(desc)
+	result = strings.ReplaceAll(result, " ", "-")
+
+	// keep only alphanumeric and dashes
+	var clean strings.Builder
+	for _, r := range result {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			clean.WriteRune(r)
+		}
+	}
+	result = clean.String()
+
+	// collapse multiple dashes
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+
+	// trim leading/trailing dashes
+	result = strings.Trim(result, "-")
+
+	// limit length to 50 characters
+	if len(result) > 50 {
+		result = result[:50]
+		// don't end with a dash
+		result = strings.TrimRight(result, "-")
+	}
+
+	if result == "" {
+		return "unnamed"
+	}
+	return result
 }

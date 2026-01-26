@@ -324,22 +324,55 @@ func TestLogger_Close(t *testing.T) {
 
 func TestGetProgressFilename(t *testing.T) {
 	tests := []struct {
-		planFile string
-		mode     string
-		want     string
+		name            string
+		planFile        string
+		planDescription string
+		mode            string
+		want            string
 	}{
-		{"docs/plans/feature.md", "full", "progress-feature.txt"},
-		{"docs/plans/feature.md", "review", "progress-feature-review.txt"},
-		{"docs/plans/feature.md", "codex-only", "progress-feature-codex.txt"},
-		{"", "full", "progress.txt"},
-		{"", "review", "progress-review.txt"},
-		{"", "codex-only", "progress-codex.txt"},
-		{"plans/2024-01-15-refactor.md", "full", "progress-2024-01-15-refactor.txt"},
+		{"full mode with plan", "docs/plans/feature.md", "", "full", "progress-feature.txt"},
+		{"review mode with plan", "docs/plans/feature.md", "", "review", "progress-feature-review.txt"},
+		{"codex-only mode with plan", "docs/plans/feature.md", "", "codex-only", "progress-feature-codex.txt"},
+		{"full mode no plan", "", "", "full", "progress.txt"},
+		{"review mode no plan", "", "", "review", "progress-review.txt"},
+		{"codex-only mode no plan", "", "", "codex-only", "progress-codex.txt"},
+		{"full with date prefix", "plans/2024-01-15-refactor.md", "", "full", "progress-2024-01-15-refactor.txt"},
+		{"plan mode with description", "", "implement caching", "plan", "progress-plan-implement-caching.txt"},
+		{"plan mode with complex description", "", "Add User Authentication!", "plan", "progress-plan-add-user-authentication.txt"},
+		{"plan mode no description", "", "", "plan", "progress-plan.txt"},
+		{"plan mode with special chars", "", "fix: bug #123", "plan", "progress-plan-fix-bug-123.txt"},
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.planFile+"_"+tc.mode, func(t *testing.T) {
-			got := progressFilename(tc.planFile, tc.mode)
+		t.Run(tc.name, func(t *testing.T) {
+			got := progressFilename(tc.planFile, tc.planDescription, tc.mode)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSanitizePlanName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"simple words", "implement caching", "implement-caching"},
+		{"uppercase", "Add User Auth", "add-user-auth"},
+		{"special chars", "fix: bug #123", "fix-bug-123"},
+		{"multiple spaces", "add   feature", "add-feature"},
+		{"leading trailing dashes", "--test--", "test"},
+		{"only special chars", "!@#$%", "unnamed"},
+		{"empty string", "", "unnamed"},
+		{"long description", strings.Repeat("a", 60), strings.Repeat("a", 50)},
+		{"long with spaces", "this is a very long plan description that exceeds the maximum length", "this-is-a-very-long-plan-description-that-exceeds"},
+		{"numbers", "feature 123", "feature-123"},
+		{"mixed", "API v2.0 endpoint", "api-v20-endpoint"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sanitizePlanName(tc.input)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -636,4 +669,97 @@ func TestParseColorOrPanic(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestLogger_LogQuestion(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors())
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	l.LogQuestion("Which cache backend?", []string{"Redis", "In-memory", "File-based"})
+
+	// check file output
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	contentStr := string(content)
+	assert.Contains(t, contentStr, "QUESTION: Which cache backend?")
+	assert.Contains(t, contentStr, "OPTIONS: Redis, In-memory, File-based")
+
+	// check stdout output
+	output := buf.String()
+	assert.Contains(t, output, "QUESTION: Which cache backend?")
+	assert.Contains(t, output, "OPTIONS: Redis, In-memory, File-based")
+}
+
+func TestLogger_LogAnswer(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors())
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	l.LogAnswer("Redis")
+
+	// check file output
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "ANSWER: Redis")
+
+	// check stdout output
+	assert.Contains(t, buf.String(), "ANSWER: Redis")
+}
+
+func TestLogger_PlanModeFilename(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tests := []struct {
+		name        string
+		cfg         Config
+		wantPath    string
+		wantContent string
+	}{
+		{
+			name:        "plan mode with description",
+			cfg:         Config{Mode: "plan", PlanDescription: "implement caching", Branch: "main"},
+			wantPath:    "progress-plan-implement-caching.txt",
+			wantContent: "Mode: plan",
+		},
+		{
+			name:        "plan mode without description",
+			cfg:         Config{Mode: "plan", Branch: "main"},
+			wantPath:    "progress-plan.txt",
+			wantContent: "Mode: plan",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			l, err := NewLogger(tc.cfg, testColors())
+			require.NoError(t, err)
+			defer l.Close()
+
+			assert.Equal(t, tc.wantPath, filepath.Base(l.Path()))
+
+			content, err := os.ReadFile(l.Path())
+			require.NoError(t, err)
+			assert.Contains(t, string(content), tc.wantContent)
+		})
+	}
 }

@@ -97,6 +97,19 @@ func (b *BroadcastLogger) PrintAligned(text string) {
 	}
 }
 
+// LogQuestion logs a question and its options for plan creation mode.
+func (b *BroadcastLogger) LogQuestion(question string, options []string) {
+	b.inner.LogQuestion(question, options)
+	b.broadcast(NewOutputEvent(b.phase, "QUESTION: "+question))
+	b.broadcast(NewOutputEvent(b.phase, "OPTIONS: "+strings.Join(options, ", ")))
+}
+
+// LogAnswer logs the user's answer for plan creation mode.
+func (b *BroadcastLogger) LogAnswer(answer string) {
+	b.inner.LogAnswer(answer)
+	b.broadcast(NewOutputEvent(b.phase, "ANSWER: "+answer))
+}
+
 // Path returns the progress file path.
 func (b *BroadcastLogger) Path() string {
 	return b.inner.Path()

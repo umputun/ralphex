@@ -27,14 +27,14 @@ const (
 
 // Event represents a single event to be streamed to web clients.
 type Event struct {
-	Type         EventType      `json:"type"`
+	Type         EventType       `json:"type"`
 	Phase        processor.Phase `json:"phase"`
-	Section      string         `json:"section,omitempty"`
-	Text         string         `json:"text"`
-	Timestamp    time.Time      `json:"timestamp"`
-	Signal       string         `json:"signal,omitempty"`
-	TaskNum      int            `json:"task_num,omitempty"`      // 1-based task index from plan (matches plan.tasks[].number)
-	IterationNum int            `json:"iteration_num,omitempty"` // 1-based iteration index for review/codex phases
+	Section      string          `json:"section,omitempty"`
+	Text         string          `json:"text"`
+	Timestamp    time.Time       `json:"timestamp"`
+	Signal       string          `json:"signal,omitempty"`
+	TaskNum      int             `json:"task_num,omitempty"`      // 1-based task index from plan (matches plan.tasks[].number)
+	IterationNum int             `json:"iteration_num,omitempty"` // 1-based iteration index for review/codex phases
 }
 
 // NewOutputEvent creates an output event with current timestamp.
