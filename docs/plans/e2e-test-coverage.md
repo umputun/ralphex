@@ -116,8 +116,8 @@ Expand Playwright e2e tests to cover gaps identified in the current test suite. 
 
 ### Task 11: Update documentation
 
-- [ ] Update `CLAUDE.md` test coverage description if needed
-- [ ] Add comments to new test functions explaining coverage
+- [x] Update `CLAUDE.md` test coverage description if needed
+- [x] Add comments to new test functions explaining coverage
 
 ## Technical Details
 
