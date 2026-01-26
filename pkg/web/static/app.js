@@ -26,6 +26,7 @@
     const collapseAllBtn = document.getElementById('collapse-all');
     const helpOverlay = document.getElementById('help-overlay');
     const helpCloseBtn = document.getElementById('help-close');
+    const helpBtn = document.getElementById('help-btn');
 
     // session sidebar elements
     const sessionSidebar = document.getElementById('session-sidebar');
@@ -33,6 +34,9 @@
     const sidebarToggle = document.getElementById('sidebar-toggle');
     const viewToggle = document.getElementById('view-toggle');
     const mainWrapper = document.getElementById('main-wrapper');
+    const projectPathEl = document.getElementById('project-path');
+    const projectWrapEl = document.getElementById('project-wrap');
+    const projectCopyBtn = document.getElementById('project-copy');
     const planNameEl = document.getElementById('plan-name');
     const branchNameEl = document.getElementById('branch-name');
 
@@ -521,7 +525,9 @@
         statusBadge.className = 'status-badge';
 
         if (event.type === 'signal') {
-            var isSuccess = event.signal === 'COMPLETED' || event.signal === 'REVIEW_DONE' || event.signal === 'CODEX_REVIEW_DONE';
+            // only COMPLETED (from ALL_TASKS_DONE) is a terminal success signal
+            // REVIEW_DONE and CODEX_REVIEW_DONE mark end of review passes, not end of execution
+            var isSuccess = event.signal === 'COMPLETED';
             var isFailed = event.signal === 'FAILED';
 
             if (isSuccess || isFailed) {
@@ -1090,7 +1096,7 @@
     // render sessions as flat list sorted by recency
     function renderSessionsRecent(sessions) {
         sessions.forEach(function(session) {
-            sessionList.appendChild(createSessionItem(session));
+            sessionList.appendChild(createSessionItem(session, true)); // show project in flat list
         });
     }
 
@@ -1099,7 +1105,7 @@
         // group sessions by directory
         var groups = {};
         sessions.forEach(function(session) {
-            var dir = session.dir || 'Unknown';
+            var dir = session.dirPath || session.dir || 'Unknown';
             if (!groups[dir]) {
                 groups[dir] = [];
             }
@@ -1170,7 +1176,8 @@
     }
 
     // create a session item element
-    function createSessionItem(session) {
+    // showProject: if true, show project badge (used in time-sorted view)
+    function createSessionItem(session, showProject) {
         var item = document.createElement('div');
         item.className = 'session-item';
         item.dataset.sessionId = session.id;
@@ -1179,7 +1186,14 @@
             item.classList.add('selected');
         }
 
-        // status indicator
+        // session info container
+        var info = document.createElement('div');
+        info.className = 'session-info';
+
+        // top row: indicator + plan name
+        var topRow = document.createElement('div');
+        topRow.className = 'session-row session-row-top';
+
         var indicator = document.createElement('span');
         indicator.className = 'session-indicator';
         if (session.state === 'active') {
@@ -1190,35 +1204,46 @@
             indicator.title = 'Completed session';
         }
 
-        // session info container
-        var info = document.createElement('div');
-        info.className = 'session-info';
-
-        // plan name
         var name = document.createElement('div');
         name.className = 'session-name';
         name.textContent = extractPlanName(session.planPath);
 
-        // branch and time
-        var meta = document.createElement('div');
-        meta.className = 'session-meta';
+        topRow.appendChild(indicator);
+        topRow.appendChild(name);
+
+        var timeSpan = document.createElement('span');
+        timeSpan.className = 'session-time session-time-top';
+        timeSpan.textContent = formatRelativeTime(session.lastModified);
+
+        topRow.appendChild(timeSpan);
+
+        info.appendChild(topRow);
+        var projectFullPath = session.dirPath || session.dir || '';
+        if (showProject && projectFullPath) {
+            // second row: project
+            var metaRow = document.createElement('div');
+            metaRow.className = 'session-row session-row-meta';
+
+            var projectSpan = document.createElement('span');
+            projectSpan.className = 'session-project';
+            projectSpan.textContent = extractProjectName(projectFullPath);
+            projectSpan.title = projectFullPath;
+            metaRow.appendChild(projectSpan);
+            info.appendChild(metaRow);
+        }
 
         if (session.branch) {
+            var branchRow = document.createElement('div');
+            branchRow.className = 'session-row session-row-branch';
+
             var branchSpan = document.createElement('span');
             branchSpan.className = 'session-branch';
             branchSpan.textContent = session.branch;
-            meta.appendChild(branchSpan);
+
+            branchRow.appendChild(branchSpan);
+            info.appendChild(branchRow);
         }
 
-        var timeSpan = document.createElement('span');
-        timeSpan.className = 'session-time';
-        timeSpan.textContent = formatRelativeTime(session.lastModified);
-        meta.appendChild(timeSpan);
-
-        info.appendChild(name);
-        info.appendChild(meta);
-
-        item.appendChild(indicator);
         item.appendChild(info);
 
         // click handler
@@ -1265,6 +1290,15 @@
 
         // update header info
         if (session) {
+            if (projectPathEl) {
+                var fullPath = session.dirPath || session.dir || '';
+                projectPathEl.textContent = fullPath ? extractProjectName(fullPath) : '';
+                projectPathEl.title = fullPath;
+                projectPathEl.dataset.fullPath = fullPath;
+                if (projectWrapEl) {
+                    projectWrapEl.classList.toggle('is-hidden', !fullPath);
+                }
+            }
             if (planNameEl) {
                 planNameEl.textContent = extractPlanName(session.planPath);
             }
@@ -1278,6 +1312,28 @@
 
         // reload plan for new session
         fetchPlanForSession(sessionId);
+    }
+
+    function copyTextToClipboard(text) {
+        if (!text) return Promise.resolve(false);
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text).then(function() { return true; });
+        }
+        var textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.top = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            var ok = document.execCommand('copy');
+            return Promise.resolve(ok);
+        } catch (err) {
+            return Promise.resolve(false);
+        } finally {
+            document.body.removeChild(textarea);
+        }
     }
 
     // reconnect SSE stream to a specific session
@@ -1487,6 +1543,25 @@
     if (viewToggle) {
         viewToggle.addEventListener('click', toggleSessionViewMode);
     }
+    if (projectCopyBtn && projectPathEl) {
+        var copyResetTimer = null;
+        var copyLabel = projectCopyBtn.textContent;
+        projectCopyBtn.addEventListener('click', function() {
+            var fullPath = projectPathEl.dataset.fullPath || projectPathEl.title || projectPathEl.textContent;
+            copyTextToClipboard(fullPath).then(function(success) {
+                if (!success) return;
+                projectCopyBtn.textContent = 'Copied';
+                projectCopyBtn.classList.add('copied');
+                if (copyResetTimer) {
+                    clearTimeout(copyResetTimer);
+                }
+                copyResetTimer = setTimeout(function() {
+                    projectCopyBtn.textContent = copyLabel;
+                    projectCopyBtn.classList.remove('copied');
+                }, 1200);
+            });
+        });
+    }
 
     // keyboard shortcuts
     document.addEventListener('keydown', function(e) {
@@ -1685,7 +1760,6 @@
             '</nav>\n' +
             '<div class="search-bar">\n' +
             '<input type="text" id="search" placeholder="Search... (press / to focus)" autocomplete="off">\n' +
-            '<span class="search-hint">Press Escape to clear, P to toggle plan</span>\n' +
             '</div>\n';
     }
 
@@ -1700,6 +1774,7 @@
             '<span class="plan-panel-title">Plan</span>\n' +
             '<button class="plan-toggle" id="plan-toggle">▶</button>\n' +
             '</div>\n' +
+            '<div class="plan-collapsed-label">Plan</div>\n' +
             '<div class="plan-content">\n' + clones.plan.innerHTML + '\n</div>\n' +
             '</aside>\n' +
             '</div>\n' +
@@ -1807,7 +1882,11 @@
 
     expandAllBtn.addEventListener('click', expandAllSections);
     collapseAllBtn.addEventListener('click', collapseAllSections);
-    // help modal close handlers (with null checks for SSR/test environments)
+
+    // help modal handlers (with null checks for SSR/test environments)
+    if (helpBtn) {
+        helpBtn.addEventListener('click', showHelp);
+    }
     if (helpCloseBtn) {
         helpCloseBtn.addEventListener('click', hideHelp);
     }
@@ -1818,9 +1897,6 @@
             }
         });
     }
-
-
-
 
 
 
