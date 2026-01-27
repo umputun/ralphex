@@ -8,12 +8,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/processor"
 )
 
@@ -777,3 +779,539 @@ func TestExtractProjectDir(t *testing.T) {
 		})
 	}
 }
+
+func TestServer_HandleStartPlan(t *testing.T) {
+	t.Run("returns error when plan runner not configured", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan", strings.NewReader(`{"dir":"/tmp","description":"test"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleStartPlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	})
+
+	t.Run("rejects non-POST methods", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/plan", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleStartPlan(w, req)
+
+			resp := w.Result()
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+			resp.Body.Close()
+		}
+	})
+
+	t.Run("rejects invalid JSON", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		runner := NewPlanRunner(cfg, sm)
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.SetPlanRunner(runner)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan", strings.NewReader("not json"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleStartPlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+func TestServer_HandleAnswer(t *testing.T) {
+	t.Run("returns error when plan runner not configured", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/answer", strings.NewReader(`{"session_id":"x","question_id":"y","answer":"z"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleAnswer(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	})
+
+	t.Run("rejects non-POST methods", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/answer", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleAnswer(w, req)
+
+			resp := w.Result()
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+			resp.Body.Close()
+		}
+	})
+
+	t.Run("rejects invalid JSON", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		runner := NewPlanRunner(cfg, sm)
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.SetPlanRunner(runner)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/answer", strings.NewReader("not json"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleAnswer(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+func TestServer_HandleCancelSession(t *testing.T) {
+	t.Run("returns error when plan runner not configured", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/test-id/cancel", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleCancelSession(w, req, "test-id")
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	})
+
+	t.Run("rejects non-POST methods", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/sessions/test-id/cancel", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleCancelSession(w, req, "test-id")
+
+			resp := w.Result()
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+			resp.Body.Close()
+		}
+	})
+}
+
+// testConfigForServer returns a minimal config for testing server endpoints.
+func testConfigForServer(t *testing.T) *config.Config {
+	t.Helper()
+	return &config.Config{
+		ClaudeCommand: "echo",
+		PlansDir:      t.TempDir(),
+		Colors: config.ColorConfig{
+			Task:       "0,255,0",
+			Review:     "0,255,255",
+			Codex:      "255,0,255",
+			ClaudeEval: "100,200,255",
+			Warn:       "255,255,0",
+			Error:      "255,0,0",
+			Signal:     "0,255,0",
+			Timestamp:  "150,150,150",
+			Info:       "200,200,200",
+		},
+	}
+}
+
+func TestServer_HandleRecentDirs(t *testing.T) {
+	t.Run("returns empty list when not configured", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/recent-dirs", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleRecentDirs(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result struct {
+			Dirs []string `json:"dirs"`
+		}
+		require.NoError(t, json.Unmarshal(body, &result))
+		assert.Empty(t, result.Dirs)
+	})
+
+	t.Run("returns directories from config.ProjectDirs", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		// set up plan runner with config containing project dirs
+		cfg := &config.Config{
+			ProjectDirs: []string{"/path/project1", "/path/project2"},
+		}
+		srv.planRunner = NewPlanRunner(cfg, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/recent-dirs", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleRecentDirs(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result struct {
+			Dirs []string `json:"dirs"`
+		}
+		require.NoError(t, json.Unmarshal(body, &result))
+		assert.Len(t, result.Dirs, 2)
+		assert.Equal(t, "/path/project1", result.Dirs[0])
+		assert.Equal(t, "/path/project2", result.Dirs[1])
+	})
+
+	t.Run("includes directories from sessions", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+
+		// register sessions with different paths
+		session1 := NewSession("session1", "/project/alpha/progress-test1.txt")
+		session2 := NewSession("session2", "/project/beta/progress-test2.txt")
+		sm.Register(session1)
+		sm.Register(session2)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/recent-dirs", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleRecentDirs(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result struct {
+			Dirs []string `json:"dirs"`
+		}
+		require.NoError(t, json.Unmarshal(body, &result))
+		assert.Len(t, result.Dirs, 2)
+		assert.Contains(t, result.Dirs, "/project/alpha")
+		assert.Contains(t, result.Dirs, "/project/beta")
+	})
+
+	t.Run("deduplicates directories from config and sessions", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+
+		// register a session
+		session := NewSession("session1", "/shared/project/progress-test.txt")
+		sm.Register(session)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		// set up plan runner with config containing project dirs (one overlaps with session)
+		cfg := &config.Config{
+			ProjectDirs: []string{"/shared/project", "/other/project"},
+		}
+		srv.planRunner = NewPlanRunner(cfg, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/recent-dirs", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleRecentDirs(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result struct {
+			Dirs []string `json:"dirs"`
+		}
+		require.NoError(t, json.Unmarshal(body, &result))
+		// should only have 2 entries - /shared/project appears once (deduped)
+		assert.Len(t, result.Dirs, 2)
+		assert.Equal(t, "/shared/project", result.Dirs[0]) // from config first
+		assert.Equal(t, "/other/project", result.Dirs[1])
+	})
+
+	t.Run("rejects non-GET methods", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/recent-dirs", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleRecentDirs(w, req)
+
+			resp := w.Result()
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+			resp.Body.Close()
+		}
+	})
+}
+
+func TestServer_HandleResumable(t *testing.T) {
+	t.Run("returns error when plan runner not configured", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/resumable", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleResumable(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	})
+
+	t.Run("rejects non-GET methods", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/resumable", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleResumable(w, req)
+
+			resp := w.Result()
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+			resp.Body.Close()
+		}
+	})
+
+	t.Run("returns empty list when no resumable sessions", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.planRunner = NewPlanRunner(cfg, sm)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/resumable", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleResumable(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+		var result ResumableResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+		assert.NotNil(t, result.Sessions)
+		assert.Empty(t, result.Sessions)
+	})
+
+	t.Run("returns resumable sessions from project dirs", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// create a resumable progress file
+		progressContent := `# Ralphex Progress Log
+Plan: add authentication
+Branch: main
+Mode: plan
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Starting plan...
+`
+		progressPath := filepath.Join(tmpDir, "progress-plan-auth.txt")
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		cfg := testConfigForServer(t)
+		cfg.ProjectDirs = []string{tmpDir}
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.planRunner = NewPlanRunner(cfg, sm)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/resumable", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleResumable(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var result ResumableResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+		require.Len(t, result.Sessions, 1)
+		assert.Equal(t, "add authentication", result.Sessions[0].PlanDescription)
+		assert.Equal(t, progressPath, result.Sessions[0].ProgressPath)
+	})
+}
+
+func TestServer_HandleResumePlan(t *testing.T) {
+	t.Run("returns error when plan runner not configured", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan/resume", strings.NewReader(`{"progress_path":"/tmp/test.txt"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleResumePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	})
+
+	t.Run("rejects non-POST methods", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/plan/resume", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleResumePlan(w, req)
+
+			resp := w.Result()
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+			resp.Body.Close()
+		}
+	})
+
+	t.Run("rejects invalid JSON", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.planRunner = NewPlanRunner(cfg, sm)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan/resume", strings.NewReader("not json"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleResumePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("rejects missing progress_path", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.planRunner = NewPlanRunner(cfg, sm)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan/resume", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleResumePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+		body, _ := io.ReadAll(resp.Body)
+		assert.Contains(t, string(body), "progress_path required")
+	})
+
+	t.Run("rejects non-existent progress file", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.planRunner = NewPlanRunner(cfg, sm)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan/resume", strings.NewReader(`{"progress_path":"/nonexistent/progress.txt"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleResumePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+

@@ -136,9 +136,11 @@ type Logger struct {
 type Config struct {
 	PlanFile        string // plan filename (used to derive progress filename)
 	PlanDescription string // plan description for plan mode (used for filename)
+	ProgressPath    string // explicit progress file path (overrides derived filename)
 	Mode            string // execution mode: full, review, codex-only, plan
 	Branch          string // current git branch
 	NoColor         bool   // disable color output (sets color.NoColor globally)
+	Append          bool   // append to existing file instead of creating new (for resuming sessions)
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
@@ -149,7 +151,10 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 		color.NoColor = true
 	}
 
-	progressPath := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode)
+	progressPath := cfg.ProgressPath
+	if progressPath == "" {
+		progressPath = progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode)
+	}
 
 	// ensure progress files are tracked by creating parent dir
 	if dir := filepath.Dir(progressPath); dir != "." {
@@ -158,9 +163,19 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 		}
 	}
 
-	f, err := os.Create(progressPath) //nolint:gosec // path derived from plan filename
-	if err != nil {
-		return nil, fmt.Errorf("create progress file: %w", err)
+	// open file in appropriate mode
+	var f *os.File
+	var err error
+	if cfg.Append {
+		f, err = os.OpenFile(progressPath, os.O_APPEND|os.O_WRONLY, 0o644) //nolint:gosec // path derived from plan filename
+		if err != nil {
+			return nil, fmt.Errorf("open progress file for append: %w", err)
+		}
+	} else {
+		f, err = os.Create(progressPath) //nolint:gosec // path derived from plan filename
+		if err != nil {
+			return nil, fmt.Errorf("create progress file: %w", err)
+		}
 	}
 
 	// acquire exclusive lock on progress file to signal active session
@@ -179,17 +194,27 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 		colors:    colors,
 	}
 
-	// write header
-	planStr := cfg.PlanFile
-	if planStr == "" {
-		planStr = "(no plan - review only)"
+	if cfg.Append {
+		// write resume separator instead of full header
+		l.writeFile("\n%s\n", strings.Repeat("-", 60))
+		l.writeFile("Resumed: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+		l.writeFile("%s\n\n", strings.Repeat("-", 60))
+	} else {
+		// write full header for new sessions
+		planStr := cfg.PlanFile
+		if cfg.Mode == "plan" && cfg.PlanDescription != "" {
+			planStr = cfg.PlanDescription
+		}
+		if planStr == "" {
+			planStr = "(no plan - review only)"
+		}
+		l.writeFile("# Ralphex Progress Log\n")
+		l.writeFile("Plan: %s\n", planStr)
+		l.writeFile("Branch: %s\n", cfg.Branch)
+		l.writeFile("Mode: %s\n", cfg.Mode)
+		l.writeFile("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+		l.writeFile("%s\n\n", strings.Repeat("-", 60))
 	}
-	l.writeFile("# Ralphex Progress Log\n")
-	l.writeFile("Plan: %s\n", planStr)
-	l.writeFile("Branch: %s\n", cfg.Branch)
-	l.writeFile("Mode: %s\n", cfg.Mode)
-	l.writeFile("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
-	l.writeFile("%s\n\n", strings.Repeat("-", 60))
 
 	return l, nil
 }

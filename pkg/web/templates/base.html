@@ -30,6 +30,7 @@
                 <div class="status-area">
                     <span class="elapsed-time" id="elapsed-time"></span>
                     <span class="status-badge" id="status-badge"></span>
+                    <button class="new-plan-btn" id="new-plan-btn" title="Create new plan (N)">+ New Plan</button>
                     <button class="export-btn" id="export-btn" title="Export session as HTML">Export</button>
                     <button class="help-btn" id="help-btn" title="Keyboard shortcuts (?)" aria-label="Show keyboard shortcuts">?</button>
                 </div>
@@ -113,8 +114,54 @@
                 </div>
                 <div class="help-section">
                     <div class="help-section-title">Other</div>
+                    <div class="help-row"><kbd>n</kbd> <span>New plan</span></div>
                     <div class="help-row"><kbd>?</kbd> <span>Show this help</span></div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="new-plan-overlay">
+        <div class="modal new-plan-modal">
+            <div class="modal-header">
+                <span class="modal-title">Create New Plan</span>
+                <button class="modal-close" id="new-plan-close">×</button>
+            </div>
+            <div class="modal-content">
+                <div id="resumable-sessions" class="resumable-sessions" style="display: none;"></div>
+                <div class="form-group">
+                    <label for="plan-dir">Project Directory</label>
+                    <div class="dir-input-group">
+                        <select id="plan-dir-select" class="dir-select">
+                            <option value="">Select recent directory...</option>
+                        </select>
+                        <input type="text" id="plan-dir" class="dir-input" placeholder="/path/to/project" autocomplete="off">
+                    </div>
+                    <div class="form-hint">Select from recent or enter a new path</div>
+                </div>
+                <div class="form-group">
+                    <label for="plan-description">Plan Description</label>
+                    <textarea id="plan-description" class="plan-textarea" placeholder="Describe what you want to build..." rows="3"></textarea>
+                    <div class="form-hint">Brief description of the feature or task</div>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-secondary" id="new-plan-cancel">Cancel</button>
+                    <button class="btn btn-secondary" id="new-plan-resume" disabled>Resume</button>
+                    <button class="btn btn-primary" id="new-plan-start">Start New</button>
+                </div>
+                <div class="form-error" id="new-plan-error"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="question-overlay">
+        <div class="modal question-modal">
+            <div class="modal-header">
+                <span class="modal-title">Claude needs your input</span>
+            </div>
+            <div class="modal-content">
+                <div class="question-text" id="question-text"></div>
+                <div class="question-options" id="question-options"></div>
             </div>
         </div>
     </div>

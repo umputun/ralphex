@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -38,6 +39,9 @@ type Server struct {
 	// plan caching - set after first successful load (single-session mode)
 	planMu    sync.Mutex
 	planCache *Plan
+
+	// planRunner for web-initiated plan creation (optional)
+	planRunner *PlanRunner
 }
 
 // NewServer creates a new web server for single-session mode (direct execution).
@@ -78,8 +82,13 @@ func (s *Server) Start(ctx context.Context) error {
 	// register routes
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/events", s.handleEvents)
-	mux.HandleFunc("/api/plan", s.handlePlan)
+	mux.HandleFunc("/api/plan", s.handlePlanDispatch)
+	mux.HandleFunc("/api/plan/resume", s.handleResumePlan)
+	mux.HandleFunc("/api/resumable", s.handleResumable)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
+	mux.HandleFunc("/api/sessions/", s.handleSessionsSubpath)
+	mux.HandleFunc("/api/answer", s.handleAnswer)
+	mux.HandleFunc("/api/recent-dirs", s.handleRecentDirs)
 
 	// static files
 	staticFS, err := fs.Sub(embeddedFS, "static")
@@ -125,6 +134,46 @@ func (s *Server) Stop() error {
 // Session returns the server's session (for single-session mode).
 func (s *Server) Session() *Session {
 	return s.session
+}
+
+// SetPlanRunner sets the plan runner for web-initiated plan creation.
+func (s *Server) SetPlanRunner(runner *PlanRunner) {
+	s.planRunner = runner
+}
+
+// handlePlanDispatch routes /api/plan requests based on method.
+// GET requests go to handlePlan, POST requests go to handleStartPlan.
+func (s *Server) handlePlanDispatch(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handlePlan(w, r)
+	case http.MethodPost:
+		s.handleStartPlan(w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionsSubpath routes /api/sessions/{id}/... requests.
+func (s *Server) handleSessionsSubpath(w http.ResponseWriter, r *http.Request) {
+	// extract session ID and action from path
+	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) < 1 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	sessionID := parts[0]
+
+	if len(parts) == 2 && parts[1] == "cancel" {
+		s.handleCancelSession(w, r, sessionID)
+		return
+	}
+
+	http.NotFound(w, r)
 }
 
 // templateData holds data for the dashboard template.
@@ -294,12 +343,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSession(r *http.Request) (*Session, error) {
 	sessionID := r.URL.Query().Get("session")
 
-	// single-session mode (no session manager or no session ID)
-	if s.sm == nil || sessionID == "" {
-		if s.session == nil {
-			return nil, errors.New("no session specified")
-		}
-		return s.session, nil
+	// single-session mode (no session manager)
+	if s.sm == nil {
+		return s.getSingleSession(sessionID)
+	}
+
+	if sessionID == "" {
+		return nil, errors.New("no session specified")
 	}
 
 	// multi-session mode - look up session
@@ -310,6 +360,24 @@ func (s *Server) getSession(r *http.Request) (*Session, error) {
 	}
 
 	return session, nil
+}
+
+func (s *Server) getSingleSession(sessionID string) (*Session, error) {
+	if sessionID == "" {
+		if s.session == nil {
+			return nil, errors.New("no session specified")
+		}
+		return s.session, nil
+	}
+	if s.planRunner != nil {
+		if planSession := s.planRunner.GetSession(sessionID); planSession != nil {
+			return planSession, nil
+		}
+	}
+	if s.session != nil && s.session.ID == sessionID {
+		return s.session, nil
+	}
+	return nil, fmt.Errorf("session not found: %s", sessionID)
 }
 
 // SessionInfo represents session data for the API response.
@@ -353,15 +421,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	infos := make([]SessionInfo, 0, len(sessions))
 	for _, session := range sessions {
 		meta := session.GetMetadata()
-		var dirPath string
-		if absPath, err := filepath.Abs(session.Path); err == nil {
-			dirPath = filepath.Dir(absPath)
-		} else {
-			dirPath = filepath.Dir(session.Path)
-			if dirPath == "." || dirPath == ".." {
-				dirPath = ""
-			}
-		}
+		dirPath := extractDirPath(session.Path)
 		infos = append(infos, SessionInfo{
 			ID:           session.ID,
 			State:        session.GetState(),
@@ -397,4 +457,298 @@ func extractProjectDir(path string) string {
 		return "Unknown"
 	}
 	return name
+}
+
+// extractDirPath returns the absolute directory path for a session path.
+// returns empty string for relative paths like "." or "..".
+func extractDirPath(path string) string {
+	if absPath, err := filepath.Abs(path); err == nil {
+		return filepath.Dir(absPath)
+	}
+	dirPath := filepath.Dir(path)
+	if dirPath == "." || dirPath == ".." {
+		return ""
+	}
+	return dirPath
+}
+
+// StartPlanRequest is the request body for POST /api/plan.
+type StartPlanRequest struct {
+	Dir         string `json:"dir"`
+	Description string `json:"description"`
+}
+
+// StartPlanResponse is the response body for POST /api/plan.
+type StartPlanResponse struct {
+	SessionID string `json:"session_id"`
+	Success   bool   `json:"success"`
+}
+
+// handleStartPlan handles POST /api/plan to start a new plan creation.
+func (s *Server) handleStartPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.planRunner == nil {
+		http.Error(w, "plan creation not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req StartPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Dir == "" {
+		http.Error(w, "directory required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Description == "" {
+		http.Error(w, "description required", http.StatusBadRequest)
+		return
+	}
+
+	session, err := s.planRunner.StartPlan(req.Dir, req.Description)
+	if err != nil {
+		log.Printf("[ERROR] failed to start plan: %v", err)
+		http.Error(w, "failed to start plan: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp := StartPlanResponse{
+		SessionID: session.ID,
+		Success:   true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("[WARN] failed to encode response: %v", err)
+	}
+}
+
+// AnswerRequest is the request body for POST /api/answer.
+type AnswerRequest struct {
+	SessionID  string `json:"session_id"`
+	QuestionID string `json:"question_id"`
+	Answer     string `json:"answer"`
+}
+
+// AnswerResponse is the response body for POST /api/answer.
+type AnswerResponse struct {
+	Success bool `json:"success"`
+}
+
+// handleAnswer handles POST /api/answer to submit an answer to a pending question.
+func (s *Server) handleAnswer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.planRunner == nil {
+		http.Error(w, "plan creation not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req AnswerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.SessionID == "" || req.QuestionID == "" || req.Answer == "" {
+		http.Error(w, "session_id, question_id, and answer required", http.StatusBadRequest)
+		return
+	}
+
+	session := s.planRunner.GetSession(req.SessionID)
+	if session == nil {
+		http.Error(w, "session not found: "+req.SessionID, http.StatusNotFound)
+		return
+	}
+
+	collector := session.GetInputCollector()
+	if collector == nil {
+		http.Error(w, "no input collector for session", http.StatusBadRequest)
+		return
+	}
+
+	if err := collector.SubmitAnswer(req.QuestionID, req.Answer); err != nil {
+		http.Error(w, "failed to submit answer: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp := AnswerResponse{Success: true}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("[WARN] failed to encode response: %v", err)
+	}
+}
+
+// handleCancelSession handles POST /api/sessions/{id}/cancel to cancel a plan creation.
+func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.planRunner == nil {
+		http.Error(w, "plan creation not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := s.planRunner.CancelPlan(sessionID); err != nil {
+		http.Error(w, "failed to cancel plan: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"success":true}`))
+}
+
+// RecentDirsResponse is the response body for GET /api/recent-dirs.
+type RecentDirsResponse struct {
+	Dirs []string `json:"dirs"`
+}
+
+// handleRecentDirs handles GET /api/recent-dirs.
+// Returns directories from config.ProjectDirs and from existing sessions.
+func (s *Server) handleRecentDirs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// use a map to deduplicate directories
+	seen := make(map[string]bool)
+	var dirs []string
+
+	// add directories from config (these come first, in order)
+	if s.planRunner != nil && s.planRunner.config != nil {
+		for _, dir := range s.planRunner.config.ProjectDirs {
+			if !seen[dir] {
+				seen[dir] = true
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+
+	// add directories from existing sessions
+	if s.sm != nil {
+		for _, session := range s.sm.All() {
+			// extract directory from progress file path
+			dir := filepath.Dir(session.Path)
+			if dir != "" && !seen[dir] {
+				seen[dir] = true
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+
+	if dirs == nil {
+		dirs = []string{}
+	}
+
+	resp := RecentDirsResponse{Dirs: dirs}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("[WARN] failed to encode response: %v", err)
+	}
+}
+
+// ResumableResponse is the response body for GET /api/resumable.
+type ResumableResponse struct {
+	Sessions []ResumableSession `json:"sessions"`
+}
+
+// handleResumable handles GET /api/resumable to list resumable plan sessions.
+func (s *Server) handleResumable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.planRunner == nil {
+		http.Error(w, "plan creation not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	sessions, err := s.planRunner.GetResumableSessions()
+	if err != nil {
+		log.Printf("[ERROR] failed to get resumable sessions: %v", err)
+		http.Error(w, "failed to get resumable sessions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if sessions == nil {
+		sessions = []ResumableSession{}
+	}
+
+	resp := ResumableResponse{Sessions: sessions}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("[WARN] failed to encode response: %v", err)
+	}
+}
+
+// ResumePlanRequest is the request body for POST /api/plan/resume.
+type ResumePlanRequest struct {
+	ProgressPath string `json:"progress_path"`
+}
+
+// ResumePlanResponse is the response body for POST /api/plan/resume.
+type ResumePlanResponse struct {
+	SessionID string `json:"session_id"`
+	Success   bool   `json:"success"`
+}
+
+// handleResumePlan handles POST /api/plan/resume to resume an interrupted plan.
+func (s *Server) handleResumePlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.planRunner == nil {
+		http.Error(w, "plan creation not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req ResumePlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.ProgressPath == "" {
+		http.Error(w, "progress_path required", http.StatusBadRequest)
+		return
+	}
+
+	session, err := s.planRunner.ResumePlan(req.ProgressPath)
+	if err != nil {
+		log.Printf("[ERROR] failed to resume plan: %v", err)
+		http.Error(w, "failed to resume plan: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp := ResumePlanResponse{
+		SessionID: session.ID,
+		Success:   true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("[WARN] failed to encode response: %v", err)
+	}
 }

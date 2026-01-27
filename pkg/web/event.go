@@ -15,26 +15,44 @@ type EventType string
 
 // event type constants for SSE streaming.
 const (
-	EventTypeOutput         EventType = "output"          // regular output line
-	EventTypeSection        EventType = "section"         // section header
-	EventTypeError          EventType = "error"           // error message
-	EventTypeWarn           EventType = "warn"            // warning message
-	EventTypeSignal         EventType = "signal"          // completion/failure signal
-	EventTypeTaskStart      EventType = "task_start"      // task execution started
-	EventTypeTaskEnd        EventType = "task_end"        // task execution ended
-	EventTypeIterationStart EventType = "iteration_start" // review/codex iteration started
+	EventTypeOutput           EventType = "output"            // regular output line
+	EventTypeSection          EventType = "section"           // section header
+	EventTypeError            EventType = "error"             // error message
+	EventTypeWarn             EventType = "warn"              // warning message
+	EventTypeSignal           EventType = "signal"            // completion/failure signal
+	EventTypeTaskStart        EventType = "task_start"        // task execution started
+	EventTypeTaskEnd          EventType = "task_end"          // task execution ended
+	EventTypeIterationStart   EventType = "iteration_start"   // review/codex iteration started
+	EventTypeQuestion         EventType = "question"          // interactive question for plan creation
+	EventTypeQuestionAnswered EventType = "question_answered" // answer submitted for an interactive question
 )
+
+// QuestionEventData contains details for interactive plan creation questions.
+type QuestionEventData struct {
+	QuestionID string   `json:"question_id"`
+	Question   string   `json:"question"`
+	Options    []string `json:"options"`
+	Context    string   `json:"context,omitempty"`
+}
+
+// AnswerEventData contains details for question answers in plan creation mode.
+type AnswerEventData struct {
+	QuestionID string `json:"question_id"`
+	Answer     string `json:"answer"`
+}
 
 // Event represents a single event to be streamed to web clients.
 type Event struct {
-	Type         EventType       `json:"type"`
-	Phase        processor.Phase `json:"phase"`
-	Section      string          `json:"section,omitempty"`
-	Text         string          `json:"text"`
-	Timestamp    time.Time       `json:"timestamp"`
-	Signal       string          `json:"signal,omitempty"`
-	TaskNum      int             `json:"task_num,omitempty"`      // 1-based task index from plan (matches plan.tasks[].number)
-	IterationNum int             `json:"iteration_num,omitempty"` // 1-based iteration index for review/codex phases
+	Type         EventType          `json:"type"`
+	Phase        processor.Phase    `json:"phase"`
+	Section      string             `json:"section,omitempty"`
+	Text         string             `json:"text"`
+	Timestamp    time.Time          `json:"timestamp"`
+	Signal       string             `json:"signal,omitempty"`
+	TaskNum      int                `json:"task_num,omitempty"`      // 1-based task index from plan (matches plan.tasks[].number)
+	IterationNum int                `json:"iteration_num,omitempty"` // 1-based iteration index for review/codex phases
+	QuestionData *QuestionEventData `json:"question_data,omitempty"` // question details for plan creation mode
+	AnswerData   *AnswerEventData   `json:"answer_data,omitempty"`   // answer details for plan creation mode
 }
 
 // NewOutputEvent creates an output event with current timestamp.
@@ -119,6 +137,34 @@ func NewIterationStartEvent(phase processor.Phase, iterationNum int, text string
 		Text:         text,
 		IterationNum: iterationNum,
 		Timestamp:    time.Now(),
+	}
+}
+
+// NewQuestionEvent creates a question event for interactive plan creation.
+func NewQuestionEvent(questionID, question string, options []string, context string) Event {
+	return Event{
+		Type:      EventTypeQuestion,
+		Text:      question,
+		Timestamp: time.Now(),
+		QuestionData: &QuestionEventData{
+			QuestionID: questionID,
+			Question:   question,
+			Options:    options,
+			Context:    context,
+		},
+	}
+}
+
+// NewQuestionAnsweredEvent creates an answer event for interactive plan creation.
+func NewQuestionAnsweredEvent(questionID, answer string) Event {
+	return Event{
+		Type:      EventTypeQuestionAnswered,
+		Text:      answer,
+		Timestamp: time.Now(),
+		AnswerData: &AnswerEventData{
+			QuestionID: questionID,
+			Answer:     answer,
+		},
 	}
 }
 

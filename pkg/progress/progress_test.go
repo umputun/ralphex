@@ -763,3 +763,84 @@ func TestLogger_PlanModeFilename(t *testing.T) {
 		})
 	}
 }
+
+func TestLogger_AppendMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	progressPath := filepath.Join(tmpDir, "progress-plan-test.txt")
+
+	// create initial progress file
+	initialContent := `# Ralphex Progress Log
+Plan: my test plan
+Branch: main
+Mode: plan
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Initial content
+[26-01-25 10:30:05] QUESTION: What approach?
+[26-01-25 10:30:05] OPTIONS: A, B
+[26-01-25 10:30:10] ANSWER: A
+`
+	err := os.WriteFile(progressPath, []byte(initialContent), 0o600)
+	require.NoError(t, err)
+
+	// open in append mode
+	l, err := NewLogger(Config{
+		ProgressPath: progressPath,
+		Mode:         "plan",
+		Branch:       "main",
+		Append:       true,
+		NoColor:      true,
+	}, testColors())
+	require.NoError(t, err)
+
+	// capture stdout
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	// write some content
+	l.Print("resumed content")
+
+	// close to finalize
+	err = l.Close()
+	require.NoError(t, err)
+
+	// verify file content
+	content, err := os.ReadFile(progressPath) //nolint:gosec // test file path
+	require.NoError(t, err)
+	contentStr := string(content)
+
+	// should preserve original header
+	assert.Contains(t, contentStr, "# Ralphex Progress Log")
+	assert.Contains(t, contentStr, "Plan: my test plan")
+	assert.Contains(t, contentStr, "Started: 2026-01-25 10:30:00")
+
+	// should preserve original content
+	assert.Contains(t, contentStr, "[26-01-25 10:30:01] Initial content")
+	assert.Contains(t, contentStr, "ANSWER: A")
+
+	// should have resume separator
+	assert.Contains(t, contentStr, "Resumed:")
+
+	// should have new content
+	assert.Contains(t, contentStr, "resumed content")
+
+	// should have completion footer
+	assert.Contains(t, contentStr, "Completed:")
+}
+
+func TestLogger_AppendMode_NonExistentFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	progressPath := filepath.Join(tmpDir, "nonexistent.txt")
+
+	// append mode should fail if file doesn't exist
+	_, err := NewLogger(Config{
+		ProgressPath: progressPath,
+		Mode:         "plan",
+		Branch:       "main",
+		Append:       true,
+	}, testColors())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open progress file for append")
+}

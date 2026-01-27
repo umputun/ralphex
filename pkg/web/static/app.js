@@ -28,6 +28,22 @@
     const helpCloseBtn = document.getElementById('help-close');
     const helpBtn = document.getElementById('help-btn');
 
+    // new plan modal elements
+    const newPlanBtn = document.getElementById('new-plan-btn');
+    const newPlanOverlay = document.getElementById('new-plan-overlay');
+    const newPlanCloseBtn = document.getElementById('new-plan-close');
+    const newPlanCancelBtn = document.getElementById('new-plan-cancel');
+    const newPlanStartBtn = document.getElementById('new-plan-start');
+    const planDirSelect = document.getElementById('plan-dir-select');
+    const planDirInput = document.getElementById('plan-dir');
+    const planDescriptionInput = document.getElementById('plan-description');
+    const newPlanError = document.getElementById('new-plan-error');
+
+    // question modal elements
+    const questionOverlay = document.getElementById('question-overlay');
+    const questionText = document.getElementById('question-text');
+    const questionOptions = document.getElementById('question-options');
+
     // session sidebar elements
     const sessionSidebar = document.getElementById('session-sidebar');
     const sessionList = document.getElementById('session-list');
@@ -102,8 +118,21 @@
         // event batching state for performance
         eventQueue: [],
         isProcessingQueue: false,
-        pendingScrollRestore: false
+        pendingScrollRestore: false,
+
+        // question modal state
+        pendingQuestion: null, // {sessionId, questionId, question, options}
+        answeredQuestions: {}, // {sessionId: Set of questionIds} - track answered questions to prevent replay
+        inlineQuestionEl: null, // active inline question element (if any)
+        sessionMode: null,
+        questionById: {},
+        questionSections: {},
+        renderedAnswerIds: {},
+        hasQuestionEvents: false,
+        planQALines: []
     };
+    state.recentOutputSignatures = {};
+    state.recentOutputOrder = [];
 
     // initialize plan panel state
     if (state.planCollapsed) {
@@ -127,9 +156,13 @@
 
     // batch size for event queue processing
     var BATCH_SIZE = 100;
+    var MAX_OUTPUT_DEDUP = 200;
 
     // max sessions to track expansion state for (prevents localStorage bloat)
     var MAX_PERSISTED_SESSIONS = 20;
+
+    // localStorage key prefix for answered questions
+    var ANSWERED_QUESTIONS_KEY_PREFIX = 'answeredQuestions:';
 
     // process event queue in batches using requestAnimationFrame
     // this prevents layout thrashing when loading sessions with many events
@@ -268,11 +301,23 @@
 
     // regex pattern for task iteration sections (hoisted for performance)
     var TASK_ITERATION_PATTERN = /^task iteration \d+$/i;
+    var PLAN_ITERATION_PATTERN = /^plan iteration \d+$/i;
+    var QA_LINE_PATTERN = /^(question|options|answer):\s+/i;
 
     // check if section text is a task iteration pattern
     function isTaskIteration(sectionText) {
         if (!sectionText) return false;
         return TASK_ITERATION_PATTERN.test(sectionText);
+    }
+
+    function isPlanIteration(sectionText) {
+        if (!sectionText) return false;
+        return PLAN_ITERATION_PATTERN.test(sectionText);
+    }
+
+    function isPlanQALine(text) {
+        if (!text) return false;
+        return QA_LINE_PATTERN.test(text);
     }
 
     // look up task title by number from plan data
@@ -379,7 +424,11 @@
 
         const phaseLabel = document.createElement('span');
         phaseLabel.className = 'section-phase';
-        phaseLabel.textContent = event.phase;
+        if (state.sessionMode === 'plan' && event.phase === 'plan') {
+            phaseLabel.textContent = 'QUESTION';
+        } else {
+            phaseLabel.textContent = event.phase;
+        }
 
         const title = document.createElement('span');
         title.className = 'section-title';
@@ -529,10 +578,16 @@
             // REVIEW_DONE and CODEX_REVIEW_DONE mark end of review passes, not end of execution
             var isSuccess = event.signal === 'COMPLETED';
             var isFailed = event.signal === 'FAILED';
+            var isPlanReady = event.signal === 'PLAN_READY';
 
-            if (isSuccess || isFailed) {
-                statusBadge.textContent = isSuccess ? 'COMPLETED' : 'FAILED';
-                statusBadge.classList.add(isSuccess ? 'completed' : 'failed');
+            if (isSuccess || isFailed || isPlanReady) {
+                if (isPlanReady) {
+                    statusBadge.textContent = 'PLAN READY';
+                    statusBadge.classList.add('completed');
+                } else {
+                    statusBadge.textContent = isSuccess ? 'COMPLETED' : 'FAILED';
+                    statusBadge.classList.add(isSuccess ? 'completed' : 'failed');
+                }
                 state.isTerminalState = true;
                 updateTimers();
                 if (state.elapsedTimerInterval) {
@@ -674,7 +729,26 @@
             return;
         }
 
+        // handle question events - show question modal
+        if (event.type === 'question') {
+            console.log('[DEBUG] Received question event:', event);
+            state.hasQuestionEvents = true;
+            clearPlanQALines();
+            handleQuestionEvent(event);
+            return;
+        }
+        if (event.type === 'question_answered') {
+            console.log('[DEBUG] Received question answered event:', event);
+            state.hasQuestionEvents = true;
+            clearPlanQALines();
+            handleQuestionAnsweredEvent(event);
+            return;
+        }
+
         if (event.type === 'section') {
+            if (state.sessionMode === 'plan' && (isPlanIteration(event.section || event.text) || isTaskIteration(event.section || event.text))) {
+                return; // skip iteration noise in plan mode
+            }
             // deduplicate sections (can happen when BroadcastLogger and Tailer both emit)
             var sectionKey = event.section + '|' + event.timestamp;
             if (state.seenSections[sectionKey]) {
@@ -687,9 +761,11 @@
             // create new collapsible section
             state.currentSection = createSectionHeader(event);
             output.appendChild(state.currentSection);
-        } else if (event.type === 'signal' && (event.signal === 'COMPLETED' || event.signal === 'FAILED')) {
+        } else if (event.type === 'signal' && (event.signal === 'COMPLETED' || event.signal === 'FAILED' || event.signal === 'PLAN_READY')) {
             // render completion message for terminal signals
-            var completionText = event.signal === 'COMPLETED' ? 'execution completed successfully' : 'execution failed';
+            var completionText = event.signal === 'PLAN_READY'
+                ? 'plan ready'
+                : (event.signal === 'COMPLETED' ? 'execution completed successfully' : 'execution failed');
             var completionEvent = {
                 timestamp: event.timestamp,
                 phase: event.phase,
@@ -704,8 +780,19 @@
                 output.appendChild(line);
             }
         } else {
+            if (state.sessionMode === 'plan' && event.type === 'output' && isPlanQALine(event.text)) {
+                if (state.hasQuestionEvents) {
+                    return; // hide raw Q/A log lines when question events are available
+                }
+            }
+            if (shouldSkipDuplicateOutput(event)) {
+                return;
+            }
             // create output line
             var line = createOutputLine(event);
+            if (state.sessionMode === 'plan' && event.type === 'output' && isPlanQALine(event.text) && !state.hasQuestionEvents) {
+                state.planQALines.push(line);
+            }
 
             // add to current section or root output
             if (state.currentSection) {
@@ -720,6 +807,25 @@
         if (state.autoScroll) {
             outputPanel.scrollTop = outputPanel.scrollHeight;
         }
+    }
+
+    function shouldSkipDuplicateOutput(event) {
+        if (!event || !event.text) return false;
+        var type = event.type || 'output';
+        if (type === 'section' || type === 'task_start' || type === 'task_end' || type === 'iteration_start' || type === 'question' || type === 'question_answered') {
+            return false;
+        }
+        var signature = type + '|' + event.phase + '|' + event.timestamp + '|' + event.text;
+        if (state.recentOutputSignatures[signature]) {
+            return true;
+        }
+        state.recentOutputSignatures[signature] = true;
+        state.recentOutputOrder.push(signature);
+        if (state.recentOutputOrder.length > MAX_OUTPUT_DEDUP) {
+            var oldSig = state.recentOutputOrder.shift();
+            delete state.recentOutputSignatures[oldSig];
+        }
+        return false;
     }
 
     // connect to SSE stream with exponential backoff
@@ -799,6 +905,9 @@
             if (state.searchTerm) {
                 var lines = section.querySelectorAll('.output-line');
                 lines.forEach(function(line) {
+                    if (line.classList.contains('inline-question')) {
+                        return;
+                    }
                     var contentEl = line.querySelector('.content');
                     var originalText = contentEl.dataset.originalText || contentEl.textContent;
                     if (matchesSearch(originalText, state.searchTerm)) {
@@ -816,6 +925,10 @@
 
         var allLines = output.querySelectorAll('.output-line');
         allLines.forEach(function(line) {
+            if (line.classList.contains('inline-question')) {
+                line.classList.remove('hidden');
+                return;
+            }
             var phase = line.dataset.phase;
             var contentEl = line.querySelector('.content');
             var originalText = contentEl.dataset.originalText || contentEl.textContent;
@@ -994,6 +1107,652 @@
     function hideHelp() { if (helpOverlay) helpOverlay.classList.remove('visible'); }
     function isHelpVisible() { return helpOverlay && helpOverlay.classList.contains('visible'); }
 
+    // new plan modal controls
+    function showNewPlanModal() {
+        if (!newPlanOverlay) return;
+        // load recent directories and resumable sessions
+        fetchRecentDirs();
+        fetchResumableSessions();
+        // clear form and reset to "new" mode
+        if (planDirInput) planDirInput.value = '';
+        if (planDescriptionInput) planDescriptionInput.value = '';
+        if (newPlanError) {
+            newPlanError.textContent = '';
+            newPlanError.classList.remove('visible');
+        }
+        // reset button states
+        setNewPlanMode('new');
+        newPlanOverlay.classList.add('visible');
+        // focus description input
+        if (planDescriptionInput) {
+            setTimeout(function() { planDescriptionInput.focus(); }, 100);
+        }
+    }
+
+    // track selected resumable session for resume mode
+    var selectedResumableSession = null;
+
+    // set modal mode: 'new' or 'resume'
+    function setNewPlanMode(mode) {
+        var resumeBtn = document.getElementById('new-plan-resume');
+        if (mode === 'resume') {
+            if (newPlanStartBtn) newPlanStartBtn.classList.add('secondary');
+            if (resumeBtn) {
+                resumeBtn.classList.remove('secondary');
+                resumeBtn.disabled = false;
+            }
+            if (planDescriptionInput) planDescriptionInput.disabled = true;
+        } else {
+            selectedResumableSession = null;
+            if (newPlanStartBtn) newPlanStartBtn.classList.remove('secondary');
+            if (resumeBtn) {
+                resumeBtn.classList.add('secondary');
+                resumeBtn.disabled = true;
+            }
+            if (planDescriptionInput) planDescriptionInput.disabled = false;
+            // clear selection highlight
+            var items = document.querySelectorAll('.resumable-item.selected');
+            items.forEach(function(item) { item.classList.remove('selected'); });
+        }
+    }
+
+    // fetch resumable sessions from API
+    function fetchResumableSessions() {
+        var container = document.getElementById('resumable-sessions');
+        if (!container) return;
+
+        fetch('/api/resumable')
+            .then(function(response) {
+                if (!response.ok) throw new Error('Failed to fetch resumable sessions');
+                return response.json();
+            })
+            .then(function(data) {
+                renderResumableSessions(container, data.sessions || []);
+            })
+            .catch(function(err) {
+                console.log('Failed to load resumable sessions:', err.message);
+                clearElement(container);
+            });
+    }
+
+    // render resumable sessions list
+    function renderResumableSessions(container, sessions) {
+        clearElement(container);
+
+        if (!sessions || sessions.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'block';
+
+        var header = document.createElement('div');
+        header.className = 'resumable-header';
+        header.textContent = 'Resume Interrupted Session';
+        container.appendChild(header);
+
+        var list = document.createElement('div');
+        list.className = 'resumable-list';
+
+        sessions.forEach(function(session) {
+            var item = document.createElement('div');
+            item.className = 'resumable-item';
+
+            var info = document.createElement('div');
+            info.className = 'resumable-info';
+
+            var desc = document.createElement('div');
+            desc.className = 'resumable-desc';
+            desc.textContent = session.plan_description || 'Untitled plan';
+
+            var meta = document.createElement('div');
+            meta.className = 'resumable-meta';
+
+            var time = document.createElement('span');
+            time.textContent = formatRelativeTime(session.start_time);
+
+            var qa = document.createElement('span');
+            qa.className = 'resumable-qa';
+            qa.textContent = session.qa_count + ' Q&A';
+
+            meta.appendChild(time);
+            meta.appendChild(qa);
+
+            info.appendChild(desc);
+            info.appendChild(meta);
+            item.appendChild(info);
+
+            item.addEventListener('click', function() {
+                // deselect others
+                var items = container.querySelectorAll('.resumable-item');
+                items.forEach(function(i) { i.classList.remove('selected'); });
+                // select this one
+                item.classList.add('selected');
+                selectedResumableSession = session;
+                // populate form fields
+                if (planDirInput) planDirInput.value = session.dir;
+                if (planDescriptionInput) planDescriptionInput.value = session.plan_description || '';
+                // switch to resume mode
+                setNewPlanMode('resume');
+            });
+
+            list.appendChild(item);
+        });
+
+        container.appendChild(list);
+    }
+
+    // resume an interrupted plan session
+    function resumePlan() {
+        if (!selectedResumableSession) {
+            showNewPlanError('Please select a session to resume');
+            return;
+        }
+
+        var resumeBtn = document.getElementById('new-plan-resume');
+        if (resumeBtn) resumeBtn.disabled = true;
+
+        fetch('/api/plan/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ progress_path: selectedResumableSession.progress_path })
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                return response.text().then(function(text) {
+                    try {
+                        var data = JSON.parse(text);
+                        throw new Error(data.error || text || 'Failed to resume plan');
+                    } catch (e) {
+                        throw new Error(text || 'Failed to resume plan');
+                    }
+                });
+            }
+            return response.json();
+        })
+        .then(function(data) {
+            hideNewPlanModal();
+            if (data.session_id) {
+                selectSession(data.session_id);
+            }
+            fetchSessions();
+        })
+        .catch(function(err) {
+            showNewPlanError(err.message);
+        })
+        .finally(function() {
+            if (resumeBtn) resumeBtn.disabled = false;
+        });
+    }
+
+    function hideNewPlanModal() {
+        if (newPlanOverlay) newPlanOverlay.classList.remove('visible');
+    }
+
+    function isNewPlanVisible() {
+        return newPlanOverlay && newPlanOverlay.classList.contains('visible');
+    }
+
+    function fetchRecentDirs() {
+        fetch('/api/recent-dirs')
+            .then(function(response) {
+                if (!response.ok) throw new Error('Failed to fetch recent directories');
+                return response.json();
+            })
+            .then(function(data) {
+                if (!planDirSelect) return;
+                // clear existing options except the first placeholder
+                while (planDirSelect.options.length > 1) {
+                    planDirSelect.remove(1);
+                }
+                // add recent directories
+                if (data.dirs && data.dirs.length > 0) {
+                    data.dirs.forEach(function(dir) {
+                        var option = document.createElement('option');
+                        option.value = dir;
+                        option.textContent = dir;
+                        planDirSelect.appendChild(option);
+                    });
+                }
+            })
+            .catch(function(err) {
+                console.log('Failed to load recent dirs:', err.message);
+            });
+    }
+
+    function startNewPlan() {
+        var dir = planDirInput ? planDirInput.value.trim() : '';
+        var description = planDescriptionInput ? planDescriptionInput.value.trim() : '';
+
+        // validation
+        if (!dir) {
+            showNewPlanError('Please enter a project directory');
+            return;
+        }
+        if (!description) {
+            showNewPlanError('Please enter a plan description');
+            return;
+        }
+
+        // disable button during request
+        if (newPlanStartBtn) newPlanStartBtn.disabled = true;
+
+        fetch('/api/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dir: dir, description: description })
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                // try to get error message from response body (may be plain text or JSON)
+                return response.text().then(function(text) {
+                    try {
+                        var data = JSON.parse(text);
+                        throw new Error(data.error || text || 'Failed to start plan');
+                    } catch (e) {
+                        throw new Error(text || 'Failed to start plan');
+                    }
+                });
+            }
+            return response.json();
+        })
+        .then(function(data) {
+            hideNewPlanModal();
+            // select the new session FIRST to avoid race condition
+            // (fetchSessions auto-selects sessions[0] which may be old)
+            if (data.session_id) {
+                selectSession(data.session_id);
+            }
+            fetchSessions();  // then refresh session list
+        })
+        .catch(function(err) {
+            showNewPlanError(err.message);
+        })
+        .finally(function() {
+            if (newPlanStartBtn) newPlanStartBtn.disabled = false;
+        });
+    }
+
+    function showNewPlanError(msg) {
+        if (newPlanError) {
+            newPlanError.textContent = msg;
+            newPlanError.classList.add('visible');
+        }
+    }
+
+    // question modal controls (inline for plan sessions)
+    function showQuestionModal(sessionId, questionId, question, options) {
+        console.log('[DEBUG] showQuestionModal called:', { sessionId, questionId, question, options });
+
+        state.pendingQuestion = {
+            sessionId: sessionId,
+            questionId: questionId,
+            question: question,
+            options: options
+        };
+
+        renderDockedQuestion(question, options);
+    }
+
+    function hideQuestionModal() {
+        clearDockedQuestion();
+        state.pendingQuestion = null;
+    }
+
+    function isQuestionVisible() {
+        return !!state.inlineQuestionEl;
+    }
+
+    function submitAnswer(answer) {
+        if (!state.pendingQuestion) return;
+
+        var sessionId = state.pendingQuestion.sessionId;
+        var questionId = state.pendingQuestion.questionId;
+
+        // mark answered in-memory immediately to avoid replay loops
+        markQuestionAnswered(sessionId, questionId, false);
+
+        fetch('/api/answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                question_id: questionId,
+                answer: answer
+            })
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                return response.text().then(function(text) {
+                    try {
+                        var data = JSON.parse(text);
+                        throw new Error(data.error || text || 'Failed to submit answer');
+                    } catch (e) {
+                        throw new Error(text || 'Failed to submit answer');
+                    }
+                });
+            }
+            markQuestionAnswered(sessionId, questionId, true);
+            hideQuestionModal();
+        })
+        .catch(function(err) {
+            console.error('Failed to submit answer:', err.message);
+            unmarkQuestionAnswered(sessionId, questionId);
+        });
+    }
+
+    // handle question event from SSE
+    function handleQuestionEvent(event) {
+        console.log('[DEBUG] handleQuestionEvent called, event:', event);
+        if (!event.question_data) {
+            console.log('[DEBUG] No question_data in event');
+            return;
+        }
+
+        var qd = event.question_data;
+        var sessionId = state.currentSessionId;
+        console.log('[DEBUG] question_data:', qd);
+        console.log('[DEBUG] currentSessionId:', sessionId);
+
+        // skip if this question was already answered (prevents replay loop)
+        if (isQuestionAnswered(sessionId, qd.question_id)) {
+            console.log('[DEBUG] Skipping already answered question:', qd.question_id);
+            return;
+        }
+
+        showQuestionModal(
+            sessionId,
+            qd.question_id,
+            qd.question,
+            qd.options
+        );
+
+        if (state.sessionMode === 'plan') {
+            state.questionById[qd.question_id] = {
+                question: qd.question,
+                options: qd.options || []
+            };
+            ensurePlanQuestionSection(qd.question_id, qd.question);
+        }
+    }
+
+    // handle question answered event from SSE
+    function handleQuestionAnsweredEvent(event) {
+        if (!event.answer_data) {
+            return;
+        }
+        var sessionId = state.currentSessionId;
+        var questionId = event.answer_data.question_id;
+        if (!sessionId || !questionId) {
+            return;
+        }
+
+        markQuestionAnswered(sessionId, questionId, true);
+
+        if (state.sessionMode === 'plan') {
+            var qInfo = state.questionById[questionId];
+            if (!qInfo && state.pendingQuestion && state.pendingQuestion.questionId === questionId) {
+                qInfo = {
+                    question: state.pendingQuestion.question,
+                    options: state.pendingQuestion.options || []
+                };
+                state.questionById[questionId] = qInfo;
+            }
+            renderQuestionAnswerCard(questionId, event.answer_data.answer, qInfo);
+
+            // keep question section open, but route subsequent output to top level
+            if (state.currentSection && state.currentSection.dataset.questionId === questionId) {
+                finalizePreviousSectionDuration(Date.now());
+                state.currentSection = null;
+            }
+        }
+
+        if (state.pendingQuestion && state.pendingQuestion.questionId === questionId) {
+            hideQuestionModal();
+        }
+    }
+
+    function updateCurrentSectionTitle(title) {
+        if (!state.currentSection || !title) return;
+        var titleEl = state.currentSection.querySelector('.section-title');
+        if (titleEl) {
+            titleEl.textContent = title;
+        }
+    }
+
+    function ensurePlanQuestionSection(questionId, title) {
+        if (!title || !questionId) return;
+
+        var existing = state.questionSections[questionId];
+        if (existing) {
+            state.currentSection = existing;
+            updateCurrentSectionTitle(title);
+            return;
+        }
+
+        var sectionEvent = {
+            section: title,
+            phase: 'plan'
+        };
+        var section = createSectionHeader(sectionEvent);
+        section.dataset.planQuestion = 'true';
+        section.dataset.questionId = questionId;
+        output.appendChild(section);
+        state.currentSection = section;
+        state.questionSections[questionId] = section;
+    }
+
+    function renderQuestionAnswerCard(questionId, answer, questionInfo) {
+        if (!questionId || !answer) return;
+        if (state.renderedAnswerIds[questionId]) return;
+
+        var info = questionInfo || state.questionById[questionId] || {};
+        var questionText = info.question || 'Question';
+        var options = Array.isArray(info.options) ? info.options : [];
+
+        ensurePlanQuestionSection(questionId, questionText);
+
+        var section = state.questionSections[questionId] || state.currentSection;
+        var container = section ? section.querySelector('.section-content') : output;
+        if (!container) return;
+
+        var card = document.createElement('div');
+        card.className = 'qa-card';
+
+        var qLabel = document.createElement('div');
+        qLabel.className = 'qa-label';
+        qLabel.textContent = 'Question';
+
+        var qText = document.createElement('div');
+        qText.className = 'qa-question';
+        qText.textContent = questionText;
+
+        card.appendChild(qLabel);
+        card.appendChild(qText);
+
+        if (options.length > 0) {
+            var optionsWrap = document.createElement('div');
+            optionsWrap.className = 'qa-options';
+            options.forEach(function(opt) {
+                var optEl = document.createElement('div');
+                optEl.className = 'qa-option';
+                if (opt === answer) {
+                    optEl.classList.add('selected');
+                }
+                optEl.textContent = opt;
+                optionsWrap.appendChild(optEl);
+            });
+            card.appendChild(optionsWrap);
+        }
+
+        var aLabel = document.createElement('div');
+        aLabel.className = 'qa-label';
+        aLabel.textContent = 'Answer';
+
+        var aText = document.createElement('div');
+        aText.className = 'qa-answer';
+        aText.textContent = answer;
+
+        card.appendChild(aLabel);
+        card.appendChild(aText);
+
+        container.appendChild(card);
+        state.renderedAnswerIds[questionId] = true;
+    }
+
+    function renderDockedQuestion(question, options) {
+        if (!outputPanel) return;
+
+        clearDockedQuestion();
+
+        var dock = document.getElementById('question-dock');
+        if (!dock) {
+            dock = document.createElement('div');
+            dock.id = 'question-dock';
+            dock.className = 'question-dock';
+            outputPanel.appendChild(dock);
+        }
+
+        var card = document.createElement('div');
+        card.className = 'question-dock-card';
+
+        var header = document.createElement('div');
+        header.className = 'question-dock-header';
+
+        var title = document.createElement('div');
+        title.className = 'question-dock-title';
+        title.textContent = 'Claude needs your input';
+
+        var timestamp = document.createElement('div');
+        timestamp.className = 'question-dock-time';
+        timestamp.textContent = formatTimestamp(new Date());
+
+        header.appendChild(title);
+        header.appendChild(timestamp);
+
+        var text = document.createElement('div');
+        text.className = 'question-dock-text';
+        text.textContent = question;
+
+        var optionsWrap = document.createElement('div');
+        optionsWrap.className = 'question-dock-options';
+        options.forEach(function(opt, idx) {
+            var btn = document.createElement('button');
+            btn.className = 'question-option';
+            btn.setAttribute('data-answer', opt);
+
+            var keySpan = document.createElement('span');
+            keySpan.className = 'option-key';
+            keySpan.textContent = (idx + 1).toString();
+
+            var textSpan = document.createElement('span');
+            textSpan.textContent = opt;
+
+            btn.appendChild(keySpan);
+            btn.appendChild(textSpan);
+
+            btn.addEventListener('click', function() {
+                submitAnswer(opt);
+            });
+
+            optionsWrap.appendChild(btn);
+        });
+
+        card.appendChild(header);
+        card.appendChild(text);
+        card.appendChild(optionsWrap);
+
+        dock.appendChild(card);
+        dock.classList.add('visible');
+
+        state.inlineQuestionEl = card;
+
+        var firstOption = card.querySelector('.question-option');
+        if (firstOption) {
+            setTimeout(function() { firstOption.focus(); }, 50);
+        }
+    }
+
+    function clearDockedQuestion() {
+        var dock = document.getElementById('question-dock');
+        if (dock) {
+            clearElement(dock);
+            dock.classList.remove('visible');
+        }
+        state.inlineQuestionEl = null;
+    }
+
+    // check if a question has been answered for a session
+    function isQuestionAnswered(sessionId, questionId) {
+        if (!sessionId || !questionId) {
+            return false;
+        }
+        if (!state.answeredQuestions[sessionId]) {
+            state.answeredQuestions[sessionId] = loadAnsweredQuestions(sessionId);
+        }
+        return state.answeredQuestions[sessionId][questionId] === true;
+    }
+
+    // mark a question as answered for a session
+    function markQuestionAnswered(sessionId, questionId, persist) {
+        if (!sessionId || !questionId) {
+            return;
+        }
+        if (!state.answeredQuestions[sessionId]) {
+            state.answeredQuestions[sessionId] = loadAnsweredQuestions(sessionId);
+        }
+        state.answeredQuestions[sessionId][questionId] = true;
+        if (persist) {
+            persistAnsweredQuestions(sessionId);
+        }
+    }
+
+    function unmarkQuestionAnswered(sessionId, questionId) {
+        if (!sessionId || !questionId) {
+            return;
+        }
+        if (!state.answeredQuestions[sessionId]) {
+            state.answeredQuestions[sessionId] = loadAnsweredQuestions(sessionId);
+        }
+        if (state.answeredQuestions[sessionId][questionId]) {
+            delete state.answeredQuestions[sessionId][questionId];
+            persistAnsweredQuestions(sessionId);
+        }
+    }
+
+    function loadAnsweredQuestions(sessionId) {
+        if (!sessionId) {
+            return {};
+        }
+        try {
+            var raw = localStorage.getItem(ANSWERED_QUESTIONS_KEY_PREFIX + sessionId);
+            if (!raw) {
+                return {};
+            }
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                return parsed;
+            }
+        } catch (err) {
+            console.warn('Failed to load answered questions:', err.message);
+        }
+        return {};
+    }
+
+    function persistAnsweredQuestions(sessionId) {
+        if (!sessionId || !state.answeredQuestions[sessionId]) {
+            return;
+        }
+        try {
+            localStorage.setItem(
+                ANSWERED_QUESTIONS_KEY_PREFIX + sessionId,
+                JSON.stringify(state.answeredQuestions[sessionId])
+            );
+        } catch (err) {
+            console.warn('Failed to persist answered questions:', err.message);
+        }
+    }
+
     // fetch sessions from API
     function fetchSessions() {
         fetch('/api/sessions')
@@ -1006,6 +1765,12 @@
             .then(function(sessions) {
                 state.sessions = sessions;
                 renderSessionList(sessions);
+                if (state.currentSessionId) {
+                    var current = findSessionById(state.currentSessionId);
+                    if (current) {
+                        updateHeaderForSession(current);
+                    }
+                }
                 // auto-select first session if none is currently selected
                 if (!state.currentSessionId && sessions.length > 0) {
                     selectSession(sessions[0].id);
@@ -1204,11 +1969,37 @@
             indicator.title = 'Completed session';
         }
 
+        // add plan mode indicator for plan sessions
+        var isPlanMode = session.mode === 'plan';
+        var isCompleted = session.state !== 'active';
+        if (isPlanMode) {
+            item.classList.add('plan-mode');
+            indicator.classList.add('plan-mode');
+            if (isCompleted) {
+                item.classList.add('plan-completed');
+            }
+        }
+
         var name = document.createElement('div');
         name.className = 'session-name';
-        name.textContent = extractPlanName(session.planPath);
+        // for plan mode, planPath contains the description; otherwise extract from path
+        name.textContent = isPlanMode ? (session.planPath || 'Plan') : extractPlanName(session.planPath);
 
         topRow.appendChild(indicator);
+
+        // add PLAN badge for plan mode sessions
+        if (isPlanMode) {
+            var planBadge = document.createElement('span');
+            planBadge.className = 'session-badge plan-badge';
+            if (isCompleted) {
+                planBadge.classList.add('plan-badge-completed');
+                planBadge.textContent = 'PLAN DONE';
+            } else {
+                planBadge.textContent = 'PLAN';
+            }
+            topRow.appendChild(planBadge);
+        }
+
         topRow.appendChild(name);
 
         var timeSpan = document.createElement('span');
@@ -1254,6 +2045,40 @@
         return item;
     }
 
+    function findSessionById(sessionId) {
+        for (var i = 0; i < state.sessions.length; i++) {
+            if (state.sessions[i].id === sessionId) {
+                return state.sessions[i];
+            }
+        }
+        return null;
+    }
+
+    function updateHeaderForSession(session) {
+        if (!session) return;
+
+        if (projectPathEl) {
+            var fullPath = session.dirPath || session.dir || '';
+            projectPathEl.textContent = fullPath ? extractProjectName(fullPath) : '';
+            projectPathEl.title = fullPath;
+            projectPathEl.dataset.fullPath = fullPath;
+            if (projectWrapEl) {
+                projectWrapEl.classList.toggle('is-hidden', !fullPath);
+            }
+        }
+        if (planNameEl) {
+            if (session.mode === 'plan') {
+                planNameEl.textContent = session.planPath || 'Plan creation';
+            } else {
+                planNameEl.textContent = extractPlanName(session.planPath);
+            }
+        }
+        if (branchNameEl) {
+            branchNameEl.textContent = session.branch || '';
+        }
+        applySessionModeUI(session);
+    }
+
     // select a session and switch to it
     function selectSession(sessionId) {
         if (sessionId === state.currentSessionId) {
@@ -1280,32 +2105,8 @@
         });
 
         // find session data
-        var session = null;
-        for (var i = 0; i < state.sessions.length; i++) {
-            if (state.sessions[i].id === sessionId) {
-                session = state.sessions[i];
-                break;
-            }
-        }
-
-        // update header info
-        if (session) {
-            if (projectPathEl) {
-                var fullPath = session.dirPath || session.dir || '';
-                projectPathEl.textContent = fullPath ? extractProjectName(fullPath) : '';
-                projectPathEl.title = fullPath;
-                projectPathEl.dataset.fullPath = fullPath;
-                if (projectWrapEl) {
-                    projectWrapEl.classList.toggle('is-hidden', !fullPath);
-                }
-            }
-            if (planNameEl) {
-                planNameEl.textContent = extractPlanName(session.planPath);
-            }
-            if (branchNameEl) {
-                branchNameEl.textContent = session.branch || '';
-            }
-        }
+        var session = findSessionById(sessionId);
+        updateHeaderForSession(session);
 
         // reconnect SSE to new session
         reconnectToSession(sessionId);
@@ -1352,6 +2153,22 @@
 
         // connect to new session
         connect();
+    }
+
+    function applySessionModeUI(session) {
+        var isPlan = session && session.mode === 'plan';
+        document.body.classList.toggle('plan-session', isPlan);
+        state.sessionMode = session ? session.mode : null;
+
+        if (isPlan) {
+            mainContainer.classList.add('plan-collapsed');
+        } else {
+            mainContainer.classList.toggle('plan-collapsed', state.planCollapsed);
+        }
+
+        if (planToggle) {
+            planToggle.textContent = mainContainer.classList.contains('plan-collapsed') ? '◀' : '▶';
+        }
     }
 
     // fetch plan for a specific session
@@ -1402,6 +2219,18 @@
         }
     }
 
+    function clearPlanQALines() {
+        if (!state.planQALines || state.planQALines.length === 0) {
+            return;
+        }
+        state.planQALines.forEach(function(line) {
+            if (line && line.parentNode) {
+                line.parentNode.removeChild(line);
+            }
+        });
+        state.planQALines = [];
+    }
+
     function resetOutputState() {
         clearElement(output);
         state.currentSection = null;
@@ -1417,11 +2246,21 @@
         state.isProcessingQueue = false;
         state.focusedSectionIndex = -1;
         state.focusedSectionElement = null;
+        state.questionById = {};
+        state.questionSections = {};
+        state.renderedAnswerIds = {};
+        state.hasQuestionEvents = false;
+        state.planQALines = [];
+        state.recentOutputSignatures = {};
+        state.recentOutputOrder = [];
         if (state.elapsedTimerInterval) {
             clearInterval(state.elapsedTimerInterval);
             state.elapsedTimerInterval = null;
         }
         elapsedTimeEl.textContent = '';
+        // clear pending question and hide modal when switching sessions
+        state.pendingQuestion = null;
+        hideQuestionModal();
     }
 
     // create plan loading/error message element
@@ -1565,6 +2404,42 @@
 
     // keyboard shortcuts
     document.addEventListener('keydown', function(e) {
+        // handle question modal - number keys select options
+        if (isQuestionVisible()) {
+            var keyNum = parseInt(e.key, 10);
+            if (keyNum >= 1 && keyNum <= 9 && state.pendingQuestion) {
+                var options = state.pendingQuestion.options;
+                if (keyNum <= options.length) {
+                    e.preventDefault();
+                    submitAnswer(options[keyNum - 1]);
+                    return;
+                }
+            }
+            // arrow keys navigate between options
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                var optionBtns = state.inlineQuestionEl ? state.inlineQuestionEl.querySelectorAll('.question-option') : [];
+                if (optionBtns.length === 0) return;
+                var currentIdx = Array.from(optionBtns).indexOf(document.activeElement);
+                var nextIdx;
+                if (e.key === 'ArrowDown') {
+                    nextIdx = currentIdx < 0 ? 0 : Math.min(currentIdx + 1, optionBtns.length - 1);
+                } else {
+                    nextIdx = currentIdx < 0 ? optionBtns.length - 1 : Math.max(currentIdx - 1, 0);
+                }
+                optionBtns[nextIdx].focus();
+                return;
+            }
+            // Enter selects focused option
+            if (e.key === 'Enter' && document.activeElement.classList.contains('question-option')) {
+                e.preventDefault();
+                document.activeElement.click();
+                return;
+            }
+            // don't process other shortcuts when question modal is visible
+            return;
+        }
+
         // '?' shows help (unless in input)
         if (e.key === '?' && document.activeElement !== searchInput) {
             e.preventDefault();
@@ -1572,10 +2447,14 @@
             return;
         }
 
-        // Escape closes help, or clears search
+        // Escape closes modals, or clears search
         if (e.key === 'Escape') {
             if (isHelpVisible()) {
                 hideHelp();
+                return;
+            }
+            if (isNewPlanVisible()) {
+                hideNewPlanModal();
                 return;
             }
             searchInput.value = '';
@@ -1584,13 +2463,19 @@
             return;
         }
 
-        // ignore other shortcuts when help is visible
-        if (isHelpVisible()) return;
+        // ignore other shortcuts when help or new plan modal is visible
+        if (isHelpVisible() || isNewPlanVisible()) return;
 
         // '/' focuses search (unless already in input)
         if (e.key === '/' && document.activeElement !== searchInput) {
             e.preventDefault();
             searchInput.focus();
+        }
+
+        // 'n' opens new plan modal (unless in input)
+        if ((e.key === 'n' || e.key === 'N') && document.activeElement !== searchInput) {
+            e.preventDefault();
+            showNewPlanModal();
         }
 
         // 'P' toggles plan panel (unless in input)
@@ -1898,8 +2783,39 @@
         });
     }
 
+    // new plan modal handlers
+    if (newPlanBtn) {
+        newPlanBtn.addEventListener('click', showNewPlanModal);
+    }
+    if (newPlanCloseBtn) {
+        newPlanCloseBtn.addEventListener('click', hideNewPlanModal);
+    }
+    if (newPlanCancelBtn) {
+        newPlanCancelBtn.addEventListener('click', hideNewPlanModal);
+    }
+    if (newPlanStartBtn) {
+        newPlanStartBtn.addEventListener('click', startNewPlan);
+    }
+    var newPlanResumeBtn = document.getElementById('new-plan-resume');
+    if (newPlanResumeBtn) {
+        newPlanResumeBtn.addEventListener('click', resumePlan);
+    }
+    if (newPlanOverlay) {
+        newPlanOverlay.addEventListener('click', function(e) {
+            if (e.target === newPlanOverlay) {
+                hideNewPlanModal();
+            }
+        });
+    }
+    if (planDirSelect) {
+        planDirSelect.addEventListener('change', function() {
+            if (planDirInput && planDirSelect.value) {
+                planDirInput.value = planDirSelect.value;
+            }
+        });
+    }
 
-
+    // question modal handlers (clicking overlay does NOT close - user must answer)
 
 
 
