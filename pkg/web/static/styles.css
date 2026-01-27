@@ -363,22 +363,17 @@ body::before {
     border-left: 2px solid var(--phase-codex);
 }
 
+/* keep completed plan sessions visually consistent with other sessions */
 .session-item.plan-mode.plan-completed {
-    border-left-color: var(--border-default);
-    background: rgba(255, 255, 255, 0.02);
+    border-left-color: var(--phase-codex);
+    background: transparent;
 }
 
-.session-item.plan-mode.plan-completed .session-name {
-    color: var(--text-muted);
-}
-
+.session-item.plan-mode.plan-completed .session-name,
 .session-item.plan-mode.plan-completed .session-project,
-.session-item.plan-mode.plan-completed .session-branch {
-    color: var(--text-faint);
-}
-
+.session-item.plan-mode.plan-completed .session-branch,
 .session-item.plan-mode.plan-completed .session-time {
-    color: var(--text-faint);
+    color: inherit;
 }
 
 .session-indicator.plan-mode.active {
@@ -407,9 +402,9 @@ body::before {
 }
 
 .plan-badge.plan-badge-completed {
-    background: var(--bg-tertiary);
-    color: var(--text-muted);
-    border-color: var(--border-subtle);
+    background: var(--phase-codex-muted);
+    color: var(--phase-codex);
+    border-color: rgba(192, 132, 252, 0.3);
 }
 
 .session-info {
@@ -1144,6 +1139,13 @@ body.plan-session .scroll-indicator {
     font-size: 14px;
     line-height: 1.5;
     color: var(--text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.question-dock-status {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text-muted);
     margin-bottom: var(--space-sm);
 }
 
@@ -2037,6 +2039,23 @@ body.plan-collapsed .scroll-indicator {
 .question-option:hover {
     background: var(--bg-elevated);
     border-color: var(--phase-review);
+}
+
+.question-option.selected {
+    background: rgba(77, 178, 255, 0.15);
+    border-color: var(--phase-review);
+}
+
+.question-option.selected .option-key {
+    background: var(--phase-review);
+    border-color: var(--phase-review);
+    color: var(--bg-primary);
+}
+
+.question-option:disabled,
+.question-option.disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .question-option:focus {

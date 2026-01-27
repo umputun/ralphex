@@ -93,7 +93,10 @@
         // session state
         sessions: [],
         currentSessionId: null,
+        currentSession: null,
         sessionPollInterval: null,
+        resumingProgressPath: null,
+        resumingPromise: null,
 
         // timing state
         executionStartTime: null,
@@ -129,7 +132,13 @@
         questionSections: {},
         renderedAnswerIds: {},
         hasQuestionEvents: false,
-        planQALines: []
+        planQALines: [],
+        questionBlockActive: false,
+        questionBlockBuffer: '',
+        inlineQuestionText: '',
+        inlineQuestionOptions: null,
+        ignoreInlineQuestionFor: null,
+        deferredAnswer: null
     };
     state.recentOutputSignatures = {};
     state.recentOutputOrder = [];
@@ -240,6 +249,48 @@
         }
     }
 
+    function normalizeQuestionText(text) {
+        return (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function splitOptionsText(text) {
+        if (!text) return [];
+        return text.split(',').map(function(opt) {
+            return opt.trim();
+        }).filter(Boolean);
+    }
+
+    function parseQuestionJsonBlock(raw) {
+        if (!raw) return null;
+        // strip log prefix from each line, join, and normalize whitespace
+        // JSON may be split across multiple output lines with timestamps like [26-01-27 16:46:39]
+        var lines = raw.split('\n');
+        var stripped = lines.map(function(line) {
+            // strip log prefix like [26-01-27 16:46:39] from start of line
+            return line.replace(/^\s*\[[^\]]+\]\s*/, '');
+        });
+        var cleaned = stripped.join(' ').replace(/\s+/g, ' ').trim();
+        if (!cleaned) return null;
+        try {
+            var parsed = JSON.parse(cleaned);
+            if (parsed && parsed.question) {
+                return {
+                    question: parsed.question,
+                    options: Array.isArray(parsed.options) ? parsed.options : []
+                };
+            }
+        } catch (err) {
+            console.log('[DEBUG] parseQuestionJsonBlock failed:', err.message, 'input:', cleaned.substring(0, 100));
+            return null;
+        }
+        return null;
+    }
+
+    function stripLogPrefix(text) {
+        if (!text) return '';
+        return text.replace(/^\s*\[[^\]]+\]\s*/, '');
+    }
+
     // escape regex special characters for safe regex creation
     function escapeRegex(str) {
         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -303,6 +354,8 @@
     var TASK_ITERATION_PATTERN = /^task iteration \d+$/i;
     var PLAN_ITERATION_PATTERN = /^plan iteration \d+$/i;
     var QA_LINE_PATTERN = /^(question|options|answer):\s+/i;
+    var QA_BLOCK_PATTERN = /^<<<RALPHEX:(QUESTION|END)>>>$/i;
+    var QA_JSON_PATTERN = /^\{.*"question"\s*:/i;
 
     // check if section text is a task iteration pattern
     function isTaskIteration(sectionText) {
@@ -317,7 +370,7 @@
 
     function isPlanQALine(text) {
         if (!text) return false;
-        return QA_LINE_PATTERN.test(text);
+        return QA_LINE_PATTERN.test(text) || QA_BLOCK_PATTERN.test(text) || QA_JSON_PATTERN.test(text);
     }
 
     // look up task title by number from plan data
@@ -742,6 +795,10 @@
             state.hasQuestionEvents = true;
             clearPlanQALines();
             handleQuestionAnsweredEvent(event);
+            return;
+        }
+
+        if (tryHandlePlanQuestionFromOutput(event)) {
             return;
         }
 
@@ -1394,6 +1451,46 @@
         renderDockedQuestion(question, options);
     }
 
+    function showPendingQuestionPlaceholder(sessionId, question, options, progressPath) {
+        if (!question) return;
+
+        var normalized = normalizeQuestionText(question);
+        if (state.deferredAnswer && normalizeQuestionText(state.deferredAnswer.question) !== normalized) {
+            state.deferredAnswer = null;
+        }
+
+        var sessionInfo = findSessionById(sessionId);
+        var isActiveSession = (sessionInfo && sessionInfo.state === 'active') ||
+            (state.currentSession && state.currentSession.state === 'active');
+        if (isActiveSession) {
+            state.deferredAnswer = null;
+        }
+
+        state.pendingQuestion = {
+            sessionId: sessionId,
+            questionId: null,
+            question: question,
+            options: options || [],
+            progressPath: progressPath,
+            placeholder: true
+        };
+
+        var selectedAnswer = null;
+        var status = isActiveSession
+            ? 'Session is active in another process. Answer in the terminal to continue.'
+            : 'Resuming plan session...';
+        if (state.deferredAnswer && normalizeQuestionText(state.deferredAnswer.question) === normalized) {
+            selectedAnswer = state.deferredAnswer.answer;
+            status = 'Answer queued — will submit when session resumes';
+        }
+
+        renderDockedQuestion(question, options || [], {
+            selectedAnswer: selectedAnswer,
+            status: status,
+            disableOptions: isActiveSession
+        });
+    }
+
     function hideQuestionModal() {
         clearDockedQuestion();
         state.pendingQuestion = null;
@@ -1409,17 +1506,70 @@
         var sessionId = state.pendingQuestion.sessionId;
         var questionId = state.pendingQuestion.questionId;
 
-        // mark answered in-memory immediately to avoid replay loops
-        markQuestionAnswered(sessionId, questionId, false);
+        if (!questionId) {
+            // no questionId means this is a placeholder from parsed output
+            // need to resume session first, then answer when real question arrives via SSE
+            renderDockedQuestion(
+                state.pendingQuestion.question,
+                state.pendingQuestion.options || [],
+                { selectedAnswer: answer, status: 'Resuming session...', disableOptions: true }
+            );
 
-        fetch('/api/answer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                session_id: sessionId,
-                question_id: questionId,
+            // store the selected answer to auto-submit when question event arrives
+            state.deferredAnswer = {
+                question: state.pendingQuestion.question,
                 answer: answer
-            })
+            };
+
+            // trigger session resume
+            var progressPath = (state.currentSession && state.currentSession.progressPath)
+                ? state.currentSession.progressPath
+                : (state.pendingQuestion.progressPath || '');
+            if (!progressPath) {
+                renderDockedQuestion(
+                    state.pendingQuestion.question,
+                    state.pendingQuestion.options || [],
+                    { selectedAnswer: answer, status: 'Unable to resume: missing progress path', disableOptions: false }
+                );
+                return;
+            }
+
+            ensurePlanSessionResumed(progressPath)
+                .catch(function(err) {
+                    var msg = (err && err.message) ? err.message : 'Failed to resume plan session';
+                    if (/session already active/i.test(msg)) {
+                        msg = 'Session is already active in another process. Answer in the terminal or stop it before resuming here.';
+                    }
+                    renderDockedQuestion(
+                        state.pendingQuestion.question,
+                        state.pendingQuestion.options || [],
+                        { selectedAnswer: answer, status: msg, disableOptions: false }
+                    );
+                });
+            return;
+        }
+
+        var resumePromise = Promise.resolve();
+        if (state.currentSession &&
+            state.currentSession.mode === 'plan' &&
+            state.currentSession.state !== 'active' &&
+            state.currentSession.progressPath) {
+            resumePromise = ensurePlanSessionResumed(state.currentSession.progressPath);
+        }
+
+        resumePromise.then(function() {
+            // mark answered in-memory immediately to avoid replay loops
+            markQuestionAnswered(sessionId, questionId, false);
+
+            return fetch('/api/answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    question_id: questionId,
+                    answer: answer
+                })
+            });
         })
         .then(function(response) {
             if (!response.ok) {
@@ -1432,6 +1582,7 @@
                     }
                 });
             }
+            state.deferredAnswer = null;
             markQuestionAnswered(sessionId, questionId, true);
             hideQuestionModal();
         })
@@ -1448,11 +1599,14 @@
             console.log('[DEBUG] No question_data in event');
             return;
         }
+        state.hasQuestionEvents = true;
 
         var qd = event.question_data;
         var sessionId = state.currentSessionId;
         console.log('[DEBUG] question_data:', qd);
         console.log('[DEBUG] currentSessionId:', sessionId);
+
+        var normalizedQuestion = normalizeQuestionText(qd.question);
 
         // skip if this question was already answered (prevents replay loop)
         if (isQuestionAnswered(sessionId, qd.question_id)) {
@@ -1473,6 +1627,16 @@
                 options: qd.options || []
             };
             ensurePlanQuestionSection(qd.question_id, qd.question);
+        }
+
+        if (state.deferredAnswer && normalizeQuestionText(state.deferredAnswer.question) !== normalizedQuestion) {
+            state.deferredAnswer = null;
+        }
+
+        if (state.deferredAnswer && normalizeQuestionText(state.deferredAnswer.question) === normalizedQuestion) {
+            var queuedAnswer = state.deferredAnswer.answer;
+            state.deferredAnswer = null;
+            submitAnswer(queuedAnswer);
         }
     }
 
@@ -1498,6 +1662,12 @@
                 };
                 state.questionById[questionId] = qInfo;
             }
+            if (!qInfo && state.pendingQuestion && state.pendingQuestion.placeholder) {
+                qInfo = {
+                    question: state.pendingQuestion.question,
+                    options: state.pendingQuestion.options || []
+                };
+            }
             renderQuestionAnswerCard(questionId, event.answer_data.answer, qInfo);
 
             // keep question section open, but route subsequent output to top level
@@ -1507,9 +1677,135 @@
             }
         }
 
-        if (state.pendingQuestion && state.pendingQuestion.questionId === questionId) {
-            hideQuestionModal();
+        if (state.pendingQuestion) {
+            if (state.pendingQuestion.questionId === questionId) {
+                hideQuestionModal();
+            } else if (state.pendingQuestion.placeholder && state.pendingQuestion.expectedAnswer === event.answer_data.answer) {
+                hideQuestionModal();
+            }
         }
+    }
+
+    function tryHandlePlanQuestionFromOutput(event) {
+        if (!event || event.type !== 'output') {
+            return false;
+        }
+        if (state.sessionMode !== 'plan' || state.hasQuestionEvents) {
+            return false;
+        }
+
+        var text = event.text || '';
+        var raw = stripLogPrefix(text);
+
+        var questionStart = '<<<RALPHEX:QUESTION>>>';
+        var questionEnd = '<<<RALPHEX:END>>>';
+
+        if (state.questionBlockActive) {
+            var endIdx = raw.indexOf(questionEnd);
+            if (endIdx !== -1) {
+                var beforeEnd = raw.slice(0, endIdx);
+                if (beforeEnd) {
+                    state.questionBlockBuffer += beforeEnd;
+                    state.questionBlockBuffer += '\n';
+                }
+                state.questionBlockActive = false;
+                var parsed = parseQuestionJsonBlock(state.questionBlockBuffer);
+                state.questionBlockBuffer = '';
+                if (parsed && parsed.question) {
+                    state.inlineQuestionText = '';
+                    state.inlineQuestionOptions = null;
+                    state.ignoreInlineQuestionFor = normalizeQuestionText(parsed.question);
+                    showPendingQuestionPlaceholder(
+                        state.currentSessionId,
+                        parsed.question,
+                        parsed.options || [],
+                        state.currentSession ? state.currentSession.progressPath : null
+                    );
+                    clearPlanQALines();
+                }
+                return true;
+            }
+            state.questionBlockBuffer += raw;
+            state.questionBlockBuffer += '\n';
+            return true;
+        }
+
+        var startIdx = raw.indexOf(questionStart);
+        if (startIdx !== -1) {
+            var afterStart = raw.slice(startIdx + questionStart.length);
+            var inlineEndIdx = afterStart.indexOf(questionEnd);
+            if (inlineEndIdx !== -1) {
+                var inlinePayload = afterStart.slice(0, inlineEndIdx);
+                var inlineParsed = parseQuestionJsonBlock(inlinePayload);
+                if (inlineParsed && inlineParsed.question) {
+                    state.inlineQuestionText = '';
+                    state.inlineQuestionOptions = null;
+                    state.ignoreInlineQuestionFor = normalizeQuestionText(inlineParsed.question);
+                    showPendingQuestionPlaceholder(
+                        state.currentSessionId,
+                        inlineParsed.question,
+                        inlineParsed.options || [],
+                        state.currentSession ? state.currentSession.progressPath : null
+                    );
+                    clearPlanQALines();
+                }
+                return true;
+            }
+            state.questionBlockActive = true;
+            state.questionBlockBuffer = '';
+            if (afterStart.trim()) {
+                state.questionBlockBuffer += afterStart.trim();
+                state.questionBlockBuffer += '\n';
+            }
+            return true;
+        }
+
+        if (/^QUESTION:\s+/i.test(raw)) {
+            var questionText = raw.replace(/^QUESTION:\s+/i, '').trim();
+            if (state.ignoreInlineQuestionFor &&
+                normalizeQuestionText(questionText) === state.ignoreInlineQuestionFor) {
+                state.inlineQuestionText = '';
+                state.inlineQuestionOptions = null;
+                return true;
+            }
+            state.inlineQuestionText = questionText;
+            state.inlineQuestionOptions = null;
+            return true;
+        }
+
+        if (/^OPTIONS:\s+/i.test(raw) && state.inlineQuestionText) {
+            if (state.ignoreInlineQuestionFor &&
+                normalizeQuestionText(state.inlineQuestionText) === state.ignoreInlineQuestionFor) {
+                state.inlineQuestionText = '';
+                state.inlineQuestionOptions = null;
+                state.ignoreInlineQuestionFor = null;
+                return true;
+            }
+            var optionsText = raw.replace(/^OPTIONS:\s+/i, '').trim();
+            var options = splitOptionsText(optionsText);
+            state.inlineQuestionOptions = options;
+            showPendingQuestionPlaceholder(
+                state.currentSessionId,
+                state.inlineQuestionText,
+                options,
+                state.currentSession ? state.currentSession.progressPath : null
+            );
+            clearPlanQALines();
+            return true;
+        }
+
+        if (/^ANSWER:\s+/i.test(raw)) {
+            state.inlineQuestionText = '';
+            state.inlineQuestionOptions = null;
+            state.ignoreInlineQuestionFor = null;
+            if (state.pendingQuestion && state.pendingQuestion.placeholder) {
+                state.deferredAnswer = null;
+                hideQuestionModal();
+            }
+            return true;
+        }
+
+        return false;
     }
 
     function updateCurrentSectionTitle(title) {
@@ -1600,10 +1896,16 @@
         state.renderedAnswerIds[questionId] = true;
     }
 
-    function renderDockedQuestion(question, options) {
+    function renderDockedQuestion(question, options, config) {
         if (!outputPanel) return;
 
         clearDockedQuestion();
+
+        var cfg = config || {};
+        var selectedAnswer = cfg.selectedAnswer || null;
+        var statusText = cfg.status || '';
+        var disableOptions = !!cfg.disableOptions;
+        options = options || [];
 
         var dock = document.getElementById('question-dock');
         if (!dock) {
@@ -1634,12 +1936,26 @@
         text.className = 'question-dock-text';
         text.textContent = question;
 
+        var statusEl = null;
+        if (statusText) {
+            statusEl = document.createElement('div');
+            statusEl.className = 'question-dock-status';
+            statusEl.textContent = statusText;
+        }
+
         var optionsWrap = document.createElement('div');
         optionsWrap.className = 'question-dock-options';
         options.forEach(function(opt, idx) {
             var btn = document.createElement('button');
             btn.className = 'question-option';
             btn.setAttribute('data-answer', opt);
+            if (selectedAnswer && selectedAnswer === opt) {
+                btn.classList.add('selected');
+            }
+            if (disableOptions) {
+                btn.disabled = true;
+                btn.classList.add('disabled');
+            }
 
             var keySpan = document.createElement('span');
             keySpan.className = 'option-key';
@@ -1660,6 +1976,9 @@
 
         card.appendChild(header);
         card.appendChild(text);
+        if (statusEl) {
+            card.appendChild(statusEl);
+        }
         card.appendChild(optionsWrap);
 
         dock.appendChild(card);
@@ -1768,7 +2087,18 @@
                 if (state.currentSessionId) {
                     var current = findSessionById(state.currentSessionId);
                     if (current) {
+                        state.currentSession = current;
                         updateHeaderForSession(current);
+                        if (state.pendingQuestion &&
+                            state.pendingQuestion.placeholder &&
+                            state.pendingQuestion.sessionId === state.currentSessionId) {
+                            showPendingQuestionPlaceholder(
+                                state.pendingQuestion.sessionId,
+                                state.pendingQuestion.question,
+                                state.pendingQuestion.options || [],
+                                state.pendingQuestion.progressPath
+                            );
+                        }
                     }
                 }
                 // auto-select first session if none is currently selected
@@ -2079,6 +2409,84 @@
         applySessionModeUI(session);
     }
 
+    function maybeResumePendingPlan(session) {
+        if (!session || session.mode !== 'plan' || session.state === 'active') {
+            return;
+        }
+        if (!session.progressPath) {
+            return;
+        }
+        if (state.pendingQuestion && state.pendingQuestion.questionId) {
+            return;
+        }
+        fetch('/api/resumable')
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch resumable sessions');
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                var sessions = data.sessions || [];
+                var match = null;
+                for (var i = 0; i < sessions.length; i++) {
+                    if (sessions[i].progress_path === session.progressPath) {
+                        match = sessions[i];
+                        break;
+                    }
+                }
+                if (!match || !match.pending_question) {
+                    return;
+                }
+                showPendingQuestionPlaceholder(session.id, match.pending_question, match.pending_options || [], session.progressPath);
+                ensurePlanSessionResumed(session.progressPath);
+            })
+            .catch(function() {
+                // no-op; resumable list not available
+            });
+    }
+
+    function ensurePlanSessionResumed(progressPath) {
+        if (!progressPath || !state.currentSession) {
+            return Promise.resolve();
+        }
+        if (state.currentSession.mode !== 'plan' || state.currentSession.state === 'active') {
+            return Promise.resolve();
+        }
+        if (state.resumingProgressPath && state.resumingProgressPath === progressPath && state.resumingPromise) {
+            return state.resumingPromise;
+        }
+
+        state.resumingProgressPath = progressPath;
+        state.resumingPromise = fetch('/api/plan/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ progress_path: progressPath })
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                return response.text().then(function(text) {
+                    throw new Error(text || 'Failed to resume plan');
+                });
+            }
+            return response.json();
+        })
+        .then(function(data) {
+            if (data.session_id) {
+                fetchSessions();
+                if (state.currentSessionId !== data.session_id) {
+                    selectSession(data.session_id);
+                }
+            }
+        })
+        .finally(function() {
+            state.resumingProgressPath = null;
+            state.resumingPromise = null;
+        });
+
+        return state.resumingPromise;
+    }
+
     // select a session and switch to it
     function selectSession(sessionId) {
         if (sessionId === state.currentSessionId) {
@@ -2106,6 +2514,7 @@
 
         // find session data
         var session = findSessionById(sessionId);
+        state.currentSession = session;
         updateHeaderForSession(session);
 
         // reconnect SSE to new session
@@ -2113,6 +2522,8 @@
 
         // reload plan for new session
         fetchPlanForSession(sessionId);
+
+        maybeResumePendingPlan(session);
     }
 
     function copyTextToClipboard(text) {
@@ -2251,8 +2662,16 @@
         state.renderedAnswerIds = {};
         state.hasQuestionEvents = false;
         state.planQALines = [];
+        state.questionBlockActive = false;
+        state.questionBlockBuffer = '';
+        state.inlineQuestionText = '';
+        state.inlineQuestionOptions = null;
+        state.ignoreInlineQuestionFor = null;
         state.recentOutputSignatures = {};
         state.recentOutputOrder = [];
+        state.deferredAnswer = null;
+        state.resumingProgressPath = null;
+        state.resumingPromise = null;
         if (state.elapsedTimerInterval) {
             clearInterval(state.elapsedTimerInterval);
             state.elapsedTimerInterval = null;

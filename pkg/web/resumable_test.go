@@ -254,6 +254,15 @@ Completed: 2026-01-25 10:35:00 (5 minutes ago)
 			wantCompleted: false,
 			wantQACount:   1,
 		},
+		{
+			name: "inline question block does not block answer or completion",
+			content: `[26-01-25 10:30:01] <<<RALPHEX:QUESTION>>>{"question":"Pick one?","options":["A","B"]}<<<RALPHEX:END>>>
+[26-01-25 10:30:03] ANSWER: A
+[26-01-25 10:30:04] Completed: 2026-01-25 10:35:00 (5 minutes ago)
+`,
+			wantCompleted: true,
+			wantQACount:   1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -261,12 +270,60 @@ Completed: 2026-01-25 10:35:00 (5 minutes ago)
 			tmpFile := filepath.Join(t.TempDir(), "test.txt")
 			require.NoError(t, os.WriteFile(tmpFile, []byte(tt.content), 0o600))
 
-			completed, qaCount, err := scanProgressFile(tmpFile)
+			completed, qaCount, _, _, err := scanProgressFile(tmpFile)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantCompleted, completed)
 			assert.Equal(t, tt.wantQACount, qaCount)
 		})
 	}
+}
+
+func TestScanProgressFile_PendingQuestion(t *testing.T) {
+	t.Run("detects pending question from json block", func(t *testing.T) {
+		content := `[26-01-25 10:30:01] <<<RALPHEX:QUESTION>>>
+[26-01-25 10:30:01] {"question": "Pick one?", "options": ["A", "B"]}
+[26-01-25 10:30:01] <<<RALPHEX:END>>>
+`
+		tmpFile := filepath.Join(t.TempDir(), "test.txt")
+		require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0o600))
+
+		completed, qaCount, pendingQ, pendingOpts, err := scanProgressFile(tmpFile)
+		require.NoError(t, err)
+		assert.False(t, completed)
+		assert.Equal(t, 0, qaCount)
+		assert.Equal(t, "Pick one?", pendingQ)
+		assert.Equal(t, []string{"A", "B"}, pendingOpts)
+	})
+
+	t.Run("detects pending question from inline json block", func(t *testing.T) {
+		content := `[26-01-25 10:30:01] <<<RALPHEX:QUESTION>>>{"question": "Pick one?", "options": ["A", "B"]}<<<RALPHEX:END>>>
+`
+		tmpFile := filepath.Join(t.TempDir(), "test.txt")
+		require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0o600))
+
+		completed, qaCount, pendingQ, pendingOpts, err := scanProgressFile(tmpFile)
+		require.NoError(t, err)
+		assert.False(t, completed)
+		assert.Equal(t, 0, qaCount)
+		assert.Equal(t, "Pick one?", pendingQ)
+		assert.Equal(t, []string{"A", "B"}, pendingOpts)
+	})
+
+	t.Run("clears pending question after answer", func(t *testing.T) {
+		content := `[26-01-25 10:30:01] QUESTION: What?
+[26-01-25 10:30:02] OPTIONS: One, Two
+[26-01-25 10:30:03] ANSWER: One
+`
+		tmpFile := filepath.Join(t.TempDir(), "test.txt")
+		require.NoError(t, os.WriteFile(tmpFile, []byte(content), 0o600))
+
+		completed, qaCount, pendingQ, pendingOpts, err := scanProgressFile(tmpFile)
+		require.NoError(t, err)
+		assert.False(t, completed)
+		assert.Equal(t, 1, qaCount)
+		assert.Empty(t, pendingQ)
+		assert.Empty(t, pendingOpts)
+	})
 }
 
 func TestCheckResumable(t *testing.T) {

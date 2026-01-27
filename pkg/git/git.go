@@ -332,8 +332,10 @@ func loadXDGGlobalPatterns() []gitignore.Pattern {
 		return nil
 	}
 
-	var patterns []gitignore.Pattern
-	for line := range strings.SplitSeq(string(data), "\n") {
+	dataStr := string(data)
+	lineCount := strings.Count(dataStr, "\n") + 1
+	patterns := make([]gitignore.Pattern, 0, lineCount)
+	for line := range strings.SplitSeq(dataStr, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

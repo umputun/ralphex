@@ -235,6 +235,10 @@ func (r *PlanRunner) ResumePlan(progressPath string) (*Session, error) {
 		StartTime: meta.StartTime, // keep original start time
 	})
 
+	if session.MarkLoadedIfNot() {
+		loadProgressFileIntoSession(progressPath, session)
+	}
+
 	// create input collector for this session
 	collector := NewWebInputCollector(session)
 	session.SetInputCollector(collector)

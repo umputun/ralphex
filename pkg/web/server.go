@@ -388,6 +388,7 @@ type SessionInfo struct {
 	Dir string `json:"dir"`
 	// DirPath is the full filesystem path to the session directory (used for grouping and copy-to-clipboard).
 	DirPath      string    `json:"dirPath,omitempty"`
+	ProgressPath string    `json:"progressPath,omitempty"`
 	PlanPath     string    `json:"planPath,omitempty"`
 	Branch       string    `json:"branch,omitempty"`
 	Mode         string    `json:"mode,omitempty"`
@@ -427,6 +428,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			State:        session.GetState(),
 			Dir:          extractProjectDir(session.Path),
 			DirPath:      dirPath,
+			ProgressPath: session.Path,
 			PlanPath:     meta.PlanPath,
 			Branch:       meta.Branch,
 			Mode:         meta.Mode,

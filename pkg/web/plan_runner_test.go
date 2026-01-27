@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,330 @@ Started: 2026-01-25 10:30:00
 [26-01-25 10:30:01] Working...
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+}
+
+func TestPlanRunner_ResumePlan(t *testing.T) {
+	t.Run("returns error for non-existent progress file", func(t *testing.T) {
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		_, err := runner.ResumePlan("/nonexistent/progress.txt")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "progress file error")
+	})
+
+	t.Run("returns error when path is a directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		_, err := runner.ResumePlan(tmpDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a file")
+	})
+
+	t.Run("returns error for non-plan mode progress file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressPath := filepath.Join(tmpDir, "progress-test.txt")
+		progressContent := `# Ralphex Progress Log
+Plan: docs/plans/feature.md
+Branch: main
+Mode: full
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Working...
+`
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		_, err := runner.ResumePlan(progressPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a plan mode session")
+	})
+
+	t.Run("returns error when progress file has no mode", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressPath := filepath.Join(tmpDir, "progress-test.txt")
+		// missing Mode: header (mode is empty)
+		progressContent := `# Ralphex Progress Log
+Plan: docs/plans/feature.md
+Branch: main
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Working...
+`
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		_, err := runner.ResumePlan(progressPath)
+		require.Error(t, err)
+		// empty mode is treated as "not a plan mode session"
+		assert.Contains(t, err.Error(), "not a plan mode session")
+	})
+
+	t.Run("returns error when directory is not a git repo", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressPath := filepath.Join(tmpDir, "progress-plan-test.txt")
+		progressContent := `# Ralphex Progress Log
+Plan: add authentication
+Branch: main
+Mode: plan
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Working...
+`
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		_, err := runner.ResumePlan(progressPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a git repository")
+	})
+
+	t.Run("successfully resumes valid plan session", func(t *testing.T) {
+		tmpDir := createTestGitRepo(t)
+		cfg := testConfig(t)
+		cfg.PlansDir = filepath.Join(tmpDir, "docs", "plans")
+		sm := NewSessionManager()
+		defer sm.Close()
+		runner := NewPlanRunner(cfg, sm)
+
+		progressPath := filepath.Join(tmpDir, "progress-plan-test.txt")
+		progressContent := `# Ralphex Progress Log
+Plan: add authentication
+Branch: main
+Mode: plan
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Working...
+`
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		session, err := runner.ResumePlan(progressPath)
+		require.NoError(t, err)
+		require.NotNil(t, session)
+
+		assert.Equal(t, SessionStateActive, session.GetState())
+		assert.NotNil(t, session.GetInputCollector())
+
+		meta := session.GetMetadata()
+		assert.Equal(t, "plan", meta.Mode)
+		assert.Equal(t, "add authentication", meta.PlanPath)
+
+		// cleanup
+		_ = runner.CancelPlan(session.ID)
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("reuses existing session from session manager", func(t *testing.T) {
+		tmpDir := createTestGitRepo(t)
+		cfg := testConfig(t)
+		cfg.PlansDir = filepath.Join(tmpDir, "docs", "plans")
+		sm := NewSessionManager()
+		defer sm.Close()
+		runner := NewPlanRunner(cfg, sm)
+
+		progressPath := filepath.Join(tmpDir, "progress-plan-test.txt")
+		progressContent := `# Ralphex Progress Log
+Plan: add authentication
+Branch: main
+Mode: plan
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Working...
+`
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		// pre-register a session
+		existingSession := NewSession(sessionIDFromPath(progressPath), progressPath)
+		sm.Register(existingSession)
+
+		session, err := runner.ResumePlan(progressPath)
+		require.NoError(t, err)
+		require.NotNil(t, session)
+
+		// should be the same session
+		assert.Equal(t, existingSession.ID, session.ID)
+
+		// cleanup
+		_ = runner.CancelPlan(session.ID)
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("falls back to original branch on error", func(t *testing.T) {
+		tmpDir := createTestGitRepo(t)
+		cfg := testConfig(t)
+		cfg.PlansDir = filepath.Join(tmpDir, "docs", "plans")
+		runner := NewPlanRunner(cfg, nil)
+
+		progressPath := filepath.Join(tmpDir, "progress-plan-test.txt")
+		progressContent := `# Ralphex Progress Log
+Plan: add authentication
+Branch: feature-branch
+Mode: plan
+Started: 2026-01-25 10:30:00
+------------------------------------------------------------
+
+[26-01-25 10:30:01] Working...
+`
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		session, err := runner.ResumePlan(progressPath)
+		require.NoError(t, err)
+		require.NotNil(t, session)
+
+		// cleanup
+		_ = runner.CancelPlan(session.ID)
+		time.Sleep(100 * time.Millisecond)
+	})
+}
+
+func TestPlanRunner_cleanupSession(t *testing.T) {
+	t.Run("removes session from tracking", func(t *testing.T) {
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		// manually add a session to tracking (simulate what StartPlan does)
+		session := NewSession("test-session-id", "/tmp/progress.txt")
+		defer session.Close()
+		session.SetState(SessionStateActive)
+
+		runner.mu.Lock()
+		runner.sessions["test-session-id"] = &runningPlan{
+			session: session,
+			cancel:  func() {},
+			dir:     "/tmp",
+		}
+		runner.mu.Unlock()
+
+		// verify session exists
+		assert.NotNil(t, runner.GetSession("test-session-id"))
+
+		// cleanup session
+		runner.cleanupSession("test-session-id")
+
+		// verify session is removed
+		assert.Nil(t, runner.GetSession("test-session-id"))
+	})
+
+	t.Run("sets session state to completed", func(t *testing.T) {
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		// manually add a session to tracking
+		session := NewSession("test-session-id", "/tmp/progress.txt")
+		defer session.Close()
+		session.SetState(SessionStateActive)
+
+		runner.mu.Lock()
+		runner.sessions["test-session-id"] = &runningPlan{
+			session: session,
+			cancel:  func() {},
+			dir:     "/tmp",
+		}
+		runner.mu.Unlock()
+
+		// cleanup session
+		runner.cleanupSession("test-session-id")
+
+		// verify state changed
+		assert.Equal(t, SessionStateCompleted, session.GetState())
+	})
+
+	t.Run("handles non-existent session gracefully", func(t *testing.T) {
+		runner := NewPlanRunner(&config.Config{}, nil)
+
+		// should not panic
+		runner.cleanupSession("nonexistent-id")
+	})
+}
+
+func TestPlanRunner_GetResumableSessions(t *testing.T) {
+	t.Run("returns nil when config is nil", func(t *testing.T) {
+		runner := NewPlanRunner(nil, nil)
+
+		sessions, err := runner.GetResumableSessions()
+		require.NoError(t, err)
+		assert.Nil(t, sessions)
+	})
+}
+
+func TestGenerateSessionID(t *testing.T) {
+	t.Run("generates unique IDs", func(t *testing.T) {
+		id1 := generateSessionID("test description")
+		time.Sleep(time.Nanosecond) // ensure timestamp difference
+		id2 := generateSessionID("test description")
+
+		assert.NotEqual(t, id1, id2)
+	})
+
+	t.Run("sanitizes special characters", func(t *testing.T) {
+		id := generateSessionID("Hello! @World# $Test%")
+
+		// should not contain special characters (except dash)
+		assert.NotContains(t, id, "!")
+		assert.NotContains(t, id, "@")
+		assert.NotContains(t, id, "#")
+		assert.NotContains(t, id, "$")
+		assert.NotContains(t, id, "%")
+	})
+
+	t.Run("truncates long descriptions", func(t *testing.T) {
+		longDesc := "This is a very long description that exceeds twenty characters"
+		id := generateSessionID(longDesc)
+
+		// ID should be based on first 20 chars + timestamp
+		// first part should not be longer than 20 chars (plus dashes)
+		parts := strings.Split(id, "-")
+		// join all parts except the last (timestamp)
+		descPart := strings.Join(parts[:len(parts)-1], "-")
+		assert.LessOrEqual(t, len(descPart), 20)
+	})
+}
+
+func TestUniqueDirs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "removes duplicates",
+			input:    []string{"/a", "/b", "/a", "/c", "/b"},
+			expected: []string{"/a", "/b", "/c"},
+		},
+		{
+			name:     "removes empty strings",
+			input:    []string{"/a", "", "/b", ""},
+			expected: []string{"/a", "/b"},
+		},
+		{
+			name:     "handles empty input",
+			input:    []string{},
+			expected: []string{},
+		},
+		{
+			name:     "handles all empty strings",
+			input:    []string{"", "", ""},
+			expected: []string{},
+		},
+		{
+			name:     "preserves order",
+			input:    []string{"/c", "/a", "/b"},
+			expected: []string{"/c", "/a", "/b"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := uniqueDirs(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }
 
 // testConfig returns a minimal config for testing.

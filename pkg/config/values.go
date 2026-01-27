@@ -30,6 +30,7 @@ type Values struct {
 	TaskRetryCountSet    bool // tracks if task_retry_count was explicitly set
 	PlansDir             string
 	WatchDirs            []string // directories to watch for progress files
+	ProjectDirs          []string // directories to show in new plan dropdown
 }
 
 // valuesLoader implements ValuesLoader with embedded filesystem fallback.
@@ -185,14 +186,12 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 
 	// watch directories (comma-separated)
 	if key, err := section.GetKey("watch_dirs"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.WatchDirs = append(values.WatchDirs, t)
-				}
-			}
-		}
+		values.WatchDirs = parseCommaSeparatedList(key.String())
+	}
+
+	// project directories (comma-separated)
+	if key, err := section.GetKey("project_dirs"); err == nil {
+		values.ProjectDirs = parseCommaSeparatedList(key.String())
 	}
 
 	return values, nil
@@ -240,4 +239,21 @@ func (dst *Values) mergeFrom(src *Values) {
 	if len(src.WatchDirs) > 0 {
 		dst.WatchDirs = src.WatchDirs
 	}
+	if len(src.ProjectDirs) > 0 {
+		dst.ProjectDirs = src.ProjectDirs
+	}
+}
+
+func parseCommaSeparatedList(value string) []string {
+	val := strings.TrimSpace(value)
+	if val == "" {
+		return nil
+	}
+	out := make([]string, 0, 4)
+	for p := range strings.SplitSeq(val, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

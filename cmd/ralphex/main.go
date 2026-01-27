@@ -976,6 +976,47 @@ func printPlanModeInfo(description, branch string, maxIterations int, progressPa
 	colors.Info().Printf("progress log: %s\n\n", progressPath)
 }
 
+func createWebServer(cfg web.ServerConfig, session *web.Session, p webDashboardParams) (*web.Server, *web.Watcher, *web.SessionManager, error) {
+	if len(p.WatchDirs) > 0 || len(p.ConfigWatchDirs) > 0 {
+		return createMultiSessionServer(cfg, session, p)
+	}
+
+	srv, err := web.NewServer(cfg, session)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create web server: %w", err)
+	}
+
+	return srv, nil, nil, nil
+}
+
+func createMultiSessionServer(cfg web.ServerConfig, session *web.Session, p webDashboardParams) (*web.Server, *web.Watcher, *web.SessionManager, error) {
+	sm := web.NewSessionManager()
+
+	// register the live execution session so dashboard uses it instead of creating a duplicate
+	// this ensures live events from BroadcastLogger go to the same session the dashboard displays
+	sm.Register(session)
+
+	// resolve watch directories (CLI > config > cwd)
+	dirs := web.ResolveWatchDirs(p.WatchDirs, p.ConfigWatchDirs)
+
+	watcher, err := web.NewWatcher(dirs, sm)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create watcher: %w", err)
+	}
+
+	srv, err := web.NewServerWithSessions(cfg, sm)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create web server: %w", err)
+	}
+
+	// set watch dirs on config for plan runner
+	if p.AppConfig != nil && len(dirs) > 0 {
+		p.AppConfig.WatchDirs = dirs
+	}
+
+	return srv, watcher, sm, nil
+}
+
 // startWebDashboard creates the web server and broadcast logger, starting the server in background.
 // returns the broadcast logger to use for execution, or error if server fails to start.
 // when watchDirs is non-empty, creates multi-session mode with file watching.
@@ -997,27 +1038,9 @@ func startWebDashboard(ctx context.Context, p webDashboardParams) (processor.Log
 		PlanFile: p.PlanFile,
 	}
 
-	// determine if we should use multi-session mode
-	// multi-session mode is enabled when watch dirs are provided via CLI or config
-	useMultiSession := len(p.WatchDirs) > 0 || len(p.ConfigWatchDirs) > 0
-
-	var srv *web.Server
-	var watcher *web.Watcher
-	var sm *web.SessionManager
-
-	if useMultiSession {
-		var err error
-		srv, watcher, sm, err = setupMultiSessionDashboard(cfg, session, p)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// single-session mode: direct session for current execution
-		var err error
-		srv, err = web.NewServer(cfg, session)
-		if err != nil {
-			return nil, fmt.Errorf("create web server: %w", err)
-		}
+	srv, watcher, sm, err := createWebServer(cfg, session, p)
+	if err != nil {
+		return nil, err
 	}
 
 	// set up plan runner for web-initiated plan creation
@@ -1051,32 +1074,4 @@ func startWebDashboard(ctx context.Context, p webDashboardParams) (processor.Log
 
 	p.Colors.Info().Printf("web dashboard: http://localhost:%d\n", p.Port)
 	return broadcastLog, nil
-}
-
-func setupMultiSessionDashboard(cfg web.ServerConfig, session *web.Session, p webDashboardParams) (*web.Server, *web.Watcher, *web.SessionManager, error) {
-	// multi-session mode: use SessionManager and Watcher
-	sm := web.NewSessionManager()
-
-	// register the live execution session so dashboard uses it instead of creating a duplicate
-	// this ensures live events from BroadcastLogger go to the same session the dashboard displays
-	sm.Register(session)
-
-	// resolve watch directories (CLI > config > cwd)
-	dirs := web.ResolveWatchDirs(p.WatchDirs, p.ConfigWatchDirs)
-
-	watcher, err := web.NewWatcher(dirs, sm)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create watcher: %w", err)
-	}
-
-	srv, err := web.NewServerWithSessions(cfg, sm)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("create web server: %w", err)
-	}
-
-	if p.AppConfig != nil && len(dirs) > 0 {
-		p.AppConfig.WatchDirs = dirs
-	}
-
-	return srv, watcher, sm, nil
 }

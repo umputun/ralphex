@@ -190,3 +190,25 @@ func TestWebInputCollector_GetPendingQuestion(t *testing.T) {
 		assert.NotEmpty(t, pending.ID)
 	})
 }
+
+func TestGenerateQuestionID(t *testing.T) {
+	t.Run("generates unique IDs", func(t *testing.T) {
+		ids := make(map[string]bool)
+		for range 100 {
+			id := generateQuestionID()
+			assert.False(t, ids[id], "duplicate ID generated: %s", id)
+			ids[id] = true
+		}
+	})
+
+	t.Run("generates 16-character hex strings", func(t *testing.T) {
+		for range 10 {
+			id := generateQuestionID()
+			assert.Len(t, id, 16)
+			// verify it's valid hex
+			for _, c := range id {
+				assert.True(t, (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'), "invalid hex char: %c", c)
+			}
+		}
+	})
+}

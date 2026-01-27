@@ -2,6 +2,7 @@ package web
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,8 @@ type ResumableSession struct {
 	StartTime       time.Time `json:"start_time"`       // from Started: header
 	Dir             string    `json:"dir"`              // directory containing progress file
 	QACount         int       `json:"qa_count"`         // number of Q&A pairs found
+	PendingQuestion string    `json:"pending_question,omitempty"`
+	PendingOptions  []string  `json:"pending_options,omitempty"`
 }
 
 // FindResumableSessions scans directories for resumable plan creation sessions.
@@ -74,7 +77,7 @@ func checkResumable(path string) (ResumableSession, bool, error) {
 	}
 
 	// scan file for completion markers and Q&A count
-	completed, qaCount, err := scanProgressFile(path)
+	completed, qaCount, pendingQuestion, pendingOptions, err := scanProgressFile(path)
 	if err != nil {
 		return ResumableSession{}, false, err
 	}
@@ -91,6 +94,8 @@ func checkResumable(path string) (ResumableSession, bool, error) {
 		StartTime:       meta.StartTime,
 		Dir:             filepath.Dir(path),
 		QACount:         qaCount,
+		PendingQuestion: pendingQuestion,
+		PendingOptions:  pendingOptions,
 	}, true, nil
 }
 
@@ -98,10 +103,10 @@ func checkResumable(path string) (ResumableSession, bool, error) {
 // and count Q&A pairs. A session is completed if it has:
 // - A "Completed:" footer line, OR
 // - A PLAN_READY signal
-func scanProgressFile(path string) (completed bool, qaCount int, err error) {
+func scanProgressFile(path string) (completed bool, qaCount int, pendingQuestion string, pendingOptions []string, err error) {
 	f, err := os.Open(path) //nolint:gosec // path from Glob result
 	if err != nil {
-		return false, 0, fmt.Errorf("open progress file: %w", err)
+		return false, 0, "", nil, fmt.Errorf("open progress file: %w", err)
 	}
 	defer f.Close()
 
@@ -110,27 +115,152 @@ func scanProgressFile(path string) (completed bool, qaCount int, err error) {
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
+	var currentQuestion string
+	var currentOptions []string
+	var inQuestionBlock bool
+	var questionBuf strings.Builder
+	const questionStart = "<<<RALPHEX:QUESTION>>>"
+	const questionEnd = "<<<RALPHEX:END>>>"
+
 	for scanner.Scan() {
 		line := scanner.Text()
+		raw := stripTimestampPrefix(line)
 
 		// check for completion markers
-		if strings.HasPrefix(line, "Completed:") {
+		if strings.HasPrefix(raw, "Completed:") {
 			completed = true
 		}
-		if strings.Contains(line, "PLAN_READY") {
+		if strings.Contains(raw, "PLAN_READY") {
 			completed = true
+		}
+
+		if inQuestionBlock {
+			consumeQuestionBlockLine(raw, questionEnd, &questionBuf, &inQuestionBlock, &currentQuestion, &currentOptions, &pendingQuestion, &pendingOptions)
+			continue
+		}
+
+		if startIdx := strings.Index(raw, questionStart); startIdx != -1 {
+			afterStart := raw[startIdx+len(questionStart):]
+			if endIdx := strings.Index(afterStart, questionEnd); endIdx != -1 {
+				payload := strings.TrimSpace(afterStart[:endIdx])
+				q, opts := parseQuestionBlock(payload)
+				if q != "" {
+					currentQuestion = q
+					currentOptions = opts
+					pendingQuestion = q
+					pendingOptions = opts
+				}
+				continue
+			}
+			inQuestionBlock = true
+			questionBuf.Reset()
+			if trimmed := strings.TrimSpace(afterStart); trimmed != "" {
+				questionBuf.WriteString(trimmed)
+				questionBuf.WriteByte('\n')
+			}
+			continue
 		}
 
 		// count Q&A pairs (look for ANSWER: lines in timestamped format)
 		// format: [timestamp] ANSWER: ...
-		if strings.Contains(line, "] ANSWER:") {
+		if strings.HasPrefix(raw, "ANSWER:") {
 			qaCount++
+			currentQuestion = ""
+			currentOptions = nil
+			pendingQuestion = ""
+			pendingOptions = nil
+			continue
+		}
+
+		if questionLine, ok := strings.CutPrefix(raw, "QUESTION:"); ok {
+			currentQuestion = strings.TrimSpace(questionLine)
+			currentOptions = nil
+			pendingQuestion = currentQuestion
+			pendingOptions = nil
+			continue
+		}
+
+		if strings.HasPrefix(raw, "OPTIONS:") && currentQuestion != "" {
+			optionsText := strings.TrimSpace(strings.TrimPrefix(raw, "OPTIONS:"))
+			currentOptions = splitOptions(optionsText)
+			pendingOptions = currentOptions
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return false, 0, fmt.Errorf("scan progress file: %w", err)
+		return false, 0, "", nil, fmt.Errorf("scan progress file: %w", err)
 	}
 
-	return completed, qaCount, nil
+	if pendingQuestion == "" && currentQuestion != "" {
+		pendingQuestion = currentQuestion
+		pendingOptions = currentOptions
+	}
+
+	return completed, qaCount, pendingQuestion, pendingOptions, nil
+}
+
+func consumeQuestionBlockLine(raw, questionEnd string, questionBuf *strings.Builder, inQuestionBlock *bool, currentQuestion *string, currentOptions *[]string, pendingQuestion *string, pendingOptions *[]string) {
+	endIdx := strings.Index(raw, questionEnd)
+	if endIdx == -1 {
+		questionBuf.WriteString(strings.TrimSpace(raw))
+		questionBuf.WriteByte('\n')
+		return
+	}
+
+	if endIdx > 0 {
+		questionBuf.WriteString(strings.TrimSpace(raw[:endIdx]))
+		questionBuf.WriteByte('\n')
+	}
+
+	*inQuestionBlock = false
+	q, opts := parseQuestionBlock(questionBuf.String())
+	if q == "" {
+		return
+	}
+
+	*currentQuestion = q
+	*currentOptions = opts
+	*pendingQuestion = q
+	*pendingOptions = opts
+}
+
+func stripTimestampPrefix(line string) string {
+	if strings.HasPrefix(line, "[") {
+		if idx := strings.Index(line, "] "); idx != -1 {
+			return line[idx+2:]
+		}
+	}
+	return line
+}
+
+func parseQuestionBlock(raw string) (string, []string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	type payload struct {
+		Question string   `json:"question"`
+		Options  []string `json:"options"`
+	}
+	var p payload
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(p.Question), p.Options
+}
+
+func splitOptions(optionsText string) []string {
+	if optionsText == "" {
+		return nil
+	}
+	parts := strings.Split(optionsText, ", ")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
 }

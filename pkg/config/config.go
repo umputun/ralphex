@@ -188,6 +188,7 @@ func loadWithLocal(globalDir, localDir string) (*Config, error) {
 		TaskRetryCountSet:    values.TaskRetryCountSet,
 		PlansDir:             values.PlansDir,
 		WatchDirs:            values.WatchDirs,
+		ProjectDirs:          values.ProjectDirs,
 		Colors:               colors,
 		TaskPrompt:           prompts.Task,
 		ReviewFirstPrompt:    prompts.ReviewFirst,
