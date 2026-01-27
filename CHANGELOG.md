@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.3 - 2026-01-26
+
+### Fixed
+
+- IsIgnored now loads global and system gitignore patterns (#35)
+
 ## v0.4.2 - 2026-01-26
 
 ### Fixed
