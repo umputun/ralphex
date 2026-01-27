@@ -139,10 +139,9 @@ func scanProgressFile(path string) (completed bool, qaCount int, pendingQuestion
 			continue
 		}
 
-		if startIdx := strings.Index(raw, questionStart); startIdx != -1 {
-			afterStart := raw[startIdx+len(questionStart):]
-			if endIdx := strings.Index(afterStart, questionEnd); endIdx != -1 {
-				payload := strings.TrimSpace(afterStart[:endIdx])
+		if _, afterStart, found := strings.Cut(raw, questionStart); found {
+			if payload, _, foundEnd := strings.Cut(afterStart, questionEnd); foundEnd {
+				payload = strings.TrimSpace(payload)
 				q, opts := parseQuestionBlock(payload)
 				if q != "" {
 					currentQuestion = q
@@ -226,8 +225,8 @@ func consumeQuestionBlockLine(raw, questionEnd string, questionBuf *strings.Buil
 
 func stripTimestampPrefix(line string) string {
 	if strings.HasPrefix(line, "[") {
-		if idx := strings.Index(line, "] "); idx != -1 {
-			return line[idx+2:]
+		if _, after, found := strings.Cut(line, "] "); found {
+			return after
 		}
 	}
 	return line
