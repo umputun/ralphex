@@ -146,8 +146,8 @@ iteration_delay_ms = 9999
 	assert.NotEmpty(t, cfg.TaskPrompt)
 }
 
-func Test_defaultConfigDir(t *testing.T) {
-	dir := defaultConfigDir()
+func TestDefaultConfigDir(t *testing.T) {
+	dir := DefaultConfigDir()
 	assert.NotEmpty(t, dir)
 	assert.Contains(t, dir, "ralphex")
 }

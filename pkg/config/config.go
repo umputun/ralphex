@@ -95,7 +95,7 @@ type ColorConfig struct {
 func Load(configDir string) (*Config, error) {
 	globalDir := configDir
 	if globalDir == "" {
-		globalDir = defaultConfigDir()
+		globalDir = DefaultConfigDir()
 	}
 
 	// auto-detect local config directory in cwd.
@@ -201,11 +201,11 @@ func loadWithLocal(globalDir, localDir string) (*Config, error) {
 	return c, nil
 }
 
-// defaultConfigDir returns the default configuration directory path.
+// DefaultConfigDir returns the default configuration directory path.
 // returns ~/.config/ralphex/ on all platforms.
 // if os.UserHomeDir() fails, falls back to ./.config/ralphex/ silently -
 // this allows the tool to work even in unusual environments.
-func defaultConfigDir() string {
+func DefaultConfigDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".", ".config", "ralphex")

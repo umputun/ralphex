@@ -33,6 +33,9 @@ ralphex --codex-only
 
 # interactive plan creation
 ralphex --plan "add user authentication"
+
+# reset global config to defaults (interactive)
+ralphex --reset
 ```
 
 ## Requirements

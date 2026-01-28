@@ -1,8 +1,11 @@
 package config
 
 import (
+	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -392,4 +395,449 @@ func TestDefaultsInstaller_installDefaultFiles_WriteFilePermissionDenied(t *test
 	err := installer.installDefaultFiles(destDir, "defaults/prompts", "prompt")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write prompt file")
+}
+
+func TestReset_CreatesConfigDirIfMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "nonexistent", "ralphex") // nested non-existent path
+
+	// config dir does not exist - reset should create it
+	stdin := strings.NewReader("y\ny\ny\n")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.True(t, result.ConfigReset)
+	assert.True(t, result.PromptsReset)
+	assert.True(t, result.AgentsReset)
+
+	// verify config dir and files were created
+	configPath := filepath.Join(configDir, "config")
+	data, err := os.ReadFile(configPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "claude_command = claude")
+}
+
+func TestReset_ResetsConfigFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// modify config file
+	configPath := filepath.Join(configDir, "config")
+	require.NoError(t, os.WriteFile(configPath, []byte("# modified config\nclaude_command = custom"), 0o600))
+
+	// verify it's modified
+	data, err := os.ReadFile(configPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "custom")
+
+	// reset with "y" answers
+	stdin := strings.NewReader("y\nn\nn\n")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.True(t, result.ConfigReset)
+	assert.False(t, result.PromptsReset)
+	assert.False(t, result.AgentsReset)
+
+	// verify config was reset to default
+	data, err = os.ReadFile(configPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "claude_command = claude")
+	assert.NotContains(t, string(data), "custom")
+}
+
+func TestReset_ResetsPromptsDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// modify a prompt file
+	taskPromptPath := filepath.Join(configDir, "prompts", "task.txt")
+	require.NoError(t, os.WriteFile(taskPromptPath, []byte("modified prompt content"), 0o600))
+
+	// reset with "y" for prompts (config auto-skips since unmodified, agents auto-skips)
+	stdin := strings.NewReader("y\n")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.False(t, result.ConfigReset)
+	assert.True(t, result.PromptsReset)
+	assert.False(t, result.AgentsReset)
+
+	// verify prompt was reset
+	data, err := os.ReadFile(taskPromptPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "modified prompt content")
+}
+
+func TestReset_ResetsAgentsDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// modify an agent file
+	qualityAgentPath := filepath.Join(configDir, "agents", "quality.txt")
+	require.NoError(t, os.WriteFile(qualityAgentPath, []byte("modified agent content"), 0o600))
+
+	// reset with "y" for agents (config/prompts auto-skip since unmodified)
+	stdin := strings.NewReader("y\n")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.False(t, result.ConfigReset)
+	assert.False(t, result.PromptsReset)
+	assert.True(t, result.AgentsReset)
+
+	// verify agent was reset
+	data, err := os.ReadFile(qualityAgentPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "modified agent content")
+}
+
+func TestReset_PreservesCustomAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// add a custom agent AND modify a default agent
+	customAgentPath := filepath.Join(configDir, "agents", "my-custom-agent.txt")
+	require.NoError(t, os.WriteFile(customAgentPath, []byte("my custom agent content"), 0o600))
+	qualityAgentPath := filepath.Join(configDir, "agents", "quality.txt")
+	require.NoError(t, os.WriteFile(qualityAgentPath, []byte("modified quality agent"), 0o600))
+
+	// reset agents - user says yes to reset modified defaults
+	stdin := strings.NewReader("y\n")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.True(t, result.AgentsReset)
+
+	// verify custom agent was preserved
+	data, err := os.ReadFile(customAgentPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, "my custom agent content", string(data))
+
+	// verify default agent was reset
+	data, err = os.ReadFile(qualityAgentPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.NotEqual(t, "modified quality agent", string(data))
+}
+
+func TestReset_SkipsWhenAllDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first - don't modify anything
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// all components match defaults, so all auto-skip (no input needed)
+	stdin := strings.NewReader("")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.False(t, result.ConfigReset)
+	assert.False(t, result.PromptsReset)
+	assert.False(t, result.AgentsReset)
+
+	// verify output shows skipped
+	assert.Contains(t, stdout.String(), "skipped (all files match defaults)")
+}
+
+func TestReset_ResetsAllComponents(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// modify everything
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# modified"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "prompts", "task.txt"), []byte("modified"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "agents", "quality.txt"), []byte("modified"), 0o600))
+
+	// reset all with "y" answers
+	stdin := strings.NewReader("y\ny\ny\n")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.True(t, result.ConfigReset)
+	assert.True(t, result.PromptsReset)
+	assert.True(t, result.AgentsReset)
+
+	// verify summary output
+	output := stdout.String()
+	assert.Contains(t, output, "Done.")
+	assert.Contains(t, output, "Reset: config, prompts, agents")
+}
+
+func TestReset_ShowsDifferentFilesWithDates(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// modify a prompt file
+	taskPromptPath := filepath.Join(configDir, "prompts", "task.txt")
+	require.NoError(t, os.WriteFile(taskPromptPath, []byte("modified"), 0o600))
+
+	// run reset
+	stdin := strings.NewReader("n\nn\nn\n")
+	stdout := &bytes.Buffer{}
+
+	_, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+
+	// verify output shows different files
+	output := stdout.String()
+	assert.Contains(t, output, "Different from current defaults")
+	assert.Contains(t, output, "task.txt")
+}
+
+func TestReset_SkipsAgentsWhenOnlyCustomExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// add only a custom agent (no modified defaults)
+	customAgentPath := filepath.Join(configDir, "agents", "my-custom-agent.txt")
+	require.NoError(t, os.WriteFile(customAgentPath, []byte("custom content"), 0o600))
+
+	// no input needed - agents should auto-skip since only custom files exist
+	stdin := strings.NewReader("")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.False(t, result.AgentsReset)
+
+	// verify output shows skipped
+	output := stdout.String()
+	assert.Contains(t, output, "Agents directory?")
+	assert.Contains(t, output, "skipped (all files match defaults)")
+}
+
+func TestReset_ShowsCustomAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// add a custom agent AND modify a default agent (so the prompt is shown)
+	customAgentPath := filepath.Join(configDir, "agents", "my-special-agent.txt")
+	require.NoError(t, os.WriteFile(customAgentPath, []byte("custom content"), 0o600))
+	qualityAgentPath := filepath.Join(configDir, "agents", "quality.txt")
+	require.NoError(t, os.WriteFile(qualityAgentPath, []byte("modified"), 0o600))
+
+	// run reset (decline)
+	stdin := strings.NewReader("n\n")
+	stdout := &bytes.Buffer{}
+
+	_, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+
+	// verify output shows custom agents
+	output := stdout.String()
+	assert.Contains(t, output, "Custom agents (untouched)")
+	assert.Contains(t, output, "my-special-agent.txt")
+}
+
+func TestReset_HandlesEOFGracefully(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	// install defaults first
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// modify config so prompt would be shown
+	configPath := filepath.Join(configDir, "config")
+	require.NoError(t, os.WriteFile(configPath, []byte("# modified"), 0o600))
+
+	// empty stdin (simulates Ctrl+D)
+	stdin := strings.NewReader("")
+	stdout := &bytes.Buffer{}
+
+	result, err := Reset(configDir, stdin, stdout)
+	require.NoError(t, err)
+	assert.False(t, result.ConfigReset) // EOF = decline
+}
+
+func TestDefaultsInstaller_FindDifferentFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	promptsDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0o700))
+
+	// install default prompts
+	installer := &defaultsInstaller{embedFS: defaultsFS}
+	require.NoError(t, installer.installDefaultFiles(promptsDir, "defaults/prompts", "prompt"))
+
+	t.Run("returns_empty_when_all_match", func(t *testing.T) {
+		different, err := installer.findDifferentFiles(promptsDir, "defaults/prompts")
+		require.NoError(t, err)
+		assert.Empty(t, different)
+	})
+
+	t.Run("returns_modified_files", func(t *testing.T) {
+		// modify one file
+		taskPath := filepath.Join(promptsDir, "task.txt")
+		require.NoError(t, os.WriteFile(taskPath, []byte("modified content"), 0o600))
+
+		different, err := installer.findDifferentFiles(promptsDir, "defaults/prompts")
+		require.NoError(t, err)
+		assert.Len(t, different, 1)
+		assert.Equal(t, "task.txt", different[0].name)
+		assert.False(t, different[0].missing)
+	})
+
+	t.Run("marks_missing_files", func(t *testing.T) {
+		// delete one file
+		taskPath := filepath.Join(promptsDir, "codex.txt")
+		require.NoError(t, os.Remove(taskPath))
+
+		different, err := installer.findDifferentFiles(promptsDir, "defaults/prompts")
+		require.NoError(t, err)
+
+		// find the missing file in results
+		var missingFile *fileInfo
+		for i := range different {
+			if different[i].name == "codex.txt" {
+				missingFile = &different[i]
+				break
+			}
+		}
+		require.NotNil(t, missingFile, "codex.txt should be in different files")
+		assert.True(t, missingFile.missing, "codex.txt should be marked as missing")
+	})
+}
+
+func TestDefaultsInstaller_FindCustomFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o700))
+
+	// install default agents
+	installer := &defaultsInstaller{embedFS: defaultsFS}
+	require.NoError(t, installer.installDefaultFiles(agentsDir, "defaults/agents", "agent"))
+
+	t.Run("returns_empty_when_no_custom", func(t *testing.T) {
+		custom, err := installer.findCustomFiles(agentsDir, "defaults/agents")
+		require.NoError(t, err)
+		assert.Empty(t, custom)
+	})
+
+	t.Run("returns_custom_files", func(t *testing.T) {
+		// add custom agent
+		customPath := filepath.Join(agentsDir, "my-agent.txt")
+		require.NoError(t, os.WriteFile(customPath, []byte("custom"), 0o600))
+
+		custom, err := installer.findCustomFiles(agentsDir, "defaults/agents")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"my-agent.txt"}, custom)
+	})
+}
+
+func TestDefaultsInstaller_CountEmbeddedFiles(t *testing.T) {
+	installer := &defaultsInstaller{embedFS: defaultsFS}
+
+	count, err := installer.countEmbeddedFiles("defaults/agents")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, count, 1, "should have at least one embedded agent")
+
+	count, err = installer.countEmbeddedFiles("defaults/prompts")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, count, 1, "should have at least one embedded prompt")
+}
+
+func TestDefaultsInstaller_OverwriteEmbeddedFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	destDir := filepath.Join(tmpDir, "dest")
+	installer := &defaultsInstaller{embedFS: defaultsFS}
+
+	// first call creates files
+	err := installer.overwriteEmbeddedFiles(destDir, "defaults/prompts")
+	require.NoError(t, err)
+
+	// verify files exist
+	entries, err := os.ReadDir(destDir)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(entries), 1, "should have at least one file")
+
+	// modify a file
+	taskPath := filepath.Join(destDir, "task.txt")
+	require.NoError(t, os.WriteFile(taskPath, []byte("modified"), 0o600))
+
+	// add a custom file
+	customPath := filepath.Join(destDir, "custom.txt")
+	require.NoError(t, os.WriteFile(customPath, []byte("custom"), 0o600))
+
+	// overwrite again
+	err = installer.overwriteEmbeddedFiles(destDir, "defaults/prompts")
+	require.NoError(t, err)
+
+	// verify task.txt was overwritten
+	data, err := os.ReadFile(taskPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.NotEqual(t, "modified", string(data))
+
+	// verify custom file was preserved
+	data, err = os.ReadFile(customPath) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, "custom", string(data))
+}
+
+func TestDefaultsInstaller_AskYesNo(t *testing.T) {
+	installer := &defaultsInstaller{embedFS: defaultsFS}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{name: "lowercase_y", input: "y\n", expected: true},
+		{name: "uppercase_Y", input: "Y\n", expected: true},
+		{name: "yes", input: "yes\n", expected: true},
+		{name: "YES", input: "YES\n", expected: true},
+		{name: "n", input: "n\n", expected: false},
+		{name: "no", input: "no\n", expected: false},
+		{name: "empty", input: "\n", expected: false},
+		{name: "other", input: "maybe\n", expected: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := strings.NewReader(tc.input)
+			stdout := &bytes.Buffer{}
+			result := installer.askYesNo(bufio.NewScanner(reader), stdout)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }

@@ -145,6 +145,9 @@ linters:
           - errcheck
         text: "Error return value of .*.Println.*is not checked"
       - linters:
+          - errcheck
+        text: "Error return value of .*.Fprintln.*is not checked"
+      - linters:
           - gosec
         text: "G104: Errors unhandled"
     paths:

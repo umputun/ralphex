@@ -224,6 +224,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-w, --watch` | Directories to watch for progress files (repeatable) | - |
 | `-d, --debug` | Enable debug logging | false |
 | `--no-color` | Disable color output | false |
+| `--reset` | Interactively reset global config to embedded defaults | - |
 
 ## Plan File Format
 
@@ -294,7 +295,7 @@ The entire system is designed for customization - both task execution and review
 **Agent files** (`~/.config/ralphex/agents/`):
 - Edit existing files to modify agent behavior
 - Add new `.txt` files to create custom agents
-- Delete all files and restart to restore defaults
+- Run `ralphex --reset` to interactively restore defaults, or delete all files manually
 - Alternatively, reference agents already installed in your Claude Code directly in prompt files (see example below)
 
 **Prompt files** (`~/.config/ralphex/prompts/`):
@@ -439,7 +440,7 @@ For full mode, start on master - ralphex creates a branch automatically from the
 
 **How do I restore default agents after customizing?**
 
-Delete all `.txt` files from `~/.config/ralphex/agents/` and restart ralphex.
+Run `ralphex --reset` to interactively reset global config. Select which components to reset (config, prompts, agents). Alternatively, delete all `.txt` files from `~/.config/ralphex/agents/` manually.
 
 **How does local .ralphex/ config interact with global config?**
 
