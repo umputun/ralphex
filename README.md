@@ -434,6 +434,10 @@ Yes, use `--review` flag. See [CLI Options](#cli-options).
 
 No. Git is required for branch management, automatic commits, and diff-based code reviews.
 
+**What if my repository has no commits?**
+
+ralphex prompts to create an initial commit when the repository is empty. This is required because ralphex needs branches for feature isolation. Answer "y" to let ralphex stage all files and create an initial commit, or create one manually first with `git add . && git commit -m "initial commit"`.
+
 **Should I run ralphex on master or a feature branch?**
 
 For full mode, start on master - ralphex creates a branch automatically from the plan filename. For `--review` mode, switch to your feature branch first - reviews compare against master using `git diff master...HEAD`.

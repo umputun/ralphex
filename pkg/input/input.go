@@ -119,3 +119,18 @@ func (c *TerminalCollector) selectWithNumbers(question string, options []string)
 
 	return options[num-1], nil
 }
+
+// AskYesNo prompts with [y/N] and returns true for yes.
+// defaults to no on EOF, empty input, or any read error.
+func AskYesNo(prompt string, stdin io.Reader, stdout io.Writer) bool {
+	fmt.Fprintf(stdout, "%s [y/N]: ", prompt)
+	scanner := bufio.NewScanner(stdin)
+	if !scanner.Scan() {
+		// EOF (Ctrl+D) or read error - print newline so subsequent output
+		// doesn't appear on the same line as the prompt, then default to "no"
+		fmt.Fprintln(stdout)
+		return false
+	}
+	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	return answer == "y" || answer == "yes"
+}

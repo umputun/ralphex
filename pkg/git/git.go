@@ -87,6 +87,45 @@ func (r *Repo) HasCommits() (bool, error) {
 	return true, nil
 }
 
+// CreateInitialCommit stages all files and creates an initial commit.
+// returns error if no files to stage or commit fails.
+func (r *Repo) CreateInitialCommit(message string) error {
+	wt, err := r.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("get worktree: %w", err)
+	}
+
+	// stage all files
+	if addErr := wt.AddGlob("."); addErr != nil {
+		return fmt.Errorf("stage files: %w", addErr)
+	}
+
+	// check if anything was staged
+	status, err := wt.Status()
+	if err != nil {
+		return fmt.Errorf("get status: %w", err)
+	}
+
+	hasStaged := false
+	for _, s := range status {
+		if s.Staging != git.Unmodified && s.Staging != git.Untracked {
+			hasStaged = true
+			break
+		}
+	}
+	if !hasStaged {
+		return errors.New("no files to commit")
+	}
+
+	author := r.getAuthor()
+	_, err = wt.Commit(message, &git.CommitOptions{Author: author})
+	if err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	return nil
+}
+
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD state.
 func (r *Repo) CurrentBranch() (string, error) {
 	head, err := r.repo.Head()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -1327,17 +1328,49 @@ func TestFindRecentPlan(t *testing.T) {
 	})
 }
 
-func TestValidateRepoHasCommits(t *testing.T) {
+func TestEnsureRepoHasCommits(t *testing.T) {
 	t.Run("returns nil for repo with commits", func(t *testing.T) {
 		dir := setupTestRepo(t)
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
 
-		err = validateRepoHasCommits(gitOps)
+		var stdout bytes.Buffer
+		err = ensureRepoHasCommits(gitOps, strings.NewReader(""), &stdout)
 		assert.NoError(t, err)
 	})
 
-	t.Run("returns error for empty repo", func(t *testing.T) {
+	t.Run("creates commit when user answers yes", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := gogit.PlainInit(dir, false)
+		require.NoError(t, err)
+
+		// create a file so there's something to commit
+		err = os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600)
+		require.NoError(t, err)
+
+		gitOps, err := git.Open(dir)
+		require.NoError(t, err)
+
+		// verify no commits before
+		hasCommits, err := gitOps.HasCommits()
+		require.NoError(t, err)
+		assert.False(t, hasCommits)
+
+		var stdout bytes.Buffer
+		err = ensureRepoHasCommits(gitOps, strings.NewReader("y\n"), &stdout)
+		require.NoError(t, err)
+
+		// verify commit was created
+		hasCommits, err = gitOps.HasCommits()
+		require.NoError(t, err)
+		assert.True(t, hasCommits)
+
+		// verify output
+		assert.Contains(t, stdout.String(), "repository has no commits")
+		assert.Contains(t, stdout.String(), "created initial commit")
+	})
+
+	t.Run("returns error when user answers no", func(t *testing.T) {
 		dir := t.TempDir()
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)
@@ -1345,10 +1378,40 @@ func TestValidateRepoHasCommits(t *testing.T) {
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
 
-		err = validateRepoHasCommits(gitOps)
+		var stdout bytes.Buffer
+		err = ensureRepoHasCommits(gitOps, strings.NewReader("n\n"), &stdout)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "repository has no commits")
-		assert.Contains(t, err.Error(), "git add . && git commit")
+		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
+	})
+
+	t.Run("returns error on EOF", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := gogit.PlainInit(dir, false)
+		require.NoError(t, err)
+
+		gitOps, err := git.Open(dir)
+		require.NoError(t, err)
+
+		var stdout bytes.Buffer
+		err = ensureRepoHasCommits(gitOps, strings.NewReader(""), &stdout)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
+	})
+
+	t.Run("returns error when no files to commit", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := gogit.PlainInit(dir, false)
+		require.NoError(t, err)
+
+		// no files created - empty repo
+
+		gitOps, err := git.Open(dir)
+		require.NoError(t, err)
+
+		var stdout bytes.Buffer
+		err = ensureRepoHasCommits(gitOps, strings.NewReader("y\n"), &stdout)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "create initial commit")
 	})
 }
 

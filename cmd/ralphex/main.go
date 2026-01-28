@@ -172,9 +172,9 @@ func run(ctx context.Context, o opts) error {
 		return fmt.Errorf("open git repo: %w", err)
 	}
 
-	// validate repository has commits (early check with helpful error)
-	if validateErr := validateRepoHasCommits(gitOps); validateErr != nil {
-		return validateErr
+	// ensure repository has commits (prompts to create initial commit if empty)
+	if ensureErr := ensureRepoHasCommits(gitOps, os.Stdin, os.Stdout); ensureErr != nil {
+		return ensureErr
 	}
 
 	mode := determineMode(o)
@@ -667,19 +667,30 @@ func checkDependencies(deps ...string) error {
 	return nil
 }
 
-// validateRepoHasCommits checks that the repository has at least one commit.
-// returns a user-friendly error message if the repository is empty.
-func validateRepoHasCommits(gitOps *git.Repo) error {
+// ensureRepoHasCommits checks that the repository has at least one commit.
+// if the repository is empty, prompts the user to create an initial commit.
+func ensureRepoHasCommits(gitOps *git.Repo, stdin io.Reader, stdout io.Writer) error {
 	hasCommits, err := gitOps.HasCommits()
 	if err != nil {
 		return fmt.Errorf("check commits: %w", err)
 	}
-	if !hasCommits {
-		return errors.New("repository has no commits\n\n" +
-			"ralphex needs at least one commit to create feature branches.\n\n" +
-			"create an initial commit first:\n" +
-			"  git add . && git commit -m \"initial commit\"")
+	if hasCommits {
+		return nil
 	}
+
+	// prompt user to create initial commit
+	fmt.Fprintln(stdout, "repository has no commits")
+	fmt.Fprintln(stdout, "ralphex needs at least one commit to create feature branches.")
+	fmt.Fprintln(stdout)
+	if !input.AskYesNo("create initial commit?", stdin, stdout) {
+		return errors.New("no commits - please create initial commit manually")
+	}
+
+	// create the commit
+	if err := gitOps.CreateInitialCommit("initial commit"); err != nil {
+		return fmt.Errorf("create initial commit: %w", err)
+	}
+	fmt.Fprintln(stdout, "created initial commit")
 	return nil
 }
 

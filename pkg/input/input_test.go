@@ -105,3 +105,35 @@ func TestNewTerminalCollector(t *testing.T) {
 	c := NewTerminalCollector()
 	assert.NotNil(t, c)
 }
+
+func TestAskYesNo(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "y returns true", input: "y\n", want: true},
+		{name: "Y returns true", input: "Y\n", want: true},
+		{name: "yes returns true", input: "yes\n", want: true},
+		{name: "YES returns true", input: "YES\n", want: true},
+		{name: "Yes returns true", input: "Yes\n", want: true},
+		{name: "n returns false", input: "n\n", want: false},
+		{name: "N returns false", input: "N\n", want: false},
+		{name: "no returns false", input: "no\n", want: false},
+		{name: "empty returns false", input: "\n", want: false},
+		{name: "anything else returns false", input: "maybe\n", want: false},
+		{name: "y with spaces", input: "  y  \n", want: true},
+		{name: "EOF returns false", input: "", want: false},
+	}
+
+	prompt := "continue?"
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			got := AskYesNo(prompt, strings.NewReader(tc.input), &stdout)
+			assert.Equal(t, tc.want, got)
+			assert.Contains(t, stdout.String(), prompt)
+			assert.Contains(t, stdout.String(), "[y/N]")
+		})
+	}
+}
