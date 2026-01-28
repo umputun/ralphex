@@ -8,6 +8,22 @@ allowed-tools: [Bash, Read, AskUserQuestion, TaskOutput, Glob]
 
 **SCOPE**: This command ONLY launches ralphex, monitors progress, and reports status. Do NOT take any other actions.
 
+## Step 0: Verify CLI Installation
+
+Check if ralphex CLI is installed:
+```bash
+which ralphex
+```
+
+**If not found**, guide installation based on platform:
+
+- **macOS (Homebrew)**: `brew install umputun/apps/ralphex`
+- **Linux (Debian/Ubuntu)**: download `.deb` from https://github.com/umputun/ralphex/releases
+- **Linux (RHEL/Fedora)**: download `.rpm` from https://github.com/umputun/ralphex/releases
+- **Any platform with Go**: `go install github.com/umputun/ralphex/cmd/ralphex@latest`
+
+Use AskUserQuestion to confirm installation method, then guide through it. **Do not proceed until `which ralphex` succeeds.**
+
 ## Step 1: Check for Plan Argument
 
 Check `$ARGUMENTS` for optional plan file path:

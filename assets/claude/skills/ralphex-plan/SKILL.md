@@ -6,6 +6,21 @@ description: Create structured implementation plan in docs/plans/
 
 Create an implementation plan in `docs/plans/yyyymmdd-<task-name>.md` with interactive context gathering.
 
+## Prerequisites: Verify CLI Installation
+
+Check if ralphex CLI is installed (needed to execute the plan after creation):
+```bash
+which ralphex
+```
+
+**If not found**, inform user they'll need it to execute the plan:
+- **macOS (Homebrew)**: `brew install umputun/apps/ralphex`
+- **Linux (Debian/Ubuntu)**: download `.deb` from https://github.com/umputun/ralphex/releases
+- **Linux (RHEL/Fedora)**: download `.rpm` from https://github.com/umputun/ralphex/releases
+- **Any platform with Go**: `go install github.com/umputun/ralphex/cmd/ralphex@latest`
+
+Proceed with plan creation regardless, but remind user to install before execution.
+
 ## Step 0: Parse Intent and Gather Context
 
 Before asking questions, understand what the user is working on:
