@@ -260,6 +260,7 @@ If you're an AI agent preparing a contribution, complete this checklist:
 - Site source: `site/` directory with `mkdocs.yml`
 - Template overrides: `site/overrides/` with `custom_dir: overrides` in mkdocs.yml
 - **CI constraint**: Cloudflare Pages uses mkdocs-material 9.2.x, must use `materialx.emoji` syntax (not `material.extensions.emoji` which requires 9.4+)
+- **Raw .md files**: MkDocs renders ALL `.md` files in `docs_dir` as HTML pages. To serve raw markdown (e.g., `assets/claude/*.md` for Claude Code skills), copy them AFTER `mkdocs build` - see `prep_site` target in Makefile
 
 ## Workflow Rules
 

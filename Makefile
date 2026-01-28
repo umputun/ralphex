@@ -69,5 +69,6 @@ prep_site:
 	cp -fv llms.txt site/docs/
 	grep -v -E 'badge|coveralls|goreportcard' site/docs/index.md > site/docs/index.md.tmp && mv site/docs/index.md.tmp site/docs/index.md
 	cd site && pip install -r requirements.txt && mkdocs build
+	rm -rf site/site/assets/claude && cp -rv assets/claude site/site/assets/
 
 .PHONY: all build test lint fmt race version e2e-prep e2e-review e2e-codex prep_site
