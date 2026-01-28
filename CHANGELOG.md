@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.4 - 2026-01-27
+
+### Fixed
+
+- Plan creation loop issue: Claude now emits PLAN_READY signal instead of asking natural language questions
+
 ## v0.4.3 - 2026-01-26
 
 ### Fixed
