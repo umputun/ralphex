@@ -64,11 +64,21 @@ e2e-codex: build
 	@echo "Monitor: tail -f /tmp/ralphex-review-test/progress-codex.txt"
 
 prep_site:
-	cp -fv README.md site/docs/index.md
-	cp -rv assets site/docs/
-	cp -fv llms.txt site/docs/
-	grep -v -E 'badge|coveralls|goreportcard' site/docs/index.md > site/docs/index.md.tmp && mv site/docs/index.md.tmp site/docs/index.md
+	# prepare docs source directory for mkdocs
+	rm -rf site/docs-src && mkdir -p site/docs-src
+	cp -fv README.md site/docs-src/index.md
+	cp -rv assets site/docs-src/
+	grep -v -E 'badge|coveralls|goreportcard' site/docs-src/index.md > site/docs-src/index.md.tmp && mv site/docs-src/index.md.tmp site/docs-src/index.md
+	mkdir -p site/docs-src/stylesheets && cp -fv site/docs/stylesheets/extra.css site/docs-src/stylesheets/
+	# build site structure: landing page + docs subdirectory
+	rm -rf site/site && mkdir -p site/site
+	cp -fv site/docs/index.html site/site/
+	cp -fv site/docs/favicon.png site/site/
+	cp -rv site/docs/assets site/site/
+	cp -fv llms.txt site/site/
+	# build mkdocs into site/site/docs/
 	cd site && pip install -r requirements.txt && mkdocs build
-	rm -rf site/site/assets/claude && cp -rv assets/claude site/site/assets/
+	# copy raw claude assets (not rendered by mkdocs)
+	rm -rf site/site/docs/assets/claude && cp -rv assets/claude site/site/docs/assets/
 
 .PHONY: all build test lint fmt race version e2e-prep e2e-review e2e-codex prep_site

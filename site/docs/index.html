@@ -1,0 +1,1404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ralphex - Autonomous Plan Execution with Claude Code</title>
+    <meta name="description" content="Write a plan, start ralphex, walk away. Autonomous task execution and multi-phase code review for Claude Code.">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="ralphex - Autonomous Plan Execution">
+    <meta property="og:description" content="Write a plan, start ralphex, walk away. Autonomous task execution and multi-phase code review for Claude Code.">
+    <meta property="og:url" content="https://ralphex.com/">
+    <meta property="og:image" content="https://ralphex.com/assets/ralphex-og.png">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@umputun">
+    <meta name="twitter:title" content="ralphex - Autonomous Plan Execution">
+    <meta name="twitter:description" content="Write a plan, start ralphex, walk away.">
+    <meta name="twitter:image" content="https://ralphex.com/assets/ralphex-og.png">
+
+    <link rel="icon" type="image/png" href="favicon.png">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-primary: #0a0e14;
+            --bg-secondary: #0f1419;
+            --bg-tertiary: #151c24;
+            --bg-card: #1a222d;
+            --teal: #2dd4bf;
+            --teal-dim: #14b8a6;
+            --teal-glow: rgba(45, 212, 191, 0.15);
+            --blue: #60a5fa;
+            --blue-dim: #3b82f6;
+            --purple: #a78bfa;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #1e293b;
+            --border-hover: #334155;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Noise texture overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+            opacity: 0.03;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        /* Grid background */
+        .grid-bg {
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(45, 212, 191, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(45, 212, 191, 0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+            mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black 30%, transparent 70%);
+            pointer-events: none;
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(10, 14, 20, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+
+        .nav-logo img {
+            height: 36px;
+            width: auto;
+        }
+
+        .nav-logo span {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            font-size: 1.25rem;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--teal);
+        }
+
+        .nav-links .btn-docs {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .nav-links .btn-docs:hover {
+            background: var(--bg-card);
+            border-color: var(--teal);
+            color: var(--teal);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 8rem 2rem 4rem;
+            position: relative;
+        }
+
+        .hero-glow {
+            position: absolute;
+            top: 10%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 600px;
+            background: radial-gradient(ellipse at center, var(--teal-glow) 0%, transparent 60%);
+            pointer-events: none;
+            animation: pulse 8s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+            50% { opacity: 0.8; transform: translateX(-50%) scale(1.1); }
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            padding: 0.4rem 1rem;
+            border-radius: 100px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .hero-badge span {
+            color: var(--teal);
+            font-weight: 600;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .hero h1 {
+            font-size: clamp(3rem, 8vw, 5.5rem);
+            font-weight: 700;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            animation: fadeInUp 0.6s ease-out 0.1s both;
+            letter-spacing: -0.03em;
+        }
+
+        .hero h1 .highlight {
+            background: linear-gradient(135deg, var(--teal) 0%, var(--blue) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-subtitle {
+            font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin-bottom: 3rem;
+            animation: fadeInUp 0.6s ease-out 0.2s both;
+            font-weight: 300;
+        }
+
+        .hero-cta {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            animation: fadeInUp 0.6s ease-out 0.3s both;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.875rem 1.75rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--teal) 0%, var(--teal-dim) 100%);
+            color: var(--bg-primary);
+            box-shadow: 0 4px 20px rgba(45, 212, 191, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 30px rgba(45, 212, 191, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card);
+            border-color: var(--border-hover);
+        }
+
+        /* Terminal Demo */
+        .terminal-demo {
+            margin-top: 4rem;
+            width: 100%;
+            max-width: 700px;
+            animation: fadeInUp 0.6s ease-out 0.4s both;
+        }
+
+        .terminal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
+        }
+
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot.red { background: #ff5f56; }
+        .terminal-dot.yellow { background: #ffbd2e; }
+        .terminal-dot.green { background: #27c93f; }
+
+        .terminal-title {
+            flex: 1;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .terminal-body {
+            padding: 1.25rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            line-height: 1.8;
+        }
+
+        .terminal-line {
+            display: flex;
+            gap: 0.5rem;
+            opacity: 0;
+            animation: terminalType 0.3s ease-out forwards;
+        }
+
+        .terminal-line:nth-child(1) { animation-delay: 0.6s; }
+        .terminal-line:nth-child(2) { animation-delay: 1.0s; }
+        .terminal-line:nth-child(3) { animation-delay: 1.4s; }
+        .terminal-line:nth-child(4) { animation-delay: 1.8s; }
+        .terminal-line:nth-child(5) { animation-delay: 2.2s; }
+        .terminal-line:nth-child(6) { animation-delay: 2.6s; }
+        .terminal-line:nth-child(7) { animation-delay: 3.0s; }
+
+        @keyframes terminalType {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .prompt { color: var(--teal); }
+        .cmd { color: var(--text-primary); }
+        .time { color: var(--text-muted); min-width: 75px; }
+        .phase { font-weight: 500; min-width: 70px; }
+        .phase.task { color: #4ade80; }
+        .phase.review { color: var(--blue); }
+        .phase.codex { color: var(--purple); }
+        .success { color: #4ade80; font-weight: 600; }
+
+        /* Features Section */
+        .features {
+            padding: 6rem 2rem;
+            position: relative;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .section-header h2 {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            letter-spacing: -0.02em;
+        }
+
+        .section-header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .feature-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--teal), var(--blue));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-4px);
+        }
+
+        .feature-card:hover::before {
+            opacity: 1;
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            background: var(--teal-glow);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.25rem;
+            font-size: 1.5rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        /* How It Works */
+        .how-it-works {
+            padding: 6rem 2rem;
+            background: var(--bg-secondary);
+        }
+
+        .workflow {
+            display: flex;
+            flex-direction: column;
+            gap: 3rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .workflow-step {
+            display: flex;
+            gap: 2rem;
+            align-items: flex-start;
+        }
+
+        .step-number {
+            flex-shrink: 0;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--teal-glow), transparent);
+            border: 2px solid var(--teal);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--teal);
+        }
+
+        .step-content h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .step-content p {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .step-content code {
+            display: inline-block;
+            margin-top: 0.75rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--teal);
+        }
+
+        /* Agents Section */
+        .agents {
+            padding: 6rem 2rem;
+        }
+
+        .agents-table {
+            max-width: 800px;
+            margin: 0 auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .agent-row {
+            display: flex;
+            align-items: center;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+        }
+
+        .agent-row:last-child {
+            border-bottom: none;
+        }
+
+        .agent-row:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .agent-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            color: var(--teal);
+            width: 160px;
+            flex-shrink: 0;
+        }
+
+        .agent-desc {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Planning Section */
+        .planning {
+            padding: 6rem 2rem;
+            background: var(--bg-secondary);
+        }
+
+        .planning-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3rem;
+            max-width: 1100px;
+            margin: 0 auto;
+            align-items: start;
+        }
+
+        @media (max-width: 900px) {
+            .planning-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .planning-terminal .terminal {
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        }
+
+        .planning-body {
+            font-size: 0.8rem;
+        }
+
+        .plan-line {
+            opacity: 1 !important;
+            animation: none !important;
+        }
+
+        .plan-question {
+            margin-top: 0.75rem;
+        }
+
+        .question-label {
+            color: var(--purple);
+            font-weight: 600;
+        }
+
+        .plan-options {
+            padding-left: 1rem;
+        }
+
+        .option {
+            color: var(--text-muted);
+        }
+
+        .option.selected {
+            color: var(--teal);
+            font-weight: 500;
+        }
+
+        .answer {
+            color: var(--blue);
+            font-weight: 500;
+        }
+
+        .planning-features {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .planning-feature {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+        .planning-feature-icon {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: var(--teal-glow);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .planning-feature h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .planning-feature p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        /* Customize Section */
+        .customize {
+            padding: 6rem 2rem;
+        }
+
+        .customize-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            max-width: 900px;
+            margin: 0 auto 3rem;
+        }
+
+        @media (max-width: 700px) {
+            .customize-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .customize-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.75rem;
+            transition: all 0.3s;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .customize-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-2px);
+        }
+
+        .customize-icon {
+            width: 40px;
+            height: 40px;
+            margin-bottom: 1rem;
+        }
+
+        .customize-card h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .customize-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin-bottom: 1rem;
+            flex: 1;
+        }
+
+        .customize-path {
+            display: inline-block;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            padding: 0.35rem 0.75rem;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--teal);
+            align-self: flex-start;
+        }
+
+        .config-preview {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .config-structure {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .config-title {
+            background: var(--bg-tertiary);
+            padding: 0.75rem 1.25rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .config-structure pre {
+            padding: 1.25rem;
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            line-height: 1.7;
+            overflow-x: auto;
+        }
+
+        .config-structure code {
+            color: var(--text-primary);
+        }
+
+        .config-structure .dir {
+            color: var(--blue);
+        }
+
+        .config-structure .comment {
+            color: var(--text-muted);
+            margin-left: 0.5rem;
+        }
+
+        /* Install Section */
+        .install {
+            padding: 6rem 2rem;
+            background: var(--bg-secondary);
+        }
+
+        .install-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .install-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .install-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .install-card pre {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .install-card code {
+            color: var(--teal);
+        }
+
+        .install-card a {
+            color: var(--blue);
+            text-decoration: none;
+        }
+
+        .install-card a:hover {
+            text-decoration: underline;
+        }
+
+        .releases-link {
+            display: block;
+            margin-top: 0.75rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--teal);
+        }
+
+        /* Footer */
+        footer {
+            padding: 3rem 2rem;
+            border-top: 1px solid var(--border);
+            text-align: center;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--teal);
+        }
+
+        .footer-copy {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            nav {
+                padding: 1rem;
+            }
+
+            .nav-links {
+                gap: 1rem;
+            }
+
+            .nav-links a:not(.btn-docs) {
+                display: none;
+            }
+
+            .hero {
+                padding: 6rem 1.5rem 3rem;
+            }
+
+            .workflow-step {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+
+            .step-number {
+                margin: 0 auto;
+            }
+
+            .agent-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+
+            .agent-name {
+                width: auto;
+            }
+        }
+
+        /* Scroll animations */
+        .animate-on-scroll {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: all 0.6s ease-out;
+        }
+
+        .animate-on-scroll.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <div class="grid-bg"></div>
+
+    <nav>
+        <a href="/" class="nav-logo">
+            <img src="assets/ralphex-icon-transparent.png" alt="ralphex">
+            <span>ralphex</span>
+        </a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#how-it-works">How It Works</a>
+            <a href="#planning">Planning</a>
+            <a href="#customize">Customize</a>
+            <a href="#install">Install</a>
+            <a href="https://github.com/umputun/ralphex" target="_blank">GitHub</a>
+            <a href="docs/" class="btn-docs">Documentation</a>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-glow"></div>
+
+        <div class="hero-badge">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+            </svg>
+            Powered by <span>Claude Code</span>
+        </div>
+
+        <h1>
+            Write a plan.<br>
+            <span class="highlight">Walk away.</span>
+        </h1>
+
+        <p class="hero-subtitle">
+            Autonomous task execution and multi-phase code review.
+            Each task runs in a fresh session, keeping Claude sharp from start to finish.
+        </p>
+
+        <div class="hero-cta">
+            <a href="#install" class="btn btn-primary">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Install
+            </a>
+            <a href="docs/" class="btn btn-secondary">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                Documentation
+            </a>
+        </div>
+
+        <div class="terminal-demo">
+            <div class="terminal">
+                <div class="terminal-header">
+                    <div class="terminal-dot red"></div>
+                    <div class="terminal-dot yellow"></div>
+                    <div class="terminal-dot green"></div>
+                    <div class="terminal-title">ralphex</div>
+                </div>
+                <div class="terminal-body">
+                    <div class="terminal-line">
+                        <span class="prompt">$</span>
+                        <span class="cmd">ralphex docs/plans/add-auth.md</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="time">[09:14:22]</span>
+                        <span class="phase task">Task 1:</span>
+                        <span>JWT middleware → tests pass → committed</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="time">[09:21:08]</span>
+                        <span class="phase task">Task 2:</span>
+                        <span>login endpoint → tests pass → committed</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="time">[09:28:45]</span>
+                        <span class="phase review">Review 1:</span>
+                        <span>5 agents → 2 issues fixed → committed</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="time">[09:35:12]</span>
+                        <span class="phase codex">Codex:</span>
+                        <span>GPT-5 review → 1 issue reported</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="time">[09:41:03]</span>
+                        <span class="phase review">Review 2:</span>
+                        <span>1 fix → committed → no issues</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="time">[09:41:17]</span>
+                        <span class="success">COMPLETED</span>
+                        <span>→ docs/plans/completed/</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="features" id="features">
+        <div class="section-header animate-on-scroll">
+            <h2>Built for Autonomous Execution</h2>
+            <p>Everything you need to let Claude Code work independently on complex features</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card animate-on-scroll">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <polyline points="4 17 10 11 4 5"/>
+                        <line x1="12" y1="19" x2="20" y2="19"/>
+                    </svg>
+                </div>
+                <h3>Zero Setup</h3>
+                <p>Works out of the box with sensible defaults. No configuration required to get started.</p>
+            </div>
+
+            <div class="feature-card animate-on-scroll">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+                    </svg>
+                </div>
+                <h3>Fresh Context</h3>
+                <p>Each task executes in a new Claude session. No context degradation over long features.</p>
+            </div>
+
+            <div class="feature-card animate-on-scroll">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                    </svg>
+                </div>
+                <h3>Automatic Retry</h3>
+                <p>Tasks that fail validation are retried automatically with error context.</p>
+            </div>
+
+            <div class="feature-card animate-on-scroll">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                </div>
+                <h3>Multi-Agent Review</h3>
+                <p>5 specialized agents review in parallel: quality, implementation, testing, simplification, docs.</p>
+            </div>
+
+            <div class="feature-card animate-on-scroll">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7m0-18H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7m0-18v18"/>
+                    </svg>
+                </div>
+                <h3>External Codex Review</h3>
+                <p>Optional GPT-5 review for independent analysis. Two AI perspectives catch more issues.</p>
+            </div>
+
+            <div class="feature-card animate-on-scroll">
+                <div class="feature-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="3" y1="9" x2="21" y2="9"/>
+                        <line x1="9" y1="21" x2="9" y2="9"/>
+                    </svg>
+                </div>
+                <h3>Web Dashboard</h3>
+                <p>Real-time browser UI with SSE streaming, phase navigation, and multi-session support.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="how-it-works" id="how-it-works">
+        <div class="section-header animate-on-scroll">
+            <h2>How It Works</h2>
+            <p>Four phases take your plan from idea to reviewed, committed code</p>
+        </div>
+
+        <div class="workflow">
+            <div class="workflow-step animate-on-scroll">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h3>Task Execution</h3>
+                    <p>Reads your plan, executes tasks one by one. Runs validation commands (tests, linters) after each task. Marks checkboxes complete and commits.</p>
+                    <code>ralphex docs/plans/feature.md</code>
+                </div>
+            </div>
+
+            <div class="workflow-step animate-on-scroll">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h3>First Code Review</h3>
+                    <p>Launches 5 review agents in parallel via Claude Code's Task tool. Covers quality, implementation correctness, testing, over-engineering, and documentation.</p>
+                </div>
+            </div>
+
+            <div class="workflow-step animate-on-scroll">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h3>Codex External Review</h3>
+                    <p>Independent review by GPT-5. Claude evaluates findings, fixes valid issues, iterates until codex reports no issues. Two AI perspectives catch more bugs.</p>
+                </div>
+            </div>
+
+            <div class="workflow-step animate-on-scroll">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h3>Final Review</h3>
+                    <p>Quality and implementation agents run one more pass focusing on critical/major issues only. Plan moves to completed/ on success.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="agents" id="agents">
+        <div class="section-header animate-on-scroll">
+            <h2>Review Agents</h2>
+            <p>Five specialized agents work in parallel to catch different categories of issues</p>
+        </div>
+
+        <div class="agents-table animate-on-scroll">
+            <div class="agent-row">
+                <span class="agent-name">quality</span>
+                <span class="agent-desc">Bugs, security issues, race conditions, error handling</span>
+            </div>
+            <div class="agent-row">
+                <span class="agent-name">implementation</span>
+                <span class="agent-desc">Verifies code actually achieves the stated goals</span>
+            </div>
+            <div class="agent-row">
+                <span class="agent-name">testing</span>
+                <span class="agent-desc">Test coverage, edge cases, test quality</span>
+            </div>
+            <div class="agent-row">
+                <span class="agent-name">simplification</span>
+                <span class="agent-desc">Detects over-engineering and unnecessary complexity</span>
+            </div>
+            <div class="agent-row">
+                <span class="agent-name">documentation</span>
+                <span class="agent-desc">Checks if README, comments, or docs need updates</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="planning" id="planning">
+        <div class="section-header animate-on-scroll">
+            <h2>Interactive Plan Creation</h2>
+            <p>Don't have a plan yet? Let Claude help you create one</p>
+        </div>
+
+        <div class="planning-content">
+            <div class="planning-terminal animate-on-scroll">
+                <div class="terminal">
+                    <div class="terminal-header">
+                        <div class="terminal-dot red"></div>
+                        <div class="terminal-dot yellow"></div>
+                        <div class="terminal-dot green"></div>
+                        <div class="terminal-title">ralphex --plan</div>
+                    </div>
+                    <div class="terminal-body planning-body">
+                        <div class="terminal-line plan-line">
+                            <span class="prompt">$</span>
+                            <span class="cmd">ralphex --plan "add caching for API"</span>
+                        </div>
+                        <div class="terminal-line plan-line">
+                            <span class="time">[10:30:05]</span>
+                            <span>analyzing codebase structure...</span>
+                        </div>
+                        <div class="terminal-line plan-line">
+                            <span class="time">[10:30:12]</span>
+                            <span>found store layer in pkg/store/</span>
+                        </div>
+                        <div class="terminal-line plan-line plan-question">
+                            <span class="question-label">QUESTION:</span>
+                            <span>Which cache backend?</span>
+                        </div>
+                        <div class="terminal-line plan-line plan-options">
+                            <span class="option selected">› Redis</span>
+                        </div>
+                        <div class="terminal-line plan-line plan-options">
+                            <span class="option">&nbsp; In-memory</span>
+                        </div>
+                        <div class="terminal-line plan-line plan-options">
+                            <span class="option">&nbsp; File-based</span>
+                        </div>
+                        <div class="terminal-line plan-line">
+                            <span class="time">[10:30:45]</span>
+                            <span class="answer">ANSWER: Redis</span>
+                        </div>
+                        <div class="terminal-line plan-line">
+                            <span class="time">[10:32:05]</span>
+                            <span class="success">plan written</span>
+                            <span>→ docs/plans/add-api-caching.md</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="planning-features animate-on-scroll">
+                <div class="planning-feature">
+                    <div class="planning-feature-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="m21 21-4.35-4.35"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h4>Codebase Analysis</h4>
+                        <p>Claude explores your project structure, finds existing patterns and conventions</p>
+                    </div>
+                </div>
+
+                <div class="planning-feature">
+                    <div class="planning-feature-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h4>Clarifying Questions</h4>
+                        <p>Interactive picker (fzf) for design decisions - cache backend, auth method, etc.</p>
+                    </div>
+                </div>
+
+                <div class="planning-feature">
+                    <div class="planning-feature-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h4>Complete Plan File</h4>
+                        <p>Generates structured markdown with tasks, checkboxes, and validation commands</p>
+                    </div>
+                </div>
+
+                <div class="planning-feature">
+                    <div class="planning-feature-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h4>Immediate Execution</h4>
+                        <p>Option to start implementation right away or save for later</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="customize" id="customize">
+        <div class="section-header animate-on-scroll">
+            <h2>Fully Customizable</h2>
+            <p>Adapt ralphex to your workflow, language, and review standards</p>
+        </div>
+
+        <div class="customize-grid">
+            <div class="customize-card animate-on-scroll">
+                <div class="customize-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <path d="M12 20h9"/>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                    </svg>
+                </div>
+                <h3>Custom Agents</h3>
+                <p>Create domain-specific review agents. Add security checks for fintech, TypeScript linting for frontend, or compliance rules for regulated industries.</p>
+                <code class="customize-path">~/.config/ralphex/agents/*.txt</code>
+            </div>
+
+            <div class="customize-card animate-on-scroll">
+                <div class="customize-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                </div>
+                <h3>Custom Prompts</h3>
+                <p>Control how tasks execute and reviews run. Modify the task prompt, first review, codex integration, or final review phases.</p>
+                <code class="customize-path">~/.config/ralphex/prompts/*.txt</code>
+            </div>
+
+            <div class="customize-card animate-on-scroll">
+                <div class="customize-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                </div>
+                <h3>Per-Project Config</h3>
+                <p>Override global settings per repository. Each project can have its own agents, prompts, and configuration that take priority.</p>
+                <code class="customize-path">.ralphex/</code>
+            </div>
+
+            <div class="customize-card animate-on-scroll">
+                <div class="customize-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 1v6m0 6v10"/>
+                        <path d="m4.22 4.22 4.24 4.24m7.08 7.08 4.24 4.24"/>
+                        <path d="M1 12h6m6 0h10"/>
+                        <path d="m4.22 19.78 4.24-4.24m7.08-7.08 4.24-4.24"/>
+                    </svg>
+                </div>
+                <h3>Use Existing Agents</h3>
+                <p>Reference Claude Code agents you already have installed. No duplication needed - just name them in your prompts.</p>
+                <code class="customize-path">qa-expert, go-test-expert, ...</code>
+            </div>
+        </div>
+
+        <div class="config-preview animate-on-scroll">
+            <div class="config-structure">
+                <div class="config-title">Configuration Structure</div>
+                <pre><code><span class="dir">~/.config/ralphex/</span>
+├── config              <span class="comment"># settings (INI format)</span>
+├── <span class="dir">prompts/</span>
+│   ├── task.txt        <span class="comment"># task execution</span>
+│   ├── review_first.txt<span class="comment"># 5-agent review</span>
+│   ├── review_second.txt<span class="comment"># final 2-agent review</span>
+│   └── codex.txt       <span class="comment"># external review</span>
+└── <span class="dir">agents/</span>
+    ├── quality.txt     <span class="comment"># bugs, security</span>
+    ├── implementation.txt
+    ├── testing.txt
+    ├── simplification.txt
+    └── documentation.txt</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <section class="install" id="install">
+        <div class="section-header animate-on-scroll">
+            <h2>Install</h2>
+            <p>Get started in seconds</p>
+        </div>
+
+        <div class="install-options">
+            <div class="install-card animate-on-scroll">
+                <h3>Homebrew (macOS)</h3>
+                <pre><code>brew install umputun/apps/ralphex</code></pre>
+            </div>
+
+            <div class="install-card animate-on-scroll">
+                <h3>Go Install</h3>
+                <pre><code>go install github.com/umputun/ralphex/cmd/ralphex@latest</code></pre>
+            </div>
+
+            <div class="install-card animate-on-scroll">
+                <h3>Binary Releases</h3>
+                <pre><code># download from GitHub releases</code></pre>
+                <a href="https://github.com/umputun/ralphex/releases" class="releases-link" target="_blank">github.com/umputun/ralphex/releases</a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-links">
+            <a href="https://github.com/umputun/ralphex" target="_blank">GitHub</a>
+            <a href="docs/">Documentation</a>
+            <a href="https://github.com/umputun/ralphex/releases" target="_blank">Releases</a>
+            <a href="https://t.me/umputun" target="_blank">Telegram</a>
+        </div>
+        <p class="footer-copy">MIT License &copy; 2026 Umputun</p>
+    </footer>
+
+    <script>
+        // Scroll animations
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.animate-on-scroll').forEach(el => {
+            observer.observe(el);
+        });
+
+        // Smooth scroll for nav links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -539,8 +539,8 @@ Benefits: Auto-updates when marketplace refreshes (at Claude Code startup).
 **Manual Installation (Alternative)**
 
 The slash command definitions are hosted at:
-- [`/ralphex`](https://ralphex.umputun.dev/assets/claude/ralphex.md)
-- [`/ralphex-plan`](https://ralphex.umputun.dev/assets/claude/ralphex-plan.md)
+- [`/ralphex`](https://ralphex.com/assets/claude/ralphex.md)
+- [`/ralphex-plan`](https://ralphex.com/assets/claude/ralphex-plan.md)
 
 To install, ask Claude Code to "install ralphex slash commands" or manually copy the files to `~/.claude/commands/`.
 

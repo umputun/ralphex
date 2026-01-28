@@ -1,8 +1,11 @@
-site_name: RALPHEX
-site_url: https://ralphex.umputun.dev/
+site_name: RALPHEX Documentation
+site_url: https://ralphex.com/docs/
 site_author: Umputun
 site_description: >-
   Autonomous plan execution with Claude Code
+
+docs_dir: docs-src
+site_dir: site/docs
 
 repo_name: umputun/ralphex
 repo_url: https://github.com/umputun/ralphex
@@ -11,7 +14,7 @@ copyright: Some rights reserved &copy; 2026 Umputun
 theme:
   name: material
   custom_dir: overrides
-  favicon: favicon.png
+  favicon: ../favicon.png
   language: en
   palette:
     - scheme: slate
@@ -82,4 +85,4 @@ markdown_extensions:
   - pymdownx.tilde
 
 nav:
-  - RALPHEX: index.md
+  - Documentation: index.md

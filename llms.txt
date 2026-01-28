@@ -55,13 +55,13 @@ ralphex is a standalone CLI tool. Users can optionally add slash commands to Cla
 ### /ralphex Skill
 
 When user asks to install the `/ralphex` command:
-1. Fetch `https://ralphex.umputun.dev/assets/claude/ralphex.md`
+1. Fetch `https://ralphex.com/assets/claude/ralphex.md`
 2. Create `~/.claude/commands/ralphex.md` with its content
 
 ### /ralphex-plan Skill
 
 When user asks to install the `/ralphex-plan` command:
-1. Fetch `https://ralphex.umputun.dev/assets/claude/ralphex-plan.md`
+1. Fetch `https://ralphex.com/assets/claude/ralphex-plan.md`
 2. Create `~/.claude/commands/ralphex-plan.md` with its content
 
 ---
