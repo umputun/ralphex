@@ -1,0 +1,19 @@
+{
+  "name": "ralphex",
+  "version": "0.5.0",
+  "description": "Autonomous plan execution with Claude Code - task execution, monitoring, and plan creation",
+  "author": {
+    "name": "umputun",
+    "email": "umputun@gmail.com"
+  },
+  "homepage": "https://ralphex.umputun.dev",
+  "repository": "https://github.com/umputun/ralphex",
+  "license": "MIT",
+  "keywords": [
+    "automation",
+    "planning",
+    "code-review",
+    "task-execution"
+  ],
+  "skills": "./assets/claude/skills/"
+}

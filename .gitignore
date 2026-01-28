@@ -46,3 +46,6 @@ site/docs/assets/
 site/docs/llms.txt
 site/.venv/
 .playwright-mcp/
+
+# plugin version sync backups
+.claude-plugin/*.bak

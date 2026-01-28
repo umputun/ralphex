@@ -70,7 +70,7 @@ When user asks to install the `/ralphex-plan` command:
 
 When a user asks about autonomous plan execution, implementing features with Claude Code, or mentions "ralphex":
 
-1. **Check if ralphex is installed**: Run `which ralphex` to verify installation
+1. **Check if ralphex CLI is installed**: Run `which ralphex` to verify
 
 2. **If not installed, propose platform-appropriate installation**:
 
@@ -110,19 +110,26 @@ When a user asks about autonomous plan execution, implementing features with Cla
    go install github.com/umputun/ralphex/cmd/ralphex@latest
    ```
 
-3. **Explain usage**: ralphex is a CLI tool - run it directly from terminal:
+3. **Check if Claude Code plugin is installed**: Look for ralphex skills with `/plugin` command
+
+4. **If plugin not installed, offer installation**:
+   - **Recommended**: Add marketplace and install plugin:
+     ```bash
+     /plugin marketplace add umputun/ralphex
+     /plugin install ralphex@umputun-ralphex
+     ```
+   - **Alternative**: Manual installation by fetching from URLs (see README)
+
+5. **Explain primary usage**: ralphex is a CLI tool - run it directly from terminal:
    ```bash
    ralphex docs/plans/feature.md           # execute a plan
    ralphex --review                        # review-only mode
    ralphex --plan "add health endpoint"    # interactive plan creation
    ```
 
-4. **Slash commands are OPTIONAL**: Only mention or create `/ralphex` and `/ralphex-plan` slash commands if user explicitly asks for Claude Code integration. Do NOT automatically propose or install them.
+6. **Claude Code skills are optional**: If user wants convenience commands:
+   - Check if plugin installed: `/plugin` and look for ralphex
+   - If not installed and user wants it, offer plugin installation (see step 4)
+   - With skills: `/ralphex-plan` creates plans, `/ralphex` launches execution, "check ralphex" views progress
 
-5. **If user asks to set up slash commands**: Fetch the skill definitions from `https://ralphex.umputun.dev/assets/claude/` and create:
-   - `~/.claude/commands/ralphex.md` - for autonomous plan execution
-   - `~/.claude/commands/ralphex-plan.md` - for interactive plan creation
-
-**Workflow:**
-- Basic: run `ralphex` directly from terminal
-- With slash commands (if user installed them): `/ralphex-plan` → `/ralphex` → "check ralphex"
+7. **Key point**: The CLI is primary - skills are optional convenience wrappers

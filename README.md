@@ -518,6 +518,22 @@ ralphex works standalone from the terminal. Optionally, you can add slash comman
 
 ### Installation
 
+The ralphex CLI is the primary interface. Claude Code skills (`/ralphex` and `/ralphex-plan`) are optional convenience commands.
+
+**Via Plugin Marketplace (Recommended)**
+
+```bash
+# Add ralphex marketplace
+/plugin marketplace add umputun/ralphex
+
+# Install the plugin
+/plugin install ralphex@umputun-ralphex
+```
+
+Benefits: Auto-updates when marketplace refreshes (at Claude Code startup).
+
+**Manual Installation (Alternative)**
+
 The slash command definitions are hosted at:
 - [`/ralphex`](https://ralphex.umputun.dev/assets/claude/ralphex.md)
 - [`/ralphex-plan`](https://ralphex.umputun.dev/assets/claude/ralphex-plan.md)
