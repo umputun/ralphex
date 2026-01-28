@@ -52,6 +52,9 @@ github.com/cyphar/filepath-securejoin
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
+# github.com/deckarep/golang-set/v2 v2.7.0
+## explicit; go 1.18
+github.com/deckarep/golang-set/v2
 # github.com/dustin/go-humanize v1.0.1
 ## explicit; go 1.16
 github.com/dustin/go-humanize
@@ -132,6 +135,12 @@ github.com/go-git/go-git/v5/utils/merkletrie/internal/frame
 github.com/go-git/go-git/v5/utils/merkletrie/noder
 github.com/go-git/go-git/v5/utils/sync
 github.com/go-git/go-git/v5/utils/trace
+# github.com/go-jose/go-jose/v3 v3.0.4
+## explicit; go 1.12
+github.com/go-jose/go-jose/v3/json
+# github.com/go-stack/stack v1.8.1
+## explicit; go 1.17
+github.com/go-stack/stack
 # github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
 ## explicit; go 1.20
 github.com/golang/groupcache/lru
@@ -155,6 +164,10 @@ github.com/mattn/go-isatty
 github.com/pjbgf/sha1cd
 github.com/pjbgf/sha1cd/internal
 github.com/pjbgf/sha1cd/ubc
+# github.com/playwright-community/playwright-go v0.5200.1
+## explicit; go 1.22
+github.com/playwright-community/playwright-go
+github.com/playwright-community/playwright-go/internal/safe
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib
