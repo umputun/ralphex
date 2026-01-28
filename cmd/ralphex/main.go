@@ -38,6 +38,7 @@ type opts struct {
 	Serve           bool     `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
 	Port            int      `short:"p" long:"port" default:"8080" description:"web dashboard port"`
 	Watch           []string `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
+	Reset           bool     `long:"reset" description:"interactively reset global config to embedded defaults"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
 }
@@ -126,6 +127,18 @@ func run(ctx context.Context, o opts) error {
 	// validate conflicting flags
 	if err := validateFlags(o); err != nil {
 		return err
+	}
+
+	// handle --reset flag early (before full config load)
+	// reset completes, then continues with normal execution if other args provided
+	if o.Reset {
+		if err := runReset(); err != nil {
+			return err
+		}
+		// if reset was the only operation, exit successfully
+		if isResetOnly(o) {
+			return nil
+		}
 	}
 
 	// load config first to get custom command paths
@@ -1050,4 +1063,21 @@ func startWebDashboard(ctx context.Context, p webDashboardParams) (processor.Log
 
 	p.Colors.Info().Printf("web dashboard: http://localhost:%d\n", p.Port)
 	return broadcastLog, nil
+}
+
+// runReset runs the interactive config reset flow.
+func runReset() error {
+	configDir := config.DefaultConfigDir()
+	_, err := config.Reset(configDir, os.Stdin, os.Stdout)
+	if err != nil {
+		return fmt.Errorf("reset config: %w", err)
+	}
+	return nil
+}
+
+// isResetOnly returns true if --reset was the only meaningful flag/arg specified.
+// this allows reset to work standalone (exit after reset) while also supporting
+// combined usage like "ralphex --reset docs/plans/feature.md".
+func isResetOnly(o opts) bool {
+	return o.PlanFile == "" && !o.Review && !o.CodexOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
 }

@@ -140,7 +140,7 @@ project/
 **Customization:**
 - Edit files in `~/.config/ralphex/agents/` to modify agent prompts
 - Add new `.txt` files to create custom agents
-- Delete ALL `.txt` files from the directory and restart ralphex to restore defaults
+- Run `ralphex --reset` to interactively restore defaults, or delete ALL `.txt` files manually
 - Alternatively, reference agents installed in your Claude Code directly in prompt files (like `qa-expert`, `go-smells-expert`)
 
 ## Testing
@@ -260,3 +260,10 @@ If you're an AI agent preparing a contribution, complete this checklist:
 - Site source: `site/` directory with `mkdocs.yml`
 - Template overrides: `site/overrides/` with `custom_dir: overrides` in mkdocs.yml
 - **CI constraint**: Cloudflare Pages uses mkdocs-material 9.2.x, must use `materialx.emoji` syntax (not `material.extensions.emoji` which requires 9.4+)
+
+## Workflow Rules
+
+- **CHANGELOG**: Never modify during development - updates are part of release process only
+- **Version sections**: Never add entries to existing version sections - versions are immutable once released
+- **Linter warnings**: Add exclusions to `.golangci.yml` instead of `_, _ =` prefixes for fmt.Fprintf/Fprintln
+- **Exporting functions**: When changing visibility (lowercase to uppercase), check ALL callers including test files
