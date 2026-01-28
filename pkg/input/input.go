@@ -129,6 +129,8 @@ func AskYesNo(prompt string, stdin io.Reader, stdout io.Writer) bool {
 		// EOF (Ctrl+D) or read error - print newline so subsequent output
 		// doesn't appear on the same line as the prompt, then default to "no"
 		fmt.Fprintln(stdout)
+		// scanner.Err() returns nil on EOF, non-nil on actual read errors
+		// either way, we default to "no" as documented
 		return false
 	}
 	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))

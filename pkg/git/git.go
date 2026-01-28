@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -102,12 +103,18 @@ func (r *Repo) CreateInitialCommit(message string) error {
 		return fmt.Errorf("get status: %w", err)
 	}
 
+	// collect untracked paths and sort for deterministic staging order
+	var paths []string
+	for path, s := range status {
+		if s.Worktree == git.Untracked {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+
 	// stage each untracked file that's not ignored
 	staged := 0
-	for path, s := range status {
-		if s.Worktree != git.Untracked {
-			continue
-		}
+	for _, path := range paths {
 		ignored, ignoreErr := r.IsIgnored(path)
 		if ignoreErr != nil {
 			return fmt.Errorf("check ignored %s: %w", path, ignoreErr)
