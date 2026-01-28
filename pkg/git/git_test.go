@@ -811,6 +811,37 @@ func TestRepo_IsIgnored(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, ignored, "file matching XDG global gitignore pattern should be ignored")
 	})
+
+	t.Run("local gitignore overrides global", func(t *testing.T) {
+		dir := setupTestRepo(t)
+
+		// isolate from real home directory
+		fakeHome := t.TempDir()
+		t.Setenv("HOME", fakeHome)
+		t.Setenv("XDG_CONFIG_HOME", fakeHome)
+
+		// set up global ignore for *.log files
+		require.NoError(t, os.MkdirAll(filepath.Join(fakeHome, "git"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(fakeHome, "git", "ignore"), []byte("*.log\n"), 0o600))
+
+		// create local .gitignore that un-ignores debug.log
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		err := os.WriteFile(gitignorePath, []byte("!debug.log\n"), 0o600)
+		require.NoError(t, err)
+
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// debug.log should NOT be ignored (local un-ignore overrides global ignore)
+		ignored, err := repo.IsIgnored("debug.log")
+		require.NoError(t, err)
+		assert.False(t, ignored, "local !debug.log should override global *.log")
+
+		// other.log should still be ignored (only debug.log is un-ignored)
+		ignored, err = repo.IsIgnored("other.log")
+		require.NoError(t, err)
+		assert.True(t, ignored, "other.log should still be ignored by global pattern")
+	})
 }
 
 func TestRepo_HasChangesOtherThan(t *testing.T) {
@@ -1158,6 +1189,54 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 		assert.Contains(t, files, "README.md")
 		assert.Contains(t, files, ".gitignore")
 		assert.NotContains(t, files, "debug.log", "gitignored files should not be committed")
+	})
+
+	t.Run("respects global gitignore", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := git.PlainInit(dir, false)
+		require.NoError(t, err)
+
+		// isolate from real home directory
+		fakeHome := t.TempDir()
+		t.Setenv("HOME", fakeHome)
+		t.Setenv("XDG_CONFIG_HOME", fakeHome)
+
+		// set up global ignore for *.log files
+		require.NoError(t, os.MkdirAll(filepath.Join(fakeHome, "git"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(fakeHome, "git", "ignore"), []byte("*.log\n"), 0o600))
+
+		// create tracked file
+		err = os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600)
+		require.NoError(t, err)
+
+		// create file that should be ignored by global gitignore
+		err = os.WriteFile(filepath.Join(dir, "debug.log"), []byte("log content\n"), 0o600)
+		require.NoError(t, err)
+
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		err = repo.CreateInitialCommit("initial commit")
+		require.NoError(t, err)
+
+		// verify commit exists
+		head, err := repo.repo.Head()
+		require.NoError(t, err)
+		commit, err := repo.repo.CommitObject(head.Hash())
+		require.NoError(t, err)
+
+		// get tree to check committed files
+		tree, err := commit.Tree()
+		require.NoError(t, err)
+
+		// collect committed file names
+		files := make([]string, 0, len(tree.Entries))
+		for _, entry := range tree.Entries {
+			files = append(files, entry.Name)
+		}
+
+		assert.Contains(t, files, "README.md")
+		assert.NotContains(t, files, "debug.log", "globally gitignored files should not be committed")
 	})
 }
 
