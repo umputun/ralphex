@@ -222,6 +222,65 @@ func TestBroadcastLogger_PrintSection_IterationEvents(t *testing.T) {
 	require.Len(t, mockLogger.PrintSectionCalls(), 2)
 }
 
+func TestBroadcastLogger_LogQuestion(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		LogQuestionFunc: func(string, []string) {},
+	}
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+	bl := NewBroadcastLogger(mockLogger, session)
+
+	bl.LogQuestion("Which database?", []string{"PostgreSQL", "MySQL", "SQLite"})
+
+	require.Len(t, mockLogger.LogQuestionCalls(), 1)
+	assert.Equal(t, "Which database?", mockLogger.LogQuestionCalls()[0].Question)
+	assert.Equal(t, []string{"PostgreSQL", "MySQL", "SQLite"}, mockLogger.LogQuestionCalls()[0].Options)
+}
+
+func TestBroadcastLogger_LogAnswer(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		LogAnswerFunc: func(string) {},
+	}
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+	bl := NewBroadcastLogger(mockLogger, session)
+
+	bl.LogAnswer("PostgreSQL")
+
+	require.Len(t, mockLogger.LogAnswerCalls(), 1)
+	assert.Equal(t, "PostgreSQL", mockLogger.LogAnswerCalls()[0].Answer)
+}
+
+func TestBroadcastLogger_LogDraftReview_Accept(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		LogDraftReviewFunc: func(string, string) {},
+	}
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+	bl := NewBroadcastLogger(mockLogger, session)
+
+	bl.LogDraftReview("accept", "")
+
+	require.Len(t, mockLogger.LogDraftReviewCalls(), 1)
+	assert.Equal(t, "accept", mockLogger.LogDraftReviewCalls()[0].Action)
+	assert.Empty(t, mockLogger.LogDraftReviewCalls()[0].Feedback)
+}
+
+func TestBroadcastLogger_LogDraftReview_ReviseWithFeedback(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		LogDraftReviewFunc: func(string, string) {},
+	}
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+	bl := NewBroadcastLogger(mockLogger, session)
+
+	bl.LogDraftReview("revise", "Please add more details to Task 3")
+
+	require.Len(t, mockLogger.LogDraftReviewCalls(), 1)
+	assert.Equal(t, "revise", mockLogger.LogDraftReviewCalls()[0].Action)
+	assert.Equal(t, "Please add more details to Task 3", mockLogger.LogDraftReviewCalls()[0].Feedback)
+}
+
 func TestExtractTerminalSignal(t *testing.T) {
 	cases := []struct {
 		name   string

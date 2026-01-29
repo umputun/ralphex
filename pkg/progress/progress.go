@@ -460,6 +460,25 @@ func (l *Logger) LogAnswer(answer string) {
 	l.writeStdout("%s %s\n", tsStr, answerStr)
 }
 
+// LogDraftReview logs the user's draft review action and optional feedback.
+// format: DRAFT REVIEW: <action>
+// if feedback is non-empty: FEEDBACK: <feedback>
+func (l *Logger) LogDraftReview(action, feedback string) {
+	timestamp := time.Now().Format(timestampFormat)
+
+	l.writeFile("[%s] DRAFT REVIEW: %s\n", timestamp, action)
+
+	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	actionStr := l.colors.Info().Sprintf("DRAFT REVIEW: %s", action)
+	l.writeStdout("%s %s\n", tsStr, actionStr)
+
+	if feedback != "" {
+		l.writeFile("[%s] FEEDBACK: %s\n", timestamp, feedback)
+		feedbackStr := l.colors.Info().Sprintf("FEEDBACK: %s", feedback)
+		l.writeStdout("%s %s\n", tsStr, feedbackStr)
+	}
+}
+
 // Elapsed returns formatted elapsed time since start.
 func (l *Logger) Elapsed() string {
 	return humanize.RelTime(l.startTime, time.Now(), "", "")

@@ -37,6 +37,7 @@ func (s *stubLogger) PrintSection(_ Section)           {}
 func (s *stubLogger) PrintAligned(_ string)            {}
 func (s *stubLogger) LogQuestion(_ string, _ []string) {}
 func (s *stubLogger) LogAnswer(_ string)               {}
+func (s *stubLogger) LogDraftReview(_, _ string)       {}
 func (s *stubLogger) Path() string                     { return s.path }
 func (s *stubLogger) PrintCalls() []printCall          { return s.printCalls }
 

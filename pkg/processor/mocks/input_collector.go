@@ -14,6 +14,9 @@ import (
 //
 //		// make and configure a mocked processor.InputCollector
 //		mockedInputCollector := &InputCollectorMock{
+//			AskDraftReviewFunc: func(ctx context.Context, question string, planContent string) (string, string, error) {
+//				panic("mock out the AskDraftReview method")
+//			},
 //			AskQuestionFunc: func(ctx context.Context, question string, options []string) (string, error) {
 //				panic("mock out the AskQuestion method")
 //			},
@@ -24,11 +27,23 @@ import (
 //
 //	}
 type InputCollectorMock struct {
+	// AskDraftReviewFunc mocks the AskDraftReview method.
+	AskDraftReviewFunc func(ctx context.Context, question string, planContent string) (string, string, error)
+
 	// AskQuestionFunc mocks the AskQuestion method.
 	AskQuestionFunc func(ctx context.Context, question string, options []string) (string, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// AskDraftReview holds details about calls to the AskDraftReview method.
+		AskDraftReview []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Question is the question argument value.
+			Question string
+			// PlanContent is the planContent argument value.
+			PlanContent string
+		}
 		// AskQuestion holds details about calls to the AskQuestion method.
 		AskQuestion []struct {
 			// Ctx is the ctx argument value.
@@ -39,7 +54,48 @@ type InputCollectorMock struct {
 			Options []string
 		}
 	}
-	lockAskQuestion sync.RWMutex
+	lockAskDraftReview sync.RWMutex
+	lockAskQuestion    sync.RWMutex
+}
+
+// AskDraftReview calls AskDraftReviewFunc.
+func (mock *InputCollectorMock) AskDraftReview(ctx context.Context, question string, planContent string) (string, string, error) {
+	if mock.AskDraftReviewFunc == nil {
+		panic("InputCollectorMock.AskDraftReviewFunc: method is nil but InputCollector.AskDraftReview was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		Question    string
+		PlanContent string
+	}{
+		Ctx:         ctx,
+		Question:    question,
+		PlanContent: planContent,
+	}
+	mock.lockAskDraftReview.Lock()
+	mock.calls.AskDraftReview = append(mock.calls.AskDraftReview, callInfo)
+	mock.lockAskDraftReview.Unlock()
+	return mock.AskDraftReviewFunc(ctx, question, planContent)
+}
+
+// AskDraftReviewCalls gets all the calls that were made to AskDraftReview.
+// Check the length with:
+//
+//	len(mockedInputCollector.AskDraftReviewCalls())
+func (mock *InputCollectorMock) AskDraftReviewCalls() []struct {
+	Ctx         context.Context
+	Question    string
+	PlanContent string
+} {
+	var calls []struct {
+		Ctx         context.Context
+		Question    string
+		PlanContent string
+	}
+	mock.lockAskDraftReview.RLock()
+	calls = mock.calls.AskDraftReview
+	mock.lockAskDraftReview.RUnlock()
+	return calls
 }
 
 // AskQuestion calls AskQuestionFunc.

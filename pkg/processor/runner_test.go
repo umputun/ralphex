@@ -44,14 +44,15 @@ func newMockExecutor(results []executor.Result) *mocks.ExecutorMock {
 // newMockLogger creates a mock logger with no-op implementations.
 func newMockLogger(path string) *mocks.LoggerMock {
 	return &mocks.LoggerMock{
-		SetPhaseFunc:     func(_ processor.Phase) {},
-		PrintFunc:        func(_ string, _ ...any) {},
-		PrintRawFunc:     func(_ string, _ ...any) {},
-		PrintSectionFunc: func(_ processor.Section) {},
-		PrintAlignedFunc: func(_ string) {},
-		LogQuestionFunc:  func(_ string, _ []string) {},
-		LogAnswerFunc:    func(_ string) {},
-		PathFunc:         func() string { return path },
+		SetPhaseFunc:       func(_ processor.Phase) {},
+		PrintFunc:          func(_ string, _ ...any) {},
+		PrintRawFunc:       func(_ string, _ ...any) {},
+		PrintSectionFunc:   func(_ processor.Section) {},
+		PrintAlignedFunc:   func(_ string) {},
+		LogQuestionFunc:    func(_ string, _ []string) {},
+		LogAnswerFunc:      func(_ string) {},
+		LogDraftReviewFunc: func(_, _ string) {},
+		PathFunc:           func() string { return path },
 	}
 }
 
@@ -851,4 +852,277 @@ func TestRunner_ErrorPatternMatch_ClaudeInPlanCreation(t *testing.T) {
 	require.Error(t, err)
 	var patternErr *executor.PatternMatchError
 	require.ErrorAs(t, err, &patternErr)
+}
+
+// newMockInputCollectorWithDraftReview creates a mock input collector with predefined answers and draft review responses.
+func newMockInputCollectorWithDraftReview(answers []string, draftResponses []struct {
+	action   string
+	feedback string
+	err      error
+}) *mocks.InputCollectorMock {
+	answerIdx := 0
+	draftIdx := 0
+	return &mocks.InputCollectorMock{
+		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) {
+			if answerIdx >= len(answers) {
+				return "", errors.New("no more mock answers")
+			}
+			answer := answers[answerIdx]
+			answerIdx++
+			return answer, nil
+		},
+		AskDraftReviewFunc: func(_ context.Context, _ string, _ string) (string, string, error) {
+			if draftIdx >= len(draftResponses) {
+				return "", "", errors.New("no more mock draft responses")
+			}
+			resp := draftResponses[draftIdx]
+			draftIdx++
+			return resp.action, resp.feedback, resp.err
+		},
+	}
+}
+
+func TestRunner_RunPlan_PlanDraft_AcceptFlow(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	planDraftSignal := `Let me create a plan for you.
+
+<<<RALPHEX:PLAN_DRAFT>>>
+# Test Plan
+
+## Overview
+This is a test plan.
+
+## Tasks
+- [ ] Task 1
+<<<RALPHEX:END>>>`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: planDraftSignal},                                   // first iteration - emits draft
+		{Output: "plan created", Signal: processor.SignalPlanReady}, // second iteration - completes
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
+		action   string
+		feedback string
+		err      error
+	}{
+		{action: "accept", feedback: "", err: nil},
+	})
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "add health endpoint",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 2)
+	assert.Len(t, inputCollector.AskDraftReviewCalls(), 1)
+	assert.Contains(t, inputCollector.AskDraftReviewCalls()[0].PlanContent, "# Test Plan")
+}
+
+func TestRunner_RunPlan_PlanDraft_ReviseFlow(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Initial Plan
+## Tasks
+- [ ] Task 1
+<<<RALPHEX:END>>>`
+
+	revisedDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Revised Plan
+## Tasks
+- [ ] Task 1
+- [ ] Task 2 (added per feedback)
+<<<RALPHEX:END>>>`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: planDraftSignal},                                   // first iteration - initial draft
+		{Output: revisedDraftSignal},                                // second iteration - revised draft
+		{Output: "plan created", Signal: processor.SignalPlanReady}, // third iteration - completes
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
+		action   string
+		feedback string
+		err      error
+	}{
+		{action: "revise", feedback: "please add a second task", err: nil},
+		{action: "accept", feedback: "", err: nil},
+	})
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "add health endpoint",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 3)
+	assert.Len(t, inputCollector.AskDraftReviewCalls(), 2)
+
+	// verify feedback was passed to claude in second call
+	secondPrompt := claude.RunCalls()[1].Prompt
+	assert.Contains(t, secondPrompt, "please add a second task")
+	assert.Contains(t, secondPrompt, "PREVIOUS DRAFT FEEDBACK")
+}
+
+func TestRunner_RunPlan_PlanDraft_RejectFlow(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Test Plan
+## Tasks
+- [ ] Task 1
+<<<RALPHEX:END>>>`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: planDraftSignal}, // first iteration - emits draft
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
+		action   string
+		feedback string
+		err      error
+	}{
+		{action: "reject", feedback: "", err: nil},
+	})
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "add health endpoint",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, processor.ErrUserRejectedPlan)
+	assert.Len(t, claude.RunCalls(), 1)
+	assert.Len(t, inputCollector.AskDraftReviewCalls(), 1)
+}
+
+func TestRunner_RunPlan_PlanDraft_AskDraftReviewError(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Test Plan
+<<<RALPHEX:END>>>`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: planDraftSignal},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
+		action   string
+		feedback string
+		err      error
+	}{
+		{action: "", feedback: "", err: errors.New("draft review error")},
+	})
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "collect draft review")
+}
+
+func TestRunner_RunPlan_PlanDraft_MalformedSignal(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	// malformed - missing END marker
+	malformedDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Test Plan
+This content has no END marker`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: malformedDraftSignal},                              // first iteration - malformed draft
+		{Output: "plan created", Signal: processor.SignalPlanReady}, // second iteration - completes anyway
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollectorWithDraftReview(nil, nil)
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// should log warning but continue
+	var foundWarning bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "warning") && strings.Contains(call.Format, "%v") {
+			foundWarning = true
+			break
+		}
+	}
+	assert.True(t, foundWarning, "should log warning about malformed signal")
+}
+
+func TestRunner_RunPlan_PlanDraft_WithQuestionThenDraft(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	questionSignal := `<<<RALPHEX:QUESTION>>>
+{"question": "Which framework?", "options": ["Gin", "Chi", "Echo"]}
+<<<RALPHEX:END>>>`
+
+	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Plan with Gin
+## Tasks
+- [ ] Set up Gin router
+<<<RALPHEX:END>>>`
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: questionSignal},                                    // first iteration - question
+		{Output: planDraftSignal},                                   // second iteration - draft
+		{Output: "plan created", Signal: processor.SignalPlanReady}, // third iteration - completes
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollectorWithDraftReview([]string{"Gin"}, []struct {
+		action   string
+		feedback string
+		err      error
+	}{
+		{action: "accept", feedback: "", err: nil},
+	})
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "add API endpoints",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 3)
+	assert.Len(t, inputCollector.AskQuestionCalls(), 1)
+	assert.Len(t, inputCollector.AskDraftReviewCalls(), 1)
 }

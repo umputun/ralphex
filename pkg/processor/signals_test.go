@@ -268,3 +268,190 @@ func TestParseQuestionPayload_NoSignal(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPlanDraft(t *testing.T) {
+	tests := []struct {
+		signal string
+		want   bool
+	}{
+		{SignalPlanDraft, true},
+		{SignalCompleted, false},
+		{SignalFailed, false},
+		{SignalReviewDone, false},
+		{SignalCodexDone, false},
+		{SignalQuestion, false},
+		{SignalPlanReady, false},
+		{"", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.signal, func(t *testing.T) {
+			assert.Equal(t, tc.want, IsPlanDraft(tc.signal))
+		})
+	}
+}
+
+func TestParsePlanDraftPayload_ValidContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected string
+	}{
+		{
+			name: "simple plan draft",
+			output: `some output before
+<<<RALPHEX:PLAN_DRAFT>>>
+# Plan Title
+
+## Overview
+This is a test plan.
+
+## Tasks
+- [ ] Task 1
+<<<RALPHEX:END>>>
+some output after`,
+			expected: `# Plan Title
+
+## Overview
+This is a test plan.
+
+## Tasks
+- [ ] Task 1`,
+		},
+		{
+			name: "plan draft with extra whitespace",
+			output: `<<<RALPHEX:PLAN_DRAFT>>>
+
+    # Plan
+
+## Overview
+Content here.
+
+<<<RALPHEX:END>>>`,
+			expected: `# Plan
+
+## Overview
+Content here.`,
+		},
+		{
+			name: "plan draft embedded in large output",
+			output: `[10:30:05] analyzing codebase...
+[10:30:10] found existing patterns
+[10:30:15] generating plan draft
+
+<<<RALPHEX:PLAN_DRAFT>>>
+# Feature Implementation Plan
+
+## Context
+The project uses Go with standard library.
+
+## Implementation Steps
+
+### Task 1: Create interface
+- [ ] Define interface in consumer package
+- [ ] Add mock generation directive
+<<<RALPHEX:END>>>
+
+[10:30:20] waiting for user review...`,
+			expected: `# Feature Implementation Plan
+
+## Context
+The project uses Go with standard library.
+
+## Implementation Steps
+
+### Task 1: Create interface
+- [ ] Define interface in consumer package
+- [ ] Add mock generation directive`,
+		},
+		{
+			name: "minimal plan content",
+			output: `<<<RALPHEX:PLAN_DRAFT>>>
+# Minimal Plan
+<<<RALPHEX:END>>>`,
+			expected: "# Minimal Plan",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := ParsePlanDraftPayload(tc.output)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestParsePlanDraftPayload_Malformed(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		errContains string
+	}{
+		{
+			name: "missing end marker",
+			output: `<<<RALPHEX:PLAN_DRAFT>>>
+# Plan without end marker`,
+			errContains: "missing END marker",
+		},
+		{
+			name: "empty content",
+			output: `<<<RALPHEX:PLAN_DRAFT>>>
+<<<RALPHEX:END>>>`,
+			errContains: "empty plan content",
+		},
+		{
+			name: "whitespace only content",
+			output: `<<<RALPHEX:PLAN_DRAFT>>>
+
+
+<<<RALPHEX:END>>>`,
+			errContains: "empty plan content",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := ParsePlanDraftPayload(tc.output)
+			assert.Empty(t, result)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+		})
+	}
+}
+
+func TestParsePlanDraftPayload_NoSignal(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{
+			name:   "empty output",
+			output: "",
+		},
+		{
+			name:   "regular output without signal",
+			output: "[10:30:05] running analysis...\n[10:30:10] done\n",
+		},
+		{
+			name:   "output with other signals",
+			output: "<<<RALPHEX:ALL_TASKS_DONE>>>",
+		},
+		{
+			name:   "partial signal marker",
+			output: "RALPHEX:PLAN_DRAFT is not valid",
+		},
+		{
+			name:   "signal text in regular content",
+			output: "the signal is <<<RALPHEX:PLAN_DRAFT but without proper format",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := ParsePlanDraftPayload(tc.output)
+			require.ErrorIs(t, err, ErrNoPlanDraftSignal)
+			assert.Empty(t, result)
+		})
+	}
+}

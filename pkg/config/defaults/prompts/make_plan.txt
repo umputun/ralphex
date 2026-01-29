@@ -53,9 +53,54 @@ Rules for questions:
 
 After emitting QUESTION, STOP immediately. Do not continue. The loop will collect the answer and run another iteration.
 
-## Step 4: Create the Plan (when ready)
+## Step 3.5: Present Draft for Review
 
-When you have enough information to create a complete plan:
+When you have enough information to create a plan, present it as a draft for user review BEFORE writing to disk.
+
+Emit the plan draft:
+
+<<<RALPHEX:PLAN_DRAFT>>>
+# <Title>
+
+## Overview
+<Brief description of what will be implemented>
+
+## Context
+- Files involved: <list relevant files>
+...
+
+## Implementation Steps
+...
+<<<RALPHEX:END>>>
+
+CRITICAL: After emitting PLAN_DRAFT, STOP immediately. Do not continue. Do not write the plan file yet.
+
+The loop will:
+1. Display the draft to the user with terminal rendering
+2. Ask the user to Accept, Revise, or Reject
+3. Run another iteration with the user's decision
+
+**Handling user responses:**
+
+If user ACCEPTS (progress file contains "DRAFT REVIEW: accept"):
+- Proceed to Step 4 to write the plan file to disk
+- Then emit PLAN_READY
+
+If user requests REVISION (progress file contains "DRAFT REVIEW: revise" and "FEEDBACK:"):
+- Read the feedback from the progress file
+- Modify the plan based on the feedback
+- Emit a new PLAN_DRAFT with the updated plan
+- STOP and wait for next review
+
+If user REJECTS (progress file contains "DRAFT REVIEW: reject"):
+- Output exactly: <<<RALPHEX:TASK_FAILED>>>
+- STOP immediately - the user has cancelled plan creation
+
+## Step 4: Write Plan File (after draft accepted)
+
+This step executes ONLY after the user accepts your draft (progress file contains "DRAFT REVIEW: accept").
+
+Write the accepted plan to disk:
 
 1. Create a plan file at docs/plans/YYYY-MM-DD-<slug>.md where <slug> is derived from the description
 2. Use this structure:
@@ -110,9 +155,9 @@ When you have enough information to create a complete plan:
 - [ ] move this plan to `docs/plans/completed/`
 ---
 
-## Step 4.5: Validate Plan Before Completion
+## Step 4.5: Validate Plan Before Draft
 
-Before emitting PLAN_READY, verify the plan against these criteria:
+Before emitting PLAN_DRAFT in Step 3.5, verify the plan against these criteria:
 
 **Scope & Feasibility:**
 - [ ] Tasks are reasonably sized (aim for 3-7 items; adjust if needed for coherence)
@@ -132,11 +177,14 @@ Before emitting PLAN_READY, verify the plan against these criteria:
 - [ ] New files only for genuinely new components, not minor additions
 - [ ] No over-engineered patterns when simpler solutions work
 
-If validation fails, fix the plan before continuing (this is part of plan creation, not post-creation iteration).
+If validation fails, fix the plan before emitting PLAN_DRAFT.
 
-Only after validations pass, emit PLAN_READY:
-- Output exactly: <<<RALPHEX:PLAN_READY>>>
-- STOP IMMEDIATELY - do not output anything else after this signal
+Only after validation passes:
+1. Emit PLAN_DRAFT (Step 3.5) and wait for user review
+2. If user accepts, write the plan file (Step 4)
+3. After writing the file, emit PLAN_READY:
+   - Output exactly: <<<RALPHEX:PLAN_READY>>>
+   - STOP IMMEDIATELY - do not output anything else after this signal
 
 CRITICAL RULES:
 - DO NOT ask "Would you like to proceed?" or "Should I implement this?" or similar

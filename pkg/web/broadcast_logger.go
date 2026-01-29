@@ -110,6 +110,15 @@ func (b *BroadcastLogger) LogAnswer(answer string) {
 	b.broadcast(NewOutputEvent(b.phase, "ANSWER: "+answer))
 }
 
+// LogDraftReview logs the user's draft review action and optional feedback.
+func (b *BroadcastLogger) LogDraftReview(action, feedback string) {
+	b.inner.LogDraftReview(action, feedback)
+	b.broadcast(NewOutputEvent(b.phase, "DRAFT REVIEW: "+action))
+	if feedback != "" {
+		b.broadcast(NewOutputEvent(b.phase, "FEEDBACK: "+feedback))
+	}
+}
+
 // Path returns the progress file path.
 func (b *BroadcastLogger) Path() string {
 	return b.inner.Path()

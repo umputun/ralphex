@@ -18,6 +18,9 @@ import (
 //			LogAnswerFunc: func(answer string)  {
 //				panic("mock out the LogAnswer method")
 //			},
+//			LogDraftReviewFunc: func(action string, feedback string)  {
+//				panic("mock out the LogDraftReview method")
+//			},
 //			LogQuestionFunc: func(question string, options []string)  {
 //				panic("mock out the LogQuestion method")
 //			},
@@ -49,6 +52,9 @@ type LoggerMock struct {
 	// LogAnswerFunc mocks the LogAnswer method.
 	LogAnswerFunc func(answer string)
 
+	// LogDraftReviewFunc mocks the LogDraftReview method.
+	LogDraftReviewFunc func(action string, feedback string)
+
 	// LogQuestionFunc mocks the LogQuestion method.
 	LogQuestionFunc func(question string, options []string)
 
@@ -76,6 +82,13 @@ type LoggerMock struct {
 		LogAnswer []struct {
 			// Answer is the answer argument value.
 			Answer string
+		}
+		// LogDraftReview holds details about calls to the LogDraftReview method.
+		LogDraftReview []struct {
+			// Action is the action argument value.
+			Action string
+			// Feedback is the feedback argument value.
+			Feedback string
 		}
 		// LogQuestion holds details about calls to the LogQuestion method.
 		LogQuestion []struct {
@@ -117,14 +130,15 @@ type LoggerMock struct {
 			Phase processor.Phase
 		}
 	}
-	lockLogAnswer    sync.RWMutex
-	lockLogQuestion  sync.RWMutex
-	lockPath         sync.RWMutex
-	lockPrint        sync.RWMutex
-	lockPrintAligned sync.RWMutex
-	lockPrintRaw     sync.RWMutex
-	lockPrintSection sync.RWMutex
-	lockSetPhase     sync.RWMutex
+	lockLogAnswer      sync.RWMutex
+	lockLogDraftReview sync.RWMutex
+	lockLogQuestion    sync.RWMutex
+	lockPath           sync.RWMutex
+	lockPrint          sync.RWMutex
+	lockPrintAligned   sync.RWMutex
+	lockPrintRaw       sync.RWMutex
+	lockPrintSection   sync.RWMutex
+	lockSetPhase       sync.RWMutex
 }
 
 // LogAnswer calls LogAnswerFunc.
@@ -156,6 +170,42 @@ func (mock *LoggerMock) LogAnswerCalls() []struct {
 	mock.lockLogAnswer.RLock()
 	calls = mock.calls.LogAnswer
 	mock.lockLogAnswer.RUnlock()
+	return calls
+}
+
+// LogDraftReview calls LogDraftReviewFunc.
+func (mock *LoggerMock) LogDraftReview(action string, feedback string) {
+	if mock.LogDraftReviewFunc == nil {
+		panic("LoggerMock.LogDraftReviewFunc: method is nil but Logger.LogDraftReview was just called")
+	}
+	callInfo := struct {
+		Action   string
+		Feedback string
+	}{
+		Action:   action,
+		Feedback: feedback,
+	}
+	mock.lockLogDraftReview.Lock()
+	mock.calls.LogDraftReview = append(mock.calls.LogDraftReview, callInfo)
+	mock.lockLogDraftReview.Unlock()
+	mock.LogDraftReviewFunc(action, feedback)
+}
+
+// LogDraftReviewCalls gets all the calls that were made to LogDraftReview.
+// Check the length with:
+//
+//	len(mockedLogger.LogDraftReviewCalls())
+func (mock *LoggerMock) LogDraftReviewCalls() []struct {
+	Action   string
+	Feedback string
+} {
+	var calls []struct {
+		Action   string
+		Feedback string
+	}
+	mock.lockLogDraftReview.RLock()
+	calls = mock.calls.LogDraftReview
+	mock.lockLogDraftReview.RUnlock()
 	return calls
 }
 

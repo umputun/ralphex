@@ -723,6 +723,62 @@ func TestLogger_LogAnswer(t *testing.T) {
 	assert.Contains(t, buf.String(), "ANSWER: Redis")
 }
 
+func TestLogger_LogDraftReview_Accept(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors())
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	l.LogDraftReview("accept", "")
+
+	// check file output
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	contentStr := string(content)
+	assert.Contains(t, contentStr, "DRAFT REVIEW: accept")
+	assert.NotContains(t, contentStr, "FEEDBACK:")
+
+	// check stdout output
+	output := buf.String()
+	assert.Contains(t, output, "DRAFT REVIEW: accept")
+	assert.NotContains(t, output, "FEEDBACK:")
+}
+
+func TestLogger_LogDraftReview_ReviseWithFeedback(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors())
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	l.LogDraftReview("revise", "Please add more details to Task 3")
+
+	// check file output
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	contentStr := string(content)
+	assert.Contains(t, contentStr, "DRAFT REVIEW: revise")
+	assert.Contains(t, contentStr, "FEEDBACK: Please add more details to Task 3")
+
+	// check stdout output
+	output := buf.String()
+	assert.Contains(t, output, "DRAFT REVIEW: revise")
+	assert.Contains(t, output, "FEEDBACK: Please add more details to Task 3")
+}
+
 func TestLogger_PlanModeFilename(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()

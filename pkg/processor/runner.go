@@ -61,12 +61,14 @@ type Logger interface {
 	PrintAligned(text string)
 	LogQuestion(question string, options []string)
 	LogAnswer(answer string)
+	LogDraftReview(action string, feedback string)
 	Path() string
 }
 
 // InputCollector provides interactive input collection for plan creation.
 type InputCollector interface {
 	AskQuestion(ctx context.Context, question string, options []string) (string, error)
+	AskDraftReview(ctx context.Context, question string, planContent string) (action string, feedback string, err error)
 }
 
 // Runner orchestrates the execution loop.
@@ -554,8 +556,80 @@ func (r *Runner) showCodexSummary(output string) {
 	}
 }
 
+// ErrUserRejectedPlan is returned when user rejects the plan draft.
+var ErrUserRejectedPlan = errors.New("user rejected plan")
+
+// draftReviewResult holds the result of draft review handling.
+type draftReviewResult struct {
+	handled  bool   // true if draft was found and handled
+	feedback string // revision feedback (non-empty only for "revise" action)
+	err      error  // error if review failed or user rejected
+}
+
+// handlePlanDraft processes PLAN_DRAFT signal if present in output.
+// returns result indicating whether draft was handled and any feedback/errors.
+func (r *Runner) handlePlanDraft(ctx context.Context, output string) draftReviewResult {
+	planContent, draftErr := ParsePlanDraftPayload(output)
+	if draftErr != nil {
+		// log malformed signals (but not "no signal" which is expected)
+		if !errors.Is(draftErr, ErrNoPlanDraftSignal) {
+			r.log.Print("warning: %v", draftErr)
+		}
+		return draftReviewResult{handled: false}
+	}
+
+	r.log.Print("plan draft ready for review")
+
+	action, feedback, askErr := r.inputCollector.AskDraftReview(ctx, "Review the plan draft", planContent)
+	if askErr != nil {
+		return draftReviewResult{handled: true, err: fmt.Errorf("collect draft review: %w", askErr)}
+	}
+
+	// log the draft review action and feedback to progress file
+	r.log.LogDraftReview(action, feedback)
+
+	switch action {
+	case "accept":
+		r.log.Print("draft accepted, continuing to write plan file...")
+		return draftReviewResult{handled: true}
+	case "revise":
+		r.log.Print("revision requested, re-running with feedback...")
+		return draftReviewResult{handled: true, feedback: feedback}
+	case "reject":
+		r.log.Print("plan rejected by user")
+		return draftReviewResult{handled: true, err: ErrUserRejectedPlan}
+	}
+
+	return draftReviewResult{handled: true}
+}
+
+// handlePlanQuestion processes QUESTION signal if present in output.
+// returns true if question was found and handled, false otherwise.
+// returns error if question handling failed.
+func (r *Runner) handlePlanQuestion(ctx context.Context, output string) (bool, error) {
+	question, err := ParseQuestionPayload(output)
+	if err != nil {
+		// log malformed signals (but not "no signal" which is expected)
+		if !errors.Is(err, ErrNoQuestionSignal) {
+			r.log.Print("warning: %v", err)
+		}
+		return false, nil
+	}
+
+	r.log.LogQuestion(question.Question, question.Options)
+
+	answer, askErr := r.inputCollector.AskQuestion(ctx, question.Question, question.Options)
+	if askErr != nil {
+		return true, fmt.Errorf("collect answer: %w", askErr)
+	}
+
+	r.log.LogAnswer(answer)
+	return true, nil
+}
+
 // runPlanCreation executes the interactive plan creation loop.
 // the loop continues until PLAN_READY signal or max iterations reached.
+// handles QUESTION signals for Q&A and PLAN_DRAFT signals for draft review.
 func (r *Runner) runPlanCreation(ctx context.Context) error {
 	if r.cfg.PlanDescription == "" {
 		return errors.New("plan description required for plan mode")
@@ -571,6 +645,9 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 	// plan iterations use 20% of max_iterations (min 5)
 	maxPlanIterations := max(5, r.cfg.MaxIterations/5)
 
+	// track revision feedback for context in next iteration
+	var lastRevisionFeedback string
+
 	for i := 1; i <= maxPlanIterations; i++ {
 		select {
 		case <-ctx.Done():
@@ -581,6 +658,12 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		r.log.PrintSection(NewPlanIterationSection(i))
 
 		prompt := r.buildPlanPrompt()
+		// append revision feedback context if present
+		if lastRevisionFeedback != "" {
+			prompt = fmt.Sprintf("%s\n\n---\nPREVIOUS DRAFT FEEDBACK:\nUser requested revisions with this feedback:\n%s\n\nPlease revise the plan accordingly and present a new PLAN_DRAFT.", prompt, lastRevisionFeedback)
+			lastRevisionFeedback = "" // clear after use
+		}
+
 		result := r.claude.Run(ctx, prompt)
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
@@ -599,29 +682,28 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 			return nil
 		}
 
-		// check for QUESTION signal
-		question, err := ParseQuestionPayload(result.Output)
-		if err == nil {
-			// got a question - ask user and log answer
-			r.log.LogQuestion(question.Question, question.Options)
-
-			answer, askErr := r.inputCollector.AskQuestion(ctx, question.Question, question.Options)
-			if askErr != nil {
-				return fmt.Errorf("collect answer: %w", askErr)
-			}
-
-			r.log.LogAnswer(answer)
-
+		// check for PLAN_DRAFT signal - present draft for user review
+		draftResult := r.handlePlanDraft(ctx, result.Output)
+		if draftResult.err != nil {
+			return draftResult.err
+		}
+		if draftResult.handled {
+			lastRevisionFeedback = draftResult.feedback
 			time.Sleep(r.iterationDelay)
 			continue
 		}
 
-		// log malformed question signals (but not "no question signal" which is expected)
-		if !errors.Is(err, ErrNoQuestionSignal) {
-			r.log.Print("warning: %v", err)
+		// check for QUESTION signal
+		handled, err := r.handlePlanQuestion(ctx, result.Output)
+		if err != nil {
+			return err
+		}
+		if handled {
+			time.Sleep(r.iterationDelay)
+			continue
 		}
 
-		// no question and no completion - continue
+		// no question, no draft, and no completion - continue
 		time.Sleep(r.iterationDelay)
 	}
 
