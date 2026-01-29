@@ -148,6 +148,9 @@ linters:
           - errcheck
         text: "Error return value of .*.Fprintln.*is not checked"
       - linters:
+          - errcheck
+        source: "w\\.log\\("
+      - linters:
           - gosec
         text: "G104: Errors unhandled"
     paths:

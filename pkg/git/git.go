@@ -550,7 +550,7 @@ func (r *Repo) EnsureIgnored(pattern, probePath string, logFn func(string, ...an
 	}
 
 	if _, err := fmt.Fprintf(f, "\n# ralphex progress logs\n%s\n", pattern); err != nil {
-		f.Close()
+		_ = f.Close() // close on write error, ignore close error since write already failed
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
 

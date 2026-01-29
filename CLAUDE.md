@@ -22,6 +22,7 @@ cmd/ralphex/        # main entry point, CLI parsing
 pkg/config/         # configuration loading, defaults, prompts, agents
 pkg/executor/       # claude and codex CLI execution
 pkg/git/            # git operations using go-git library
+pkg/plan/           # plan file selection and manipulation
 pkg/processor/      # orchestration loop, prompts, signals
 pkg/progress/       # timestamped logging with color
 pkg/web/            # web dashboard, SSE streaming, session management
