@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,7 @@ func TestDashboardLoads(t *testing.T) {
 	})
 
 	t.Run("has header with title", func(t *testing.T) {
-		h1 := page.Locator("header h1")
+		h1 := page.Locator("header h1").First()
 		text, err := h1.TextContent()
 		require.NoError(t, err)
 		assert.Equal(t, "Ralphex Dashboard", text)
@@ -251,7 +252,7 @@ func TestKeyboardShortcutHelp(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for help overlay to appear
-		waitVisible(t, page, "#help-overlay", 5000)
+		waitVisible(t, page, "#help-overlay", float64(pollTimeout / time.Millisecond))
 
 		// verify modal content
 		modal := page.Locator(".help-modal")
@@ -264,14 +265,14 @@ func TestKeyboardShortcutHelp(t *testing.T) {
 		// open help first
 		err := page.Keyboard().Press("?")
 		require.NoError(t, err)
-		waitVisible(t, page, "#help-overlay", 5000)
+		waitVisible(t, page, "#help-overlay", float64(pollTimeout / time.Millisecond))
 
 		// press Escape to close
 		err = page.Keyboard().Press("Escape")
 		require.NoError(t, err)
 
 		// wait for overlay to be hidden
-		waitHidden(t, page, "#help-overlay", 5000)
+		waitHidden(t, page, "#help-overlay", float64(pollTimeout / time.Millisecond))
 	})
 }
 

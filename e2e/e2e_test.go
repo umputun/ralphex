@@ -30,6 +30,14 @@ const (
 	pollInterval     = 100 * time.Millisecond
 	longPollTimeout  = 15 * time.Second
 	longPollInterval = 500 * time.Millisecond
+
+	// server startup timeout
+	serverStartTimeout = 30 * time.Second
+
+	// negative-assertion waits: verify something does NOT change over a time window.
+	// these are intentional sleeps — there is no condition to poll for "no change".
+	noChangeWait      = 1500 * time.Millisecond
+	noChangeWaitShort = 500 * time.Millisecond
 )
 
 var (
@@ -75,7 +83,7 @@ func TestMain(m *testing.M) {
 	defer stopServer()
 
 	// wait for server to be ready
-	if err := waitForServer(30 * time.Second); err != nil {
+	if err := waitForServer(serverStartTimeout); err != nil {
 		fmt.Fprintf(os.Stderr, "server not ready: %v\n", err)
 		return
 	}
@@ -317,9 +325,9 @@ func navigateToDashboard(t *testing.T, page playwright.Page) {
 	require.NoError(t, err, "navigate to dashboard")
 
 	// wait for the main header h1 to be visible (indicates page loaded)
-	err = page.Locator("header h1").WaitFor(playwright.LocatorWaitForOptions{
+	err = page.Locator("header h1").First().WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(10000),
+		Timeout: playwright.Float(float64(longPollTimeout / time.Millisecond)),
 	})
 	require.NoError(t, err, "wait for header")
 }
@@ -328,7 +336,7 @@ func navigateToDashboard(t *testing.T, page playwright.Page) {
 func waitVisible(t *testing.T, page playwright.Page, selector string, timeout ...float64) {
 	t.Helper()
 
-	timeoutMs := float64(15000) // default 15s for CI
+	timeoutMs := float64(longPollTimeout / time.Millisecond)
 	if len(timeout) > 0 {
 		timeoutMs = timeout[0]
 	}
@@ -344,7 +352,7 @@ func waitVisible(t *testing.T, page playwright.Page, selector string, timeout ..
 func waitHidden(t *testing.T, page playwright.Page, selector string, timeout ...float64) {
 	t.Helper()
 
-	timeoutMs := float64(15000)
+	timeoutMs := float64(longPollTimeout / time.Millisecond)
 	if len(timeout) > 0 {
 		timeoutMs = timeout[0]
 	}
@@ -496,6 +504,19 @@ func waitForScrollIndicator(t *testing.T, indicator playwright.Locator, visible 
 		v, ok := result.(bool)
 		return ok && v == visible
 	}, pollTimeout, pollInterval, "scroll indicator visible should be %v", visible)
+}
+
+// expandAllSections clicks the expand-all button and waits for all sections to open.
+func expandAllSections(t *testing.T, page playwright.Page) {
+	t.Helper()
+	err := page.Locator("#expand-all").Click()
+	require.NoError(t, err, "click expand all")
+	sections := page.Locator(".section-header")
+	count, err := sections.Count()
+	require.NoError(t, err, "count sections")
+	if count > 0 {
+		waitAllDetailsState(t, sections, count, true)
+	}
 }
 
 // clickSessionByName polls the session sidebar until a session with the given name

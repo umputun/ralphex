@@ -309,16 +309,7 @@ func TestErrorEventRendering(t *testing.T) {
 
 	t.Run("error lines have visually distinct styling", func(t *testing.T) {
 		// expand all sections to make error content visible
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// verify the error line content element exists and is visible
 		errorContent := page.Locator(".output-line[data-type='error'] .content").First()
@@ -397,7 +388,7 @@ func TestSignalEventRendering(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait and check again - timer should be stopped after terminal signal
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(noChangeWait)
 
 		time2, err := elapsedEl.TextContent()
 		require.NoError(t, err)
@@ -408,16 +399,7 @@ func TestSignalEventRendering(t *testing.T) {
 
 	t.Run("completion message is rendered", func(t *testing.T) {
 		// expand all sections to see completion message
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// look for completion message in output
 		// the JS renders "execution completed successfully" for COMPLETED signal
@@ -505,16 +487,7 @@ func TestTaskBoundaryRendering(t *testing.T) {
 
 	t.Run("task number is displayed in section title", func(t *testing.T) {
 		// expand all sections to see task content
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// find task sections and verify they have task-related titles
 		taskSections := page.Locator(".section-header[data-phase='task']")
@@ -631,16 +604,7 @@ func TestIterationBoundaryRendering(t *testing.T) {
 
 	t.Run("iteration number is displayed in section title", func(t *testing.T) {
 		// expand all sections to see content
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// check review sections for iteration numbers
 		reviewSections := page.Locator(".section-header[data-phase='review']")
@@ -737,16 +701,7 @@ func TestWarnEventRendering(t *testing.T) {
 
 	t.Run("warn lines have visually distinct styling", func(t *testing.T) {
 		// expand all sections to make warning content visible
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// verify the warn line content element exists and is visible
 		warnContent := page.Locator(".output-line[data-type='warn'] .content").First()
@@ -800,16 +755,7 @@ func TestAutoScrollOnNewContent(t *testing.T) {
 
 	t.Run("scroll position updates when content loads and user at bottom", func(t *testing.T) {
 		// expand all sections to ensure we have scrollable content
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// get the output panel and verify it has content
 		outputPanel := page.Locator(".output-panel")
@@ -826,20 +772,11 @@ func TestAutoScrollOnNewContent(t *testing.T) {
 
 	t.Run("scroll position preserved when user scrolled up", func(t *testing.T) {
 		// expand all sections to ensure we have scrollable content
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// scroll to top of the output panel to simulate user scrolling up
 		outputPanel := page.Locator(".output-panel")
-		_, err = outputPanel.Evaluate("el => { el.scrollTop = 0; }", nil)
+		_, err := outputPanel.Evaluate("el => { el.scrollTop = 0; }", nil)
 		require.NoError(t, err)
 
 		// wait for scroll position to be at top
@@ -853,7 +790,7 @@ func TestAutoScrollOnNewContent(t *testing.T) {
 
 		// wait and verify position is preserved (not auto-scrolled to bottom)
 		// this is an intentional time-based check: we verify no change over time
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(noChangeWaitShort)
 
 		scrollTopAfter, err := outputPanel.Evaluate("el => el.scrollTop", nil)
 		require.NoError(t, err)
@@ -875,20 +812,11 @@ func TestScrollToBottomButtonBehavior(t *testing.T) {
 
 	t.Run("button appears when scrolled away from bottom", func(t *testing.T) {
 		// expand all sections to ensure we have scrollable content
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// scroll to top of the output panel
 		outputPanel := page.Locator(".output-panel")
-		_, err = outputPanel.Evaluate("el => { el.scrollTop = 0; }", nil)
+		_, err := outputPanel.Evaluate("el => { el.scrollTop = 0; }", nil)
 		require.NoError(t, err)
 
 		// trigger scroll event to update UI state
@@ -915,16 +843,7 @@ func TestScrollToBottomButtonBehavior(t *testing.T) {
 
 	t.Run("clicking button scrolls to bottom", func(t *testing.T) {
 		// expand all sections
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		outputPanel := page.Locator(".output-panel")
 
@@ -977,20 +896,11 @@ func TestScrollToBottomButtonBehavior(t *testing.T) {
 
 	t.Run("button hides when at bottom", func(t *testing.T) {
 		// expand all sections
-		expandBtn := page.Locator("#expand-all")
-		err := expandBtn.Click()
-		require.NoError(t, err)
-
-		// wait for sections to expand
-		sections := page.Locator(".section-header")
-		sectionCount, _ := sections.Count()
-		if sectionCount > 0 {
-			waitAllDetailsState(t, sections, sectionCount, true)
-		}
+		expandAllSections(t, page)
 
 		// scroll to bottom programmatically (more reliable than button click)
 		outputPanel := page.Locator(".output-panel")
-		_, err = outputPanel.Evaluate("el => { el.scrollTop = el.scrollHeight; }", nil)
+		_, err := outputPanel.Evaluate("el => { el.scrollTop = el.scrollHeight; }", nil)
 		require.NoError(t, err)
 
 		// trigger scroll event to update UI state
@@ -1019,7 +929,7 @@ func TestSSEReconnectionBehavior(t *testing.T) {
 		// wait for badge to become visible
 		err := badge.WaitFor(playwright.LocatorWaitForOptions{
 			State:   playwright.WaitForSelectorStateVisible,
-			Timeout: playwright.Float(15000),
+			Timeout: playwright.Float(float64(longPollTimeout / time.Millisecond)),
 		})
 		require.NoError(t, err, "status badge should be visible")
 

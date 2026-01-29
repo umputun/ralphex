@@ -202,10 +202,14 @@ func TestViewToggleButton(t *testing.T) {
 	err = viewToggle.Click()
 	require.NoError(t, err)
 
-	// wait for grouped class to appear (or verify state changed)
-	class, err := viewToggle.GetAttribute("class")
+	// wait for state change after click
+	initialClass, err := viewToggle.GetAttribute("class")
 	require.NoError(t, err)
-	t.Logf("View toggle class after click: %s", class)
+	if hasClass(initialClass, "grouped") {
+		waitForClassGone(t, viewToggle, "grouped")
+	} else {
+		waitForClass(t, viewToggle, "grouped")
+	}
 }
 
 func TestSessionDiscoveryOnNewFile(t *testing.T) {
