@@ -134,6 +134,20 @@ project/
 - **scalars/colors**: per-field fallback to embedded defaults if missing
 - `*Set` flags (e.g., `CodexEnabledSet`) distinguish explicit `false`/`0` from "not set"
 
+### Error Pattern Detection
+
+Configurable patterns detect rate limit and quota errors in claude/codex output:
+- `claude_error_patterns`: comma-separated patterns for claude (default: "You've hit your limit")
+- `codex_error_patterns`: comma-separated patterns for codex (default: "Rate limit,quota exceeded")
+- Matching is case-insensitive substring search
+- Whitespace is trimmed from each pattern
+- On match, ralphex exits gracefully with pattern info and help command suggestion
+
+Implementation:
+- `PatternMatchError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
+- `checkErrorPatterns()` helper for case-insensitive matching
+- Patterns passed via `ClaudeExecutor.ErrorPatterns` and `CodexExecutor.ErrorPatterns`
+
 ### Agent System
 
 5 default agents are installed on first run to `~/.config/ralphex/agents/`:
@@ -276,6 +290,13 @@ If you're an AI agent preparing a contribution, complete this checklist:
 - Template overrides: `site/overrides/` with `custom_dir: overrides` in mkdocs.yml
 - **CI constraint**: Cloudflare Pages uses mkdocs-material 9.2.x, must use `materialx.emoji` syntax (not `material.extensions.emoji` which requires 9.4+)
 - **Raw .md files**: MkDocs renders ALL `.md` files in `docs_dir` as HTML pages. To serve raw markdown (e.g., `assets/claude/*.md` for Claude Code skills), copy them AFTER `mkdocs build` - see `prep_site` target in Makefile
+
+## Testing Safety Rules
+
+- **CRITICAL: Tests must NEVER touch real user config directory** (`~/.config/ralphex/`)
+- All tests MUST use `t.TempDir()` for any file operations
+- Config pollution is hard to debug - corrupted files cause cryptic errors
+- Verify tests are clean: compare MD5 checksums of config files before/after `go test ./...`
 
 ## Workflow Rules
 
