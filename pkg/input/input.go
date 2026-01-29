@@ -29,10 +29,6 @@ func ReadLineWithContext(ctx context.Context, reader *bufio.Reader) (string, err
 		return "", fmt.Errorf("read line: %w", err)
 	}
 
-	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("read line: %w", err)
-	}
-
 	go func() {
 		line, err := reader.ReadString('\n')
 		resultCh <- readLineResult{line: line, err: err}

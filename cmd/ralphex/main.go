@@ -2,7 +2,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +19,7 @@ import (
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
 	"github.com/umputun/ralphex/pkg/input"
+	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
 	"github.com/umputun/ralphex/pkg/web"
@@ -45,27 +44,14 @@ type opts struct {
 
 var revision = "unknown"
 
-// datePrefixRe matches date-like prefixes in plan filenames (e.g., "2024-01-15-").
-var datePrefixRe = regexp.MustCompile(`^[\d-]+`)
-
-// errNoPlansFound is returned when no plan files exist in the plans directory.
-var errNoPlansFound = errors.New("no plans found")
-
 // startupInfo holds parameters for printing startup information.
 type startupInfo struct {
-	PlanFile      string
-	Branch        string
-	Mode          processor.Mode
-	MaxIterations int
-	ProgressPath  string
-}
-
-// planSelector holds parameters for plan file selection.
-type planSelector struct {
-	PlanFile string
-	Optional bool
-	PlansDir string
-	Colors   *progress.Colors
+	PlanFile        string
+	PlanDescription string // used for plan mode instead of PlanFile
+	Branch          string
+	Mode            processor.Mode
+	MaxIterations   int
+	ProgressPath    string
 }
 
 // executePlanRequest holds parameters for plan execution.
@@ -73,19 +59,10 @@ type executePlanRequest struct {
 	PlanFile string
 	Mode     processor.Mode
 	GitOps   *git.Repo
+	Workflow *git.Workflow
 	Config   *config.Config
 	Colors   *progress.Colors
-}
-
-// webDashboardParams holds parameters for web dashboard setup.
-type webDashboardParams struct {
-	BaseLog         processor.Logger
-	Port            int
-	PlanFile        string
-	Branch          string
-	WatchDirs       []string // CLI watch dirs
-	ConfigWatchDirs []string // config watch dirs
-	Colors          *progress.Colors
+	Selector *plan.Selector
 }
 
 func main() {
@@ -153,7 +130,15 @@ func run(ctx context.Context, o opts) error {
 	// watch-only mode: --serve with watch dirs (CLI or config) and no plan file
 	// runs web dashboard without plan execution, can run from any directory
 	if isWatchOnlyMode(o, cfg.WatchDirs) {
-		return runWatchOnly(ctx, o, cfg, colors)
+		dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
+		dashboard := web.NewDashboard(web.DashboardConfig{
+			Port:   o.Port,
+			Colors: colors,
+		})
+		if watchErr := dashboard.RunWatchOnly(ctx, dirs); watchErr != nil {
+			return fmt.Errorf("run watch-only mode: %w", watchErr)
+		}
+		return nil
 	}
 
 	// check dependencies using configured command (or default "claude")
@@ -171,50 +156,67 @@ func run(ctx context.Context, o opts) error {
 	if err != nil {
 		return fmt.Errorf("open git repo: %w", err)
 	}
+	workflow := git.NewWorkflow(gitOps, colors.Info().Printf)
 
 	// ensure repository has commits (prompts to create initial commit if empty)
-	if ensureErr := ensureRepoHasCommits(ctx, gitOps, os.Stdin, os.Stdout); ensureErr != nil {
+	if ensureErr := ensureRepoHasCommits(ctx, workflow, os.Stdin, os.Stdout); ensureErr != nil {
 		return ensureErr
 	}
 
 	mode := determineMode(o)
 
+	// create plan selector for use by plan selection and plan mode
+	selector := plan.NewSelector(cfg.PlansDir, colors)
+
 	// plan mode has different flow - doesn't require plan file selection
 	if mode == processor.ModePlan {
 		return runPlanMode(ctx, o, executePlanRequest{
-			Mode:   processor.ModePlan,
-			GitOps: gitOps,
-			Config: cfg,
-			Colors: colors,
+			Mode:     processor.ModePlan,
+			GitOps:   gitOps,
+			Workflow: workflow,
+			Config:   cfg,
+			Colors:   colors,
+			Selector: selector,
 		})
 	}
 
 	// select and prepare plan file (not needed for plan mode)
-	planFile, err := preparePlanFile(ctx, planSelector{
-		PlanFile: o.PlanFile,
-		Optional: o.Review || o.CodexOnly,
-		PlansDir: cfg.PlansDir,
-		Colors:   colors,
-	})
+	planFile, err := selector.Select(ctx, o.PlanFile, o.Review || o.CodexOnly)
 	if err != nil {
 		// check for auto-plan-mode: no plans found on main/master branch
-		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, gitOps, cfg, colors)
+		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, executePlanRequest{
+			GitOps:   gitOps,
+			Workflow: workflow,
+			Config:   cfg,
+			Colors:   colors,
+			Selector: selector,
+		})
 		if handled {
 			return autoPlanErr
 		}
-		return err
+		return fmt.Errorf("select plan: %w", err)
 	}
 
-	if setupErr := setupGitForExecution(gitOps, planFile, mode, colors); setupErr != nil {
-		return setupErr
+	// setup git for execution (branch, gitignore)
+	if planFile != "" && mode == processor.ModeFull {
+		if err := workflow.CreateBranchForPlan(planFile); err != nil {
+			return fmt.Errorf("create branch for plan: %w", err)
+		}
+	}
+	if err := gitOps.EnsureIgnored("progress*.txt", "progress-test.txt", func(format string, args ...any) {
+		colors.Info().Printf(format, args...)
+	}); err != nil {
+		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
 	return executePlan(ctx, o, executePlanRequest{
 		PlanFile: planFile,
 		Mode:     mode,
 		GitOps:   gitOps,
+		Workflow: workflow,
 		Config:   cfg,
 		Colors:   colors,
+		Selector: selector,
 	})
 }
 
@@ -227,70 +229,26 @@ func getCurrentBranch(gitOps *git.Repo) string {
 	return branch
 }
 
-// isMainBranch returns true if the branch name is "main" or "master".
-func isMainBranch(branch string) bool {
-	return branch == "main" || branch == "master"
-}
-
-// promptPlanDescription prompts the user for a plan description when no plans are found.
-// returns the trimmed description, or empty string if user cancels (Ctrl+C/Ctrl+D/EOF or empty input).
-func promptPlanDescription(ctx context.Context, r io.Reader, colors *progress.Colors) string {
-	colors.Info().Printf("no plans found. what would you like to implement?\n")
-	colors.Info().Printf("(enter description or press Ctrl+C/Ctrl+D to cancel): ")
-
-	reader := bufio.NewReader(r)
-	line, err := input.ReadLineWithContext(ctx, reader)
-	if err != nil {
-		// EOF (Ctrl+D) is graceful cancel
-		return ""
-	}
-
-	return strings.TrimSpace(line)
-}
-
 // tryAutoPlanMode attempts to switch to plan mode when no plans are found on main/master.
 // returns (true, nil) if user canceled, (true, err) if plan mode was attempted, or (false, nil) if auto-plan-mode doesn't apply.
-func tryAutoPlanMode(ctx context.Context, err error, o opts, gitOps *git.Repo, cfg *config.Config, colors *progress.Colors) (bool, error) {
-	if !errors.Is(err, errNoPlansFound) || o.Review || o.CodexOnly {
+func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequest) (bool, error) {
+	if !errors.Is(err, plan.ErrNoPlansFound) || o.Review || o.CodexOnly {
 		return false, nil
 	}
 
-	branch, branchErr := gitOps.CurrentBranch()
-	if branchErr != nil || !isMainBranch(branch) {
+	isMain, branchErr := req.GitOps.IsMainBranch()
+	if branchErr != nil || !isMain {
 		return false, nil //nolint:nilerr // branchErr is intentionally ignored - if we can't get branch, skip auto-plan-mode
 	}
 
-	description := promptPlanDescription(ctx, os.Stdin, colors)
+	description := plan.PromptDescription(ctx, os.Stdin, req.Colors)
 	if description == "" {
 		return true, nil // user canceled
 	}
 
 	o.PlanDescription = description
-	return true, runPlanMode(ctx, o, executePlanRequest{
-		Mode:   processor.ModePlan,
-		GitOps: gitOps,
-		Config: cfg,
-		Colors: colors,
-	})
-}
-
-// setupRunnerLogger creates the appropriate logger for the runner.
-// if --serve is enabled, wraps the base logger with a broadcast logger.
-func setupRunnerLogger(ctx context.Context, o opts, params webDashboardParams) (processor.Logger, error) {
-	if !o.Serve {
-		return params.BaseLog, nil
-	}
-	return startWebDashboard(ctx, params)
-}
-
-// handlePostExecution handles tasks after runner completion.
-func handlePostExecution(gitOps *git.Repo, planFile string, mode processor.Mode, colors *progress.Colors) {
-	// move completed plan to completed/ directory
-	if planFile != "" && mode == processor.ModeFull {
-		if moveErr := movePlanToCompleted(gitOps, planFile, colors); moveErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
-		}
-	}
+	req.Mode = processor.ModePlan
+	return true, runPlanMode(ctx, o, req)
 }
 
 // executePlan runs the main execution loop for a plan file.
@@ -319,17 +277,22 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}()
 
 	// wrap logger with broadcast logger if --serve is enabled
-	runnerLog, err := setupRunnerLogger(ctx, o, webDashboardParams{
-		BaseLog:         baseLog,
-		Port:            o.Port,
-		PlanFile:        req.PlanFile,
-		Branch:          branch,
-		WatchDirs:       o.Watch,
-		ConfigWatchDirs: req.Config.WatchDirs,
-		Colors:          req.Colors,
-	})
-	if err != nil {
-		return err
+	var runnerLog processor.Logger = baseLog
+	if o.Serve {
+		dashboard := web.NewDashboard(web.DashboardConfig{
+			BaseLog:         baseLog,
+			Port:            o.Port,
+			PlanFile:        req.PlanFile,
+			Branch:          branch,
+			WatchDirs:       o.Watch,
+			ConfigWatchDirs: req.Config.WatchDirs,
+			Colors:          req.Colors,
+		})
+		var dashErr error
+		runnerLog, dashErr = dashboard.Start(ctx)
+		if dashErr != nil {
+			return fmt.Errorf("start dashboard: %w", dashErr)
+		}
 	}
 
 	// print startup info
@@ -347,8 +310,12 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		return fmt.Errorf("runner: %w", runErr)
 	}
 
-	// handle post-execution tasks
-	handlePostExecution(req.GitOps, req.PlanFile, req.Mode, req.Colors)
+	// move completed plan to completed/ directory
+	if req.PlanFile != "" && req.Mode == processor.ModeFull {
+		if moveErr := req.Workflow.MovePlanToCompleted(req.PlanFile); moveErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
+		}
+	}
 
 	elapsed := baseLog.Elapsed()
 	req.Colors.Info().Printf("\ncompleted in %s\n", elapsed)
@@ -366,41 +333,20 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	return nil
 }
 
-// setupGitForExecution prepares git state for execution (branch, gitignore).
-func setupGitForExecution(gitOps *git.Repo, planFile string, mode processor.Mode, colors *progress.Colors) error {
-	if planFile == "" {
-		return nil
-	}
-	if mode == processor.ModeFull {
-		if err := createBranchIfNeeded(gitOps, planFile, colors); err != nil {
-			return err
-		}
-	}
-	return ensureGitignore(gitOps, colors)
-}
-
 // checkClaudeDep checks that the claude command is available in PATH.
 func checkClaudeDep(cfg *config.Config) error {
 	claudeCmd := cfg.ClaudeCommand
 	if claudeCmd == "" {
 		claudeCmd = "claude"
 	}
-	return checkDependencies(claudeCmd)
+	if _, err := exec.LookPath(claudeCmd); err != nil {
+		return fmt.Errorf("%s not found in PATH", claudeCmd)
+	}
+	return nil
 }
 
 // isWatchOnlyMode returns true if running in watch-only mode.
 // watch-only mode runs the web dashboard without executing any plan.
-//
-// enabled when all conditions are met:
-//   - --serve flag is set
-//   - no plan file provided (neither positional arg nor --plan)
-//   - watch directories exist (via --watch flag or config file)
-//
-// use cases:
-//   - monitoring multiple concurrent ralphex executions from a central dashboard
-//   - viewing progress of ralphex sessions running in other terminals
-//
-// example: ralphex --serve --watch ~/projects --watch /tmp
 func isWatchOnlyMode(o opts, configWatchDirs []string) bool {
 	return o.Serve && o.PlanFile == "" && o.PlanDescription == "" && (len(o.Watch) > 0 || len(configWatchDirs) > 0)
 }
@@ -448,256 +394,15 @@ func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mo
 	}, log)
 }
 
-func preparePlanFile(ctx context.Context, sel planSelector) (string, error) {
-	selected, err := selectPlan(ctx, sel)
-	if err != nil {
-		return "", err
-	}
-	if selected == "" {
-		if !sel.Optional {
-			return "", errors.New("plan file required for task execution")
-		}
-		return "", nil
-	}
-	// normalize to absolute path
-	abs, err := filepath.Abs(selected)
-	if err != nil {
-		return "", fmt.Errorf("resolve plan path: %w", err)
-	}
-	return abs, nil
-}
-
-func selectPlan(ctx context.Context, sel planSelector) (string, error) {
-	if sel.PlanFile != "" {
-		if _, err := os.Stat(sel.PlanFile); err != nil {
-			return "", fmt.Errorf("plan file not found: %s", sel.PlanFile)
-		}
-		return sel.PlanFile, nil
-	}
-
-	// for review-only modes, plan is optional
-	if sel.Optional {
-		return "", nil
-	}
-
-	// use fzf to select plan
-	return selectPlanWithFzf(ctx, sel.PlansDir, sel.Colors)
-}
-
-func selectPlanWithFzf(ctx context.Context, plansDir string, colors *progress.Colors) (string, error) {
-	if _, err := os.Stat(plansDir); err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%w: %s (directory missing)", errNoPlansFound, plansDir)
-		}
-		return "", fmt.Errorf("cannot access plans directory %s: %w", plansDir, err)
-	}
-
-	// find plan files (excluding completed/)
-	plans, err := filepath.Glob(filepath.Join(plansDir, "*.md"))
-	if err != nil || len(plans) == 0 {
-		return "", fmt.Errorf("%w: %s", errNoPlansFound, plansDir)
-	}
-
-	// auto-select if single plan (no fzf needed)
-	if len(plans) == 1 {
-		colors.Info().Printf("auto-selected: %s\n", plans[0])
-		return plans[0], nil
-	}
-
-	// multiple plans require fzf
-	if _, lookupErr := exec.LookPath("fzf"); lookupErr != nil {
-		return "", errors.New("fzf not found, please provide plan file as argument")
-	}
-
-	// use fzf for selection
-	cmd := exec.CommandContext(ctx, "fzf",
-		"--prompt=select plan: ",
-		"--preview=head -50 {}",
-		"--preview-window=right:60%",
-	)
-	cmd.Stdin = strings.NewReader(strings.Join(plans, "\n"))
-	cmd.Stderr = os.Stderr
-
-	out, err := cmd.Output()
-	if err != nil {
-		return "", errors.New("no plan selected")
-	}
-
-	return strings.TrimSpace(string(out)), nil
-}
-
-// extractBranchName derives a branch name from a plan file path.
-// removes the .md extension and strips any leading date prefix (e.g., "2024-01-15-").
-func extractBranchName(planFile string) string {
-	name := strings.TrimSuffix(filepath.Base(planFile), ".md")
-	branchName := strings.TrimLeft(datePrefixRe.ReplaceAllString(name, ""), "-")
-	if branchName == "" {
-		return name
-	}
-	return branchName
-}
-
-func createBranchIfNeeded(gitOps *git.Repo, planFile string, colors *progress.Colors) error {
-	currentBranch, err := gitOps.CurrentBranch()
-	if err != nil {
-		return fmt.Errorf("get current branch: %w", err)
-	}
-
-	if currentBranch != "main" && currentBranch != "master" {
-		return nil // already on feature branch
-	}
-
-	branchName := extractBranchName(planFile)
-
-	// check for uncommitted changes to files other than the plan
-	hasOtherChanges, err := gitOps.HasChangesOtherThan(planFile)
-	if err != nil {
-		return fmt.Errorf("check uncommitted files: %w", err)
-	}
-
-	if hasOtherChanges {
-		// other files have uncommitted changes - show helpful error
-		return fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+
-			"ralphex needs to create a feature branch from %s to isolate plan work.\n\n"+
-			"options:\n"+
-			"  git stash && ralphex %s && git stash pop   # stash changes temporarily\n"+
-			"  git commit -am \"wip\"                       # commit changes first\n"+
-			"  ralphex --review                           # skip branch creation (review-only mode)",
-			branchName, currentBranch, planFile)
-	}
-
-	// check if plan file needs to be committed (untracked, modified, or staged)
-	planHasChanges, err := gitOps.FileHasChanges(planFile)
-	if err != nil {
-		return fmt.Errorf("check plan file status: %w", err)
-	}
-
-	// create or switch to branch
-	if gitOps.BranchExists(branchName) {
-		colors.Info().Printf("switching to existing branch: %s\n", branchName)
-		if err := gitOps.CheckoutBranch(branchName); err != nil {
-			return fmt.Errorf("checkout branch %s: %w", branchName, err)
-		}
-	} else {
-		colors.Info().Printf("creating branch: %s\n", branchName)
-		if err := gitOps.CreateBranch(branchName); err != nil {
-			return fmt.Errorf("create branch %s: %w", branchName, err)
-		}
-	}
-
-	// auto-commit plan file if it was the only uncommitted file
-	if planHasChanges {
-		colors.Info().Printf("committing plan file: %s\n", filepath.Base(planFile))
-		if err := gitOps.Add(planFile); err != nil {
-			return fmt.Errorf("stage plan file: %w", err)
-		}
-		if err := gitOps.Commit("add plan: " + branchName); err != nil {
-			return fmt.Errorf("commit plan file: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func movePlanToCompleted(gitOps *git.Repo, planFile string, colors *progress.Colors) error {
-	// create completed directory
-	completedDir := filepath.Join(filepath.Dir(planFile), "completed")
-	if err := os.MkdirAll(completedDir, 0o750); err != nil {
-		return fmt.Errorf("create completed dir: %w", err)
-	}
-
-	// destination path
-	destPath := filepath.Join(completedDir, filepath.Base(planFile))
-
-	// use git mv
-	if err := gitOps.MoveFile(planFile, destPath); err != nil {
-		// fallback to regular move for untracked files
-		if renameErr := os.Rename(planFile, destPath); renameErr != nil {
-			return fmt.Errorf("move plan: %w", renameErr)
-		}
-		// stage the new location - log if fails but continue
-		if addErr := gitOps.Add(destPath); addErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to stage moved plan: %v\n", addErr)
-		}
-	}
-
-	// commit the move
-	commitMsg := "move completed plan: " + filepath.Base(planFile)
-	if err := gitOps.Commit(commitMsg); err != nil {
-		return fmt.Errorf("commit plan move: %w", err)
-	}
-
-	colors.Info().Printf("moved plan to %s\n", destPath)
-	return nil
-}
-
-func ensureGitignore(gitOps *git.Repo, colors *progress.Colors) error {
-	// check if already ignored
-	ignored, err := gitOps.IsIgnored("progress-test.txt")
-	if err == nil && ignored {
-		return nil // already ignored
-	}
-
-	// write to .gitignore at repo root (not CWD)
-	gitignorePath := filepath.Join(gitOps.Root(), ".gitignore")
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // .gitignore needs world-readable
-	if err != nil {
-		return fmt.Errorf("open .gitignore: %w", err)
-	}
-
-	if _, err := f.WriteString("\n# ralphex progress logs\nprogress*.txt\n"); err != nil {
-		f.Close()
-		return fmt.Errorf("write .gitignore: %w", err)
-	}
-
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close .gitignore: %w", err)
-	}
-
-	colors.Info().Println("added progress*.txt to .gitignore")
-	return nil
-}
-
-func checkDependencies(deps ...string) error {
-	for _, dep := range deps {
-		if _, err := exec.LookPath(dep); err != nil {
-			return fmt.Errorf("%s not found in PATH", dep)
-		}
-	}
-	return nil
-}
-
-// ensureRepoHasCommits checks that the repository has at least one commit.
-// if the repository is empty, prompts the user to create an initial commit.
-func ensureRepoHasCommits(ctx context.Context, gitOps *git.Repo, stdin io.Reader, stdout io.Writer) error {
-	hasCommits, err := gitOps.HasCommits()
-	if err != nil {
-		return fmt.Errorf("check commits: %w", err)
-	}
-	if hasCommits {
-		return nil
-	}
-
-	// prompt user to create initial commit
-	fmt.Fprintln(stdout, "repository has no commits")
-	fmt.Fprintln(stdout, "ralphex needs at least one commit to create feature branches.")
-	fmt.Fprintln(stdout)
-	if !input.AskYesNo(ctx, "create initial commit?", stdin, stdout) {
-		if err = ctx.Err(); err != nil {
-			return fmt.Errorf("create initial commit: %w", err)
-		}
-		return errors.New("no commits - please create initial commit manually")
-	}
-
-	// create the commit
-	if err := gitOps.CreateInitialCommit("initial commit"); err != nil {
-		return fmt.Errorf("create initial commit: %w", err)
-	}
-	fmt.Fprintln(stdout, "created initial commit")
-	return nil
-}
-
 func printStartupInfo(info startupInfo, colors *progress.Colors) {
+	if info.Mode == processor.ModePlan {
+		colors.Info().Printf("starting interactive plan creation\n")
+		colors.Info().Printf("request: %s\n", info.PlanDescription)
+		colors.Info().Printf("branch: %s (max %d iterations)\n", info.Branch, info.MaxIterations)
+		colors.Info().Printf("progress log: %s\n\n", info.ProgressPath)
+		return
+	}
+
 	planStr := info.PlanFile
 	if planStr == "" {
 		planStr = "(no plan - review only)"
@@ -711,143 +416,15 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 	colors.Info().Printf("progress log: %s\n\n", info.ProgressPath)
 }
 
-// runWatchOnly runs the web dashboard in watch-only mode without plan execution.
-// monitors directories for progress files and serves the multi-session dashboard.
-func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progress.Colors) error {
-	dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
-
-	// fail fast if no watch directories configured
-	if len(dirs) == 0 {
-		return errors.New("no watch directories configured")
-	}
-
-	// setup server and watcher
-	srvErrCh, watchErrCh, err := setupWatchMode(ctx, o.Port, dirs)
-	if err != nil {
-		return err
-	}
-
-	// print startup info
-	printWatchModeInfo(dirs, o.Port, colors)
-
-	// monitor for errors until shutdown
-	return monitorWatchMode(ctx, srvErrCh, watchErrCh, colors)
-}
-
-// setupWatchMode creates and starts the web server and file watcher for watch-only mode.
-// returns error channels for monitoring both components.
-func setupWatchMode(ctx context.Context, port int, dirs []string) (chan error, chan error, error) {
-	sm := web.NewSessionManager()
-	watcher, err := web.NewWatcher(dirs, sm)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create watcher: %w", err)
-	}
-
-	serverCfg := web.ServerConfig{
-		Port:     port,
-		PlanName: "(watch mode)",
-		Branch:   "",
-		PlanFile: "",
-	}
-
-	srv, err := web.NewServerWithSessions(serverCfg, sm)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create web server: %w", err)
-	}
-
-	// start server with startup check
-	srvErrCh, err := startServerAsync(ctx, srv, port)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// start watcher in background
-	watchErrCh := make(chan error, 1)
-	go func() {
-		if watchErr := watcher.Start(ctx); watchErr != nil {
-			watchErrCh <- watchErr
-		}
-		close(watchErrCh)
-	}()
-
-	return srvErrCh, watchErrCh, nil
-}
-
-// printWatchModeInfo prints startup information for watch-only mode.
-func printWatchModeInfo(dirs []string, port int, colors *progress.Colors) {
-	colors.Info().Printf("watch-only mode: monitoring %d directories\n", len(dirs))
-	for _, dir := range dirs {
-		colors.Info().Printf("  %s\n", dir)
-	}
-	colors.Info().Printf("web dashboard: http://localhost:%d\n", port)
-	colors.Info().Printf("press Ctrl+C to exit\n")
-}
-
-// serverStartupTimeout is the time to wait for server startup before assuming success.
-const serverStartupTimeout = 100 * time.Millisecond
-
-// startServerAsync starts a web server in the background and waits briefly for startup errors.
-// returns the error channel for monitoring late errors, or an error if startup fails.
-func startServerAsync(ctx context.Context, srv *web.Server, port int) (chan error, error) {
-	errCh := make(chan error, 1)
-	go func() {
-		if err := srv.Start(ctx); err != nil {
-			errCh <- err
-		}
-		close(errCh)
-	}()
-
-	// wait briefly for startup errors
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return nil, fmt.Errorf("web server failed to start on port %d: %w", port, err)
-		}
-	case <-time.After(serverStartupTimeout):
-		// server started successfully
-	}
-
-	return errCh, nil
-}
-
-// monitorWatchMode monitors server and watcher error channels until shutdown.
-func monitorWatchMode(ctx context.Context, srvErrCh, watchErrCh chan error, colors *progress.Colors) error {
-	for {
-		// exit when both channels are nil (closed and handled)
-		if srvErrCh == nil && watchErrCh == nil {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil
-		case srvErr, ok := <-srvErrCh:
-			if !ok {
-				srvErrCh = nil
-				continue
-			}
-			if srvErr != nil && ctx.Err() == nil {
-				colors.Error().Printf("web server error: %v\n", srvErr)
-			}
-		case watchErr, ok := <-watchErrCh:
-			if !ok {
-				watchErrCh = nil
-				continue
-			}
-			if watchErr != nil && ctx.Err() == nil {
-				colors.Error().Printf("file watcher error: %v\n", watchErr)
-			}
-		}
-	}
-}
-
 // runPlanMode executes interactive plan creation mode.
 // creates input collector, progress logger, and runs the plan creation loop.
 // after plan creation, prompts user to continue with implementation or exit.
 func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	// ensure gitignore has progress files
-	if gitignoreErr := ensureGitignore(req.GitOps, req.Colors); gitignoreErr != nil {
-		return gitignoreErr
+	if err := req.GitOps.EnsureIgnored("progress*.txt", "progress-test.txt", func(format string, args ...any) {
+		req.Colors.Info().Printf(format, args...)
+	}); err != nil {
+		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
 	branch := getCurrentBranch(req.GitOps)
@@ -869,7 +446,13 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	}()
 
 	// print startup info for plan mode
-	printPlanModeInfo(o.PlanDescription, branch, o.MaxIterations, baseLog.Path(), req.Colors)
+	printStartupInfo(startupInfo{
+		PlanDescription: o.PlanDescription,
+		Branch:          branch,
+		Mode:            processor.ModePlan,
+		MaxIterations:   o.MaxIterations,
+		ProgressPath:    baseLog.Path(),
+	}, req.Colors)
 
 	// create input collector
 	collector := input.NewTerminalCollector()
@@ -896,7 +479,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	// find the newly created plan file
-	planFile := findRecentPlan(req.Config.PlansDir, startTime)
+	planFile := req.Selector.FindRecent(startTime)
 	elapsed := baseLog.Elapsed()
 
 	// print completion message with plan file path if found
@@ -931,152 +514,22 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		return nil
 	}
 
-	return continuePlanExecution(ctx, o, executePlanRequest{
-		PlanFile: planFile,
-		Mode:     processor.ModeFull,
-		GitOps:   req.GitOps,
-		Config:   req.Config,
-		Colors:   req.Colors,
-	})
-}
-
-// continuePlanExecution runs full execution mode after plan creation completes.
-// creates branch and delegates to executePlan for the main execution loop.
-func continuePlanExecution(ctx context.Context, o opts, req executePlanRequest) error {
+	// continue with plan implementation
 	req.Colors.Info().Printf("\ncontinuing with plan implementation...\n")
 
 	// create branch if needed
-	if branchErr := createBranchIfNeeded(req.GitOps, req.PlanFile, req.Colors); branchErr != nil {
-		return branchErr
+	if err := req.Workflow.CreateBranchForPlan(planFile); err != nil {
+		return fmt.Errorf("create branch for plan: %w", err)
 	}
 
-	return executePlan(ctx, o, req)
-}
-
-// findRecentPlan finds the most recently modified .md file in plansDir
-// that was modified after startTime. Returns empty string if none found.
-func findRecentPlan(plansDir string, startTime time.Time) string {
-	// find all .md files in plansDir (excluding completed/ subdirectory)
-	pattern := filepath.Join(plansDir, "*.md")
-	plans, err := filepath.Glob(pattern)
-	if err != nil || len(plans) == 0 {
-		return ""
-	}
-
-	var recentPlan string
-	var recentTime time.Time
-
-	for _, plan := range plans {
-		info, statErr := os.Stat(plan)
-		if statErr != nil {
-			continue
-		}
-		// file must be modified after startTime
-		if info.ModTime().Before(startTime) {
-			continue
-		}
-		// find the most recent one
-		if recentPlan == "" || info.ModTime().After(recentTime) {
-			recentPlan = plan
-			recentTime = info.ModTime()
-		}
-	}
-
-	return recentPlan
-}
-
-// printPlanModeInfo prints startup information for plan creation mode.
-func printPlanModeInfo(description, branch string, maxIterations int, progressPath string, colors *progress.Colors) {
-	colors.Info().Printf("starting interactive plan creation\n")
-	colors.Info().Printf("request: %s\n", description)
-	colors.Info().Printf("branch: %s (max %d iterations)\n", branch, maxIterations)
-	colors.Info().Printf("progress log: %s\n\n", progressPath)
-}
-
-// startWebDashboard creates the web server and broadcast logger, starting the server in background.
-// returns the broadcast logger to use for execution, or error if server fails to start.
-// when watchDirs is non-empty, creates multi-session mode with file watching.
-func startWebDashboard(ctx context.Context, p webDashboardParams) (processor.Logger, error) {
-	// create session for SSE streaming (handles both live streaming and history replay)
-	session := web.NewSession("main", p.BaseLog.Path())
-	broadcastLog := web.NewBroadcastLogger(p.BaseLog, session)
-
-	// extract plan name for display
-	planName := "(no plan)"
-	if p.PlanFile != "" {
-		planName = filepath.Base(p.PlanFile)
-	}
-
-	cfg := web.ServerConfig{
-		Port:     p.Port,
-		PlanName: planName,
-		Branch:   p.Branch,
-		PlanFile: p.PlanFile,
-	}
-
-	// determine if we should use multi-session mode
-	// multi-session mode is enabled when watch dirs are provided via CLI or config
-	useMultiSession := len(p.WatchDirs) > 0 || len(p.ConfigWatchDirs) > 0
-
-	var srv *web.Server
-	var watcher *web.Watcher
-
-	if useMultiSession {
-		// multi-session mode: use SessionManager and Watcher
-		sm := web.NewSessionManager()
-
-		// register the live execution session so dashboard uses it instead of creating a duplicate
-		// this ensures live events from BroadcastLogger go to the same session the dashboard displays
-		sm.Register(session)
-
-		// resolve watch directories (CLI > config > cwd)
-		dirs := web.ResolveWatchDirs(p.WatchDirs, p.ConfigWatchDirs)
-
-		var err error
-		watcher, err = web.NewWatcher(dirs, sm)
-		if err != nil {
-			return nil, fmt.Errorf("create watcher: %w", err)
-		}
-
-		srv, err = web.NewServerWithSessions(cfg, sm)
-		if err != nil {
-			return nil, fmt.Errorf("create web server: %w", err)
-		}
-	} else {
-		// single-session mode: direct session for current execution
-		var err error
-		srv, err = web.NewServer(cfg, session)
-		if err != nil {
-			return nil, fmt.Errorf("create web server: %w", err)
-		}
-	}
-
-	// start server with startup check
-	srvErrCh, err := startServerAsync(ctx, srv, p.Port)
-	if err != nil {
-		return nil, err
-	}
-
-	// start watcher in background if multi-session mode
-	if watcher != nil {
-		go func() {
-			if watchErr := watcher.Start(ctx); watchErr != nil {
-				// log error but don't fail - server can still work
-				fmt.Fprintf(os.Stderr, "warning: watcher error: %v\n", watchErr)
-			}
-		}()
-	}
-
-	// monitor for late server errors in background
-	// these are logged but don't fail the main execution since the dashboard is supplementary
-	go func() {
-		if srvErr := <-srvErrCh; srvErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: web server error during execution: %v\n", srvErr)
-		}
-	}()
-
-	p.Colors.Info().Printf("web dashboard: http://localhost:%d\n", p.Port)
-	return broadcastLog, nil
+	return executePlan(ctx, o, executePlanRequest{
+		PlanFile: planFile,
+		Mode:     processor.ModeFull,
+		GitOps:   req.GitOps,
+		Workflow: req.Workflow,
+		Config:   req.Config,
+		Colors:   req.Colors,
+	})
 }
 
 // runReset runs the interactive config reset flow.
@@ -1094,4 +547,32 @@ func runReset() error {
 // combined usage like "ralphex --reset docs/plans/feature.md".
 func isResetOnly(o opts) bool {
 	return o.PlanFile == "" && !o.Review && !o.CodexOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
+}
+
+// ensureRepoHasCommits checks that the repository has at least one commit.
+// If the repository is empty, prompts the user to create an initial commit.
+func ensureRepoHasCommits(ctx context.Context, wf *git.Workflow, stdin io.Reader, stdout io.Writer) error {
+	// track if we actually created a commit
+	createdCommit := false
+	promptFn := func() bool {
+		fmt.Fprintln(stdout, "repository has no commits")
+		fmt.Fprintln(stdout, "ralphex needs at least one commit to create feature branches.")
+		fmt.Fprintln(stdout)
+		if !input.AskYesNo(ctx, "create initial commit?", stdin, stdout) {
+			return false
+		}
+		createdCommit = true
+		return true
+	}
+
+	if err := wf.EnsureHasCommits(promptFn); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("create initial commit: %w", ctx.Err())
+		}
+		return fmt.Errorf("ensure has commits: %w", err)
+	}
+	if createdCommit {
+		fmt.Fprintln(stdout, "created initial commit")
+	}
+	return nil
 }

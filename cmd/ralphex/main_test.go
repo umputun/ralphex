@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
+	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
 )
@@ -54,7 +54,7 @@ func TestPromptPlanDescription(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			reader := strings.NewReader(tc.input)
-			result := promptPlanDescription(context.Background(), reader, colors)
+			result := plan.PromptDescription(context.Background(), reader, colors)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
@@ -62,7 +62,7 @@ func TestPromptPlanDescription(t *testing.T) {
 	t.Run("eof_returns_empty", func(t *testing.T) {
 		// empty reader simulates EOF (Ctrl+D)
 		reader := strings.NewReader("")
-		result := promptPlanDescription(context.Background(), reader, colors)
+		result := plan.PromptDescription(context.Background(), reader, colors)
 		assert.Empty(t, result)
 	})
 
@@ -71,32 +71,9 @@ func TestPromptPlanDescription(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 		reader := strings.NewReader("some input\n")
-		result := promptPlanDescription(ctx, reader, colors)
+		result := plan.PromptDescription(ctx, reader, colors)
 		assert.Empty(t, result)
 	})
-}
-
-func TestIsMainBranch(t *testing.T) {
-	tests := []struct {
-		name     string
-		branch   string
-		expected bool
-	}{
-		{name: "main_is_main_branch", branch: "main", expected: true},
-		{name: "master_is_main_branch", branch: "master", expected: true},
-		{name: "feature_branch_is_not_main", branch: "feature-x", expected: false},
-		{name: "develop_is_not_main", branch: "develop", expected: false},
-		{name: "empty_is_not_main", branch: "", expected: false},
-		{name: "main_prefixed_is_not_main", branch: "main-feature", expected: false},
-		{name: "master_prefixed_is_not_main", branch: "master-fix", expected: false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := isMainBranch(tc.branch)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
 }
 
 func TestDetermineMode(t *testing.T) {
@@ -281,7 +258,7 @@ func TestAutoPlanModeDetection(t *testing.T) {
 		err = run(context.Background(), o)
 		require.Error(t, err)
 		// should still get the no plans found error, not auto-plan-mode
-		assert.ErrorIs(t, err, errNoPlansFound, "should return errNoPlansFound on feature branch")
+		assert.ErrorIs(t, err, plan.ErrNoPlansFound, "should return ErrNoPlansFound on feature branch")
 	})
 
 	t.Run("review_mode_skips_auto_plan_mode", func(t *testing.T) {
@@ -310,7 +287,7 @@ func TestAutoPlanModeDetection(t *testing.T) {
 		// error should be from context cancellation or runner, not "no plans found"
 		// this verifies auto-plan-mode is skipped for --review flag
 		require.Error(t, err)
-		assert.NotErrorIs(t, err, errNoPlansFound, "review mode should skip auto-plan-mode")
+		assert.NotErrorIs(t, err, plan.ErrNoPlansFound, "review mode should skip auto-plan-mode")
 	})
 
 	t.Run("codex_only_mode_skips_auto_plan_mode", func(t *testing.T) {
@@ -339,7 +316,7 @@ func TestAutoPlanModeDetection(t *testing.T) {
 		// error should be from context cancellation or runner, not "no plans found"
 		// this verifies auto-plan-mode is skipped for --codex-only flag
 		require.Error(t, err)
-		assert.NotErrorIs(t, err, errNoPlansFound, "codex-only mode should skip auto-plan-mode")
+		assert.NotErrorIs(t, err, plan.ErrNoPlansFound, "codex-only mode should skip auto-plan-mode")
 	})
 }
 
@@ -359,41 +336,6 @@ func TestCheckClaudeDep(t *testing.T) {
 		if err != nil {
 			assert.Contains(t, err.Error(), "claude")
 		}
-	})
-}
-
-func TestPreparePlanFile(t *testing.T) {
-	colors := testColors()
-
-	t.Run("returns_absolute_path", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		planFile := filepath.Join(tmpDir, "test-plan.md")
-		require.NoError(t, os.WriteFile(planFile, []byte("# Test"), 0o600))
-
-		result, err := preparePlanFile(context.Background(), planSelector{
-			PlanFile: planFile, Optional: false, PlansDir: tmpDir, Colors: colors,
-		})
-		require.NoError(t, err)
-		assert.True(t, filepath.IsAbs(result))
-	})
-
-	t.Run("returns_error_for_missing_plan_in_task_mode", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		_, err := preparePlanFile(context.Background(), planSelector{
-			PlanFile: "", Optional: false, PlansDir: tmpDir, Colors: colors,
-		})
-		require.Error(t, err)
-		// error should be errNoPlansFound sentinel
-		require.ErrorIs(t, err, errNoPlansFound, "error should be errNoPlansFound")
-		assert.Contains(t, err.Error(), "no plans found")
-	})
-
-	t.Run("returns_empty_for_review_mode_without_plan", func(t *testing.T) {
-		result, err := preparePlanFile(context.Background(), planSelector{
-			PlanFile: "", Optional: true, PlansDir: "", Colors: colors,
-		})
-		require.NoError(t, err)
-		assert.Empty(t, result)
 	})
 }
 
@@ -432,608 +374,6 @@ func TestCreateRunner(t *testing.T) {
 	})
 }
 
-func TestSelectPlan(t *testing.T) {
-	colors := testColors()
-
-	t.Run("returns provided plan file if exists", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		planFile := filepath.Join(tmpDir, "test-plan.md")
-		err := os.WriteFile(planFile, []byte("# Test Plan"), 0o600)
-		require.NoError(t, err)
-
-		result, err := selectPlan(context.Background(), planSelector{
-			PlanFile: planFile, Optional: false, PlansDir: tmpDir, Colors: colors,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, planFile, result)
-	})
-
-	t.Run("returns error if plan file not found", func(t *testing.T) {
-		_, err := selectPlan(context.Background(), planSelector{
-			PlanFile: "/nonexistent/plan.md", Optional: false, PlansDir: "", Colors: colors,
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "plan file not found")
-	})
-
-	t.Run("returns empty string for optional mode with no plan", func(t *testing.T) {
-		result, err := selectPlan(context.Background(), planSelector{
-			PlanFile: "", Optional: true, PlansDir: "", Colors: colors,
-		})
-		require.NoError(t, err)
-		assert.Empty(t, result)
-	})
-}
-
-func TestSelectPlanWithFzf(t *testing.T) {
-	colors := testColors()
-
-	t.Run("returns_sentinel_error_if_plans_directory_missing", func(t *testing.T) {
-		_, err := selectPlanWithFzf(context.Background(), "/nonexistent/plans", colors)
-		require.Error(t, err)
-		require.ErrorIs(t, err, errNoPlansFound, "missing dir should return errNoPlansFound")
-		assert.Contains(t, err.Error(), "directory missing")
-	})
-
-	t.Run("returns_actual_error_for_permission_denied", func(t *testing.T) {
-		if os.Getuid() == 0 {
-			t.Skip("test requires non-root user")
-		}
-
-		// create parent directory with no permissions
-		parentDir := t.TempDir()
-		restrictedDir := filepath.Join(parentDir, "noaccess")
-		require.NoError(t, os.Mkdir(restrictedDir, 0o000))
-		t.Cleanup(func() { _ = os.Chmod(restrictedDir, 0o755) }) //nolint:gosec // restore for cleanup
-
-		// try to access subdirectory inside restricted parent - this gives EACCES
-		plansDir := filepath.Join(restrictedDir, "plans")
-		_, err := selectPlanWithFzf(context.Background(), plansDir, colors)
-		require.Error(t, err)
-		require.NotErrorIs(t, err, errNoPlansFound, "permission error should NOT return errNoPlansFound")
-		assert.ErrorContains(t, err, "cannot access plans directory")
-	})
-
-	t.Run("returns_sentinel_error_when_no_plans", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		_, err := selectPlanWithFzf(context.Background(), tmpDir, colors)
-		require.Error(t, err)
-		require.ErrorIs(t, err, errNoPlansFound, "should return errNoPlansFound sentinel")
-		assert.Contains(t, err.Error(), tmpDir, "error should contain directory path")
-	})
-
-	t.Run("auto-selects single plan file", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		planFile := filepath.Join(tmpDir, "single-plan.md")
-		err := os.WriteFile(planFile, []byte("# Single Plan"), 0o600)
-		require.NoError(t, err)
-
-		result, err := selectPlanWithFzf(context.Background(), tmpDir, colors)
-		require.NoError(t, err)
-		assert.Equal(t, planFile, result)
-	})
-}
-
-func TestCheckDependencies(t *testing.T) {
-	t.Run("returns nil for existing dependencies", func(t *testing.T) {
-		err := checkDependencies("ls") // ls should exist on all unix systems
-		require.NoError(t, err)
-	})
-
-	t.Run("returns error for missing dependency", func(t *testing.T) {
-		err := checkDependencies("nonexistent-command-12345")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not found in PATH")
-	})
-}
-
-func TestExtractBranchName(t *testing.T) {
-	tests := []struct {
-		name     string
-		planFile string
-		expected string
-	}{
-		{name: "simple_filename", planFile: "add-feature.md", expected: "add-feature"},
-		{name: "with_path", planFile: "docs/plans/add-feature.md", expected: "add-feature"},
-		{name: "date_prefix", planFile: "2024-01-15-feature.md", expected: "feature"},
-		{name: "complex_date_prefix", planFile: "2024-01-15-12-30-my-feature.md", expected: "my-feature"},
-		{name: "numeric_only_keeps_name", planFile: "12345.md", expected: "12345"},
-		{name: "with_path_and_date", planFile: "docs/plans/2024-01-15-add-tests.md", expected: "add-tests"},
-		{name: "trailing_dashes_trimmed", planFile: "2024---feature.md", expected: "feature"},
-		{name: "all_numeric_returns_original", planFile: "2024-01-15.md", expected: "2024-01-15"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := extractBranchName(tc.planFile)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
-func TestCreateBranchIfNeeded(t *testing.T) {
-	colors := testColors()
-
-	t.Run("on_feature_branch_does_nothing", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// create and switch to feature branch
-		err = repo.CreateBranch("feature-test")
-		require.NoError(t, err)
-
-		// should return nil without creating new branch
-		err = createBranchIfNeeded(repo, "docs/plans/some-plan.md", colors)
-		require.NoError(t, err)
-
-		// verify still on feature-test
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "feature-test", branch)
-	})
-
-	t.Run("on_master_creates_branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// verify on master
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "master", branch)
-
-		// should create branch from plan filename
-		err = createBranchIfNeeded(repo, "docs/plans/add-feature.md", colors)
-		require.NoError(t, err)
-
-		// verify switched to new branch
-		branch, err = repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "add-feature", branch)
-	})
-
-	t.Run("switches_to_existing_branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// create branch first
-		err = repo.CreateBranch("existing-feature")
-		require.NoError(t, err)
-
-		// switch back to master
-		err = repo.CheckoutBranch("master")
-		require.NoError(t, err)
-
-		// should switch to existing branch without error
-		err = createBranchIfNeeded(repo, "docs/plans/existing-feature.md", colors)
-		require.NoError(t, err)
-
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "existing-feature", branch)
-	})
-
-	t.Run("strips_date_prefix", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// plan file with date prefix
-		err = createBranchIfNeeded(repo, "docs/plans/2024-01-15-feature.md", colors)
-		require.NoError(t, err)
-
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "feature", branch)
-	})
-
-	t.Run("handles_plain_filename", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		err = createBranchIfNeeded(repo, "add-tests.md", colors)
-		require.NoError(t, err)
-
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "add-tests", branch)
-	})
-
-	t.Run("handles_numeric_only_prefix", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// edge case: plan with complex date prefix
-		err = createBranchIfNeeded(repo, "docs/plans/2024-01-15-12-30-my-feature.md", colors)
-		require.NoError(t, err)
-
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "my-feature", branch)
-	})
-
-	t.Run("auto_commits_plan_when_only_uncommitted_file", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// create plan file as the only uncommitted file
-		plansDir := filepath.Join(dir, "docs", "plans")
-		require.NoError(t, os.MkdirAll(plansDir, 0o750))
-		planFile := filepath.Join(plansDir, "auto-commit-test.md")
-		require.NoError(t, os.WriteFile(planFile, []byte("# Auto Commit Test Plan\n"), 0o600))
-
-		// should create branch and auto-commit the plan
-		err = createBranchIfNeeded(repo, planFile, colors)
-		require.NoError(t, err)
-
-		// verify we're on the new branch
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "auto-commit-test", branch)
-
-		// verify plan was committed (worktree should be clean)
-		dirty, err := repo.IsDirty()
-		require.NoError(t, err)
-		assert.False(t, dirty, "worktree should be clean after auto-commit")
-	})
-
-	t.Run("returns_error_with_helpful_message_when_other_files_uncommitted", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// create plan file
-		plansDir := filepath.Join(dir, "docs", "plans")
-		require.NoError(t, os.MkdirAll(plansDir, 0o750))
-		planFile := filepath.Join(plansDir, "error-test.md")
-		require.NoError(t, os.WriteFile(planFile, []byte("# Error Test Plan\n"), 0o600))
-
-		// create another uncommitted file
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other content"), 0o600))
-
-		// should return an error with helpful message
-		err = createBranchIfNeeded(repo, planFile, colors)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot create branch")
-		assert.Contains(t, err.Error(), "uncommitted changes")
-		assert.Contains(t, err.Error(), "git stash")
-		assert.Contains(t, err.Error(), "git commit -am")
-		assert.Contains(t, err.Error(), "ralphex --review")
-	})
-
-	t.Run("returns_error_when_tracked_file_modified", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// create plan file
-		plansDir := filepath.Join(dir, "docs", "plans")
-		require.NoError(t, os.MkdirAll(plansDir, 0o750))
-		planFile := filepath.Join(plansDir, "modified-test.md")
-		require.NoError(t, os.WriteFile(planFile, []byte("# Modified Test Plan\n"), 0o600))
-
-		// modify an existing tracked file
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified\n"), 0o600))
-
-		// should return an error
-		err = createBranchIfNeeded(repo, planFile, colors)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "uncommitted changes")
-	})
-}
-
-func TestMovePlanToCompleted(t *testing.T) {
-	colors := testColors()
-
-	t.Run("moves_tracked_file_and_commits", func(t *testing.T) {
-		dir := setupTestRepo(t)
-
-		// change to test repo dir (movePlanToCompleted uses relative paths)
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		repo, err := git.Open(".")
-		require.NoError(t, err)
-
-		// create plans directory and plan file
-		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
-		require.NoError(t, err)
-
-		planFile := filepath.Join("docs", "plans", "test-plan.md")
-		err = os.WriteFile(planFile, []byte("# Test Plan\n"), 0o600)
-		require.NoError(t, err)
-
-		// stage and commit the plan
-		err = repo.Add(planFile)
-		require.NoError(t, err)
-		err = repo.Commit("add test plan")
-		require.NoError(t, err)
-
-		// move plan to completed
-		err = movePlanToCompleted(repo, planFile, colors)
-		require.NoError(t, err)
-
-		// verify old file removed
-		_, err = os.Stat(planFile)
-		assert.True(t, os.IsNotExist(err))
-
-		// verify new file exists
-		completedFile := filepath.Join("docs", "plans", "completed", "test-plan.md")
-		_, err = os.Stat(completedFile)
-		require.NoError(t, err)
-	})
-
-	t.Run("creates_completed_directory", func(t *testing.T) {
-		dir := setupTestRepo(t)
-
-		// change to test repo dir
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		repo, err := git.Open(".")
-		require.NoError(t, err)
-
-		// create plans directory without completed subdir
-		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
-		require.NoError(t, err)
-
-		planFile := filepath.Join("docs", "plans", "new-plan.md")
-		err = os.WriteFile(planFile, []byte("# New Plan\n"), 0o600)
-		require.NoError(t, err)
-
-		// stage and commit
-		err = repo.Add(planFile)
-		require.NoError(t, err)
-		err = repo.Commit("add new plan")
-		require.NoError(t, err)
-
-		// verify completed dir doesn't exist
-		completedDir := filepath.Join("docs", "plans", "completed")
-		_, err = os.Stat(completedDir)
-		assert.True(t, os.IsNotExist(err))
-
-		// move plan
-		err = movePlanToCompleted(repo, planFile, colors)
-		require.NoError(t, err)
-
-		// verify completed directory was created
-		info, err := os.Stat(completedDir)
-		require.NoError(t, err)
-		assert.True(t, info.IsDir())
-	})
-
-	t.Run("moves_untracked_file", func(t *testing.T) {
-		dir := setupTestRepo(t)
-
-		// change to test repo dir
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		repo, err := git.Open(".")
-		require.NoError(t, err)
-
-		// create plans directory and untracked plan file
-		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
-		require.NoError(t, err)
-
-		planFile := filepath.Join("docs", "plans", "untracked-plan.md")
-		err = os.WriteFile(planFile, []byte("# Untracked Plan\n"), 0o600)
-		require.NoError(t, err)
-
-		// don't stage the file, just move it
-		err = movePlanToCompleted(repo, planFile, colors)
-		require.NoError(t, err)
-
-		// verify old file removed
-		_, err = os.Stat(planFile)
-		assert.True(t, os.IsNotExist(err))
-
-		// verify new file exists
-		completedFile := filepath.Join("docs", "plans", "completed", "untracked-plan.md")
-		_, err = os.Stat(completedFile)
-		require.NoError(t, err)
-	})
-
-	t.Run("moves_file_with_absolute_path", func(t *testing.T) {
-		dir := setupTestRepo(t)
-
-		// resolve symlinks for consistent paths (macOS /var -> /private/var)
-		dir, err := filepath.EvalSymlinks(dir)
-		require.NoError(t, err)
-
-		// change to test repo dir
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		repo, err := git.Open(".")
-		require.NoError(t, err)
-
-		// create plans directory and plan file
-		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
-		require.NoError(t, err)
-
-		planFile := filepath.Join(dir, "docs", "plans", "abs-plan.md")
-		err = os.WriteFile(planFile, []byte("# Absolute Path Plan\n"), 0o600)
-		require.NoError(t, err)
-
-		// stage and commit
-		err = repo.Add(planFile)
-		require.NoError(t, err)
-		err = repo.Commit("add abs plan")
-		require.NoError(t, err)
-
-		// move using absolute path (simulates normalized path from run())
-		err = movePlanToCompleted(repo, planFile, colors)
-		require.NoError(t, err)
-
-		// verify old file removed
-		_, err = os.Stat(planFile)
-		assert.True(t, os.IsNotExist(err))
-
-		// verify new file exists
-		completedFile := filepath.Join(dir, "docs", "plans", "completed", "abs-plan.md")
-		_, err = os.Stat(completedFile)
-		require.NoError(t, err)
-	})
-}
-
-func TestEnsureGitignore(t *testing.T) {
-	colors := testColors()
-
-	t.Run("adds_pattern_when_not_ignored", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// save original working directory
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-
-		// change to test repo dir (ensureGitignore uses relative .gitignore path)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		// ensure gitignore
-		err = ensureGitignore(repo, colors)
-		require.NoError(t, err)
-
-		// verify .gitignore was created with the pattern
-		content, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test file in temp dir
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "progress*.txt")
-	})
-
-	t.Run("skips_when_already_ignored", func(t *testing.T) {
-		dir := setupTestRepo(t)
-
-		// create gitignore with pattern already present
-		gitignore := filepath.Join(dir, ".gitignore")
-		err := os.WriteFile(gitignore, []byte("progress*.txt\n"), 0o600)
-		require.NoError(t, err)
-
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// save original working directory
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		// ensure gitignore - should be a no-op
-		err = ensureGitignore(repo, colors)
-		require.NoError(t, err)
-
-		// verify content unchanged (no duplicate pattern)
-		content, err := os.ReadFile(gitignore) //nolint:gosec // test file in temp dir
-		require.NoError(t, err)
-		assert.Equal(t, "progress*.txt\n", string(content))
-	})
-
-	t.Run("creates_gitignore_if_missing", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// verify no .gitignore exists
-		gitignore := filepath.Join(dir, ".gitignore")
-		_, err = os.Stat(gitignore)
-		assert.True(t, os.IsNotExist(err))
-
-		// save original working directory
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		// ensure gitignore
-		err = ensureGitignore(repo, colors)
-		require.NoError(t, err)
-
-		// verify .gitignore was created
-		_, err = os.Stat(gitignore)
-		require.NoError(t, err)
-
-		// verify content
-		content, err := os.ReadFile(gitignore) //nolint:gosec // test file in temp dir
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "progress*.txt")
-	})
-}
-
-func TestSetupRunnerLogger(t *testing.T) {
-	t.Run("returns_base_logger_when_serve_disabled", func(t *testing.T) {
-		colors := testColors()
-		baseLog, err := progress.NewLogger(progress.Config{
-			PlanFile: "",
-			Mode:     "test",
-			Branch:   "test",
-			NoColor:  true,
-		}, colors)
-		require.NoError(t, err)
-		defer baseLog.Close()
-
-		o := opts{Serve: false}
-		params := webDashboardParams{
-			BaseLog: baseLog,
-			Port:    8080,
-			Colors:  colors,
-		}
-
-		result, err := setupRunnerLogger(context.Background(), o, params)
-		require.NoError(t, err)
-		assert.Equal(t, baseLog, result, "should return the base logger unchanged")
-	})
-
-	t.Run("returns_broadcast_logger_when_serve_enabled", func(t *testing.T) {
-		colors := testColors()
-		baseLog, err := progress.NewLogger(progress.Config{
-			PlanFile: "",
-			Mode:     "test",
-			Branch:   "test",
-			NoColor:  true,
-		}, colors)
-		require.NoError(t, err)
-		defer baseLog.Close()
-
-		o := opts{Serve: true, Port: 0} // port 0 to let system assign available port
-		params := webDashboardParams{
-			BaseLog:  baseLog,
-			Port:     0, // system-assigned port
-			PlanFile: "",
-			Branch:   "test",
-			Colors:   colors,
-		}
-
-		result, err := setupRunnerLogger(t.Context(), o, params)
-		require.NoError(t, err)
-		// result should be different from baseLog (it's a BroadcastLogger wrapper)
-		assert.NotEqual(t, baseLog, result, "should return a broadcast logger, not the base logger")
-	})
-}
-
 func TestGetCurrentBranch(t *testing.T) {
 	t.Run("returns_branch_name", func(t *testing.T) {
 		dir := setupTestRepo(t)
@@ -1056,141 +396,6 @@ func TestGetCurrentBranch(t *testing.T) {
 		// getCurrentBranch should return "unknown" on error
 		branch := getCurrentBranch(repo)
 		assert.Equal(t, "unknown", branch)
-	})
-}
-
-func TestSetupGitForExecution(t *testing.T) {
-	colors := testColors()
-
-	t.Run("returns_nil_for_empty_plan_file", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		err = setupGitForExecution(repo, "", processor.ModeFull, colors)
-		require.NoError(t, err)
-	})
-
-	t.Run("creates_branch_for_full_mode", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// change to test repo dir for gitignore
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		err = setupGitForExecution(repo, "docs/plans/new-feature.md", processor.ModeFull, colors)
-		require.NoError(t, err)
-
-		// verify branch was created
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "new-feature", branch)
-	})
-
-	t.Run("skips_branch_for_review_mode", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// change to test repo dir for gitignore
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		err = setupGitForExecution(repo, "docs/plans/some-plan.md", processor.ModeReview, colors)
-		require.NoError(t, err)
-
-		// verify still on master (no branch created)
-		branch, err := repo.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "master", branch)
-	})
-}
-
-func TestHandlePostExecution(t *testing.T) {
-	colors := testColors()
-
-	t.Run("moves_plan_on_full_mode_completion", func(t *testing.T) {
-		dir := setupTestRepo(t)
-
-		// change to test repo dir
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		repo, err := git.Open(".")
-		require.NoError(t, err)
-
-		// create plan file
-		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
-		require.NoError(t, err)
-		planFile := filepath.Join("docs", "plans", "test-feature.md")
-		err = os.WriteFile(planFile, []byte("# Test Plan\n"), 0o600)
-		require.NoError(t, err)
-
-		// stage and commit
-		err = repo.Add(planFile)
-		require.NoError(t, err)
-		err = repo.Commit("add plan")
-		require.NoError(t, err)
-
-		// handlePostExecution should move the plan
-		handlePostExecution(repo, planFile, processor.ModeFull, colors)
-
-		// verify plan was moved
-		_, err = os.Stat(planFile)
-		assert.True(t, os.IsNotExist(err), "original plan should be gone")
-
-		completedFile := filepath.Join("docs", "plans", "completed", "test-feature.md")
-		_, err = os.Stat(completedFile)
-		require.NoError(t, err, "plan should be in completed dir")
-	})
-
-	t.Run("skips_move_on_review_mode", func(t *testing.T) {
-		dir := setupTestRepo(t)
-
-		// change to test repo dir
-		origDir, err := os.Getwd()
-		require.NoError(t, err)
-		err = os.Chdir(dir)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
-
-		repo, err := git.Open(".")
-		require.NoError(t, err)
-
-		// create plan file
-		err = os.MkdirAll(filepath.Join("docs", "plans"), 0o750)
-		require.NoError(t, err)
-		planFile := filepath.Join("docs", "plans", "review-test.md")
-		err = os.WriteFile(planFile, []byte("# Test Plan\n"), 0o600)
-		require.NoError(t, err)
-
-		// handlePostExecution with review mode should NOT move the plan
-		handlePostExecution(repo, planFile, processor.ModeReview, colors)
-
-		// verify plan was NOT moved
-		_, err = os.Stat(planFile)
-		require.NoError(t, err, "plan should still exist in original location")
-	})
-
-	t.Run("skips_move_on_empty_plan_file", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
-		require.NoError(t, err)
-
-		// handlePostExecution with empty plan should not panic
-		handlePostExecution(repo, "", processor.ModeFull, colors)
-		// no error means success
 	})
 }
 
@@ -1248,93 +453,9 @@ func TestPrintStartupInfo(t *testing.T) {
 	})
 }
 
-func TestFindRecentPlan(t *testing.T) {
-	t.Run("finds_recently_modified_file", func(t *testing.T) {
-		dir := t.TempDir()
-		startTime := time.Now()
-
-		// create a plan file
-		planFile := filepath.Join(dir, "new-plan.md")
-		err := os.WriteFile(planFile, []byte("# New Plan"), 0o600)
-		require.NoError(t, err)
-
-		// explicitly set mod time to be after startTime
-		futureTime := startTime.Add(time.Second)
-		err = os.Chtimes(planFile, futureTime, futureTime)
-		require.NoError(t, err)
-
-		result := findRecentPlan(dir, startTime)
-		assert.Equal(t, planFile, result)
-	})
-
-	t.Run("returns_empty_for_old_files", func(t *testing.T) {
-		dir := t.TempDir()
-		startTime := time.Now()
-
-		// create a plan file
-		planFile := filepath.Join(dir, "old-plan.md")
-		err := os.WriteFile(planFile, []byte("# Old Plan"), 0o600)
-		require.NoError(t, err)
-
-		// set mod time to be before startTime
-		pastTime := startTime.Add(-time.Hour)
-		err = os.Chtimes(planFile, pastTime, pastTime)
-		require.NoError(t, err)
-
-		result := findRecentPlan(dir, startTime)
-		assert.Empty(t, result)
-	})
-
-	t.Run("returns_most_recent_of_multiple_files", func(t *testing.T) {
-		dir := t.TempDir()
-		startTime := time.Now()
-
-		// create first file with earlier mod time
-		plan1 := filepath.Join(dir, "plan1.md")
-		err := os.WriteFile(plan1, []byte("# Plan 1"), 0o600)
-		require.NoError(t, err)
-		time1 := startTime.Add(time.Second)
-		err = os.Chtimes(plan1, time1, time1)
-		require.NoError(t, err)
-
-		// create second file with later mod time
-		plan2 := filepath.Join(dir, "plan2.md")
-		err = os.WriteFile(plan2, []byte("# Plan 2"), 0o600)
-		require.NoError(t, err)
-		time2 := startTime.Add(2 * time.Second)
-		err = os.Chtimes(plan2, time2, time2)
-		require.NoError(t, err)
-
-		result := findRecentPlan(dir, startTime)
-		assert.Equal(t, plan2, result)
-	})
-
-	t.Run("returns_empty_for_nonexistent_directory", func(t *testing.T) {
-		result := findRecentPlan("/nonexistent/directory", time.Now())
-		assert.Empty(t, result)
-	})
-
-	t.Run("returns_empty_for_empty_directory", func(t *testing.T) {
-		dir := t.TempDir()
-		result := findRecentPlan(dir, time.Now())
-		assert.Empty(t, result)
-	})
-
-	t.Run("ignores_non_md_files", func(t *testing.T) {
-		dir := t.TempDir()
-		startTime := time.Now()
-
-		// create non-md file with future mod time
-		txtFile := filepath.Join(dir, "notes.txt")
-		err := os.WriteFile(txtFile, []byte("notes"), 0o600)
-		require.NoError(t, err)
-		futureTime := startTime.Add(time.Second)
-		err = os.Chtimes(txtFile, futureTime, futureTime)
-		require.NoError(t, err)
-
-		result := findRecentPlan(dir, startTime)
-		assert.Empty(t, result)
-	})
+// returns a no-op logger for tests
+func noopLogger() func(string, ...any) (int, error) {
+	return func(string, ...any) (int, error) { return 0, nil }
 }
 
 func TestEnsureRepoHasCommits(t *testing.T) {
@@ -1342,9 +463,10 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		dir := setupTestRepo(t)
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
+		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitOps, strings.NewReader(""), &stdout)
+		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader(""), &stdout)
 		assert.NoError(t, err)
 	})
 
@@ -1359,6 +481,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
+		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		// verify no commits before
 		hasCommits, err := gitOps.HasCommits()
@@ -1366,7 +489,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		assert.False(t, hasCommits)
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitOps, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader("y\n"), &stdout)
 		require.NoError(t, err)
 
 		// verify commit was created
@@ -1386,9 +509,10 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
+		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitOps, strings.NewReader("n\n"), &stdout)
+		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader("n\n"), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
 	})
@@ -1400,9 +524,10 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
+		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitOps, strings.NewReader(""), &stdout)
+		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader(""), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
 	})
@@ -1416,9 +541,10 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
+		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitOps, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader("y\n"), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "create initial commit")
 	})
@@ -1430,12 +556,13 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 
 		gitOps, err := git.Open(dir)
 		require.NoError(t, err)
+		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(ctx, gitOps, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(ctx, wf, strings.NewReader("y\n"), &stdout)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
 	})
