@@ -6,6 +6,7 @@
 #   {{PLAN_FILE}} - path to the plan file being executed
 #   {{PROGRESS_FILE}} - path to the progress log (task execution + previous reviews)
 #   {{GOAL}} - human-readable goal description
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
 #   {{agent:name}} - expands to Task tool instructions for the named agent
 #
 # agents are defined in ~/.config/ralphex/agents/ (user) or pkg/config/defaults/agents/ (builtin)
@@ -17,8 +18,8 @@ Progress log: {{PROGRESS_FILE}} (contains task execution and previous review ite
 ## Step 1: Get Branch Context
 
 Run both commands to understand what was done:
-- `git log master..HEAD --oneline` - see commit history (what was implemented)
-- `git diff master...HEAD` - see actual code changes
+- `git log {{DEFAULT_BRANCH}}..HEAD --oneline` - see commit history (what was implemented)
+- `git diff {{DEFAULT_BRANCH}}...HEAD` - see actual code changes
 
 ## Step 2: Launch ALL 5 Review Agents IN PARALLEL
 

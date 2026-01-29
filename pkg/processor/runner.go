@@ -40,6 +40,7 @@ type Config struct {
 	IterationDelayMs int            // delay between iterations in milliseconds
 	TaskRetryCount   int            // number of times to retry failed tasks
 	CodexEnabled     bool           // whether codex review is enabled
+	DefaultBranch    string         // default branch name (detected from repo)
 	AppConfig        *config.Config // full application config (for executors and prompts)
 }
 
@@ -191,7 +192,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 	r.log.SetPhase(PhaseReview)
 	r.log.PrintSection(NewGenericSection("claude review 0: all findings"))
 
-	if err := r.runClaudeReview(ctx, r.buildFirstReviewPrompt()); err != nil {
+	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -225,7 +226,7 @@ func (r *Runner) runReviewOnly(ctx context.Context) error {
 	r.log.SetPhase(PhaseReview)
 	r.log.PrintSection(NewGenericSection("claude review 0: all findings"))
 
-	if err := r.runClaudeReview(ctx, r.buildFirstReviewPrompt()); err != nil {
+	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -277,7 +278,7 @@ func (r *Runner) runCodexOnly(ctx context.Context) error {
 // runTaskPhase executes tasks until completion or max iterations.
 // executes ONE Task section per iteration.
 func (r *Runner) runTaskPhase(ctx context.Context) error {
-	prompt := r.buildTaskPrompt()
+	prompt := r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt)
 	retryCount := 0
 
 	for i := 1; i <= r.cfg.MaxIterations; i++ {
@@ -354,7 +355,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 
 		r.log.PrintSection(NewClaudeReviewSection(i, ": critical/major"))
 
-		result := r.claude.Run(ctx, r.buildSecondReviewPrompt())
+		result := r.claude.Run(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt))
 		if result.Error != nil {
 			return fmt.Errorf("claude execution: %w", result.Error)
 		}
@@ -454,8 +455,9 @@ The code implements the plan at: %s
 	// different diff command based on iteration
 	var diffInstruction, diffDescription string
 	if isFirst {
-		diffInstruction = "Run: git diff master...HEAD"
-		diffDescription = "code changes between master and HEAD branch"
+		defaultBranch := r.getDefaultBranch()
+		diffInstruction = fmt.Sprintf("Run: git diff %s...HEAD", defaultBranch)
+		diffDescription = fmt.Sprintf("code changes between %s and HEAD branch", defaultBranch)
 	} else {
 		diffInstruction = "Run: git diff"
 		diffDescription = "uncommitted changes (Claude's fixes from previous iteration)"

@@ -277,6 +277,20 @@ These 5 agents cover common review concerns and work well out of the box. Custom
 
 ### Template Syntax
 
+Custom prompt files support variable expansion. All variables use the `{{VARIABLE}}` syntax.
+
+**Available variables:**
+
+| Variable | Description | Example value |
+|----------|-------------|---------------|
+| `{{PLAN_FILE}}` | Path to the plan file being executed | `docs/plans/feature.md` |
+| `{{PROGRESS_FILE}}` | Path to the progress log file | `progress-feature.txt` |
+| `{{GOAL}}` | Human-readable goal description | `implementation of plan at docs/plans/feature.md` |
+| `{{DEFAULT_BRANCH}}` | Default branch name (detected from repo) | `main`, `master`, `origin/main` |
+| `{{agent:name}}` | Expands to Task tool instructions for the named agent | (see below) |
+
+**Agent references:**
+
 Reference agents in prompt files using `{{agent:name}}` syntax:
 
 ```
@@ -286,7 +300,7 @@ Launch the following review agents in parallel:
 {{agent:testing}}
 ```
 
-Each `{{agent:name}}` expands to Task tool instructions that tell Claude Code to run that agent.
+Each `{{agent:name}}` expands to Task tool instructions that tell Claude Code to run that agent. Variables inside agent content are also expanded, so agents can use `{{DEFAULT_BRANCH}}` or other variables.
 
 ### Customization
 

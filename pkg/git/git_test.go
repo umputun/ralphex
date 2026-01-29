@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1296,6 +1297,123 @@ func TestRepo_IsMainBranch(t *testing.T) {
 		isMain, err := r.IsMainBranch()
 		require.NoError(t, err)
 		assert.False(t, isMain)
+	})
+}
+
+func TestRepo_GetDefaultBranch(t *testing.T) {
+	t.Run("returns master for repo with only master branch", func(t *testing.T) {
+		dir := setupTestRepo(t) // creates repo with master branch
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		branch := r.GetDefaultBranch()
+		assert.Equal(t, "master", branch)
+	})
+
+	t.Run("returns main when main branch exists", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create main branch
+		err = r.CreateBranch("main")
+		require.NoError(t, err)
+
+		// switch back to master to ensure we're not just returning current branch
+		err = r.CheckoutBranch("master")
+		require.NoError(t, err)
+
+		branch := r.GetDefaultBranch()
+		assert.Equal(t, "main", branch)
+	})
+
+	t.Run("returns origin/main when origin/HEAD points to main but local main does not exist", func(t *testing.T) {
+		dir := setupTestRepo(t) // creates repo with master branch
+		repo, err := git.PlainOpen(dir)
+		require.NoError(t, err)
+
+		// simulate origin/HEAD pointing to origin/main (like after remote default branch rename)
+		// but local main branch doesn't exist
+		originMainRef := plumbing.NewSymbolicReference(
+			plumbing.NewRemoteReferenceName("origin", "HEAD"),
+			plumbing.NewRemoteReferenceName("origin", "main"),
+		)
+		err = repo.Storer.SetReference(originMainRef)
+		require.NoError(t, err)
+
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// should return origin/main since local main doesn't exist
+		branch := r.GetDefaultBranch()
+		assert.Equal(t, "origin/main", branch)
+	})
+
+	t.Run("returns trunk when trunk exists but not main or master", func(t *testing.T) {
+		dir := t.TempDir()
+		repo, err := git.PlainInit(dir, false)
+		require.NoError(t, err)
+
+		// create a file and commit on trunk branch
+		readme := filepath.Join(dir, "README.md")
+		err = os.WriteFile(readme, []byte("# Test\n"), 0o600)
+		require.NoError(t, err)
+
+		wt, err := repo.Worktree()
+		require.NoError(t, err)
+		_, err = wt.Add("README.md")
+		require.NoError(t, err)
+		_, err = wt.Commit("initial commit", &git.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com"},
+		})
+		require.NoError(t, err)
+
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create and switch to trunk, delete master
+		err = r.CreateBranch("trunk")
+		require.NoError(t, err)
+
+		// delete master branch by removing the reference directly
+		err = repo.Storer.RemoveReference("refs/heads/master")
+		require.NoError(t, err)
+
+		branch := r.GetDefaultBranch()
+		assert.Equal(t, "trunk", branch)
+	})
+
+	t.Run("fallback to master when no common branches exist", func(t *testing.T) {
+		dir := t.TempDir()
+		repo, err := git.PlainInit(dir, false)
+		require.NoError(t, err)
+
+		// create a file and commit
+		readme := filepath.Join(dir, "README.md")
+		err = os.WriteFile(readme, []byte("# Test\n"), 0o600)
+		require.NoError(t, err)
+
+		wt, err := repo.Worktree()
+		require.NoError(t, err)
+		_, err = wt.Add("README.md")
+		require.NoError(t, err)
+		_, err = wt.Commit("initial commit", &git.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com"},
+		})
+		require.NoError(t, err)
+
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create unusual branch and delete master
+		err = r.CreateBranch("unusual-name")
+		require.NoError(t, err)
+
+		err = repo.Storer.RemoveReference("refs/heads/master")
+		require.NoError(t, err)
+
+		branch := r.GetDefaultBranch()
+		assert.Equal(t, "master", branch) // fallback
 	})
 }
 

@@ -354,7 +354,7 @@ func TestCreateRunner(t *testing.T) {
 		require.NoError(t, err)
 		defer log.Close()
 
-		runner := createRunner(cfg, o, "/path/to/plan.md", processor.ModeFull, log)
+		runner := createRunner(cfg, o, "/path/to/plan.md", processor.ModeFull, log, "master")
 		assert.NotNil(t, runner)
 	})
 
@@ -368,7 +368,7 @@ func TestCreateRunner(t *testing.T) {
 		defer log.Close()
 
 		// tests that codex-only mode code path runs without panic
-		runner := createRunner(cfg, o, "", processor.ModeCodexOnly, log)
+		runner := createRunner(cfg, o, "", processor.ModeCodexOnly, log, "main")
 		assert.NotNil(t, runner)
 	})
 }

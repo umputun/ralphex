@@ -44,6 +44,23 @@ ralphex --reset
 - `fzf` - for plan selection (optional)
 - `codex` - for external review (optional)
 
+## Customization
+
+Configuration directory: `~/.config/ralphex/`
+
+**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `make_plan.txt`
+
+**Agent files** (`~/.config/ralphex/agents/`): Custom review agents referenced via `{{agent:name}}` in prompts
+
+**Template variables** (available in prompt and agent files):
+- `{{PLAN_FILE}}` - path to plan file
+- `{{PROGRESS_FILE}}` - path to progress log
+- `{{GOAL}}` - goal description
+- `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.)
+- `{{agent:name}}` - expands to Task tool instructions for named agent
+
+Run `ralphex --reset` to restore default configuration interactively.
+
 ---
 
 ## Claude Code Integration (Optional)

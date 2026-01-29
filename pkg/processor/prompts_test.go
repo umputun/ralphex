@@ -10,9 +10,10 @@ import (
 	"github.com/umputun/ralphex/pkg/config"
 )
 
-func TestRunner_buildTaskPrompt(t *testing.T) {
-	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: testAppConfig(t)}, log: newMockLogger("")}
-	prompt := r.buildTaskPrompt()
+func TestRunner_replacePromptVariables_TaskPrompt(t *testing.T) {
+	appCfg := testAppConfig(t)
+	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: appCfg}, log: newMockLogger("")}
+	prompt := r.replacePromptVariables(appCfg.TaskPrompt)
 
 	assert.Contains(t, prompt, "docs/plans/test.md")
 	assert.Contains(t, prompt, "progress-test.txt")
@@ -22,14 +23,15 @@ func TestRunner_buildTaskPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "STOP HERE")
 }
 
-func TestRunner_buildFirstReviewPrompt(t *testing.T) {
+func TestRunner_replacePromptVariables_ReviewFirstPrompt(t *testing.T) {
 	t.Run("with plan file and progress path", func(t *testing.T) {
-		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: testAppConfig(t)}, log: newMockLogger("")}
-		prompt := r.buildFirstReviewPrompt()
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
+		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.Contains(t, prompt, "progress-test.txt") // progress file should be substituted
-		assert.Contains(t, prompt, "git diff master...HEAD")
+		assert.Contains(t, prompt, "git diff main...HEAD")
 		assert.Contains(t, prompt, "<<<RALPHEX:REVIEW_DONE>>>")
 		assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
 		// verify expanded agent content from the 5 agents
@@ -37,26 +39,38 @@ func TestRunner_buildFirstReviewPrompt(t *testing.T) {
 		assert.Contains(t, prompt, "security issues")          // from quality agent
 		assert.Contains(t, prompt, "achieves the stated goal") // from implementation agent
 		assert.Contains(t, prompt, "test coverage")            // from testing agent
+		// verify no unsubstituted template variables remain
+		assert.NotContains(t, prompt, "{{DEFAULT_BRANCH}}")
 	})
 
-	t.Run("without plan file", func(t *testing.T) {
-		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", AppConfig: testAppConfig(t)}, log: newMockLogger("")}
-		prompt := r.buildFirstReviewPrompt()
+	t.Run("without plan file uses default branch in goal", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", DefaultBranch: "trunk", AppConfig: appCfg}, log: newMockLogger("")}
+		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
 
-		assert.Contains(t, prompt, "current branch vs master")
+		assert.Contains(t, prompt, "current branch vs trunk")
 		assert.Contains(t, prompt, "progress.txt")
 		assert.Contains(t, prompt, "<<<RALPHEX:REVIEW_DONE>>>")
 	})
+
+	t.Run("fallback to master when default branch not set", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", AppConfig: appCfg}, log: newMockLogger("")}
+		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+
+		assert.Contains(t, prompt, "current branch vs master")
+	})
 }
 
-func TestRunner_buildSecondReviewPrompt(t *testing.T) {
+func TestRunner_replacePromptVariables_ReviewSecondPrompt(t *testing.T) {
 	t.Run("with plan file and progress path", func(t *testing.T) {
-		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: testAppConfig(t)}, log: newMockLogger("")}
-		prompt := r.buildSecondReviewPrompt()
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
+		prompt := r.replacePromptVariables(appCfg.ReviewSecondPrompt)
 
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.Contains(t, prompt, "progress-test.txt") // progress file should be substituted
-		assert.Contains(t, prompt, "git diff master...HEAD")
+		assert.Contains(t, prompt, "git diff main...HEAD")
 		assert.Contains(t, prompt, "<<<RALPHEX:REVIEW_DONE>>>")
 		assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
 		// verify expanded agent content from quality and implementation agents
@@ -65,13 +79,16 @@ func TestRunner_buildSecondReviewPrompt(t *testing.T) {
 		assert.Contains(t, prompt, "achieves the stated goal") // from implementation agent
 		// should NOT have testing agent (only 2 agents for second pass)
 		assert.NotContains(t, prompt, "test coverage")
+		// verify no unsubstituted template variables remain
+		assert.NotContains(t, prompt, "{{DEFAULT_BRANCH}}")
 	})
 
-	t.Run("without plan file", func(t *testing.T) {
-		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", AppConfig: testAppConfig(t)}, log: newMockLogger("")}
-		prompt := r.buildSecondReviewPrompt()
+	t.Run("without plan file uses default branch in goal", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", DefaultBranch: "develop", AppConfig: appCfg}, log: newMockLogger("")}
+		prompt := r.replacePromptVariables(appCfg.ReviewSecondPrompt)
 
-		assert.Contains(t, prompt, "current branch vs master")
+		assert.Contains(t, prompt, "current branch vs develop")
 		assert.Contains(t, prompt, "progress.txt")
 	})
 }
@@ -89,44 +106,51 @@ func TestRunner_buildCodexEvaluationPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "Invalid/irrelevant issues")
 }
 
-func TestRunner_buildTaskPrompt_CustomPrompt(t *testing.T) {
+func TestRunner_replacePromptVariables_CustomTaskPrompt(t *testing.T) {
 	appCfg := &config.Config{
 		TaskPrompt: "Custom task prompt for {{PLAN_FILE}} with progress at {{PROGRESS_FILE}}",
 	}
 	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: appCfg}}
-	prompt := r.buildTaskPrompt()
+	prompt := r.replacePromptVariables(appCfg.TaskPrompt)
 
 	assert.Equal(t, "Custom task prompt for docs/plans/test.md with progress at progress-test.txt", prompt)
 	// verify it doesn't contain default prompt content
 	assert.NotContains(t, prompt, "<<<RALPHEX:ALL_TASKS_DONE>>>")
 }
 
-func TestRunner_buildFirstReviewPrompt_CustomPrompt(t *testing.T) {
+func TestRunner_replacePromptVariables_CustomReviewFirstPrompt(t *testing.T) {
 	appCfg := &config.Config{
 		ReviewFirstPrompt: "Custom first review for {{GOAL}}",
 	}
 
 	t.Run("with plan file", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
-		prompt := r.buildFirstReviewPrompt()
+		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Equal(t, "Custom first review for implementation of plan at docs/plans/test.md", prompt)
 	})
 
-	t.Run("without plan file", func(t *testing.T) {
+	t.Run("without plan file uses default branch", func(t *testing.T) {
+		r := &Runner{cfg: Config{PlanFile: "", DefaultBranch: "main", AppConfig: appCfg}}
+		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+
+		assert.Equal(t, "Custom first review for current branch vs main", prompt)
+	})
+
+	t.Run("without plan file fallback to master", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "", AppConfig: appCfg}}
-		prompt := r.buildFirstReviewPrompt()
+		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Equal(t, "Custom first review for current branch vs master", prompt)
 	})
 }
 
-func TestRunner_buildSecondReviewPrompt_CustomPrompt(t *testing.T) {
+func TestRunner_replacePromptVariables_CustomReviewSecondPrompt(t *testing.T) {
 	appCfg := &config.Config{
 		ReviewSecondPrompt: "Custom second review for {{GOAL}}",
 	}
 	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
-	prompt := r.buildSecondReviewPrompt()
+	prompt := r.replacePromptVariables(appCfg.ReviewSecondPrompt)
 
 	assert.Equal(t, "Custom second review for implementation of plan at docs/plans/test.md", prompt)
 }
@@ -166,9 +190,31 @@ func TestRunner_replacePromptVariables(t *testing.T) {
 }
 
 func TestRunner_replacePromptVariables_NoGoal(t *testing.T) {
-	r := &Runner{cfg: Config{PlanFile: ""}}
-	result := r.replacePromptVariables("Goal: {{GOAL}}")
-	assert.Equal(t, "Goal: current branch vs master", result)
+	t.Run("fallback to master when default branch not set", func(t *testing.T) {
+		r := &Runner{cfg: Config{PlanFile: ""}}
+		result := r.replacePromptVariables("Goal: {{GOAL}}")
+		assert.Equal(t, "Goal: current branch vs master", result)
+	})
+
+	t.Run("uses configured default branch", func(t *testing.T) {
+		r := &Runner{cfg: Config{PlanFile: "", DefaultBranch: "trunk"}}
+		result := r.replacePromptVariables("Goal: {{GOAL}}")
+		assert.Equal(t, "Goal: current branch vs trunk", result)
+	})
+}
+
+func TestRunner_replacePromptVariables_DefaultBranch(t *testing.T) {
+	t.Run("replaces DEFAULT_BRANCH variable", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.replacePromptVariables("git diff {{DEFAULT_BRANCH}}...HEAD")
+		assert.Equal(t, "git diff main...HEAD", result)
+	})
+
+	t.Run("fallback to master when not configured", func(t *testing.T) {
+		r := &Runner{cfg: Config{}}
+		result := r.replacePromptVariables("git diff {{DEFAULT_BRANCH}}...HEAD")
+		assert.Equal(t, "git diff master...HEAD", result)
+	})
 }
 
 func TestRunner_getPlanFileRef(t *testing.T) {
@@ -345,7 +391,7 @@ func TestRunner_expandAgentReferences_DuplicateReferences(t *testing.T) {
 func TestRunner_expandAgentReferences_SpecialCharactersInPrompt(t *testing.T) {
 	appCfg := &config.Config{
 		CustomAgents: []config.CustomAgent{
-			{Name: "regex-agent", Prompt: "check for patterns like {{PLAN_FILE}} and $variables\nwith newlines\tand tabs"},
+			{Name: "regex-agent", Prompt: "check for patterns and $variables\nwith newlines\tand tabs"},
 		},
 	}
 	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
@@ -356,11 +402,45 @@ func TestRunner_expandAgentReferences_SpecialCharactersInPrompt(t *testing.T) {
 	// prompt with special characters preserves newlines and tabs
 	assert.NotContains(t, result, "{{agent:regex-agent}}")
 	assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent")
-	assert.Contains(t, result, "{{PLAN_FILE}}")
 	assert.Contains(t, result, "$variables")
 	// verify actual newlines/tabs are preserved (not escaped as \n \t)
 	assert.Contains(t, result, "\n")
 	assert.Contains(t, result, "\t")
+}
+
+func TestRunner_expandAgentReferences_ExpandsVariablesInContent(t *testing.T) {
+	t.Run("expands all template variables in agent content", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomAgents: []config.CustomAgent{
+				{Name: "review", Prompt: "review changes on {{DEFAULT_BRANCH}}, plan: {{PLAN_FILE}}, goal: {{GOAL}}"},
+			},
+		}
+		r := &Runner{cfg: Config{PlanFile: "docs/plan.md", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
+
+		prompt := "Run {{agent:review}}"
+		result := r.expandAgentReferences(prompt)
+
+		assert.Contains(t, result, "review changes on main")
+		assert.Contains(t, result, "plan: docs/plan.md")
+		assert.Contains(t, result, "goal: implementation of plan at docs/plan.md")
+		assert.NotContains(t, result, "{{DEFAULT_BRANCH}}")
+		assert.NotContains(t, result, "{{PLAN_FILE}}")
+		assert.NotContains(t, result, "{{GOAL}}")
+	})
+
+	t.Run("uses fallbacks when config values not set", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomAgents: []config.CustomAgent{
+				{Name: "review", Prompt: "diff {{DEFAULT_BRANCH}}..HEAD"},
+			},
+		}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+
+		prompt := "Run {{agent:review}}"
+		result := r.expandAgentReferences(prompt)
+
+		assert.Contains(t, result, "diff master..HEAD")
+	})
 }
 
 func TestRunner_expandAgentReferences_CaseSensitivity(t *testing.T) {

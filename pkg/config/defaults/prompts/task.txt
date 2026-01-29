@@ -5,6 +5,7 @@
 #   {{PLAN_FILE}} - path to the plan file being executed
 #   {{PROGRESS_FILE}} - path to the progress log file
 #   {{GOAL}} - human-readable goal description
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
 
 Read the plan file at {{PLAN_FILE}}. Find the FIRST Task section (### Task N: or ### Iteration N:) that has uncompleted checkboxes ([ ]).
 

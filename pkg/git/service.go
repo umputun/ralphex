@@ -49,6 +49,12 @@ func (s *Service) IsMainBranch() (bool, error) {
 	return s.repo.IsMainBranch()
 }
 
+// GetDefaultBranch returns the default branch name.
+// detects from origin/HEAD or common branch names (main, master, trunk, develop).
+func (s *Service) GetDefaultBranch() string {
+	return s.repo.GetDefaultBranch()
+}
+
 // HasCommits returns true if the repository has at least one commit.
 func (s *Service) HasCommits() (bool, error) {
 	return s.repo.HasCommits()

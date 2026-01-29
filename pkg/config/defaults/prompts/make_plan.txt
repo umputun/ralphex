@@ -5,6 +5,7 @@
 # available variables:
 #   {{PLAN_DESCRIPTION}} - user's original request for what to implement
 #   {{PROGRESS_FILE}} - path to progress file with Q&A history
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
 
 You are helping create an implementation plan for: {{PLAN_DESCRIPTION}}
 

@@ -530,3 +530,65 @@ func (r *repo) IsMainBranch() (bool, error) {
 	}
 	return branch == "main" || branch == "master", nil
 }
+
+// GetDefaultBranch returns the default branch name.
+// detects the default branch in this order:
+// 1. check origin/HEAD symbolic reference (most reliable for repos with remotes)
+// 2. check common branch names: main, master, trunk, develop
+// 3. fall back to "master" if nothing else found
+func (r *repo) GetDefaultBranch() string {
+	// first, try to get the default branch from origin/HEAD
+	if branch := r.getDefaultBranchFromOriginHead(); branch != "" {
+		return branch
+	}
+
+	// fallback: check which common branch names exist
+	branches, err := r.gitRepo.Branches()
+	if err != nil {
+		return "master"
+	}
+
+	branchSet := make(map[string]bool)
+	_ = branches.ForEach(func(ref *plumbing.Reference) error {
+		branchSet[ref.Name().Short()] = true
+		return nil
+	})
+
+	// check common default branch names in order of preference
+	for _, name := range []string{"main", "master", "trunk", "develop"} {
+		if branchSet[name] {
+			return name
+		}
+	}
+
+	return "master"
+}
+
+// getDefaultBranchFromOriginHead attempts to detect default branch from origin/HEAD symbolic ref.
+// returns empty string if origin/HEAD doesn't exist or isn't a symbolic reference.
+// returns local branch name if it exists, otherwise returns remote-tracking branch (e.g., "origin/main").
+func (r *repo) getDefaultBranchFromOriginHead() string {
+	ref, err := r.gitRepo.Reference(plumbing.NewRemoteReferenceName("origin", "HEAD"), false)
+	if err != nil {
+		return ""
+	}
+	if ref.Type() != plumbing.SymbolicReference {
+		return ""
+	}
+
+	target := ref.Target().Short()
+	if !strings.HasPrefix(target, "origin/") {
+		return target
+	}
+
+	// target is like "origin/main", extract branch name
+	branchName := target[7:]
+	// verify local branch exists before returning it
+	// if local doesn't exist, return remote-tracking ref which git commands understand
+	localRef := plumbing.NewBranchReferenceName(branchName)
+	if _, err := r.gitRepo.Reference(localRef, false); err == nil {
+		return branchName
+	}
+	// local branch doesn't exist, use remote-tracking branch (e.g., "origin/main")
+	return target
+}

@@ -491,3 +491,27 @@ func TestService_EnsureIgnored(t *testing.T) {
 		assert.Contains(t, string(content), "*.tmp")
 	})
 }
+
+func TestService_GetDefaultBranch(t *testing.T) {
+	t.Run("returns detected default branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		branch := svc.GetDefaultBranch()
+		assert.Equal(t, "master", branch)
+	})
+
+	t.Run("returns main when main branch exists", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create main branch
+		err = svc.CreateBranch("main")
+		require.NoError(t, err)
+
+		branch := svc.GetDefaultBranch()
+		assert.Equal(t, "main", branch)
+	})
+}

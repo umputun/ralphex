@@ -56,12 +56,13 @@ type startupInfo struct {
 
 // executePlanRequest holds parameters for plan execution.
 type executePlanRequest struct {
-	PlanFile string
-	Mode     processor.Mode
-	GitSvc   *git.Service
-	Config   *config.Config
-	Colors   *progress.Colors
-	Selector *plan.Selector
+	PlanFile      string
+	Mode          processor.Mode
+	GitSvc        *git.Service
+	Config        *config.Config
+	Colors        *progress.Colors
+	Selector      *plan.Selector
+	DefaultBranch string
 }
 
 func main() {
@@ -161,6 +162,9 @@ func run(ctx context.Context, o opts) error {
 		return ensureErr
 	}
 
+	// detect default branch for prompt templates
+	defaultBranch := gitSvc.GetDefaultBranch()
+
 	mode := determineMode(o)
 
 	// create plan selector for use by plan selection and plan mode
@@ -169,11 +173,12 @@ func run(ctx context.Context, o opts) error {
 	// plan mode has different flow - doesn't require plan file selection
 	if mode == processor.ModePlan {
 		return runPlanMode(ctx, o, executePlanRequest{
-			Mode:     processor.ModePlan,
-			GitSvc:   gitSvc,
-			Config:   cfg,
-			Colors:   colors,
-			Selector: selector,
+			Mode:          processor.ModePlan,
+			GitSvc:        gitSvc,
+			Config:        cfg,
+			Colors:        colors,
+			Selector:      selector,
+			DefaultBranch: defaultBranch,
 		})
 	}
 
@@ -182,10 +187,11 @@ func run(ctx context.Context, o opts) error {
 	if err != nil {
 		// check for auto-plan-mode: no plans found on main/master branch
 		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, executePlanRequest{
-			GitSvc:   gitSvc,
-			Config:   cfg,
-			Colors:   colors,
-			Selector: selector,
+			GitSvc:        gitSvc,
+			Config:        cfg,
+			Colors:        colors,
+			Selector:      selector,
+			DefaultBranch: defaultBranch,
 		})
 		if handled {
 			return autoPlanErr
@@ -204,12 +210,13 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	return executePlan(ctx, o, executePlanRequest{
-		PlanFile: planFile,
-		Mode:     mode,
-		GitSvc:   gitSvc,
-		Config:   cfg,
-		Colors:   colors,
-		Selector: selector,
+		PlanFile:      planFile,
+		Mode:          mode,
+		GitSvc:        gitSvc,
+		Config:        cfg,
+		Colors:        colors,
+		Selector:      selector,
+		DefaultBranch: defaultBranch,
 	})
 }
 
@@ -298,7 +305,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}, req.Colors)
 
 	// create and run the runner
-	r := createRunner(req.Config, o, req.PlanFile, req.Mode, runnerLog)
+	r := createRunner(req.Config, o, req.PlanFile, req.Mode, runnerLog, req.DefaultBranch)
 	if runErr := r.Run(ctx); runErr != nil {
 		return fmt.Errorf("runner: %w", runErr)
 	}
@@ -367,7 +374,7 @@ func validateFlags(o opts) error {
 }
 
 // createRunner creates a processor.Runner with the given configuration.
-func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mode, log processor.Logger) *processor.Runner {
+func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mode, log processor.Logger, defaultBranch string) *processor.Runner {
 	// --codex-only mode forces codex enabled regardless of config
 	codexEnabled := cfg.CodexEnabled
 	if mode == processor.ModeCodexOnly {
@@ -383,6 +390,7 @@ func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mo
 		IterationDelayMs: cfg.IterationDelayMs,
 		TaskRetryCount:   cfg.TaskRetryCount,
 		CodexEnabled:     codexEnabled,
+		DefaultBranch:    defaultBranch,
 		AppConfig:        cfg,
 	}, log)
 }
@@ -460,6 +468,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		Debug:            o.Debug,
 		NoColor:          o.NoColor,
 		IterationDelayMs: req.Config.IterationDelayMs,
+		DefaultBranch:    req.DefaultBranch,
 		AppConfig:        req.Config,
 	}, baseLog)
 	r.SetInputCollector(collector)
@@ -514,11 +523,12 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	return executePlan(ctx, o, executePlanRequest{
-		PlanFile: planFile,
-		Mode:     processor.ModeFull,
-		GitSvc:   req.GitSvc,
-		Config:   req.Config,
-		Colors:   req.Colors,
+		PlanFile:      planFile,
+		Mode:          processor.ModeFull,
+		GitSvc:        req.GitSvc,
+		Config:        req.Config,
+		Colors:        req.Colors,
+		DefaultBranch: req.DefaultBranch,
 	})
 }
 

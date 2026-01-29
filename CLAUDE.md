@@ -143,7 +143,14 @@ project/
 - `simplification.txt` - detects over-engineering
 - `testing.txt` - reviews test coverage and quality
 
-**Template syntax:** Use `{{agent:name}}` in prompt files to reference agents. Each reference expands to Task tool instructions that tell Claude Code to run that agent.
+**Template variables:** Prompt files support variable expansion via `replacePromptVariables()` in `pkg/processor/prompts.go`:
+- `{{PLAN_FILE}}` - path to plan file or fallback text
+- `{{PROGRESS_FILE}}` - path to progress log or fallback text
+- `{{GOAL}}` - human-readable goal (plan-based or branch comparison)
+- `{{DEFAULT_BRANCH}}` - detected default branch (main, master, origin/main, etc.)
+- `{{agent:name}}` - expands to Task tool instructions for the named agent
+
+Variables are also expanded inside agent content, so custom agents can use `{{DEFAULT_BRANCH}}` etc.
 
 **Customization:**
 - Edit files in `~/.config/ralphex/agents/` to modify agent prompts

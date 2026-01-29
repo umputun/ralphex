@@ -5,6 +5,7 @@
 # available variables:
 #   {{PLAN_FILE}} - path to the plan file being executed
 #   {{GOAL}} - human-readable goal description
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
 #   {{CODEX_OUTPUT}} - output from codex code review
 
 External code review evaluation.
