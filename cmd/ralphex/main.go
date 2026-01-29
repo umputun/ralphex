@@ -236,7 +236,7 @@ func isMainBranch(branch string) bool {
 // returns the trimmed description, or empty string if user cancels (Ctrl+C/Ctrl+D/EOF or empty input).
 func promptPlanDescription(ctx context.Context, r io.Reader, colors *progress.Colors) string {
 	colors.Info().Printf("no plans found. what would you like to implement?\n")
-	colors.Info().Printf("(enter description or press Ctrl+D to cancel): ")
+	colors.Info().Printf("(enter description or press Ctrl+C/Ctrl+D to cancel): ")
 
 	reader := bufio.NewReader(r)
 	line, err := input.ReadLineWithContext(ctx, reader)
@@ -683,6 +683,9 @@ func ensureRepoHasCommits(ctx context.Context, gitOps *git.Repo, stdin io.Reader
 	fmt.Fprintln(stdout, "ralphex needs at least one commit to create feature branches.")
 	fmt.Fprintln(stdout)
 	if !input.AskYesNo(ctx, "create initial commit?", stdin, stdout) {
+		if err = ctx.Err(); err != nil {
+			return fmt.Errorf("create initial commit: %w", err)
+		}
 		return errors.New("no commits - please create initial commit manually")
 	}
 
