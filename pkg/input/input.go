@@ -25,6 +25,10 @@ type ReadLineResult struct {
 func ReadLineWithContext(ctx context.Context, reader *bufio.Reader) (string, error) {
 	resultCh := make(chan ReadLineResult, 1)
 
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("read line: %w", err)
+	}
+
 	go func() {
 		line, err := reader.ReadString('\n')
 		resultCh <- ReadLineResult{Line: line, Err: err}
