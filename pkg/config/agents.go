@@ -22,8 +22,11 @@ func newAgentLoader(embedFS embed.FS) *agentLoader {
 }
 
 // Load loads custom agent files from config directories.
-// it uses replace behavior: if local agents dir has any .txt files,
+// agents use "replace entire set" behavior: if local agents dir has any .txt files,
 // use ONLY local agents; otherwise fall back to global agents.
+// this differs from prompts which use per-file fallback (local → global → embedded).
+// rationale: agents define the review strategy as a cohesive set, so partial mixing
+// would create unpredictable review behavior.
 func (al *agentLoader) Load(localDir, globalDir string) ([]CustomAgent, error) {
 	// check if local agents dir has any .txt files
 	if localDir != "" {
