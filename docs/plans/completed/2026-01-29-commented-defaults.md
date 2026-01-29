@@ -48,11 +48,11 @@ func commentOutContent(content string) string {
 - Modify: `pkg/config/defaults.go`
 - Modify: `pkg/config/defaults_test.go`
 
-- [ ] Add `commentOutContent(content string) string` function
-- [ ] Add `shouldOverwrite(filePath string) bool` function (uses stripComments + TrimSpace)
-- [ ] Add tests for `commentOutContent` (regular lines, already-commented, empty lines, mixed)
-- [ ] Add tests for `shouldOverwrite` (all-commented, empty, has content, file not exists)
-- [ ] Verify tests pass
+- [x] Add `commentOutContent(content string) string` function
+- [x] Add `shouldOverwrite(filePath string) bool` function (uses stripComments + TrimSpace)
+- [x] Add tests for `commentOutContent` (regular lines, already-commented, empty lines, mixed)
+- [x] Add tests for `shouldOverwrite` (all-commented, empty, has content, file not exists)
+- [x] Verify tests pass
 
 ### 2. Update defaults installer
 
@@ -60,12 +60,12 @@ func commentOutContent(content string) string {
 - Modify: `pkg/config/defaults.go`
 - Modify: `pkg/config/defaults_test.go`
 
-- [ ] Modify `copyConfigFile` to use `commentOutContent` before writing
-- [ ] Modify `copyConfigFile` to check `shouldOverwrite` before overwriting existing files
-- [ ] Modify `copyPromptFiles` to use `commentOutContent` and `shouldOverwrite`
-- [ ] Modify `copyAgentFiles` to use `commentOutContent` and `shouldOverwrite`
-- [ ] Add integration tests for install with existing files
-- [ ] Verify tests pass
+- [x] Modify `copyConfigFile` to use `commentOutContent` before writing
+- [x] Modify `copyConfigFile` to check `shouldOverwrite` before overwriting existing files
+- [x] Modify `copyPromptFiles` to use `commentOutContent` and `shouldOverwrite`
+- [x] Modify `copyAgentFiles` to use `commentOutContent` and `shouldOverwrite`
+- [x] Add integration tests for install with existing files
+- [x] Verify tests pass
 
 ### 3. Update config values loading
 
@@ -73,9 +73,9 @@ func commentOutContent(content string) string {
 - Modify: `pkg/config/values.go`
 - Modify: `pkg/config/values_test.go`
 
-- [ ] Update config loading to strip comments and fall back to embedded if empty
-- [ ] Add tests for fallback behavior (all-commented config falls back to embedded)
-- [ ] Verify tests pass
+- [x] Update config loading to strip comments and fall back to embedded if empty
+- [x] Add tests for fallback behavior (all-commented config falls back to embedded)
+- [x] Verify tests pass
 
 ### 4. Update agents loading
 
@@ -83,9 +83,9 @@ func commentOutContent(content string) string {
 - Modify: `pkg/config/agents.go`
 - Modify: `pkg/config/agents_test.go`
 
-- [ ] Update agent loading to strip comments and fall back to embedded if empty
-- [ ] Add tests for fallback behavior per agent file
-- [ ] Verify tests pass
+- [x] Update agent loading to strip comments and fall back to embedded if empty
+- [x] Add tests for fallback behavior per agent file
+- [x] Verify tests pass
 
 ### 5. Verify prompts loading
 
@@ -93,14 +93,14 @@ func commentOutContent(content string) string {
 - Review: `pkg/config/prompts.go`
 - Modify: `pkg/config/prompts_test.go`
 
-- [ ] Verify existing `loadPromptWithFallback` already handles this pattern correctly
-- [ ] Add explicit tests for all-commented prompt files falling back to embedded
-- [ ] Verify tests pass
+- [x] Verify existing `loadPromptWithFallback` already handles this pattern correctly
+- [x] Add explicit tests for all-commented prompt files falling back to embedded
+- [x] Verify tests pass
 
 ### 6. Final Validation
 
-- [ ] Run full test suite: `make test`
-- [ ] Run linter: `make lint`
-- [ ] Test manually: delete config dir, run ralphex, verify files are commented templates
-- [ ] Test manually: verify uncommented file is not overwritten on re-run
-- [ ] Move plan to `docs/plans/completed/`
+- [x] Run full test suite: `make test`
+- [x] Run linter: `make lint`
+- [x] Test manually: delete config dir, run ralphex, verify files are commented templates
+- [x] Test manually: verify uncommented file is not overwritten on re-run
+- [x] Move plan to `docs/plans/completed/`

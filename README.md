@@ -371,6 +371,12 @@ ralphex uses a configuration directory at `~/.config/ralphex/` with the followin
 
 On first run, ralphex creates this directory with default configuration.
 
+**Commented templates:**
+- Config files are installed with all content commented out (`# ` prefix)
+- Uncomment only the settings you want to customize
+- Files that remain all-commented receive automatic updates with new defaults
+- Once you uncomment any setting, the file is preserved and won't be overwritten
+
 ### Local Project Config
 
 Projects can override global settings with a `.ralphex/` directory in the project root:
