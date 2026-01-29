@@ -81,6 +81,12 @@ type Session struct {
 
 	// loaded tracks whether historical data has been loaded into the SSE server
 	loaded bool
+
+	// inputCollector for web-based plan creation (nil when not in plan creation mode)
+	inputCollector *WebInputCollector
+
+	// cancelFunc for canceling plan creation context
+	cancelFunc context.CancelFunc
 }
 
 // NewSession creates a new session for the given progress file path.
@@ -268,5 +274,36 @@ func (s *Session) Close() {
 	defer cancel()
 	if err := s.SSE.Shutdown(ctx); err != nil {
 		log.Printf("[WARN] failed to shutdown SSE server: %v", err)
+	}
+}
+
+// SetInputCollector sets the input collector for web-based plan creation.
+func (s *Session) SetInputCollector(collector *WebInputCollector) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inputCollector = collector
+}
+
+// GetInputCollector returns the input collector, or nil if not set.
+func (s *Session) GetInputCollector() *WebInputCollector {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.inputCollector
+}
+
+// SetCancelFunc sets the cancel function for plan creation context.
+func (s *Session) SetCancelFunc(cancel context.CancelFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cancelFunc = cancel
+}
+
+// Cancel cancels the plan creation context, if any.
+// Safe to call even if no cancel func is set.
+func (s *Session) Cancel() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancelFunc != nil {
+		s.cancelFunc()
 	}
 }

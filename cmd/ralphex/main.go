@@ -86,6 +86,7 @@ type webDashboardParams struct {
 	WatchDirs       []string // CLI watch dirs
 	ConfigWatchDirs []string // config watch dirs
 	Colors          *progress.Colors
+	AppConfig       *config.Config // app config for plan runner
 }
 
 func main() {
@@ -154,6 +155,16 @@ func run(ctx context.Context, o opts) error {
 	// runs web dashboard without plan execution, can run from any directory
 	if isWatchOnlyMode(o, cfg.WatchDirs) {
 		return runWatchOnly(ctx, o, cfg, colors)
+	}
+	if shouldServeDashboardWithoutPlan(o, cfg.WatchDirs) {
+		hasPlans, planErr := plansExist(cfg.PlansDir)
+		if planErr != nil {
+			return planErr
+		}
+		if !hasPlans {
+			colors.Info().Printf("no plans found. starting dashboard in watch-only mode (watching current directory). use --watch to monitor other directories\n")
+			return runWatchOnly(ctx, o, cfg, colors)
+		}
 	}
 
 	// check dependencies using configured command (or default "claude")
@@ -327,6 +338,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		WatchDirs:       o.Watch,
 		ConfigWatchDirs: req.Config.WatchDirs,
 		Colors:          req.Colors,
+		AppConfig:       req.Config,
 	})
 	if err != nil {
 		return err
@@ -403,6 +415,19 @@ func checkClaudeDep(cfg *config.Config) error {
 // example: ralphex --serve --watch ~/projects --watch /tmp
 func isWatchOnlyMode(o opts, configWatchDirs []string) bool {
 	return o.Serve && o.PlanFile == "" && o.PlanDescription == "" && (len(o.Watch) > 0 || len(configWatchDirs) > 0)
+}
+
+// shouldServeDashboardWithoutPlan returns true when --serve is set without a plan
+// and no watch directories are configured, which should fall back to a minimal dashboard
+// if no plans exist.
+func shouldServeDashboardWithoutPlan(o opts, configWatchDirs []string) bool {
+	if !o.Serve || o.PlanFile != "" || o.PlanDescription != "" {
+		return false
+	}
+	if o.Review || o.CodexOnly {
+		return false
+	}
+	return len(o.Watch) == 0 && len(configWatchDirs) == 0
 }
 
 // determineMode returns the execution mode based on CLI flags.
@@ -524,6 +549,25 @@ func selectPlanWithFzf(ctx context.Context, plansDir string, colors *progress.Co
 	}
 
 	return strings.TrimSpace(string(out)), nil
+}
+
+// plansExist returns true if there is at least one plan file in plansDir.
+// missing directories are treated as no plans.
+func plansExist(plansDir string) (bool, error) {
+	if plansDir == "" {
+		return false, errors.New("plans directory is empty")
+	}
+	if _, err := os.Stat(plansDir); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("cannot access plans directory %s: %w", plansDir, err)
+	}
+	plans, err := filepath.Glob(filepath.Join(plansDir, "*.md"))
+	if err != nil {
+		return false, fmt.Errorf("scan plans directory %s: %w", plansDir, err)
+	}
+	return len(plans) > 0, nil
 }
 
 // extractBranchName derives a branch name from a plan file path.
@@ -715,6 +759,7 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 // monitors directories for progress files and serves the multi-session dashboard.
 func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progress.Colors) error {
 	dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
+	watchExplicit := len(o.Watch) > 0 || len(cfg.WatchDirs) > 0
 
 	// fail fast if no watch directories configured
 	if len(dirs) == 0 {
@@ -722,7 +767,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 	}
 
 	// setup server and watcher
-	srvErrCh, watchErrCh, err := setupWatchMode(ctx, o.Port, dirs)
+	srvErrCh, watchErrCh, err := setupWatchMode(ctx, o.Port, dirs, watchExplicit, cfg)
 	if err != nil {
 		return err
 	}
@@ -736,7 +781,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 
 // setupWatchMode creates and starts the web server and file watcher for watch-only mode.
 // returns error channels for monitoring both components.
-func setupWatchMode(ctx context.Context, port int, dirs []string) (chan error, chan error, error) {
+func setupWatchMode(ctx context.Context, port int, dirs []string, watchExplicit bool, cfg *config.Config) (chan error, chan error, error) {
 	sm := web.NewSessionManager()
 	watcher, err := web.NewWatcher(dirs, sm)
 	if err != nil {
@@ -744,15 +789,24 @@ func setupWatchMode(ctx context.Context, port int, dirs []string) (chan error, c
 	}
 
 	serverCfg := web.ServerConfig{
-		Port:     port,
-		PlanName: "(watch mode)",
-		Branch:   "",
-		PlanFile: "",
+		Port:          port,
+		PlanName:      "(watch mode)",
+		Branch:        "",
+		PlanFile:      "",
+		WatchExplicit: watchExplicit,
 	}
 
 	srv, err := web.NewServerWithSessions(serverCfg, sm)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create web server: %w", err)
+	}
+
+	// set up plan runner for web-initiated plan creation
+	if cfg != nil {
+		if len(dirs) > 0 {
+			cfg.WatchDirs = dirs
+		}
+		srv.SetPlanRunner(web.NewPlanRunner(cfg, sm))
 	}
 
 	// start server with startup check
@@ -1014,41 +1068,42 @@ func startWebDashboard(ctx context.Context, p webDashboardParams) (processor.Log
 		PlanFile: p.PlanFile,
 	}
 
-	// determine if we should use multi-session mode
-	// multi-session mode is enabled when watch dirs are provided via CLI or config
-	useMultiSession := len(p.WatchDirs) > 0 || len(p.ConfigWatchDirs) > 0
-
 	var srv *web.Server
 	var watcher *web.Watcher
+	var sm *web.SessionManager
+
+	// resolve watch directories upfront (CLI > config > cwd)
+	dirs := web.ResolveWatchDirs(p.WatchDirs, p.ConfigWatchDirs)
+	useMultiSession := len(dirs) > 0
 
 	if useMultiSession {
 		// multi-session mode: use SessionManager and Watcher
-		sm := web.NewSessionManager()
-
-		// register the live execution session so dashboard uses it instead of creating a duplicate
-		// this ensures live events from BroadcastLogger go to the same session the dashboard displays
-		sm.Register(session)
-
-		// resolve watch directories (CLI > config > cwd)
-		dirs := web.ResolveWatchDirs(p.WatchDirs, p.ConfigWatchDirs)
+		sm = web.NewSessionManager()
+		sm.Register(session) // use live session instead of creating duplicate
 
 		var err error
 		watcher, err = web.NewWatcher(dirs, sm)
 		if err != nil {
 			return nil, fmt.Errorf("create watcher: %w", err)
 		}
-
 		srv, err = web.NewServerWithSessions(cfg, sm)
 		if err != nil {
 			return nil, fmt.Errorf("create web server: %w", err)
 		}
 	} else {
-		// single-session mode: direct session for current execution
 		var err error
 		srv, err = web.NewServer(cfg, session)
 		if err != nil {
 			return nil, fmt.Errorf("create web server: %w", err)
 		}
+	}
+
+	// set up plan runner for web-initiated plan creation
+	if p.AppConfig != nil {
+		if len(dirs) > 0 {
+			p.AppConfig.WatchDirs = dirs
+		}
+		srv.SetPlanRunner(web.NewPlanRunner(p.AppConfig, sm))
 	}
 
 	// start server with startup check

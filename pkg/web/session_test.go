@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -377,4 +378,97 @@ func (m *mockMessageWriter) Send(msg *sse.Message) error {
 
 func (m *mockMessageWriter) Flush() error {
 	return nil
+}
+
+func TestSession_InputCollector(t *testing.T) {
+	t.Run("starts with nil input collector", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		assert.Nil(t, s.GetInputCollector())
+	})
+
+	t.Run("set and get input collector", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		collector := NewWebInputCollector(s)
+		s.SetInputCollector(collector)
+
+		got := s.GetInputCollector()
+		assert.Equal(t, collector, got)
+	})
+
+	t.Run("can replace input collector", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		collector1 := NewWebInputCollector(s)
+		collector2 := NewWebInputCollector(s)
+
+		s.SetInputCollector(collector1)
+		assert.Equal(t, collector1, s.GetInputCollector())
+
+		s.SetInputCollector(collector2)
+		assert.Equal(t, collector2, s.GetInputCollector())
+	})
+}
+
+func TestSession_Cancel(t *testing.T) {
+	t.Run("cancels context when set", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		// create a cancellable context
+		ctx, cancel := context.WithCancel(context.Background())
+		s.SetCancelFunc(cancel)
+
+		// context should not be canceled yet
+		select {
+		case <-ctx.Done():
+			t.Fatal("context should not be canceled yet")
+		default:
+			// expected
+		}
+
+		// cancel the session
+		s.Cancel()
+
+		// context should now be canceled
+		select {
+		case <-ctx.Done():
+			// expected
+		default:
+			t.Fatal("context should be canceled")
+		}
+	})
+
+	t.Run("safe to call when no cancel func set", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		// should not panic
+		s.Cancel()
+	})
+
+	t.Run("safe to call multiple times", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		s.SetCancelFunc(cancel)
+
+		// multiple calls should be safe
+		s.Cancel()
+		s.Cancel()
+		s.Cancel()
+
+		// context should be canceled
+		select {
+		case <-ctx.Done():
+			// expected
+		default:
+			t.Fatal("context should be canceled")
+		}
+	})
 }

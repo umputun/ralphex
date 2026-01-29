@@ -84,6 +84,11 @@ plans_dir = docs/plans
 # example: watch_dirs = /home/user/projects, /var/log/ralphex
 # watch_dirs =
 
+# project_dirs: directories to show in the "new plan" dropdown
+# comma-separated list of paths, relative paths resolved from project root
+# example: project_dirs = /home/user/projects, /srv/other
+# project_dirs =
+
 # ------------------------------------------------------------------------------
 # output colors (hex format: #RRGGBB)
 # ------------------------------------------------------------------------------

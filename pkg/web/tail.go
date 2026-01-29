@@ -348,6 +348,8 @@ func normalizePlainSignal(text string) string {
 		return "COMPLETED"
 	case "TASK_FAILED", "ALL_TASKS_FAILED", "FAILED":
 		return "FAILED"
+	case "PLAN_READY":
+		return "PLAN_READY"
 	case "REVIEW_DONE":
 		return "REVIEW_DONE"
 	case "CODEX_REVIEW_DONE":
@@ -364,6 +366,8 @@ func normalizeTokenSignal(rawSignal string) string {
 		return "COMPLETED"
 	case "TASK_FAILED", "ALL_TASKS_FAILED":
 		return "FAILED"
+	case "PLAN_READY":
+		return "PLAN_READY"
 	case "REVIEW_DONE":
 		return "REVIEW_DONE"
 	case "CODEX_REVIEW_DONE":

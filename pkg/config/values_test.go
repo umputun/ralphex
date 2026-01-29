@@ -33,6 +33,7 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, 1, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
 	assert.Equal(t, "docs/plans", values.PlansDir)
+	assert.Empty(t, values.ProjectDirs)
 }
 
 func TestValuesLoader_Load_GlobalOnly(t *testing.T) {
@@ -266,6 +267,8 @@ codex_sandbox = none
 iteration_delay_ms = 500
 task_retry_count = 5
 plans_dir = my/plans
+watch_dirs = /watch/a, /watch/b
+project_dirs = /project/a, /project/b
 `
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
@@ -286,6 +289,8 @@ plans_dir = my/plans
 	assert.Equal(t, 5, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
 	assert.Equal(t, "my/plans", values.PlansDir)
+	assert.Equal(t, []string{"/watch/a", "/watch/b"}, values.WatchDirs)
+	assert.Equal(t, []string{"/project/a", "/project/b"}, values.ProjectDirs)
 }
 
 func TestValues_mergeFrom(t *testing.T) {
@@ -293,22 +298,26 @@ func TestValues_mergeFrom(t *testing.T) {
 		dst := Values{
 			ClaudeCommand: "dst-claude",
 			PlansDir:      "dst-plans",
+			ProjectDirs:   []string{"dst-project"},
 		}
 		src := Values{
 			ClaudeCommand: "src-claude",
 			ClaudeArgs:    "src-args",
+			ProjectDirs:   []string{"src-project"},
 		}
 		dst.mergeFrom(&src)
 
 		assert.Equal(t, "src-claude", dst.ClaudeCommand)
 		assert.Equal(t, "src-args", dst.ClaudeArgs)
 		assert.Equal(t, "dst-plans", dst.PlansDir)
+		assert.Equal(t, []string{"src-project"}, dst.ProjectDirs)
 	})
 
 	t.Run("empty source doesn't overwrite", func(t *testing.T) {
 		dst := Values{
 			ClaudeCommand: "dst-claude",
 			PlansDir:      "dst-plans",
+			ProjectDirs:   []string{"dst-project"},
 		}
 		src := Values{
 			ClaudeCommand: "", // empty, shouldn't overwrite
@@ -317,6 +326,7 @@ func TestValues_mergeFrom(t *testing.T) {
 
 		assert.Equal(t, "dst-claude", dst.ClaudeCommand)
 		assert.Equal(t, "dst-plans", dst.PlansDir)
+		assert.Equal(t, []string{"dst-project"}, dst.ProjectDirs)
 	})
 
 	t.Run("set flags control bool and int merging", func(t *testing.T) {
@@ -394,6 +404,8 @@ codex_sandbox = none
 iteration_delay_ms = 5000
 task_retry_count = 3
 plans_dir = custom/plans
+watch_dirs = /watch/one, /watch/two
+project_dirs = /project/one, /project/two
 `)
 		values, err := vl.parseValuesFromBytes(data)
 		require.NoError(t, err)
@@ -411,6 +423,8 @@ plans_dir = custom/plans
 		assert.Equal(t, 3, values.TaskRetryCount)
 		assert.True(t, values.TaskRetryCountSet)
 		assert.Equal(t, "custom/plans", values.PlansDir)
+		assert.Equal(t, []string{"/watch/one", "/watch/two"}, values.WatchDirs)
+		assert.Equal(t, []string{"/project/one", "/project/two"}, values.ProjectDirs)
 	})
 
 	t.Run("empty config", func(t *testing.T) {

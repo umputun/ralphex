@@ -128,6 +128,129 @@ func TestEventType_Constants(t *testing.T) {
 	assert.Equal(t, EventTypeTaskStart, EventType("task_start"))
 	assert.Equal(t, EventTypeTaskEnd, EventType("task_end"))
 	assert.Equal(t, EventTypeIterationStart, EventType("iteration_start"))
+	assert.Equal(t, EventTypeQuestion, EventType("question"))
+	assert.Equal(t, EventTypeQuestionAnswered, EventType("question_answered"))
+}
+
+func TestNewQuestionEvent(t *testing.T) {
+	before := time.Now()
+	e := NewQuestionEvent("q-123", "Which approach?", []string{"Option A", "Option B"}, "some context")
+	after := time.Now()
+
+	assert.Equal(t, EventTypeQuestion, e.Type)
+	assert.Equal(t, "Which approach?", e.Text)
+	assert.True(t, e.Timestamp.After(before) || e.Timestamp.Equal(before))
+	assert.True(t, e.Timestamp.Before(after) || e.Timestamp.Equal(after))
+
+	// verify question data
+	require.NotNil(t, e.QuestionData)
+	assert.Equal(t, "q-123", e.QuestionData.QuestionID)
+	assert.Equal(t, "Which approach?", e.QuestionData.Question)
+	assert.Equal(t, []string{"Option A", "Option B"}, e.QuestionData.Options)
+	assert.Equal(t, "some context", e.QuestionData.Context)
+}
+
+func TestNewQuestionEvent_NoContext(t *testing.T) {
+	e := NewQuestionEvent("q-456", "Pick one", []string{"A", "B", "C"}, "")
+
+	assert.Equal(t, EventTypeQuestion, e.Type)
+	require.NotNil(t, e.QuestionData)
+	assert.Equal(t, "q-456", e.QuestionData.QuestionID)
+	assert.Empty(t, e.QuestionData.Context)
+}
+
+func TestNewQuestionAnsweredEvent(t *testing.T) {
+	before := time.Now()
+	e := NewQuestionAnsweredEvent("q-999", "Option A")
+	after := time.Now()
+
+	assert.Equal(t, EventTypeQuestionAnswered, e.Type)
+	assert.Equal(t, "Option A", e.Text)
+	assert.True(t, e.Timestamp.After(before) || e.Timestamp.Equal(before))
+	assert.True(t, e.Timestamp.Before(after) || e.Timestamp.Equal(after))
+
+	require.NotNil(t, e.AnswerData)
+	assert.Equal(t, "q-999", e.AnswerData.QuestionID)
+	assert.Equal(t, "Option A", e.AnswerData.Answer)
+}
+
+func TestEvent_JSON_QuestionEvent(t *testing.T) {
+	t.Run("question event includes question_data", func(t *testing.T) {
+		e := NewQuestionEvent("q-789", "Choose", []string{"X", "Y"}, "context here")
+
+		data, err := e.JSON()
+		require.NoError(t, err)
+
+		var decoded map[string]any
+		err = json.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+
+		qd, ok := decoded["question_data"].(map[string]any)
+		require.True(t, ok, "question_data should be a map")
+		assert.Equal(t, "q-789", qd["question_id"])
+		assert.Equal(t, "Choose", qd["question"])
+		assert.Equal(t, []any{"X", "Y"}, qd["options"])
+		assert.Equal(t, "context here", qd["context"])
+	})
+
+	t.Run("omits question_data when nil", func(t *testing.T) {
+		e := NewOutputEvent(processor.PhaseTask, "regular output")
+
+		data, err := e.JSON()
+		require.NoError(t, err)
+
+		var decoded map[string]any
+		err = json.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+
+		_, hasQuestionData := decoded["question_data"]
+		assert.False(t, hasQuestionData, "question_data should be omitted when nil")
+	})
+
+	t.Run("omits empty context in question_data", func(t *testing.T) {
+		e := NewQuestionEvent("q-000", "Question", []string{"A"}, "")
+
+		data, err := e.JSON()
+		require.NoError(t, err)
+
+		var decoded map[string]any
+		err = json.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+
+		qd := decoded["question_data"].(map[string]any)
+		_, hasContext := qd["context"]
+		assert.False(t, hasContext, "context should be omitted when empty")
+	})
+
+	t.Run("answer event includes answer_data", func(t *testing.T) {
+		e := NewQuestionAnsweredEvent("q-111", "B")
+
+		data, err := e.JSON()
+		require.NoError(t, err)
+
+		var decoded map[string]any
+		err = json.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+
+		ad, ok := decoded["answer_data"].(map[string]any)
+		require.True(t, ok, "answer_data should be a map")
+		assert.Equal(t, "q-111", ad["question_id"])
+		assert.Equal(t, "B", ad["answer"])
+	})
+
+	t.Run("omits answer_data when nil", func(t *testing.T) {
+		e := NewOutputEvent(processor.PhaseTask, "regular output")
+
+		data, err := e.JSON()
+		require.NoError(t, err)
+
+		var decoded map[string]any
+		err = json.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+
+		_, hasAnswerData := decoded["answer_data"]
+		assert.False(t, hasAnswerData, "answer_data should be omitted when nil")
+	})
 }
 
 func TestNewTaskStartEvent(t *testing.T) {
