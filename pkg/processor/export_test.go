@@ -21,3 +21,8 @@ func (r *Runner) TestConfig() TestRunnerConfig {
 func (r *Runner) TestHasUncompletedTasks() bool {
 	return r.hasUncompletedTasks()
 }
+
+// TestBuildCodexPrompt exposes buildCodexPrompt for testing.
+func (r *Runner) TestBuildCodexPrompt(isFirst bool, claudeResponse string) string {
+	return r.buildCodexPrompt(isFirst, claudeResponse)
+}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -510,17 +509,10 @@ If Claude's arguments are invalid, explain why the issues still exist.`, basePro
 }
 
 // hasUncompletedTasks checks if plan file has any uncompleted checkboxes.
-// Checks both original path and completed/ subdirectory.
 func (r *Runner) hasUncompletedTasks() bool {
-	// try original path first
-	content, err := os.ReadFile(r.cfg.PlanFile)
+	content, err := os.ReadFile(r.resolvePlanFilePath())
 	if err != nil {
-		// try completed/ subdirectory as fallback
-		completedPath := filepath.Join(filepath.Dir(r.cfg.PlanFile), "completed", filepath.Base(r.cfg.PlanFile))
-		content, err = os.ReadFile(completedPath) //nolint:gosec // planFile from CLI args
-		if err != nil {
-			return true // assume incomplete if can't read from either location
-		}
+		return true // assume incomplete if can't read
 	}
 
 	// look for uncompleted checkbox pattern: [ ] (not [x])
