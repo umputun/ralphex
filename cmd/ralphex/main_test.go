@@ -66,7 +66,7 @@ func TestPromptPlanDescription(t *testing.T) {
 		assert.Empty(t, result)
 	})
 
-	t.Run("context_cancelled_returns_empty", func(t *testing.T) {
+	t.Run("context_canceled_returns_empty", func(t *testing.T) {
 		// canceled context simulates Ctrl+C
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
@@ -1423,7 +1423,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		assert.Contains(t, err.Error(), "create initial commit")
 	})
 
-	t.Run("returns error when context cancelled", func(t *testing.T) {
+	t.Run("returns error when context canceled", func(t *testing.T) {
 		dir := t.TempDir()
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)

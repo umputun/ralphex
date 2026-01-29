@@ -156,7 +156,7 @@ func AskYesNo(ctx context.Context, prompt string, stdin io.Reader, stdout io.Wri
 	reader := bufio.NewReader(stdin)
 	line, err := ReadLineWithContext(ctx, reader)
 	if err != nil {
-		// EOF (Ctrl+D), context cancelled (Ctrl+C), or read error
+		// EOF (Ctrl+D), context canceled (Ctrl+C), or read error
 		// print newline so subsequent output doesn't appear on the same line
 		fmt.Fprintln(stdout)
 		return false
