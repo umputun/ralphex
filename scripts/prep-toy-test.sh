@@ -46,6 +46,7 @@ EOF
 echo "creating .gitignore..."
 cat > .gitignore << 'EOF'
 progress-*.txt
+.bin/
 EOF
 
 echo "creating plan file..."
