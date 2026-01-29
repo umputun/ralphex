@@ -454,7 +454,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	}, req.Colors)
 
 	// create input collector
-	collector := input.NewTerminalCollector()
+	collector := input.NewTerminalCollector(o.NoColor)
 
 	// record start time for finding the created plan
 	startTime := time.Now()

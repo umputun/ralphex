@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/umputun/ralphex/pkg/render"
 )
 
 // ReadLineResult holds the result of reading a line
@@ -49,17 +51,36 @@ type Collector interface {
 	// AskQuestion presents a question with options and returns the selected answer.
 	// Returns the selected option text or error if selection fails.
 	AskQuestion(ctx context.Context, question string, options []string) (string, error)
+
+	// AskDraftReview presents a plan draft for review with Accept/Revise/Reject options.
+	// Returns the selected action ("accept", "revise", or "reject") and feedback text (empty for accept/reject).
+	AskDraftReview(ctx context.Context, question string, planContent string) (action string, feedback string, err error)
 }
 
 // TerminalCollector implements Collector using fzf (if available) or numbered selection fallback.
 type TerminalCollector struct {
-	stdin  io.Reader // for testing, nil uses os.Stdin
-	stdout io.Writer // for testing, nil uses os.Stdout
+	stdin   io.Reader // for testing, nil uses os.Stdin
+	stdout  io.Writer // for testing, nil uses os.Stdout
+	noColor bool      // if true, skip glamour rendering
 }
 
-// NewTerminalCollector creates a new TerminalCollector with default stdin/stdout.
-func NewTerminalCollector() *TerminalCollector {
-	return &TerminalCollector{}
+// NewTerminalCollector creates a new TerminalCollector with specified options.
+func NewTerminalCollector(noColor bool) *TerminalCollector {
+	return &TerminalCollector{noColor: noColor}
+}
+
+func (c *TerminalCollector) getStdin() io.Reader {
+	if c.stdin != nil {
+		return c.stdin
+	}
+	return os.Stdin
+}
+
+func (c *TerminalCollector) getStdout() io.Writer {
+	if c.stdout != nil {
+		return c.stdout
+	}
+	return os.Stdout
 }
 
 // AskQuestion presents options using fzf if available, otherwise falls back to numbered selection.
@@ -111,14 +132,8 @@ func (c *TerminalCollector) selectWithFzf(ctx context.Context, question string, 
 
 // selectWithNumbers presents numbered options for selection via stdin.
 func (c *TerminalCollector) selectWithNumbers(ctx context.Context, question string, options []string) (string, error) {
-	stdout := c.stdout
-	if stdout == nil {
-		stdout = os.Stdout
-	}
-	stdin := c.stdin
-	if stdin == nil {
-		stdin = os.Stdin
-	}
+	stdout := c.getStdout()
+	stdin := c.getStdin()
 
 	// print question and options
 	_, _ = fmt.Fprintln(stdout)
@@ -163,4 +178,60 @@ func AskYesNo(ctx context.Context, prompt string, stdin io.Reader, stdout io.Wri
 	}
 	answer := strings.TrimSpace(strings.ToLower(line))
 	return answer == "y" || answer == "yes"
+}
+
+// draft review action constants
+const (
+	ActionAccept = "accept"
+	ActionRevise = "revise"
+	ActionReject = "reject"
+)
+
+// AskDraftReview presents a plan draft for review with Accept/Revise/Reject options.
+// Shows the rendered plan content, then prompts for action selection.
+// If Revise is selected, prompts for feedback text.
+// Returns action ("accept", "revise", "reject") and feedback (empty for accept/reject).
+func (c *TerminalCollector) AskDraftReview(ctx context.Context, question, planContent string) (string, string, error) {
+	stdout := c.getStdout()
+	stdin := c.getStdin()
+
+	// render and display the plan
+	rendered, err := render.RenderMarkdown(planContent, c.noColor)
+	if err != nil {
+		return "", "", fmt.Errorf("render plan: %w", err)
+	}
+
+	_, _ = fmt.Fprintln(stdout)
+	_, _ = fmt.Fprintln(stdout, "━━━ Plan Draft ━━━")
+	_, _ = fmt.Fprintln(stdout, rendered)
+	_, _ = fmt.Fprintln(stdout, "━━━━━━━━━━━━━━━━━━")
+	_, _ = fmt.Fprintln(stdout)
+
+	// present action options
+	options := []string{"Accept", "Revise", "Reject"}
+	action, err := c.selectWithNumbers(ctx, question, options)
+	if err != nil {
+		return "", "", fmt.Errorf("select action: %w", err)
+	}
+
+	actionLower := strings.ToLower(action)
+
+	// if revise, prompt for feedback
+	if actionLower == ActionRevise {
+		_, _ = fmt.Fprintln(stdout)
+		_, _ = fmt.Fprint(stdout, "Enter revision feedback: ")
+
+		reader := bufio.NewReader(stdin)
+		feedback, readErr := ReadLineWithContext(ctx, reader)
+		if readErr != nil {
+			return "", "", fmt.Errorf("read feedback: %w", readErr)
+		}
+		feedback = strings.TrimSpace(feedback)
+		if feedback == "" {
+			return "", "", errors.New("revision feedback cannot be empty")
+		}
+		return ActionRevise, feedback, nil
+	}
+
+	return actionLower, "", nil
 }

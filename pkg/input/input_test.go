@@ -3,6 +3,7 @@ package input
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -59,7 +60,7 @@ func TestTerminalCollector_selectWithNumbers(t *testing.T) {
 }
 
 func TestTerminalCollector_AskQuestion_emptyOptions(t *testing.T) {
-	c := NewTerminalCollector()
+	c := NewTerminalCollector(false)
 
 	_, err := c.AskQuestion(context.Background(), "Pick one", nil)
 
@@ -68,7 +69,7 @@ func TestTerminalCollector_AskQuestion_emptyOptions(t *testing.T) {
 }
 
 func TestTerminalCollector_AskQuestion_emptyOptionsSlice(t *testing.T) {
-	c := NewTerminalCollector()
+	c := NewTerminalCollector(false)
 
 	_, err := c.AskQuestion(context.Background(), "Pick one", []string{})
 
@@ -102,8 +103,17 @@ func TestTerminalCollector_selectWithNumbers_readError(t *testing.T) {
 }
 
 func TestNewTerminalCollector(t *testing.T) {
-	c := NewTerminalCollector()
-	assert.NotNil(t, c)
+	t.Run("noColor true", func(t *testing.T) {
+		c := NewTerminalCollector(true)
+		assert.NotNil(t, c)
+		assert.True(t, c.noColor)
+	})
+
+	t.Run("noColor false", func(t *testing.T) {
+		c := NewTerminalCollector(false)
+		assert.NotNil(t, c)
+		assert.False(t, c.noColor)
+	})
 }
 
 func TestAskYesNo(t *testing.T) {
@@ -144,4 +154,165 @@ func TestAskYesNo(t *testing.T) {
 		got := AskYesNo(ctx, prompt, strings.NewReader("y\n"), &stdout)
 		assert.False(t, got)
 	})
+}
+
+func TestTerminalCollector_AskDraftReview(t *testing.T) {
+	planContent := "# Test Plan\n\n## Overview\n\nThis is a test plan."
+
+	t.Run("accept action", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("1\n"), stdout: &stdout, noColor: true}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionAccept, action)
+		assert.Empty(t, feedback)
+
+		output := stdout.String()
+		assert.Contains(t, output, "Plan Draft")
+		assert.Contains(t, output, planContent)
+		assert.Contains(t, output, "Review the plan")
+		assert.Contains(t, output, "Accept")
+		assert.Contains(t, output, "Revise")
+		assert.Contains(t, output, "Reject")
+	})
+
+	t.Run("revise action with feedback", func(t *testing.T) {
+		var stdout bytes.Buffer
+		// select option 2 (Revise), then provide feedback
+		// use a larger buffer to ensure both reads work
+		input := "2\nPlease add more details to the implementation steps\n"
+		reader := &sequentialLineReader{lines: []string{"2", "Please add more details to the implementation steps"}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noColor: true}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionRevise, action)
+		assert.Equal(t, "Please add more details to the implementation steps", feedback)
+
+		output := stdout.String()
+		assert.Contains(t, output, "Enter revision feedback")
+		_ = input // used for documentation
+	})
+
+	t.Run("reject action", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("3\n"), stdout: &stdout, noColor: true}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionReject, action)
+		assert.Empty(t, feedback)
+	})
+
+	t.Run("revise with empty feedback returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		reader := &sequentialLineReader{lines: []string{"2", ""}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noColor: true}
+
+		_, _, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "feedback cannot be empty")
+	})
+
+	t.Run("revise with whitespace-only feedback returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		reader := &sequentialLineReader{lines: []string{"2", "   "}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noColor: true}
+
+		_, _, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "feedback cannot be empty")
+	})
+
+	t.Run("invalid selection returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("5\n"), stdout: &stdout, noColor: true}
+
+		_, _, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "select action")
+	})
+
+	t.Run("EOF on selection returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader(""), stdout: &stdout, noColor: true}
+
+		_, _, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "select action")
+	})
+
+	t.Run("EOF on feedback returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		// create a reader that returns "2\n" for selection, then EOF for feedback
+		c := &TerminalCollector{stdin: &eofAfterReader{data: "2\n"}, stdout: &stdout, noColor: true}
+
+		_, _, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read feedback")
+	})
+
+	t.Run("context canceled returns error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("1\n"), stdout: &stdout, noColor: true}
+
+		_, _, err := c.AskDraftReview(ctx, "Review the plan", planContent)
+
+		require.Error(t, err)
+	})
+
+	t.Run("with color rendering", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("1\n"), stdout: &stdout, noColor: false}
+
+		action, _, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionAccept, action)
+		// with color enabled, glamour renders the markdown with ANSI codes
+		// the content should be different from plain text
+		output := stdout.String()
+		assert.Contains(t, output, "Plan Draft")
+	})
+}
+
+// eofAfterReader returns data on first read, then EOF on subsequent reads
+type eofAfterReader struct {
+	data     string
+	consumed bool
+}
+
+func (r *eofAfterReader) Read(p []byte) (n int, err error) {
+	if r.consumed {
+		return 0, io.EOF
+	}
+	r.consumed = true
+	return copy(p, r.data), nil
+}
+
+// sequentialLineReader returns lines one at a time, each ending with newline.
+// this allows simulating multiple sequential reads (selection + feedback).
+type sequentialLineReader struct {
+	lines []string
+	index int
+}
+
+func (r *sequentialLineReader) Read(p []byte) (n int, err error) {
+	if r.index >= len(r.lines) {
+		return 0, io.EOF
+	}
+	line := r.lines[r.index] + "\n"
+	r.index++
+	return copy(p, line), nil
 }
