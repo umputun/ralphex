@@ -80,10 +80,17 @@ func TestSessionListContent(t *testing.T) {
 	})
 
 	t.Run("has meta info", func(t *testing.T) {
-		meta := sessionItem.Locator(".session-meta")
-		visible, err := meta.IsVisible()
+		// .session-info contains session rows (name, time, optional project/branch)
+		info := sessionItem.Locator(".session-info")
+		visible, err := info.IsVisible()
 		require.NoError(t, err)
-		assert.True(t, visible, "session should have meta info")
+		assert.True(t, visible, "session should have info container")
+
+		// session time is always present as metadata
+		timeEl := sessionItem.Locator(".session-time")
+		timeVisible, err := timeEl.IsVisible()
+		require.NoError(t, err)
+		assert.True(t, timeVisible, "session should have time metadata")
 	})
 }
 
