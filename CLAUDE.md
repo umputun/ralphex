@@ -62,14 +62,23 @@ The `--plan "description"` flag enables interactive plan creation:
 - Questions use QUESTION signal with JSON: `{"question": "...", "options": [...]}`
 - User answers via fzf picker (or numbered fallback)
 - Q&A history stored in progress file for context
-- Loop continues until PLAN_READY signal
+- When ready, Claude emits PLAN_DRAFT signal with full plan content for user review
+- User can Accept, Revise (with feedback), or Reject the draft
+- If revised, feedback is passed to Claude for plan modifications
+- Loop continues until user accepts and Claude emits PLAN_READY signal
 - Plan file written to docs/plans/
 - After completion, prompts user: "Continue with plan implementation?"
 - If "Yes", creates branch and runs full execution mode on the new plan
 
+Plan creation signals:
+- `QUESTION` - asks user a question with options (JSON payload)
+- `PLAN_DRAFT` - presents plan draft for review (plan content between markers)
+- `PLAN_READY` - indicates plan file was written successfully
+
 Key files:
-- `pkg/input/input.go` - terminal input collector (fzf/fallback)
-- `pkg/processor/signals.go` - QUESTION/PLAN_READY signal parsing
+- `pkg/input/input.go` - terminal input collector (fzf/fallback, draft review)
+- `pkg/processor/signals.go` - QUESTION/PLAN_DRAFT/PLAN_READY signal parsing
+- `pkg/render/markdown.go` - glamour-based markdown rendering for draft preview
 - `pkg/config/defaults/prompts/make_plan.txt` - plan creation prompt
 
 ## Platform Support
