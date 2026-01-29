@@ -161,7 +161,9 @@ func (m *SessionManager) updateSession(session *Session) error {
 	if prevState != newState {
 		if newState == SessionStateActive && !session.IsTailing() {
 			// session became active, start tailing from beginning to capture existing content
-			_ = session.StartTailing(true)
+			if tailErr := session.StartTailing(true); tailErr != nil {
+				log.Printf("[WARN] failed to start tailing for session %s: %v", session.ID, tailErr)
+			}
 		} else if newState == SessionStateCompleted && session.IsTailing() {
 			// session completed, stop tailing
 			session.StopTailing()
@@ -296,7 +298,9 @@ func (m *SessionManager) StartTailingActive() {
 
 	for _, session := range sessions {
 		if session.GetState() == SessionStateActive && !session.IsTailing() {
-			_ = session.StartTailing(true) // read from beginning to populate buffer
+			if err := session.StartTailing(true); err != nil { // read from beginning to populate buffer
+				log.Printf("[WARN] failed to start tailing for session %s: %v", session.ID, err)
+			}
 		}
 	}
 }

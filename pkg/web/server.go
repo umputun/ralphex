@@ -148,6 +148,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.tmpl.Execute(w, data); err != nil {
+		log.Printf("[ERROR] template execution: %v", err)
 		http.Error(w, "template execution error", http.StatusInternalServerError)
 		return
 	}
