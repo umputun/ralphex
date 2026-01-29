@@ -137,7 +137,7 @@ func TestAskYesNo(t *testing.T) {
 		})
 	}
 
-	t.Run("context_cancelled_returns_false", func(t *testing.T) {
+	t.Run("context_canceled_returns_false", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 		var stdout bytes.Buffer

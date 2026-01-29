@@ -67,7 +67,7 @@ func TestPromptPlanDescription(t *testing.T) {
 	})
 
 	t.Run("context_cancelled_returns_empty", func(t *testing.T) {
-		// cancelled context simulates Ctrl+C
+		// canceled context simulates Ctrl+C
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 		reader := strings.NewReader("some input\n")

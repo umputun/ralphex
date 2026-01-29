@@ -20,7 +20,7 @@ type ReadLineResult struct {
 }
 
 // ReadLineWithContext reads a line from reader with context cancellation support.
-// returns the line (including newline), error, or context error if cancelled.
+// returns the line (including newline), error, or context error if canceled.
 // this allows Ctrl+C (SIGINT) to interrupt blocking stdin reads.
 func ReadLineWithContext(ctx context.Context, reader *bufio.Reader) (string, error) {
 	resultCh := make(chan ReadLineResult, 1)
