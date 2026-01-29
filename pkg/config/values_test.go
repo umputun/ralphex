@@ -472,3 +472,106 @@ func TestValuesLoader_parseValuesFromBytes_InvalidINI(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse config")
 }
+
+func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "config")
+
+	// config with only comments and whitespace - should fall back to embedded
+	commentedConfig := `# this is a commented config file
+# all lines are comments
+# claude_command = /custom/claude
+
+# empty lines below
+
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(commentedConfig), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", globalConfig)
+	require.NoError(t, err)
+
+	// should fall back to embedded defaults since file has no actual content
+	assert.Equal(t, "claude", values.ClaudeCommand)
+	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
+	assert.True(t, values.CodexEnabled)
+	assert.Equal(t, "codex", values.CodexCommand)
+	assert.Equal(t, "gpt-5.2-codex", values.CodexModel)
+	assert.Equal(t, "docs/plans", values.PlansDir)
+}
+
+func TestValuesLoader_Load_PartiallyCommentedConfigUsesUncommentedValues(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "config")
+
+	// config with some commented and some uncommented lines
+	partialConfig := `# this line is a comment
+claude_command = /custom/claude
+# claude_args is commented out
+# claude_args = --some-args
+plans_dir = custom/plans
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(partialConfig), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", globalConfig)
+	require.NoError(t, err)
+
+	// uncommented values should be used
+	assert.Equal(t, "/custom/claude", values.ClaudeCommand)
+	assert.Equal(t, "custom/plans", values.PlansDir)
+
+	// commented-out values should fall back to embedded defaults
+	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
+}
+
+func TestValuesLoader_Load_LocalAllCommentedGlobalHasContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global-config")
+	localConfig := filepath.Join(tmpDir, "local-config")
+
+	// global has actual content
+	globalContent := `claude_command = /global/claude
+plans_dir = global/plans
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
+
+	// local is all-commented (installed template)
+	localCommented := `# local config template
+# uncomment values to customize
+# claude_command = /local/claude
+`
+	require.NoError(t, os.WriteFile(localConfig, []byte(localCommented), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	// local all-commented falls back, so global values should be used
+	assert.Equal(t, "/global/claude", values.ClaudeCommand)
+	assert.Equal(t, "global/plans", values.PlansDir)
+}
+
+func TestValuesLoader_Load_BothAllCommentedFallsBackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global-config")
+	localConfig := filepath.Join(tmpDir, "local-config")
+
+	// both files are all-commented templates
+	commentedTemplate := `# config template
+# uncomment values to customize
+# claude_command = /custom/claude
+# plans_dir = custom/plans
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(commentedTemplate), 0o600))
+	require.NoError(t, os.WriteFile(localConfig, []byte(commentedTemplate), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	// both all-commented, should fall back to embedded defaults
+	assert.Equal(t, "claude", values.ClaudeCommand)
+	assert.Equal(t, "docs/plans", values.PlansDir)
+	assert.True(t, values.CodexEnabled)
+}

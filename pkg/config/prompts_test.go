@@ -430,3 +430,102 @@ func TestPromptLoader_Load_MakePlanPrompt_LocalOverridesGlobal(t *testing.T) {
 
 	assert.Equal(t, "local make plan", prompts.MakePlan)
 }
+
+func TestPromptLoader_Load_AllCommentedPromptsFallbackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+
+	// create all prompt files with only comments (simulates commented defaults)
+	commentedContent := "# this is the default template\n# uncomment and customize below\n# actual prompt content"
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_first.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_second.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte(commentedContent), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	// all prompts should fall back to embedded defaults since files contain only comments
+	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "task prompt should fall back to embedded")
+	assert.Contains(t, prompts.ReviewFirst, "{{GOAL}}", "review_first prompt should fall back to embedded")
+	assert.Contains(t, prompts.ReviewSecond, "{{GOAL}}", "review_second prompt should fall back to embedded")
+	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "codex prompt should fall back to embedded")
+	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}", "make_plan prompt should fall back to embedded")
+}
+
+func TestPromptLoader_Load_MixedCommentedAndCustomPrompts(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+
+	commentedContent := "# default template - commented out\n# customize below"
+
+	// some prompts are all-commented (should fall back to embedded)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex.txt"), []byte(commentedContent), 0o600))
+
+	// some prompts have custom content (should use custom)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_first.txt"), []byte("custom review first prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_second.txt"), []byte("# header comment\ncustom review second"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte("custom make plan"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	// all-commented prompts fall back to embedded
+	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "all-commented task should fall back")
+	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "all-commented codex should fall back")
+
+	// custom prompts are used (comment stripping applied)
+	assert.Equal(t, "custom review first prompt", prompts.ReviewFirst)
+	assert.Equal(t, "custom review second", prompts.ReviewSecond)
+	assert.Equal(t, "custom make plan", prompts.MakePlan)
+}
+
+func TestPromptLoader_Load_LocalAllCommentedFallsBackToGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global", "prompts")
+	localDir := filepath.Join(tmpDir, "local", "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	commentedContent := "# all commented\n# no actual content"
+
+	// local has all-commented file
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "task.txt"), []byte(commentedContent), 0o600))
+
+	// global has actual content
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte("global task content"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load(localDir, globalDir)
+	require.NoError(t, err)
+
+	// local all-commented should fall through to global
+	assert.Equal(t, "global task content", prompts.Task)
+}
+
+func TestPromptLoader_Load_LocalAndGlobalAllCommentedFallsBackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global", "prompts")
+	localDir := filepath.Join(tmpDir, "local", "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	commentedContent := "# all commented\n# no actual content"
+
+	// both local and global have all-commented files
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "task.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "task.txt"), []byte(commentedContent), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load(localDir, globalDir)
+	require.NoError(t, err)
+
+	// both all-commented should fall back to embedded
+	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "should fall back to embedded when both local and global are all-commented")
+}

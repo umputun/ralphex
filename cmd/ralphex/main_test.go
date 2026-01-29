@@ -36,6 +36,23 @@ func testColors() *progress.Colors {
 	})
 }
 
+// skipIfClaudeNotAvailable loads config (read-only) and skips test if configured claude command is not in PATH.
+// uses LoadReadOnly to avoid installing defaults to real user config directory during tests.
+func skipIfClaudeNotAvailable(t *testing.T) {
+	t.Helper()
+	cfg, err := config.LoadReadOnly("")
+	if err != nil {
+		t.Skipf("failed to load config: %v", err)
+	}
+	claudeCmd := cfg.ClaudeCommand
+	if claudeCmd == "" {
+		claudeCmd = "claude"
+	}
+	if _, err := exec.LookPath(claudeCmd); err != nil {
+		t.Skipf("%s not installed", claudeCmd)
+	}
+}
+
 func TestPromptPlanDescription(t *testing.T) {
 	colors := testColors()
 
@@ -154,10 +171,8 @@ func TestPlanFlagConflict(t *testing.T) {
 
 func TestPlanModeIntegration(t *testing.T) {
 	t.Run("plan_mode_requires_git_repo", func(t *testing.T) {
-		// skip if claude not installed - this test requires claude to pass dependency check
-		if _, err := exec.LookPath("claude"); err != nil {
-			t.Skip("claude not installed")
-		}
+		// skip if configured claude command is not installed
+		skipIfClaudeNotAvailable(t)
 
 		// run from a non-git directory
 		tmpDir := t.TempDir()
@@ -196,10 +211,8 @@ func TestPlanModeIntegration(t *testing.T) {
 	})
 
 	t.Run("plan_mode_progress_file_naming", func(t *testing.T) {
-		// skip if claude not installed - this test requires claude to pass dependency check
-		if _, err := exec.LookPath("claude"); err != nil {
-			t.Skip("claude not installed")
-		}
+		// skip if configured claude command is not installed
+		skipIfClaudeNotAvailable(t)
 
 		// test that progress filename is generated correctly for plan mode
 		// the actual file creation is tested by the integration test with real runner
@@ -233,10 +246,8 @@ func TestPlanModeIntegration(t *testing.T) {
 
 func TestAutoPlanModeDetection(t *testing.T) {
 	t.Run("feature_branch_with_no_plans_still_errors", func(t *testing.T) {
-		// skip if claude not installed
-		if _, err := exec.LookPath("claude"); err != nil {
-			t.Skip("claude not installed")
-		}
+		// skip if configured claude command is not installed
+		skipIfClaudeNotAvailable(t)
 
 		dir := setupTestRepo(t)
 		origDir, err := os.Getwd()
@@ -262,10 +273,8 @@ func TestAutoPlanModeDetection(t *testing.T) {
 	})
 
 	t.Run("review_mode_skips_auto_plan_mode", func(t *testing.T) {
-		// skip if claude not installed
-		if _, err := exec.LookPath("claude"); err != nil {
-			t.Skip("claude not installed")
-		}
+		// skip if configured claude command is not installed
+		skipIfClaudeNotAvailable(t)
 
 		dir := setupTestRepo(t)
 		origDir, err := os.Getwd()
@@ -291,10 +300,8 @@ func TestAutoPlanModeDetection(t *testing.T) {
 	})
 
 	t.Run("codex_only_mode_skips_auto_plan_mode", func(t *testing.T) {
-		// skip if claude not installed
-		if _, err := exec.LookPath("claude"); err != nil {
-			t.Skip("claude not installed")
-		}
+		// skip if configured claude command is not installed
+		skipIfClaudeNotAvailable(t)
 
 		dir := setupTestRepo(t)
 		origDir, err := os.Getwd()

@@ -1,19 +1,24 @@
 package config
 
 import (
+	"embed"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
-// agentLoader loads custom agent files from config directories.
-type agentLoader struct{}
+// agentLoader loads custom agent files from config directories with embedded fallback.
+type agentLoader struct {
+	embedFS embed.FS
+}
 
-// newAgentLoader creates a new agentLoader.
-func newAgentLoader() *agentLoader {
-	return &agentLoader{}
+// newAgentLoader creates a new agentLoader with the given embedded filesystem.
+func newAgentLoader(embedFS embed.FS) *agentLoader {
+	return &agentLoader{embedFS: embedFS}
 }
 
 // Load loads custom agent files from config directories.
@@ -55,11 +60,13 @@ func (al *agentLoader) dirHasAgentFiles(dir string) (bool, error) {
 }
 
 // loadFromDir loads agent files from a specific directory.
+// files with only comments/empty content fall back to embedded defaults.
+// if directory doesn't exist, falls back to loading all embedded agents.
 func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return al.loadAllFromEmbedFS()
 		}
 		return nil, fmt.Errorf("read agents directory %s: %w", agentsDir, err)
 	}
@@ -70,7 +77,7 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 			continue
 		}
 
-		prompt, err := al.loadFile(filepath.Join(agentsDir, entry.Name()))
+		prompt, err := al.loadFileWithFallback(filepath.Join(agentsDir, entry.Name()), entry.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -90,12 +97,65 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 	return agents, nil
 }
 
-// loadFile reads an agent file from disk.
+// loadFileWithFallback reads an agent file from disk with fallback to embedded.
 // comment lines (starting with #) are stripped.
-func (al *agentLoader) loadFile(path string) (string, error) {
+// if file content is empty after stripping, falls back to embedded default.
+func (al *agentLoader) loadFileWithFallback(path, filename string) (string, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed internally
 	if err != nil {
 		return "", fmt.Errorf("read agent file %s: %w", path, err)
 	}
+	content := strings.TrimSpace(stripComments(string(data)))
+	if content != "" {
+		return content, nil
+	}
+	// fall back to embedded default
+	return al.loadFromEmbedFS(filename)
+}
+
+// loadFromEmbedFS reads an agent file from the embedded filesystem.
+// returns empty string (not error) if file doesn't exist.
+// comment lines (starting with #) are stripped.
+func (al *agentLoader) loadFromEmbedFS(filename string) (string, error) {
+	data, err := al.embedFS.ReadFile("defaults/agents/" + filename)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil // custom agent with only comments - skip it
+		}
+		return "", fmt.Errorf("read embedded agent %s: %w", filename, err)
+	}
 	return strings.TrimSpace(stripComments(string(data))), nil
+}
+
+// loadAllFromEmbedFS loads all agent files from the embedded filesystem.
+// used as fallback when the agents directory doesn't exist.
+func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
+	entries, err := al.embedFS.ReadDir("defaults/agents")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded agents dir: %w", err)
+	}
+
+	agents := make([]CustomAgent, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+			continue
+		}
+
+		prompt, err := al.loadFromEmbedFS(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		if prompt == "" {
+			continue
+		}
+
+		name := strings.TrimSuffix(entry.Name(), ".txt")
+		agents = append(agents, CustomAgent{Name: name, Prompt: prompt})
+	}
+
+	sort.Slice(agents, func(i, j int) bool {
+		return agents[i].Name < agents[j].Name
+	})
+
+	return agents, nil
 }

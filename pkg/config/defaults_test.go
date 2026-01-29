@@ -571,10 +571,10 @@ func TestReset_ResetsAllComponents(t *testing.T) {
 	installer := newDefaultsInstaller(defaultsFS)
 	require.NoError(t, installer.Install(configDir))
 
-	// modify everything
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# modified"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "prompts", "task.txt"), []byte("modified"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(configDir, "agents", "quality.txt"), []byte("modified"), 0o600))
+	// modify everything with actual content (not just comments)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("claude_command = custom"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "prompts", "task.txt"), []byte("modified prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "agents", "quality.txt"), []byte("modified agent"), 0o600))
 
 	// reset all with "y" answers
 	stdin := strings.NewReader("y\ny\ny\n")
@@ -840,4 +840,323 @@ func TestDefaultsInstaller_AskYesNo(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func Test_commentOutContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "regular_lines", input: "line1\nline2\nline3", expected: "# line1\n# line2\n# line3"},
+		{name: "already_commented", input: "# comment\n# another", expected: "# comment\n# another"},
+		{name: "empty_lines", input: "\n\n", expected: "\n\n"},
+		{name: "mixed_content", input: "line1\n# comment\n\nline2", expected: "# line1\n# comment\n\n# line2"},
+		{name: "whitespace_only_line", input: "   \nline", expected: "   \n# line"},
+		{name: "indented_content", input: "  indented\n    more", expected: "#   indented\n#     more"},
+		{name: "comment_with_space", input: "  # indented comment", expected: "  # indented comment"},
+		{name: "crlf_line_endings", input: "line1\r\nline2\r\n", expected: "# line1\n# line2\n"},
+		{name: "empty_string", input: "", expected: ""},
+		{name: "single_line", input: "single", expected: "# single"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := commentOutContent(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func Test_shouldOverwrite(t *testing.T) {
+	t.Run("file_not_exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		nonExistent := filepath.Join(tmpDir, "nonexistent.txt")
+		assert.True(t, shouldOverwrite(nonExistent))
+	})
+
+	t.Run("empty_file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		emptyFile := filepath.Join(tmpDir, "empty.txt")
+		require.NoError(t, os.WriteFile(emptyFile, []byte(""), 0o600))
+		assert.True(t, shouldOverwrite(emptyFile))
+	})
+
+	t.Run("all_commented", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		commentedFile := filepath.Join(tmpDir, "commented.txt")
+		content := "# comment 1\n# comment 2\n# comment 3"
+		require.NoError(t, os.WriteFile(commentedFile, []byte(content), 0o600))
+		assert.True(t, shouldOverwrite(commentedFile))
+	})
+
+	t.Run("comments_and_empty_lines", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mixedFile := filepath.Join(tmpDir, "mixed.txt")
+		content := "# comment\n\n  \n# another comment\n"
+		require.NoError(t, os.WriteFile(mixedFile, []byte(content), 0o600))
+		assert.True(t, shouldOverwrite(mixedFile))
+	})
+
+	t.Run("has_content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		contentFile := filepath.Join(tmpDir, "content.txt")
+		content := "# comment\nactual content\n# more comment"
+		require.NoError(t, os.WriteFile(contentFile, []byte(content), 0o600))
+		assert.False(t, shouldOverwrite(contentFile))
+	})
+
+	t.Run("only_whitespace", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		whitespaceFile := filepath.Join(tmpDir, "whitespace.txt")
+		content := "   \n\t\n  \t  "
+		require.NoError(t, os.WriteFile(whitespaceFile, []byte(content), 0o600))
+		assert.True(t, shouldOverwrite(whitespaceFile))
+	})
+
+	t.Run("single_uncommented_line", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		singleFile := filepath.Join(tmpDir, "single.txt")
+		content := "claude_command = custom"
+		require.NoError(t, os.WriteFile(singleFile, []byte(content), 0o600))
+		assert.False(t, shouldOverwrite(singleFile))
+	})
+}
+
+func TestDefaultsInstaller_Install_WritesCommentedConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify config file is written with commented content
+	data, err := os.ReadFile(filepath.Join(configDir, "config")) //nolint:gosec // test
+	require.NoError(t, err)
+	content := string(data)
+
+	// all lines should be comments or empty
+	for line := range strings.SplitSeq(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		assert.True(t, strings.HasPrefix(trimmed, "#"), "line should be commented: %q", line)
+	}
+
+	// should contain expected settings (commented)
+	assert.Contains(t, content, "# claude_command")
+	assert.Contains(t, content, "# codex_enabled")
+}
+
+func TestDefaultsInstaller_Install_OverwritesCommentedConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// create config with only comments (safe to overwrite)
+	existingContent := "# old commented content\n# more comments\n"
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(existingContent), 0o600))
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify config was overwritten with new commented defaults
+	data, err := os.ReadFile(filepath.Join(configDir, "config")) //nolint:gosec // test
+	require.NoError(t, err)
+	content := string(data)
+
+	// should have new content (not old)
+	assert.NotEqual(t, existingContent, content)
+	assert.Contains(t, content, "# claude_command")
+}
+
+func TestDefaultsInstaller_Install_PreservesCustomConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// create config with actual content (should NOT be overwritten)
+	existingContent := "# my custom config\nclaude_command = my-custom-claude\n"
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(existingContent), 0o600))
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify config was NOT overwritten
+	data, err := os.ReadFile(filepath.Join(configDir, "config")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, existingContent, string(data))
+}
+
+func TestDefaultsInstaller_Install_WritesCommentedPrompts(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify prompt files are written with commented content
+	promptsDir := filepath.Join(configDir, "prompts")
+	entries, err := os.ReadDir(promptsDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, entries)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(promptsDir, entry.Name())) //nolint:gosec // test
+		require.NoError(t, err)
+		content := string(data)
+
+		// all lines should be comments or empty
+		for line := range strings.SplitSeq(content, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			assert.True(t, strings.HasPrefix(trimmed, "#"), "line in %s should be commented: %q", entry.Name(), line)
+		}
+	}
+}
+
+func TestDefaultsInstaller_Install_OverwritesCommentedPrompts(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	promptsDir := filepath.Join(configDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# config"), 0o600))
+
+	// create a prompt file with only comments (safe to overwrite)
+	existingContent := "# old commented prompt\n# more comments\n"
+	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "task.txt"), []byte(existingContent), 0o600))
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify all default prompts were installed
+	entries, err := os.ReadDir(promptsDir)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(entries), 4, "should have default prompts installed")
+
+	// verify task.txt was overwritten with new commented content
+	data, err := os.ReadFile(filepath.Join(promptsDir, "task.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.NotEqual(t, existingContent, string(data))
+}
+
+func TestDefaultsInstaller_Install_PreservesCustomPrompts(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	promptsDir := filepath.Join(configDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# config"), 0o600))
+
+	// create a prompt file with actual content (should NOT trigger install)
+	existingContent := "# my custom prompt\nactual task prompt content\n"
+	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "task.txt"), []byte(existingContent), 0o600))
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify prompt was NOT overwritten
+	data, err := os.ReadFile(filepath.Join(promptsDir, "task.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, existingContent, string(data))
+
+	// verify no other prompts were added (directory has content)
+	entries, err := os.ReadDir(promptsDir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "should only have the custom prompt")
+}
+
+func TestDefaultsInstaller_Install_WritesCommentedAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify agent files are written with commented content
+	agentsDir := filepath.Join(configDir, "agents")
+	entries, err := os.ReadDir(agentsDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, entries)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(agentsDir, entry.Name())) //nolint:gosec // test
+		require.NoError(t, err)
+		content := string(data)
+
+		// all lines should be comments or empty
+		for line := range strings.SplitSeq(content, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			assert.True(t, strings.HasPrefix(trimmed, "#"), "line in %s should be commented: %q", entry.Name(), line)
+		}
+	}
+}
+
+func TestDefaultsInstaller_Install_OverwritesCommentedAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	agentsDir := filepath.Join(configDir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# config"), 0o600))
+
+	// create an agent file with only comments (safe to overwrite)
+	existingContent := "# old commented agent\n# more comments\n"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(existingContent), 0o600))
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify all default agents were installed
+	entries, err := os.ReadDir(agentsDir)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(entries), 5, "should have default agents installed")
+
+	// verify quality.txt was overwritten with new commented content
+	data, err := os.ReadFile(filepath.Join(agentsDir, "quality.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.NotEqual(t, existingContent, string(data))
+}
+
+func TestDefaultsInstaller_Install_PreservesCustomAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	agentsDir := filepath.Join(configDir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("# config"), 0o600))
+
+	// create an agent file with actual content (should NOT trigger install)
+	existingContent := "# my custom agent\nactual agent content\n"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(existingContent), 0o600))
+
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(configDir))
+
+	// verify agent was NOT overwritten
+	data, err := os.ReadFile(filepath.Join(agentsDir, "quality.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, existingContent, string(data))
+
+	// verify no other agents were added (directory has content)
+	entries, err := os.ReadDir(agentsDir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "should only have the custom agent")
 }

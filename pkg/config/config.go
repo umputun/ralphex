@@ -116,13 +116,40 @@ func Load(configDir string) (*Config, error) {
 // local config (.ralphex/) overrides global config (~/.config/ralphex/) per-field.
 // if localDir is empty, only global config is used.
 func loadWithLocal(globalDir, localDir string) (*Config, error) {
-	embedFS := defaultsFS
-
 	// install defaults
-	installer := newDefaultsInstaller(embedFS)
+	installer := newDefaultsInstaller(defaultsFS)
 	if err := installer.Install(globalDir); err != nil {
 		return nil, fmt.Errorf("install defaults: %w", err)
 	}
+
+	return loadConfigFromDirs(globalDir, localDir)
+}
+
+// LoadReadOnly loads configuration without installing defaults.
+// use this in tests or tools that should not modify user's config directory.
+// if config files don't exist, embedded defaults are used.
+func LoadReadOnly(configDir string) (*Config, error) {
+	globalDir := configDir
+	if globalDir == "" {
+		globalDir = DefaultConfigDir()
+	}
+
+	// auto-detect local config directory in cwd
+	var localDir string
+	if cwd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(cwd, ".ralphex")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			localDir = candidate
+		}
+	}
+
+	return loadConfigFromDirs(globalDir, localDir)
+}
+
+// loadConfigFromDirs loads configuration from specified directories without installing defaults.
+// shared by loadWithLocal (after installing) and LoadReadOnly (without installing).
+func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
+	embedFS := defaultsFS
 
 	// build config file paths
 	var localConfigPath, globalConfigPath string
@@ -131,7 +158,7 @@ func loadWithLocal(globalDir, localDir string) (*Config, error) {
 	}
 	globalConfigPath = filepath.Join(globalDir, "config")
 
-	// load values (scalars)
+	// load values (scalars) - falls back to embedded if files don't exist
 	vl := newValuesLoader(embedFS)
 	values, err := vl.Load(localConfigPath, globalConfigPath)
 	if err != nil {
@@ -163,7 +190,7 @@ func loadWithLocal(globalDir, localDir string) (*Config, error) {
 		localAgentsPath = filepath.Join(localDir, "agents")
 	}
 	globalAgentsPath = filepath.Join(globalDir, "agents")
-	al := newAgentLoader()
+	al := newAgentLoader(defaultsFS)
 	agents, err := al.Load(localAgentsPath, globalAgentsPath)
 	if err != nil {
 		return nil, fmt.Errorf("load agents: %w", err)

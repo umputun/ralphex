@@ -12,6 +12,41 @@ import (
 	"time"
 )
 
+// commentOutContent prefixes all non-comment, non-empty lines with "# ".
+// lines that are already comments or empty are preserved as-is.
+// handles both Unix (LF) and Windows (CRLF) line endings.
+func commentOutContent(content string) string {
+	// normalize line endings: convert CRLF to LF
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		lines[i] = "# " + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+// shouldOverwrite checks if a file is safe to overwrite with new defaults.
+// returns true if file doesn't exist, is empty, or contains only comments/whitespace.
+// returns false if file exists but can't be read (preserve unknown content).
+// uses stripComments to determine if there's actual content.
+func shouldOverwrite(filePath string) bool {
+	data, err := os.ReadFile(filePath) //nolint:gosec // user's config file
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true // file doesn't exist - safe to create
+		}
+		return false // file exists but unreadable - preserve it
+	}
+	// strip comments and check if anything remains
+	stripped := stripComments(string(data))
+	return strings.TrimSpace(stripped) == ""
+}
+
 // defaultsInstaller implements DefaultsInstaller with embedded filesystem.
 type defaultsInstaller struct {
 	embedFS embed.FS
@@ -45,19 +80,16 @@ func (d *defaultsInstaller) Install(configDir string) error {
 		return fmt.Errorf("create agents dir: %w", err)
 	}
 
-	// install default config file if not exists
+	// install default config file if not exists or is safe to overwrite (all-commented/empty)
 	configPath := filepath.Join(configDir, "config")
-	_, statErr := os.Stat(configPath)
-	if statErr != nil && !os.IsNotExist(statErr) {
-		return fmt.Errorf("check config file: %w", statErr)
-	}
-	if os.IsNotExist(statErr) {
+	if shouldOverwrite(configPath) {
 		data, err := d.embedFS.ReadFile("defaults/config")
 		if err != nil {
 			return fmt.Errorf("read embedded config: %w", err)
 		}
-
-		if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		// write with content commented out - users uncomment what they customize
+		commented := commentOutContent(string(data))
+		if err := os.WriteFile(configPath, []byte(commented), 0o600); err != nil {
 			return fmt.Errorf("write config file: %w", err)
 		}
 	}
@@ -76,16 +108,23 @@ func (d *defaultsInstaller) Install(configDir string) error {
 }
 
 // installDefaultFiles copies embedded .txt files to the destination directory.
-// files are only installed if the directory has no .txt files - never overwrites.
+// files are only installed if the directory has no .txt files with actual content.
+// files with only comments/whitespace are considered safe to overwrite.
+// note: this is directory-level logic - if ANY file has content, no defaults are added.
+// this allows users to manage their own set of prompts/agents without interference.
 func (d *defaultsInstaller) installDefaultFiles(destDir, embedPath, fileType string) error {
-	// check if directory has any .txt files - if so, skip installation entirely
+	// check if directory has any .txt files with actual content - if so, skip installation entirely
 	existingEntries, err := os.ReadDir(destDir)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s dir: %w", fileType, err)
 	}
 	for _, entry := range existingEntries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".txt") {
-			return nil // directory has files, don't install defaults
+			// check if this file has actual content (not just comments/empty)
+			filePath := filepath.Join(destDir, entry.Name())
+			if !shouldOverwrite(filePath) {
+				return nil // directory has file with content, don't install defaults
+			}
 		}
 	}
 
@@ -99,13 +138,20 @@ func (d *defaultsInstaller) installDefaultFiles(destDir, embedPath, fileType str
 			continue
 		}
 
+		destPath := filepath.Join(destDir, entry.Name())
+		// only write if file doesn't exist or is safe to overwrite (all-commented/empty)
+		if !shouldOverwrite(destPath) {
+			continue
+		}
+
 		data, err := d.embedFS.ReadFile(embedPath + "/" + entry.Name())
 		if err != nil {
 			return fmt.Errorf("read embedded %s %s: %w", fileType, entry.Name(), err)
 		}
 
-		destPath := filepath.Join(destDir, entry.Name())
-		if err := os.WriteFile(destPath, data, 0o600); err != nil {
+		// write with content commented out - users uncomment what they customize
+		commented := commentOutContent(string(data))
+		if err := os.WriteFile(destPath, []byte(commented), 0o600); err != nil {
 			return fmt.Errorf("write %s file %s: %w", fileType, entry.Name(), err)
 		}
 	}
@@ -182,7 +228,8 @@ func (d *defaultsInstaller) resetConfigFile(configPath string, scanner *bufio.Sc
 			return false, fmt.Errorf("read local config: %w", err)
 		}
 
-		if bytes.Equal(embeddedData, localData) {
+		// file is "same" if exact match OR has only comments/whitespace
+		if bytes.Equal(embeddedData, localData) || strings.TrimSpace(stripComments(string(localData))) == "" {
 			fmt.Fprintf(stdout, "  skipped (matches defaults)\n")
 			return false, nil
 		}
@@ -199,7 +246,9 @@ func (d *defaultsInstaller) resetConfigFile(configPath string, scanner *bufio.Sc
 		return false, fmt.Errorf("create config dir: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, embeddedData, 0o600); err != nil {
+	// write with content commented out
+	commented := commentOutContent(string(embeddedData))
+	if err := os.WriteFile(configPath, []byte(commented), 0o600); err != nil {
 		return false, fmt.Errorf("write config file: %w", err)
 	}
 
@@ -341,6 +390,7 @@ type fileInfo struct {
 }
 
 // findDifferentFiles returns files in destDir that differ from embedded defaults.
+// files with only comments/empty lines are considered matching (unmodified from commented templates).
 func (d *defaultsInstaller) findDifferentFiles(destDir, embedPath string) ([]fileInfo, error) {
 	var different []fileInfo
 
@@ -365,7 +415,7 @@ func (d *defaultsInstaller) findDifferentFiles(destDir, embedPath string) ([]fil
 			return nil, fmt.Errorf("stat %s: %w", entry.Name(), err)
 		}
 
-		// compare content hashes
+		// compare content - either exact match or local file has only comments (safe to overwrite)
 		embeddedData, err := d.embedFS.ReadFile(embedPath + "/" + entry.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read embedded %s: %w", entry.Name(), err)
@@ -376,9 +426,17 @@ func (d *defaultsInstaller) findDifferentFiles(destDir, embedPath string) ([]fil
 			return nil, fmt.Errorf("read local %s: %w", entry.Name(), err)
 		}
 
-		if !bytes.Equal(embeddedData, localData) {
-			different = append(different, fileInfo{name: entry.Name(), modTime: info.ModTime()})
+		// file is "same" if either:
+		// 1. exact byte match (user hasn't touched it)
+		// 2. local file has no actual content (only comments/whitespace) - safe to overwrite
+		if bytes.Equal(embeddedData, localData) {
+			continue // exact match
 		}
+		if strings.TrimSpace(stripComments(string(localData))) == "" {
+			continue // only comments/whitespace - considered unmodified
+		}
+
+		different = append(different, fileInfo{name: entry.Name(), modTime: info.ModTime()})
 	}
 
 	return different, nil
@@ -437,7 +495,7 @@ func (d *defaultsInstaller) countEmbeddedFiles(embedPath string) (int, error) {
 	return count, nil
 }
 
-// overwriteEmbeddedFiles overwrites files in destDir with embedded defaults.
+// overwriteEmbeddedFiles overwrites files in destDir with embedded defaults (commented).
 // only overwrites files that exist in embedded defaults - preserves custom files.
 func (d *defaultsInstaller) overwriteEmbeddedFiles(destDir, embedPath string) error {
 	// ensure directory exists
@@ -460,8 +518,10 @@ func (d *defaultsInstaller) overwriteEmbeddedFiles(destDir, embedPath string) er
 			return fmt.Errorf("read embedded %s: %w", entry.Name(), err)
 		}
 
+		// write with content commented out
+		commented := commentOutContent(string(embeddedData))
 		destPath := filepath.Join(destDir, entry.Name())
-		if err := os.WriteFile(destPath, embeddedData, 0o600); err != nil {
+		if err := os.WriteFile(destPath, []byte(commented), 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", entry.Name(), err)
 		}
 	}

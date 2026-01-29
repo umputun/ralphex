@@ -74,7 +74,8 @@ func (vl *valuesLoader) Load(localConfigPath, globalConfigPath string) (Values, 
 }
 
 // parseValuesFromFile reads a config file and parses it into Values.
-// returns empty Values (not error) if file doesn't exist.
+// returns empty Values (not error) if file doesn't exist or contains only comments/whitespace.
+// this enables fallback to embedded defaults for files that are commented templates.
 func (vl *valuesLoader) parseValuesFromFile(path string) (Values, error) {
 	if path == "" {
 		return Values{}, nil
@@ -86,6 +87,13 @@ func (vl *valuesLoader) parseValuesFromFile(path string) (Values, error) {
 			return Values{}, nil
 		}
 		return Values{}, fmt.Errorf("read config %s: %w", path, err)
+	}
+
+	// strip comments and check if anything remains
+	// if only comments/whitespace, return empty Values to fall back to embedded defaults
+	stripped := stripComments(string(data))
+	if strings.TrimSpace(stripped) == "" {
+		return Values{}, nil
 	}
 
 	return vl.parseValuesFromBytes(data)
