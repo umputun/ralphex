@@ -2,6 +2,8 @@ package processor
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -20,7 +22,7 @@ func (r *Runner) getGoal() string {
 	if r.cfg.PlanFile == "" {
 		return "current branch vs " + r.getDefaultBranch()
 	}
-	return "implementation of plan at " + r.cfg.PlanFile
+	return "implementation of plan at " + r.resolvePlanFilePath()
 }
 
 // getPlanFileRef returns plan file reference or fallback text for prompts.
@@ -28,6 +30,33 @@ func (r *Runner) getPlanFileRef() string {
 	if r.cfg.PlanFile == "" {
 		return "(no plan file - reviewing current branch)"
 	}
+	return r.resolvePlanFilePath()
+}
+
+// resolvePlanFilePath returns the actual path to the plan file, checking if it was moved to completed/.
+// returns original path if file exists there, completed/ path if moved, or original path as fallback.
+func (r *Runner) resolvePlanFilePath() string {
+	if r.cfg.PlanFile == "" {
+		return ""
+	}
+
+	// check if file exists at original location
+	_, err := os.Stat(r.cfg.PlanFile)
+	if err == nil {
+		return r.cfg.PlanFile
+	}
+	if !os.IsNotExist(err) {
+		// permission or other error - return original path
+		return r.cfg.PlanFile
+	}
+
+	// check if file was moved to completed/ subdirectory
+	completedPath := filepath.Join(filepath.Dir(r.cfg.PlanFile), "completed", filepath.Base(r.cfg.PlanFile))
+	if _, err := os.Stat(completedPath); err == nil {
+		return completedPath
+	}
+
+	// fall back to original path
 	return r.cfg.PlanFile
 }
 

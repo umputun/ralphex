@@ -466,7 +466,7 @@ func (r *Runner) buildCodexPrompt(isFirst bool, claudeResponse string) string {
 The code implements the plan at: %s
 
 ---
-`, r.cfg.PlanFile)
+`, r.resolvePlanFilePath())
 	}
 
 	// different diff command based on iteration

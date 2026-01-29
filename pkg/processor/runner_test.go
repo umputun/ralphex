@@ -768,7 +768,7 @@ func TestRunner_ErrorPatternMatch_CodexInReviewPhase(t *testing.T) {
 func TestRunner_ErrorPatternMatch_ClaudeInReviewLoop(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone},                                                     // first review
 		{Output: "rate limited", Error: &executor.PatternMatchError{Pattern: "rate limited", HelpCmd: "claude /usage"}}, // review loop hits rate limit
 	})
 	codex := newMockExecutor(nil)

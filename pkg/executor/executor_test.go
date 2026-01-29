@@ -562,27 +562,27 @@ func TestCheckErrorPatterns(t *testing.T) {
 
 func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
 	tests := []struct {
-		name          string
-		output        string
-		patterns      []string
-		wantError     bool
-		wantPattern   string
-		wantHelpCmd   string
-		wantOutput    string
+		name        string
+		output      string
+		patterns    []string
+		wantError   bool
+		wantPattern string
+		wantHelpCmd string
+		wantOutput  string
 	}{
 		{
-			name:        "no patterns configured",
-			output:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}`,
-			patterns:    nil,
-			wantError:   false,
-			wantOutput:  "You've hit your limit",
+			name:       "no patterns configured",
+			output:     `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}`,
+			patterns:   nil,
+			wantError:  false,
+			wantOutput: "You've hit your limit",
 		},
 		{
-			name:        "pattern not matched",
-			output:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Task completed successfully"}}`,
-			patterns:    []string{"rate limit", "quota exceeded"},
-			wantError:   false,
-			wantOutput:  "Task completed successfully",
+			name:       "pattern not matched",
+			output:     `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Task completed successfully"}}`,
+			patterns:   []string{"rate limit", "quota exceeded"},
+			wantError:  false,
+			wantOutput: "Task completed successfully",
 		},
 		{
 			name:        "pattern matched",

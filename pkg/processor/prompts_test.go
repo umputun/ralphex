@@ -1,6 +1,8 @@
 package processor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -226,6 +228,71 @@ func TestRunner_getPlanFileRef(t *testing.T) {
 	t.Run("without plan file", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: ""}}
 		assert.Equal(t, "(no plan file - reviewing current branch)", r.getPlanFileRef())
+	})
+}
+
+func TestRunner_resolvePlanFilePath(t *testing.T) {
+	t.Run("empty plan file returns empty", func(t *testing.T) {
+		r := &Runner{cfg: Config{PlanFile: ""}}
+		assert.Empty(t, r.resolvePlanFilePath())
+	})
+
+	t.Run("file exists at original location", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		planPath := filepath.Join(tmpDir, "docs", "plans", "test.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(planPath), 0o700))
+		require.NoError(t, os.WriteFile(planPath, []byte("# plan"), 0o600))
+
+		r := &Runner{cfg: Config{PlanFile: planPath}}
+		assert.Equal(t, planPath, r.resolvePlanFilePath())
+	})
+
+	t.Run("file moved to completed directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		plansDir := filepath.Join(tmpDir, "docs", "plans")
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o700))
+
+		originalPath := filepath.Join(plansDir, "test.md")
+		completedPath := filepath.Join(completedDir, "test.md")
+		require.NoError(t, os.WriteFile(completedPath, []byte("# plan"), 0o600))
+
+		r := &Runner{cfg: Config{PlanFile: originalPath}}
+		assert.Equal(t, completedPath, r.resolvePlanFilePath())
+	})
+
+	t.Run("file not found anywhere returns original path", func(t *testing.T) {
+		r := &Runner{cfg: Config{PlanFile: "/nonexistent/path/plan.md"}}
+		assert.Equal(t, "/nonexistent/path/plan.md", r.resolvePlanFilePath())
+	})
+
+	t.Run("getPlanFileRef uses resolved path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		plansDir := filepath.Join(tmpDir, "docs", "plans")
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o700))
+
+		originalPath := filepath.Join(plansDir, "test.md")
+		completedPath := filepath.Join(completedDir, "test.md")
+		require.NoError(t, os.WriteFile(completedPath, []byte("# plan"), 0o600))
+
+		r := &Runner{cfg: Config{PlanFile: originalPath}}
+		assert.Equal(t, completedPath, r.getPlanFileRef())
+	})
+
+	t.Run("getGoal uses resolved path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		plansDir := filepath.Join(tmpDir, "docs", "plans")
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o700))
+
+		originalPath := filepath.Join(plansDir, "test.md")
+		completedPath := filepath.Join(completedDir, "test.md")
+		require.NoError(t, os.WriteFile(completedPath, []byte("# plan"), 0o600))
+
+		r := &Runner{cfg: Config{PlanFile: originalPath}}
+		assert.Contains(t, r.getGoal(), completedPath)
+		assert.NotContains(t, r.getGoal(), originalPath)
 	})
 }
 
