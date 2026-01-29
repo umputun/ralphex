@@ -159,7 +159,7 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 		}
 		// stage the new location - log if fails but continue
 		if addErr := s.repo.Add(destPath); addErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to stage moved plan: %v\n", addErr)
+			s.log.Printf("warning: failed to stage moved plan: %v\n", addErr)
 		}
 	}
 
