@@ -135,6 +135,64 @@ func TestIsWatchOnlyMode(t *testing.T) {
 	}
 }
 
+func TestShouldServeDashboardWithoutPlan(t *testing.T) {
+	tests := []struct {
+		name            string
+		opts            opts
+		configWatchDirs []string
+		expected        bool
+	}{
+		{name: "serve_only_no_plan_no_watch", opts: opts{Serve: true}, configWatchDirs: nil, expected: true},
+		{name: "serve_with_watch", opts: opts{Serve: true, Watch: []string{"/tmp"}}, configWatchDirs: nil, expected: false},
+		{name: "serve_with_config_watch", opts: opts{Serve: true}, configWatchDirs: []string{"/home"}, expected: false},
+		{name: "serve_with_plan_file", opts: opts{Serve: true, PlanFile: "plan.md"}, configWatchDirs: nil, expected: false},
+		{name: "serve_with_plan_description", opts: opts{Serve: true, PlanDescription: "plan"}, configWatchDirs: nil, expected: false},
+		{name: "serve_with_review", opts: opts{Serve: true, Review: true}, configWatchDirs: nil, expected: false},
+		{name: "serve_with_codex_only", opts: opts{Serve: true, CodexOnly: true}, configWatchDirs: nil, expected: false},
+		{name: "no_serve", opts: opts{}, configWatchDirs: nil, expected: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := shouldServeDashboardWithoutPlan(tc.opts, tc.configWatchDirs)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestPlansExist(t *testing.T) {
+	t.Run("returns_true_when_plan_files_exist", func(t *testing.T) {
+		dir := t.TempDir()
+		planFile := filepath.Join(dir, "plan.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("plan"), 0o600))
+
+		hasPlans, err := plansExist(dir)
+		require.NoError(t, err)
+		assert.True(t, hasPlans)
+	})
+
+	t.Run("returns_false_when_no_plan_files_exist", func(t *testing.T) {
+		dir := t.TempDir()
+
+		hasPlans, err := plansExist(dir)
+		require.NoError(t, err)
+		assert.False(t, hasPlans)
+	})
+
+	t.Run("returns_false_when_directory_missing", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "missing")
+
+		hasPlans, err := plansExist(dir)
+		require.NoError(t, err)
+		assert.False(t, hasPlans)
+	})
+
+	t.Run("returns_error_when_plans_dir_empty", func(t *testing.T) {
+		_, err := plansExist("")
+		require.Error(t, err)
+	})
+}
+
 func TestPlanFlagConflict(t *testing.T) {
 	t.Run("returns_error_when_plan_and_planfile_both_set", func(t *testing.T) {
 		o := opts{

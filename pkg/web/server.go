@@ -22,10 +22,11 @@ var embeddedFS embed.FS
 
 // ServerConfig holds configuration for the web server.
 type ServerConfig struct {
-	Port     int    // port to listen on
-	PlanName string // plan name to display in dashboard
-	Branch   string // git branch name
-	PlanFile string // path to plan file for /api/plan endpoint
+	Port          int    // port to listen on
+	PlanName      string // plan name to display in dashboard
+	Branch        string // git branch name
+	PlanFile      string // path to plan file for /api/plan endpoint
+	WatchExplicit bool   // true when watch dirs were explicitly configured
 }
 
 // Server provides HTTP server for the real-time dashboard.
@@ -617,7 +618,12 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request, ses
 
 // RecentDirsResponse is the response body for GET /api/recent-dirs.
 type RecentDirsResponse struct {
-	Dirs []string `json:"dirs"`
+	Dirs   []string `json:"dirs"`
+	Locked bool     `json:"locked,omitempty"`
+}
+
+func (s *Server) isWatchOnlyMode() bool {
+	return s.cfg.PlanName == "(watch mode)" && s.cfg.PlanFile == "" && s.sm != nil
 }
 
 // handleRecentDirs handles GET /api/recent-dirs.
@@ -626,6 +632,16 @@ func (s *Server) handleRecentDirs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.isWatchOnlyMode() && !s.cfg.WatchExplicit && s.planRunner != nil && s.planRunner.config != nil {
+		dirs := uniqueDirs(s.planRunner.config.WatchDirs)
+		resp := RecentDirsResponse{Dirs: dirs, Locked: len(dirs) == 1}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.Printf("[WARN] failed to encode response: %v", err)
+		}
 		return
 	}
 

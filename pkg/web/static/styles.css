@@ -535,6 +535,10 @@ header h1 {
     border: 1px solid var(--border-default);
 }
 
+.status-badge:empty {
+    display: none;
+}
+
 .status-badge.task {
     background: var(--phase-task-muted);
     color: var(--phase-task);
@@ -1849,6 +1853,16 @@ body.plan-collapsed .scroll-indicator {
     font-size: 11px;
     color: var(--text-muted);
     margin-top: var(--space-xs);
+}
+
+.dir-locked {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
 }
 
 /* resumable sessions section */

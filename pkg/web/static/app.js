@@ -909,7 +909,7 @@
             try {
                 var event = JSON.parse(e.data);
                 if (state.resetOnNextEvent) {
-                    resetOutputState();
+                    resetOutputState({ preserveTiming: true });
                     state.resetOnNextEvent = false;
                 }
                 // queue event for batch processing to avoid layout thrashing
@@ -1083,7 +1083,7 @@
         state.sessionViewMode = mode;
         localStorage.setItem('sessionViewMode', state.sessionViewMode);
         updateViewToggleButton();
-        renderSessionList(state.sessions);
+        renderSessionList(filterSessionsForDisplay(state.sessions));
     }
 
     // update view toggle button appearance
@@ -1357,6 +1357,37 @@
                 return response.json();
             })
             .then(function(data) {
+                var formGroup = planDirInput ? planDirInput.closest('.form-group') : null;
+                var inputGroup = planDirSelect ? planDirSelect.closest('.dir-input-group') : null;
+                var hint = formGroup ? formGroup.querySelector('.form-hint') : null;
+                var lockedEl = formGroup ? formGroup.querySelector('.dir-locked') : null;
+                if (formGroup && !lockedEl) {
+                    lockedEl = document.createElement('div');
+                    lockedEl.className = 'dir-locked';
+                    lockedEl.style.display = 'none';
+                    var label = formGroup.querySelector('label');
+                    if (label && label.nextSibling) {
+                        formGroup.insertBefore(lockedEl, label.nextSibling);
+                    } else {
+                        formGroup.insertBefore(lockedEl, formGroup.firstChild);
+                    }
+                }
+
+                var locked = data && data.locked && data.dirs && data.dirs.length > 0;
+                if (locked) {
+                    if (inputGroup) inputGroup.style.display = 'none';
+                    if (hint) hint.style.display = 'none';
+                    if (lockedEl) {
+                        lockedEl.textContent = data.dirs[0];
+                        lockedEl.style.display = 'block';
+                    }
+                    if (planDirInput) planDirInput.value = data.dirs[0];
+                } else {
+                    if (inputGroup) inputGroup.style.display = '';
+                    if (hint) hint.style.display = '';
+                    if (lockedEl) lockedEl.style.display = 'none';
+                }
+
                 if (!planDirSelect) return;
                 // clear existing options except the first placeholder
                 while (planDirSelect.options.length > 1) {
@@ -2083,27 +2114,31 @@
             })
             .then(function(sessions) {
                 state.sessions = sessions;
-                renderSessionList(sessions);
-                if (state.currentSessionId) {
-                    var current = findSessionById(state.currentSessionId);
-                    if (current) {
-                        state.currentSession = current;
-                        updateHeaderForSession(current);
-                        if (state.pendingQuestion &&
-                            state.pendingQuestion.placeholder &&
-                            state.pendingQuestion.sessionId === state.currentSessionId) {
-                            showPendingQuestionPlaceholder(
-                                state.pendingQuestion.sessionId,
-                                state.pendingQuestion.question,
-                                state.pendingQuestion.options || [],
-                                state.pendingQuestion.progressPath
-                            );
-                        }
-                    }
+                var displaySessions = filterSessionsForDisplay(sessions);
+                renderSessionList(displaySessions);
+
+                var current = state.currentSessionId ? findSessionById(state.currentSessionId) : null;
+                if (current && isEmptySession(current) && displaySessions.length > 0) {
+                    selectSession(displaySessions[0].id);
+                    return;
                 }
-                // auto-select first session if none is currently selected
-                if (!state.currentSessionId && sessions.length > 0) {
-                    selectSession(sessions[0].id);
+                if (!current && displaySessions.length > 0) {
+                    selectSession(displaySessions[0].id);
+                    return;
+                }
+                if (current) {
+                    state.currentSession = current;
+                    updateHeaderForSession(current);
+                    if (state.pendingQuestion &&
+                        state.pendingQuestion.placeholder &&
+                        state.pendingQuestion.sessionId === state.currentSessionId) {
+                        showPendingQuestionPlaceholder(
+                            state.pendingQuestion.sessionId,
+                            state.pendingQuestion.question,
+                            state.pendingQuestion.options || [],
+                            state.pendingQuestion.progressPath
+                        );
+                    }
                 }
             })
             .catch(function(err) {
@@ -2141,7 +2176,7 @@
 
     // extract plan name from path
     function extractPlanName(path) {
-        if (!path) return 'Unknown';
+        if (!path) return 'Waiting';
         var parts = path.split('/');
         var filename = parts[parts.length - 1];
         return filename.replace(/\.md$/i, '');
@@ -2186,6 +2221,24 @@
         } else {
             renderSessionsRecent(sessions);
         }
+    }
+
+    // check if session has no parsed metadata (no plan path, branch, or mode)
+    function isEmptySession(session) {
+        if (!session) return true;
+        return !session.planPath && !session.branch && !session.mode;
+    }
+
+    // filter sessions to hide empty entries when real sessions exist
+    function filterSessionsForDisplay(sessions) {
+        if (!sessions || sessions.length === 0) return [];
+        var hasReal = sessions.some(function(session) {
+            return !isEmptySession(session);
+        });
+        if (!hasReal) return sessions;
+        return sessions.filter(function(session) {
+            return !isEmptySession(session);
+        });
     }
 
     // render sessions as flat list sorted by recency
@@ -2642,7 +2695,21 @@
         state.planQALines = [];
     }
 
-    function resetOutputState() {
+    function resetOutputState(options) {
+        var preserveTiming = options && options.preserveTiming;
+        var preserved = null;
+        if (preserveTiming) {
+            preserved = {
+                executionStartTime: state.executionStartTime,
+                lastEventTimestamp: state.lastEventTimestamp,
+                elapsedTimerInterval: state.elapsedTimerInterval,
+                isTerminalState: state.isTerminalState,
+                hasRunTerminalCleanup: state.hasRunTerminalCleanup,
+                elapsedTimeText: elapsedTimeEl.textContent,
+                statusText: statusBadge.textContent,
+                statusClass: statusBadge.className
+            };
+        }
         clearElement(output);
         state.currentSection = null;
         state.sectionStartTimes = {};
@@ -2672,14 +2739,34 @@
         state.deferredAnswer = null;
         state.resumingProgressPath = null;
         state.resumingPromise = null;
-        if (state.elapsedTimerInterval) {
+        if (state.elapsedTimerInterval && !preserveTiming) {
             clearInterval(state.elapsedTimerInterval);
             state.elapsedTimerInterval = null;
         }
-        elapsedTimeEl.textContent = '';
+        if (!preserveTiming) {
+            elapsedTimeEl.textContent = '';
+            statusBadge.textContent = '';
+            statusBadge.className = 'status-badge';
+        }
         // clear pending question and hide modal when switching sessions
         state.pendingQuestion = null;
         hideQuestionModal();
+
+        if (preserveTiming && preserved) {
+            state.executionStartTime = preserved.executionStartTime;
+            state.lastEventTimestamp = preserved.lastEventTimestamp;
+            if (preserved.elapsedTimerInterval) {
+                state.elapsedTimerInterval = preserved.elapsedTimerInterval;
+            }
+            state.isTerminalState = preserved.isTerminalState;
+            state.hasRunTerminalCleanup = preserved.hasRunTerminalCleanup;
+            elapsedTimeEl.textContent = preserved.elapsedTimeText;
+            statusBadge.textContent = preserved.statusText;
+            statusBadge.className = preserved.statusClass;
+            if (state.executionStartTime && !state.elapsedTimerInterval && !state.isTerminalState) {
+                startElapsedTimer();
+            }
+        }
     }
 
     // create plan loading/error message element

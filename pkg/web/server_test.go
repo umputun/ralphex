@@ -1092,6 +1092,86 @@ func TestServer_HandleRecentDirs(t *testing.T) {
 		assert.Equal(t, "/other/project", result.Dirs[1])
 	})
 
+	t.Run("watch_only_returns_watch_dirs_only", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+
+		session := NewSession("session1", "/other/project/progress-test.txt")
+		sm.Register(session)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080, PlanName: "(watch mode)"}, sm)
+		require.NoError(t, err)
+
+		cfg := &config.Config{
+			ProjectDirs: []string{"/path/project1"},
+			WatchDirs:   []string{"/watch/root"},
+		}
+		srv.planRunner = NewPlanRunner(cfg, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/recent-dirs", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleRecentDirs(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result struct {
+			Dirs   []string `json:"dirs"`
+			Locked bool     `json:"locked"`
+		}
+		require.NoError(t, json.Unmarshal(body, &result))
+		assert.Equal(t, []string{"/watch/root"}, result.Dirs)
+		assert.True(t, result.Locked)
+	})
+
+	t.Run("watch_only_with_explicit_watch_dirs_uses_standard_sources", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+
+		session := NewSession("session1", "/project/alpha/progress-test.txt")
+		sm.Register(session)
+
+		srv, err := NewServerWithSessions(ServerConfig{
+			Port:          8080,
+			PlanName:      "(watch mode)",
+			WatchExplicit: true,
+		}, sm)
+		require.NoError(t, err)
+
+		cfg := &config.Config{
+			ProjectDirs: []string{"/path/project1"},
+			WatchDirs:   []string{"/watch/a", "/watch/b"},
+		}
+		srv.planRunner = NewPlanRunner(cfg, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/recent-dirs", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handleRecentDirs(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result struct {
+			Dirs   []string `json:"dirs"`
+			Locked bool     `json:"locked"`
+		}
+		require.NoError(t, json.Unmarshal(body, &result))
+		assert.Equal(t, []string{"/path/project1", "/project/alpha"}, result.Dirs)
+		assert.False(t, result.Locked)
+	})
+
 	t.Run("rejects non-GET methods", func(t *testing.T) {
 		session := NewSession("test", "/tmp/test.txt")
 		defer session.Close()

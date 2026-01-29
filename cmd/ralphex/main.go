@@ -143,6 +143,16 @@ func run(ctx context.Context, o opts) error {
 	if isWatchOnlyMode(o, cfg.WatchDirs) {
 		return runWatchOnly(ctx, o, cfg, colors)
 	}
+	if shouldServeDashboardWithoutPlan(o, cfg.WatchDirs) {
+		hasPlans, planErr := plansExist(cfg.PlansDir)
+		if planErr != nil {
+			return planErr
+		}
+		if !hasPlans {
+			colors.Info().Printf("no plans found. starting dashboard in watch-only mode (watching current directory). use --watch to monitor other directories\n")
+			return runWatchOnly(ctx, o, cfg, colors)
+		}
+	}
 
 	// check dependencies using configured command (or default "claude")
 	if depErr := checkClaudeDep(cfg); depErr != nil {
@@ -394,6 +404,19 @@ func isWatchOnlyMode(o opts, configWatchDirs []string) bool {
 	return o.Serve && o.PlanFile == "" && o.PlanDescription == "" && (len(o.Watch) > 0 || len(configWatchDirs) > 0)
 }
 
+// shouldServeDashboardWithoutPlan returns true when --serve is set without a plan
+// and no watch directories are configured, which should fall back to a minimal dashboard
+// if no plans exist.
+func shouldServeDashboardWithoutPlan(o opts, configWatchDirs []string) bool {
+	if !o.Serve || o.PlanFile != "" || o.PlanDescription != "" {
+		return false
+	}
+	if o.Review || o.CodexOnly {
+		return false
+	}
+	return len(o.Watch) == 0 && len(configWatchDirs) == 0
+}
+
 // determineMode returns the execution mode based on CLI flags.
 func determineMode(o opts) processor.Mode {
 	switch {
@@ -513,6 +536,25 @@ func selectPlanWithFzf(ctx context.Context, plansDir string, colors *progress.Co
 	}
 
 	return strings.TrimSpace(string(out)), nil
+}
+
+// plansExist returns true if there is at least one plan file in plansDir.
+// missing directories are treated as no plans.
+func plansExist(plansDir string) (bool, error) {
+	if plansDir == "" {
+		return false, errors.New("plans directory is empty")
+	}
+	if _, err := os.Stat(plansDir); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("cannot access plans directory %s: %w", plansDir, err)
+	}
+	plans, err := filepath.Glob(filepath.Join(plansDir, "*.md"))
+	if err != nil {
+		return false, fmt.Errorf("scan plans directory %s: %w", plansDir, err)
+	}
+	return len(plans) > 0, nil
 }
 
 // extractBranchName derives a branch name from a plan file path.
@@ -690,6 +732,7 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 // monitors directories for progress files and serves the multi-session dashboard.
 func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progress.Colors) error {
 	dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
+	watchExplicit := len(o.Watch) > 0 || len(cfg.WatchDirs) > 0
 
 	// fail fast if no watch directories configured
 	if len(dirs) == 0 {
@@ -697,7 +740,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 	}
 
 	// setup server and watcher
-	srvErrCh, watchErrCh, err := setupWatchMode(ctx, o.Port, dirs, cfg)
+	srvErrCh, watchErrCh, err := setupWatchMode(ctx, o.Port, dirs, watchExplicit, cfg)
 	if err != nil {
 		return err
 	}
@@ -711,7 +754,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 
 // setupWatchMode creates and starts the web server and file watcher for watch-only mode.
 // returns error channels for monitoring both components.
-func setupWatchMode(ctx context.Context, port int, dirs []string, cfg *config.Config) (chan error, chan error, error) {
+func setupWatchMode(ctx context.Context, port int, dirs []string, watchExplicit bool, cfg *config.Config) (chan error, chan error, error) {
 	sm := web.NewSessionManager()
 	watcher, err := web.NewWatcher(dirs, sm)
 	if err != nil {
@@ -719,10 +762,11 @@ func setupWatchMode(ctx context.Context, port int, dirs []string, cfg *config.Co
 	}
 
 	serverCfg := web.ServerConfig{
-		Port:     port,
-		PlanName: "(watch mode)",
-		Branch:   "",
-		PlanFile: "",
+		Port:          port,
+		PlanName:      "(watch mode)",
+		Branch:        "",
+		PlanFile:      "",
+		WatchExplicit: watchExplicit,
 	}
 
 	srv, err := web.NewServerWithSessions(serverCfg, sm)
