@@ -25,6 +25,16 @@ type Result struct {
 	Error  error  // execution error if any
 }
 
+// PatternMatchError is returned when a configured error pattern is detected in output.
+type PatternMatchError struct {
+	Pattern string // the pattern that matched
+	HelpCmd string // command to run for more information (e.g., "claude /usage")
+}
+
+func (e *PatternMatchError) Error() string {
+	return fmt.Sprintf("detected error pattern: %q", e.Pattern)
+}
+
 // CommandRunner abstracts command execution for testing.
 // Returns an io.Reader for streaming output and a wait function for completion.
 type CommandRunner interface {
@@ -160,6 +170,7 @@ type ClaudeExecutor struct {
 	Args          string            // additional arguments (space-separated), defaults to standard args
 	OutputHandler func(text string) // called for each text chunk, can be nil
 	Debug         bool              // enable debug output
+	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
 	cmdRunner     CommandRunner     // for testing, nil uses default
 }
 
@@ -203,6 +214,15 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		// non-zero exit might still have useful output
 		if result.Output == "" {
 			return Result{Error: fmt.Errorf("claude exited with error: %w", err)}
+		}
+	}
+
+	// check for error patterns in output
+	if pattern := checkErrorPatterns(result.Output, e.ErrorPatterns); pattern != "" {
+		return Result{
+			Output: result.Output,
+			Signal: result.Signal,
+			Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"},
 		}
 	}
 
@@ -317,6 +337,26 @@ func detectSignal(text string) string {
 	for _, sig := range signals {
 		if strings.Contains(text, sig) {
 			return sig
+		}
+	}
+	return ""
+}
+
+// checkErrorPatterns checks output for configured error patterns.
+// Returns the first matching pattern or empty string if none match.
+// Matching is case-insensitive substring search.
+func checkErrorPatterns(output string, patterns []string) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	outputLower := strings.ToLower(output)
+	for _, pattern := range patterns {
+		trimmed := strings.TrimSpace(pattern)
+		if trimmed == "" {
+			continue
+		}
+		if strings.Contains(outputLower, strings.ToLower(trimmed)) {
+			return trimmed
 		}
 	}
 	return ""

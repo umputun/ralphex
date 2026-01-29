@@ -69,6 +69,7 @@ type CodexExecutor struct {
 	ProjectDoc      string            // path to project documentation file
 	OutputHandler   func(text string) // called for each filtered output line in real-time
 	Debug           bool              // enable debug output
+	ErrorPatterns   []string          // patterns to detect in output (e.g., rate limit messages)
 	runner          CodexRunner       // for testing, nil uses default
 }
 
@@ -163,6 +164,15 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 
 	// detect signal in stdout (the actual response)
 	signal := detectSignal(stdoutContent)
+
+	// check for error patterns in output
+	if pattern := checkErrorPatterns(stdoutContent, e.ErrorPatterns); pattern != "" {
+		return Result{
+			Output: stdoutContent,
+			Signal: signal,
+			Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "codex /status"},
+		}
+	}
 
 	// return stdout content as the result (the actual answer from codex)
 	return Result{Output: stdoutContent, Signal: signal, Error: finalErr}

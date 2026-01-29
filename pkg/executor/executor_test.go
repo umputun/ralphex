@@ -525,3 +525,146 @@ func TestClaudeExecutor_parseStream_multipleLargeLines(t *testing.T) {
 	require.NoError(t, result.Error)
 	assert.Len(t, result.Output, lineSize*numLines, "should contain all output from all lines")
 }
+
+func TestPatternMatchError_Error(t *testing.T) {
+	err := &PatternMatchError{Pattern: "rate limit exceeded", HelpCmd: "claude /usage"}
+	assert.Equal(t, `detected error pattern: "rate limit exceeded"`, err.Error())
+}
+
+func TestCheckErrorPatterns(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		patterns []string
+		want     string
+	}{
+		{name: "no patterns", output: "some output", patterns: nil, want: ""},
+		{name: "empty patterns slice", output: "some output", patterns: []string{}, want: ""},
+		{name: "no match", output: "everything is fine", patterns: []string{"error", "failed"}, want: ""},
+		{name: "exact match", output: "You've hit your limit", patterns: []string{"You've hit your limit"}, want: "You've hit your limit"},
+		{name: "substring match", output: "Error: You've hit your limit today", patterns: []string{"hit your limit"}, want: "hit your limit"},
+		{name: "case insensitive", output: "YOU'VE HIT YOUR LIMIT", patterns: []string{"you've hit your limit"}, want: "you've hit your limit"},
+		{name: "mixed case match", output: "Rate Limit Exceeded", patterns: []string{"rate limit exceeded"}, want: "rate limit exceeded"},
+		{name: "first pattern wins", output: "rate limit and quota exceeded", patterns: []string{"rate limit", "quota exceeded"}, want: "rate limit"},
+		{name: "second pattern matches", output: "your quota exceeded the limit", patterns: []string{"rate limit", "quota exceeded"}, want: "quota exceeded"},
+		{name: "empty pattern skipped", output: "some text", patterns: []string{"", "some"}, want: "some"},
+		{name: "whitespace in pattern", output: "rate  limit", patterns: []string{"rate  limit"}, want: "rate  limit"},
+		{name: "multiline output", output: "line1\nYou've hit your limit\nline3", patterns: []string{"hit your limit"}, want: "hit your limit"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := checkErrorPatterns(tc.output, tc.patterns)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
+	tests := []struct {
+		name          string
+		output        string
+		patterns      []string
+		wantError     bool
+		wantPattern   string
+		wantHelpCmd   string
+		wantOutput    string
+	}{
+		{
+			name:        "no patterns configured",
+			output:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}`,
+			patterns:    nil,
+			wantError:   false,
+			wantOutput:  "You've hit your limit",
+		},
+		{
+			name:        "pattern not matched",
+			output:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Task completed successfully"}}`,
+			patterns:    []string{"rate limit", "quota exceeded"},
+			wantError:   false,
+			wantOutput:  "Task completed successfully",
+		},
+		{
+			name:        "pattern matched",
+			output:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Error: You've hit your limit for today"}}`,
+			patterns:    []string{"hit your limit"},
+			wantError:   true,
+			wantPattern: "hit your limit",
+			wantHelpCmd: "claude /usage",
+			wantOutput:  "Error: You've hit your limit for today",
+		},
+		{
+			name:        "case insensitive match",
+			output:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"RATE LIMIT EXCEEDED"}}`,
+			patterns:    []string{"rate limit exceeded"},
+			wantError:   true,
+			wantPattern: "rate limit exceeded",
+			wantHelpCmd: "claude /usage",
+			wantOutput:  "RATE LIMIT EXCEEDED",
+		},
+		{
+			name:        "first matching pattern returned",
+			output:      `{"type":"content_block_delta","delta":{"type":"text_delta","text":"rate limit and quota exceeded"}}`,
+			patterns:    []string{"rate limit", "quota exceeded"},
+			wantError:   true,
+			wantPattern: "rate limit",
+			wantHelpCmd: "claude /usage",
+			wantOutput:  "rate limit and quota exceeded",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := &mocks.CommandRunnerMock{
+				RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+					return strings.NewReader(tc.output), func() error { return nil }, nil
+				},
+			}
+			e := &ClaudeExecutor{
+				cmdRunner:     mock,
+				ErrorPatterns: tc.patterns,
+			}
+
+			result := e.Run(context.Background(), "test prompt")
+
+			assert.Equal(t, tc.wantOutput, result.Output)
+
+			if tc.wantError {
+				require.Error(t, result.Error)
+				var patternErr *PatternMatchError
+				require.ErrorAs(t, result.Error, &patternErr)
+				assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+				assert.Equal(t, tc.wantHelpCmd, patternErr.HelpCmd)
+			} else {
+				require.NoError(t, result.Error)
+			}
+		})
+	}
+}
+
+func TestClaudeExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
+	// error pattern should still be detected even when output contains a signal
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{
+		cmdRunner:     mock,
+		ErrorPatterns: []string{"hit your limit"},
+	}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	// should have error due to pattern match
+	require.Error(t, result.Error)
+	var patternErr *PatternMatchError
+	require.ErrorAs(t, result.Error, &patternErr)
+	assert.Equal(t, "hit your limit", patternErr.Pattern)
+
+	// should preserve output and signal
+	assert.Contains(t, result.Output, "You've hit your limit")
+	assert.Equal(t, "<<<RALPHEX:ALL_TASKS_DONE>>>", result.Signal)
+}

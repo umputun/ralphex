@@ -16,6 +16,7 @@ import (
 type Values struct {
 	ClaudeCommand        string
 	ClaudeArgs           string
+	ClaudeErrorPatterns  []string // patterns to detect in claude output (e.g., rate limit messages)
 	CodexEnabled         bool
 	CodexEnabledSet      bool // tracks if codex_enabled was explicitly set
 	CodexCommand         string
@@ -24,6 +25,7 @@ type Values struct {
 	CodexTimeoutMs       int
 	CodexTimeoutMsSet    bool // tracks if codex_timeout_ms was explicitly set
 	CodexSandbox         string
+	CodexErrorPatterns   []string // patterns to detect in codex output (e.g., rate limit messages)
 	IterationDelayMs     int
 	IterationDelayMsSet  bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount       int
@@ -203,6 +205,28 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		}
 	}
 
+	// error patterns (comma-separated)
+	if key, err := section.GetKey("claude_error_patterns"); err == nil {
+		val := strings.TrimSpace(key.String())
+		if val != "" {
+			for p := range strings.SplitSeq(val, ",") {
+				if t := strings.TrimSpace(p); t != "" {
+					values.ClaudeErrorPatterns = append(values.ClaudeErrorPatterns, t)
+				}
+			}
+		}
+	}
+	if key, err := section.GetKey("codex_error_patterns"); err == nil {
+		val := strings.TrimSpace(key.String())
+		if val != "" {
+			for p := range strings.SplitSeq(val, ",") {
+				if t := strings.TrimSpace(p); t != "" {
+					values.CodexErrorPatterns = append(values.CodexErrorPatterns, t)
+				}
+			}
+		}
+	}
+
 	return values, nil
 }
 
@@ -247,5 +271,11 @@ func (dst *Values) mergeFrom(src *Values) {
 	}
 	if len(src.WatchDirs) > 0 {
 		dst.WatchDirs = src.WatchDirs
+	}
+	if len(src.ClaudeErrorPatterns) > 0 {
+		dst.ClaudeErrorPatterns = src.ClaudeErrorPatterns
+	}
+	if len(src.CodexErrorPatterns) > 0 {
+		dst.CodexErrorPatterns = src.CodexErrorPatterns
 	}
 }
