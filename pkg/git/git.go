@@ -19,14 +19,15 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// Repo provides git operations using go-git.
-type Repo struct {
-	repo *git.Repository
-	path string // absolute path to repository root
+// repo provides low-level git operations using go-git.
+// This is an internal type - use Service for the public API.
+type repo struct {
+	gitRepo *git.Repository
+	path    string // absolute path to repository root
 }
 
 // Root returns the absolute path to the repository root.
-func (r *Repo) Root() string {
+func (r *repo) Root() string {
 	return r.path
 }
 
@@ -35,7 +36,7 @@ func (r *Repo) Root() string {
 // Relative paths starting with ".." are resolved against CWD first.
 // Other relative paths are assumed to already be repo-relative.
 // Returns error if the resolved path is outside the repository.
-func (r *Repo) toRelative(path string) (string, error) {
+func (r *repo) toRelative(path string) (string, error) {
 	// for relative paths, just clean and validate
 	if !filepath.IsAbs(path) {
 		cleaned := filepath.Clean(path)
@@ -58,10 +59,10 @@ func (r *Repo) toRelative(path string) (string, error) {
 	return rel, nil
 }
 
-// Open opens a git repository at the given path.
+// openRepo opens a git repository at the given path.
 // Supports both regular repositories and git worktrees.
-func Open(path string) (*Repo, error) {
-	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
+func openRepo(path string) (*repo, error) {
+	gitRepo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
 		EnableDotGitCommonDir: true,
 	})
 	if err != nil {
@@ -69,17 +70,17 @@ func Open(path string) (*Repo, error) {
 	}
 
 	// get the worktree root path
-	wt, err := repo.Worktree()
+	wt, err := gitRepo.Worktree()
 	if err != nil {
 		return nil, fmt.Errorf("get worktree: %w", err)
 	}
 
-	return &Repo{repo: repo, path: wt.Filesystem.Root()}, nil
+	return &repo{gitRepo: gitRepo, path: wt.Filesystem.Root()}, nil
 }
 
 // HasCommits returns true if the repository has at least one commit.
-func (r *Repo) HasCommits() (bool, error) {
-	_, err := r.repo.Head()
+func (r *repo) HasCommits() (bool, error) {
+	_, err := r.gitRepo.Head()
 	if err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
 			return false, nil // no commits yet
@@ -92,8 +93,8 @@ func (r *Repo) HasCommits() (bool, error) {
 // CreateInitialCommit stages all non-ignored files and creates an initial commit.
 // Returns error if no files to stage or commit fails.
 // Respects local, global, and system gitignore patterns via IsIgnored.
-func (r *Repo) CreateInitialCommit(message string) error {
-	wt, err := r.repo.Worktree()
+func (r *repo) CreateInitialCommit(message string) error {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
@@ -143,8 +144,8 @@ func (r *Repo) CreateInitialCommit(message string) error {
 }
 
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD state.
-func (r *Repo) CurrentBranch() (string, error) {
-	head, err := r.repo.Head()
+func (r *repo) CurrentBranch() (string, error) {
+	head, err := r.gitRepo.Head()
 	if err != nil {
 		return "", fmt.Errorf("get HEAD: %w", err)
 	}
@@ -156,13 +157,13 @@ func (r *Repo) CurrentBranch() (string, error) {
 
 // CreateBranch creates a new branch and switches to it.
 // Returns error if branch already exists to prevent data loss.
-func (r *Repo) CreateBranch(name string) error {
-	wt, err := r.repo.Worktree()
+func (r *repo) CreateBranch(name string) error {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
 
-	head, err := r.repo.Head()
+	head, err := r.gitRepo.Head()
 	if err != nil {
 		return fmt.Errorf("get HEAD: %w", err)
 	}
@@ -170,13 +171,13 @@ func (r *Repo) CreateBranch(name string) error {
 	branchRef := plumbing.NewBranchReferenceName(name)
 
 	// check if branch already exists to prevent overwriting
-	if _, err := r.repo.Reference(branchRef, false); err == nil {
+	if _, err := r.gitRepo.Reference(branchRef, false); err == nil {
 		return fmt.Errorf("branch %q already exists", name)
 	}
 
 	// create the branch reference pointing to current HEAD
 	ref := plumbing.NewHashReference(branchRef, head.Hash())
-	if err := r.repo.Storer.SetReference(ref); err != nil {
+	if err := r.gitRepo.Storer.SetReference(ref); err != nil {
 		return fmt.Errorf("create branch reference: %w", err)
 	}
 
@@ -184,7 +185,7 @@ func (r *Repo) CreateBranch(name string) error {
 	branchConfig := &config.Branch{
 		Name: name,
 	}
-	if err := r.repo.CreateBranch(branchConfig); err != nil {
+	if err := r.gitRepo.CreateBranch(branchConfig); err != nil {
 		// ignore if branch config already exists
 		if !errors.Is(err, git.ErrBranchExists) {
 			return fmt.Errorf("create branch config: %w", err)
@@ -200,15 +201,15 @@ func (r *Repo) CreateBranch(name string) error {
 }
 
 // BranchExists checks if a branch with the given name exists.
-func (r *Repo) BranchExists(name string) bool {
+func (r *repo) BranchExists(name string) bool {
 	branchRef := plumbing.NewBranchReferenceName(name)
-	_, err := r.repo.Reference(branchRef, false)
+	_, err := r.gitRepo.Reference(branchRef, false)
 	return err == nil
 }
 
 // CheckoutBranch switches to an existing branch.
-func (r *Repo) CheckoutBranch(name string) error {
-	wt, err := r.repo.Worktree()
+func (r *repo) CheckoutBranch(name string) error {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
@@ -223,7 +224,7 @@ func (r *Repo) CheckoutBranch(name string) error {
 // MoveFile moves a file using git (equivalent to git mv).
 // Paths can be absolute or relative to the repository root.
 // The destination directory must already exist.
-func (r *Repo) MoveFile(src, dst string) error {
+func (r *repo) MoveFile(src, dst string) error {
 	// convert to relative paths for git operations
 	srcRel, err := r.toRelative(src)
 	if err != nil {
@@ -234,7 +235,7 @@ func (r *Repo) MoveFile(src, dst string) error {
 		return fmt.Errorf("invalid destination path: %w", err)
 	}
 
-	wt, err := r.repo.Worktree()
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
@@ -270,13 +271,13 @@ func (r *Repo) MoveFile(src, dst string) error {
 
 // Add stages a file for commit.
 // Path can be absolute or relative to the repository root.
-func (r *Repo) Add(path string) error {
+func (r *repo) Add(path string) error {
 	rel, err := r.toRelative(path)
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	wt, err := r.repo.Worktree()
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
@@ -290,8 +291,8 @@ func (r *Repo) Add(path string) error {
 
 // Commit creates a commit with the given message.
 // Returns error if no changes are staged.
-func (r *Repo) Commit(msg string) error {
-	wt, err := r.repo.Worktree()
+func (r *repo) Commit(msg string) error {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
@@ -308,9 +309,9 @@ func (r *Repo) Commit(msg string) error {
 // getAuthor returns the commit author from git config or a fallback.
 // checks repository config first (.git/config), then falls back to global config,
 // and finally to default values.
-func (r *Repo) getAuthor() *object.Signature {
+func (r *repo) getAuthor() *object.Signature {
 	// try repository config first (merges local + global)
-	if cfg, err := r.repo.Config(); err == nil {
+	if cfg, err := r.gitRepo.Config(); err == nil {
 		if cfg.User.Name != "" && cfg.User.Email != "" {
 			return &object.Signature{
 				Name:  cfg.User.Name,
@@ -346,8 +347,8 @@ func (r *Repo) getAuthor() *object.Signature {
 //
 // Precedence (highest to lowest): local .gitignore > global > system.
 // go-git's Matcher checks patterns from end-to-start, so patterns at end have higher priority.
-func (r *Repo) IsIgnored(path string) (bool, error) {
-	wt, err := r.repo.Worktree()
+func (r *repo) IsIgnored(path string) (bool, error) {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("get worktree: %w", err)
 	}
@@ -410,8 +411,8 @@ func loadXDGGlobalPatterns() []gitignore.Pattern {
 
 // IsDirty returns true if the worktree has uncommitted changes
 // (staged or modified tracked files).
-func (r *Repo) IsDirty() (bool, error) {
-	wt, err := r.repo.Worktree()
+func (r *repo) IsDirty() (bool, error) {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("get worktree: %w", err)
 	}
@@ -437,8 +438,8 @@ func (r *Repo) IsDirty() (bool, error) {
 
 // HasChangesOtherThan returns true if there are uncommitted changes to files other than the given file.
 // this includes modified/deleted tracked files, staged changes, and untracked files (excluding gitignored).
-func (r *Repo) HasChangesOtherThan(filePath string) (bool, error) {
-	wt, err := r.repo.Worktree()
+func (r *repo) HasChangesOtherThan(filePath string) (bool, error) {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("get worktree: %w", err)
 	}
@@ -479,8 +480,8 @@ func (r *Repo) HasChangesOtherThan(filePath string) (bool, error) {
 
 // FileHasChanges returns true if the given file has uncommitted changes.
 // this includes untracked, modified, deleted, or staged states.
-func (r *Repo) FileHasChanges(filePath string) (bool, error) {
-	wt, err := r.repo.Worktree()
+func (r *repo) FileHasChanges(filePath string) (bool, error) {
+	wt, err := r.gitRepo.Worktree()
 	if err != nil {
 		return false, fmt.Errorf("get worktree: %w", err)
 	}
@@ -503,7 +504,7 @@ func (r *Repo) FileHasChanges(filePath string) (bool, error) {
 }
 
 // normalizeToRelative converts a file path to be relative to the repository root.
-func (r *Repo) normalizeToRelative(filePath string) (string, error) {
+func (r *repo) normalizeToRelative(filePath string) (string, error) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return "", fmt.Errorf("get absolute path: %w", err)
@@ -516,50 +517,16 @@ func (r *Repo) normalizeToRelative(filePath string) (string, error) {
 }
 
 // fileHasChanges checks if a file status indicates uncommitted changes.
-func (r *Repo) fileHasChanges(s *git.FileStatus) bool {
+func (r *repo) fileHasChanges(s *git.FileStatus) bool {
 	return s.Staging != git.Unmodified ||
 		s.Worktree == git.Modified || s.Worktree == git.Deleted || s.Worktree == git.Untracked
 }
 
 // IsMainBranch returns true if the current branch is "main" or "master".
-func (r *Repo) IsMainBranch() (bool, error) {
+func (r *repo) IsMainBranch() (bool, error) {
 	branch, err := r.CurrentBranch()
 	if err != nil {
 		return false, fmt.Errorf("get current branch: %w", err)
 	}
 	return branch == "main" || branch == "master", nil
-}
-
-// EnsureIgnored ensures a pattern is in .gitignore.
-// uses probePath to check if pattern is already ignored before adding.
-// if pattern is already ignored, does nothing.
-// if pattern is not ignored, appends it to .gitignore with comment.
-// logFn function is called if pattern is added (can be nil to disable logging).
-func (r *Repo) EnsureIgnored(pattern, probePath string, logFn func(string, ...any)) error {
-	// check if already ignored
-	ignored, err := r.IsIgnored(probePath)
-	if err == nil && ignored {
-		return nil // already ignored
-	}
-
-	// write to .gitignore at repo root
-	gitignorePath := filepath.Join(r.path, ".gitignore")
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // .gitignore needs world-readable
-	if err != nil {
-		return fmt.Errorf("open .gitignore: %w", err)
-	}
-
-	if _, err := fmt.Fprintf(f, "\n# ralphex progress logs\n%s\n", pattern); err != nil {
-		_ = f.Close() // close on write error, ignore close error since write already failed
-		return fmt.Errorf("write .gitignore: %w", err)
-	}
-
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close .gitignore: %w", err)
-	}
-
-	if logFn != nil {
-		logFn("added %s to .gitignore", pattern)
-	}
-	return nil
 }

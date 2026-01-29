@@ -249,9 +249,9 @@ func TestAutoPlanModeDetection(t *testing.T) {
 		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
 
 		// create and switch to a feature branch
-		gitOps, err := git.Open(".")
+		gitSvc, err := git.NewService(".", testColors().Info())
 		require.NoError(t, err)
-		require.NoError(t, gitOps.CreateBranch("feature-test"))
+		require.NoError(t, gitSvc.CreateBranch("feature-test"))
 
 		// run without arguments - should error because we're on feature branch
 		o := opts{MaxIterations: 1}
@@ -340,7 +340,7 @@ func TestCheckClaudeDep(t *testing.T) {
 }
 
 func TestCreateRunner(t *testing.T) {
-	t.Run("maps_config_correctly", func(t *testing.T) {
+	t.Run("creates_runner_without_panic", func(t *testing.T) {
 		cfg := &config.Config{
 			IterationDelayMs: 5000,
 			TaskRetryCount:   3,
@@ -358,7 +358,7 @@ func TestCreateRunner(t *testing.T) {
 		assert.NotNil(t, runner)
 	})
 
-	t.Run("codex_only_mode_forces_codex_enabled", func(t *testing.T) {
+	t.Run("codex_only_mode_creates_runner_without_panic", func(t *testing.T) {
 		cfg := &config.Config{CodexEnabled: false} // explicitly disabled in config
 		o := opts{MaxIterations: 50}
 
@@ -367,34 +367,33 @@ func TestCreateRunner(t *testing.T) {
 		require.NoError(t, err)
 		defer log.Close()
 
-		// in codex-only mode, CodexEnabled should be forced to true
+		// tests that codex-only mode code path runs without panic
 		runner := createRunner(cfg, o, "", processor.ModeCodexOnly, log)
 		assert.NotNil(t, runner)
-		// we can't directly check runner internals, but this tests the code path runs without panic
 	})
 }
 
 func TestGetCurrentBranch(t *testing.T) {
 	t.Run("returns_branch_name", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 
-		branch := getCurrentBranch(repo)
+		branch := getCurrentBranch(gitSvc)
 		assert.Equal(t, "master", branch)
 	})
 
 	t.Run("returns_unknown_on_error", func(t *testing.T) {
 		// create a repo but then break it by removing .git
 		dir := setupTestRepo(t)
-		repo, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 
 		// close and remove git dir to simulate error
 		require.NoError(t, os.RemoveAll(filepath.Join(dir, ".git")))
 
 		// getCurrentBranch should return "unknown" on error
-		branch := getCurrentBranch(repo)
+		branch := getCurrentBranch(gitSvc)
 		assert.Equal(t, "unknown", branch)
 	})
 }
@@ -453,20 +452,19 @@ func TestPrintStartupInfo(t *testing.T) {
 	})
 }
 
-// returns a no-op logger for tests
-func noopLogger() func(string, ...any) (int, error) {
-	return func(string, ...any) (int, error) { return 0, nil }
-}
+// noopLogger implements git.Logger for tests.
+type noopLogger struct{}
+
+func (noopLogger) Printf(string, ...any) (int, error) { return 0, nil }
 
 func TestEnsureRepoHasCommits(t *testing.T) {
 	t.Run("returns nil for repo with commits", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		gitOps, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, noopLogger{})
 		require.NoError(t, err)
-		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader(""), &stdout)
+		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader(""), &stdout)
 		assert.NoError(t, err)
 	})
 
@@ -479,21 +477,20 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		err = os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600)
 		require.NoError(t, err)
 
-		gitOps, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, noopLogger{})
 		require.NoError(t, err)
-		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		// verify no commits before
-		hasCommits, err := gitOps.HasCommits()
+		hasCommits, err := gitSvc.HasCommits()
 		require.NoError(t, err)
 		assert.False(t, hasCommits)
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader("y\n"), &stdout)
 		require.NoError(t, err)
 
 		// verify commit was created
-		hasCommits, err = gitOps.HasCommits()
+		hasCommits, err = gitSvc.HasCommits()
 		require.NoError(t, err)
 		assert.True(t, hasCommits)
 
@@ -507,12 +504,11 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		gitOps, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, noopLogger{})
 		require.NoError(t, err)
-		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader("n\n"), &stdout)
+		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader("n\n"), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
 	})
@@ -522,12 +518,11 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		gitOps, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, noopLogger{})
 		require.NoError(t, err)
-		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader(""), &stdout)
+		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader(""), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
 	})
@@ -539,12 +534,11 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 
 		// no files created - empty repo
 
-		gitOps, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, noopLogger{})
 		require.NoError(t, err)
-		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), wf, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader("y\n"), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "create initial commit")
 	})
@@ -554,15 +548,14 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		gitOps, err := git.Open(dir)
+		gitSvc, err := git.NewService(dir, noopLogger{})
 		require.NoError(t, err)
-		wf := git.NewWorkflow(gitOps, noopLogger())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(ctx, wf, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(ctx, gitSvc, strings.NewReader("y\n"), &stdout)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
 	})

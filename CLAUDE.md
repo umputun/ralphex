@@ -47,6 +47,13 @@ docs/plans/         # plan files location
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
 
+### Git Package API
+
+Single public entry point: `git.NewService(path, logger) (*Service, error)`
+- All git operations are methods on `Service` (CreateBranchForPlan, MovePlanToCompleted, EnsureIgnored, etc.)
+- `Logger` interface for dependency injection, compatible with `*color.Color`
+- Internal `repo` type is unexported - use `Service` for all git operations
+
 ### Plan Creation Mode
 
 The `--plan "description"` flag enables interactive plan creation:

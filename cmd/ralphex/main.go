@@ -58,8 +58,7 @@ type startupInfo struct {
 type executePlanRequest struct {
 	PlanFile string
 	Mode     processor.Mode
-	GitOps   *git.Repo
-	Workflow *git.Workflow
+	GitSvc   *git.Service
 	Config   *config.Config
 	Colors   *progress.Colors
 	Selector *plan.Selector
@@ -151,15 +150,14 @@ func run(ctx context.Context, o opts) error {
 		return errors.New("must run from repository root (no .git directory found)")
 	}
 
-	// open git repository
-	gitOps, err := git.Open(".")
+	// open git repository via Service
+	gitSvc, err := git.NewService(".", colors.Info())
 	if err != nil {
 		return fmt.Errorf("open git repo: %w", err)
 	}
-	workflow := git.NewWorkflow(gitOps, colors.Info().Printf)
 
 	// ensure repository has commits (prompts to create initial commit if empty)
-	if ensureErr := ensureRepoHasCommits(ctx, workflow, os.Stdin, os.Stdout); ensureErr != nil {
+	if ensureErr := ensureRepoHasCommits(ctx, gitSvc, os.Stdin, os.Stdout); ensureErr != nil {
 		return ensureErr
 	}
 
@@ -172,8 +170,7 @@ func run(ctx context.Context, o opts) error {
 	if mode == processor.ModePlan {
 		return runPlanMode(ctx, o, executePlanRequest{
 			Mode:     processor.ModePlan,
-			GitOps:   gitOps,
-			Workflow: workflow,
+			GitSvc:   gitSvc,
 			Config:   cfg,
 			Colors:   colors,
 			Selector: selector,
@@ -185,8 +182,7 @@ func run(ctx context.Context, o opts) error {
 	if err != nil {
 		// check for auto-plan-mode: no plans found on main/master branch
 		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, executePlanRequest{
-			GitOps:   gitOps,
-			Workflow: workflow,
+			GitSvc:   gitSvc,
 			Config:   cfg,
 			Colors:   colors,
 			Selector: selector,
@@ -199,21 +195,18 @@ func run(ctx context.Context, o opts) error {
 
 	// setup git for execution (branch, gitignore)
 	if planFile != "" && mode == processor.ModeFull {
-		if err := workflow.CreateBranchForPlan(planFile); err != nil {
+		if err := gitSvc.CreateBranchForPlan(planFile); err != nil {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
 	}
-	if err := gitOps.EnsureIgnored("progress*.txt", "progress-test.txt", func(format string, args ...any) {
-		colors.Info().Printf(format, args...)
-	}); err != nil {
+	if err := gitSvc.EnsureIgnored("progress*.txt", "progress-test.txt"); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
 	return executePlan(ctx, o, executePlanRequest{
 		PlanFile: planFile,
 		Mode:     mode,
-		GitOps:   gitOps,
-		Workflow: workflow,
+		GitSvc:   gitSvc,
 		Config:   cfg,
 		Colors:   colors,
 		Selector: selector,
@@ -221,8 +214,8 @@ func run(ctx context.Context, o opts) error {
 }
 
 // getCurrentBranch returns the current git branch name or "unknown" if unavailable.
-func getCurrentBranch(gitOps *git.Repo) string {
-	branch, err := gitOps.CurrentBranch()
+func getCurrentBranch(gitSvc *git.Service) string {
+	branch, err := gitSvc.CurrentBranch()
 	if err != nil || branch == "" {
 		return "unknown"
 	}
@@ -236,7 +229,7 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 		return false, nil
 	}
 
-	isMain, branchErr := req.GitOps.IsMainBranch()
+	isMain, branchErr := req.GitSvc.IsMainBranch()
 	if branchErr != nil || !isMain {
 		return false, nil //nolint:nilerr // branchErr is intentionally ignored - if we can't get branch, skip auto-plan-mode
 	}
@@ -254,7 +247,7 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 // executePlan runs the main execution loop for a plan file.
 // handles progress logging, web dashboard, runner execution, and post-execution tasks.
 func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
-	branch := getCurrentBranch(req.GitOps)
+	branch := getCurrentBranch(req.GitSvc)
 
 	// create progress logger
 	baseLog, err := progress.NewLogger(progress.Config{
@@ -312,7 +305,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// move completed plan to completed/ directory
 	if req.PlanFile != "" && req.Mode == processor.ModeFull {
-		if moveErr := req.Workflow.MovePlanToCompleted(req.PlanFile); moveErr != nil {
+		if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
 	}
@@ -421,13 +414,11 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 // after plan creation, prompts user to continue with implementation or exit.
 func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	// ensure gitignore has progress files
-	if err := req.GitOps.EnsureIgnored("progress*.txt", "progress-test.txt", func(format string, args ...any) {
-		req.Colors.Info().Printf(format, args...)
-	}); err != nil {
+	if err := req.GitSvc.EnsureIgnored("progress*.txt", "progress-test.txt"); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
-	branch := getCurrentBranch(req.GitOps)
+	branch := getCurrentBranch(req.GitSvc)
 
 	// create progress logger for plan mode
 	baseLog, err := progress.NewLogger(progress.Config{
@@ -518,15 +509,14 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	req.Colors.Info().Printf("\ncontinuing with plan implementation...\n")
 
 	// create branch if needed
-	if err := req.Workflow.CreateBranchForPlan(planFile); err != nil {
+	if err := req.GitSvc.CreateBranchForPlan(planFile); err != nil {
 		return fmt.Errorf("create branch for plan: %w", err)
 	}
 
 	return executePlan(ctx, o, executePlanRequest{
 		PlanFile: planFile,
 		Mode:     processor.ModeFull,
-		GitOps:   req.GitOps,
-		Workflow: req.Workflow,
+		GitSvc:   req.GitSvc,
 		Config:   req.Config,
 		Colors:   req.Colors,
 	})
@@ -551,7 +541,7 @@ func isResetOnly(o opts) bool {
 
 // ensureRepoHasCommits checks that the repository has at least one commit.
 // If the repository is empty, prompts the user to create an initial commit.
-func ensureRepoHasCommits(ctx context.Context, wf *git.Workflow, stdin io.Reader, stdout io.Writer) error {
+func ensureRepoHasCommits(ctx context.Context, gitSvc *git.Service, stdin io.Reader, stdout io.Writer) error {
 	// track if we actually created a commit
 	createdCommit := false
 	promptFn := func() bool {
@@ -565,7 +555,7 @@ func ensureRepoHasCommits(ctx context.Context, wf *git.Workflow, stdin io.Reader
 		return true
 	}
 
-	if err := wf.EnsureHasCommits(promptFn); err != nil {
+	if err := gitSvc.EnsureHasCommits(promptFn); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("create initial commit: %w", ctx.Err())
 		}

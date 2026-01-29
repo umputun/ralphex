@@ -1,7 +1,6 @@
 package git
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,17 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpen(t *testing.T) {
+func TestOpenRepo(t *testing.T) {
 	t.Run("opens valid repo", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
-		assert.NotNil(t, repo)
+		assert.NotNil(t, r)
 	})
 
 	t.Run("fails on non-repo", func(t *testing.T) {
 		dir := t.TempDir()
-		_, err := Open(dir)
+		_, err := openRepo(dir)
 		assert.Error(t, err)
 	})
 
@@ -36,11 +35,11 @@ func TestOpen(t *testing.T) {
 		cmd.Dir = mainDir
 		require.NoError(t, cmd.Run())
 
-		// open worktree with our Open()
-		repo, err := Open(wtDir)
+		// open worktree with our openRepo()
+		r, err := openRepo(wtDir)
 		require.NoError(t, err)
 
-		branch, err := repo.CurrentBranch()
+		branch, err := r.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "wt-branch", branch)
 	})
@@ -49,10 +48,10 @@ func TestOpen(t *testing.T) {
 func TestRepo_toRelative(t *testing.T) {
 	t.Run("returns repo-relative path unchanged", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		rel, err := repo.toRelative("docs/plans/test.md")
+		rel, err := r.toRelative("docs/plans/test.md")
 		require.NoError(t, err)
 		assert.Equal(t, "docs/plans/test.md", rel)
 	})
@@ -63,41 +62,41 @@ func TestRepo_toRelative(t *testing.T) {
 		dir, err := filepath.EvalSymlinks(dir)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		absPath := filepath.Join(dir, "docs", "plans", "test.md")
-		rel, err := repo.toRelative(absPath)
+		rel, err := r.toRelative(absPath)
 		require.NoError(t, err)
 		assert.Equal(t, filepath.Join("docs", "plans", "test.md"), rel)
 	})
 
 	t.Run("rejects .. path", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		_, err = repo.toRelative("../outside.txt")
+		_, err = r.toRelative("../outside.txt")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "escapes repository root")
 	})
 
 	t.Run("rejects absolute path outside repo", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		_, err = repo.toRelative("/tmp/outside/file.txt")
+		_, err = r.toRelative("/tmp/outside/file.txt")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "outside repository")
 	})
 
 	t.Run("rejects ./../ path", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		_, err = repo.toRelative("./../outside.txt")
+		_, err = r.toRelative("./../outside.txt")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "escapes repository root")
 	})
@@ -106,44 +105,44 @@ func TestRepo_toRelative(t *testing.T) {
 func TestRepo_CurrentBranch(t *testing.T) {
 	t.Run("returns master for new repo", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		branch, err := repo.CurrentBranch()
+		branch, err := r.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch)
 	})
 
 	t.Run("returns feature branch name", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateBranch("feature-test")
+		err = r.CreateBranch("feature-test")
 		require.NoError(t, err)
 
-		branch, err := repo.CurrentBranch()
+		branch, err := r.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "feature-test", branch)
 	})
 
 	t.Run("returns empty string for detached HEAD", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// get current HEAD hash
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
 
 		// checkout the commit hash directly (detached HEAD)
-		wt, err := repo.repo.Worktree()
+		wt, err := r.gitRepo.Worktree()
 		require.NoError(t, err)
 		err = wt.Checkout(&git.CheckoutOptions{Hash: head.Hash()})
 		require.NoError(t, err)
 
 		// should return empty string for detached HEAD
-		branch, err := repo.CurrentBranch()
+		branch, err := r.CurrentBranch()
 		require.NoError(t, err)
 		assert.Empty(t, branch)
 	})
@@ -152,48 +151,48 @@ func TestRepo_CurrentBranch(t *testing.T) {
 func TestRepo_CreateBranch(t *testing.T) {
 	t.Run("creates and switches to branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateBranch("new-feature")
+		err = r.CreateBranch("new-feature")
 		require.NoError(t, err)
 
-		branch, err := repo.CurrentBranch()
+		branch, err := r.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "new-feature", branch)
 	})
 
 	t.Run("fails on invalid branch name", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateBranch("invalid..name")
+		err = r.CreateBranch("invalid..name")
 		assert.Error(t, err)
 	})
 
 	t.Run("fails when branch already exists", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create branch first
-		err = repo.CreateBranch("existing")
+		err = r.CreateBranch("existing")
 		require.NoError(t, err)
 
 		// switch back to master
-		err = repo.CheckoutBranch("master")
+		err = r.CheckoutBranch("master")
 		require.NoError(t, err)
 
 		// try to create same branch again
-		err = repo.CreateBranch("existing")
+		err = r.CreateBranch("existing")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already exists")
 	})
 
 	t.Run("preserves untracked files", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create an untracked file while on master
@@ -206,7 +205,7 @@ func TestRepo_CreateBranch(t *testing.T) {
 		require.NoError(t, err, "untracked file should exist before branch creation")
 
 		// create and switch to new branch
-		err = repo.CreateBranch("feature")
+		err = r.CreateBranch("feature")
 		require.NoError(t, err)
 
 		// verify untracked file still exists after branch creation
@@ -223,7 +222,7 @@ func TestRepo_CreateBranch(t *testing.T) {
 func TestRepo_Add(t *testing.T) {
 	t.Run("stages new file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create a new file
@@ -231,11 +230,11 @@ func TestRepo_Add(t *testing.T) {
 		err = os.WriteFile(testFile, []byte("test content"), 0o600)
 		require.NoError(t, err)
 
-		err = repo.Add("newfile.txt")
+		err = r.Add("newfile.txt")
 		require.NoError(t, err)
 
 		// verify file is staged
-		wt, err := repo.repo.Worktree()
+		wt, err := r.gitRepo.Worktree()
 		require.NoError(t, err)
 		status, err := wt.Status()
 		require.NoError(t, err)
@@ -244,10 +243,10 @@ func TestRepo_Add(t *testing.T) {
 
 	t.Run("fails on non-existent file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.Add("nonexistent.txt")
+		err = r.Add("nonexistent.txt")
 		assert.Error(t, err)
 	})
 }
@@ -255,7 +254,7 @@ func TestRepo_Add(t *testing.T) {
 func TestRepo_Commit(t *testing.T) {
 	t.Run("creates commit", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create and stage a file
@@ -263,23 +262,23 @@ func TestRepo_Commit(t *testing.T) {
 		err = os.WriteFile(testFile, []byte("test"), 0o600)
 		require.NoError(t, err)
 
-		err = repo.Add("commit-test.txt")
+		err = r.Add("commit-test.txt")
 		require.NoError(t, err)
 
-		err = repo.Commit("test commit message")
+		err = r.Commit("test commit message")
 		require.NoError(t, err)
 
 		// verify commit was created
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
-		commit, err := repo.repo.CommitObject(head.Hash())
+		commit, err := r.gitRepo.CommitObject(head.Hash())
 		require.NoError(t, err)
 		assert.Equal(t, "test commit message", commit.Message)
 	})
 
 	t.Run("commit has valid author", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create and stage a file
@@ -287,16 +286,16 @@ func TestRepo_Commit(t *testing.T) {
 		err = os.WriteFile(testFile, []byte("test"), 0o600)
 		require.NoError(t, err)
 
-		err = repo.Add("author-test.txt")
+		err = r.Add("author-test.txt")
 		require.NoError(t, err)
 
-		err = repo.Commit("test author")
+		err = r.Commit("test author")
 		require.NoError(t, err)
 
 		// verify commit has author info
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
-		commit, err := repo.repo.CommitObject(head.Hash())
+		commit, err := r.gitRepo.CommitObject(head.Hash())
 		require.NoError(t, err)
 		assert.NotEmpty(t, commit.Author.Name, "author name should not be empty")
 		assert.NotEmpty(t, commit.Author.Email, "author email should not be empty")
@@ -305,11 +304,11 @@ func TestRepo_Commit(t *testing.T) {
 
 	t.Run("fails with no staged changes", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// try to commit without staging anything
-		err = repo.Commit("empty commit")
+		err = r.Commit("empty commit")
 		assert.Error(t, err)
 	})
 }
@@ -317,10 +316,10 @@ func TestRepo_Commit(t *testing.T) {
 func TestRepo_getAuthor(t *testing.T) {
 	t.Run("returns valid signature", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		author := repo.getAuthor()
+		author := r.getAuthor()
 		require.NotNil(t, author)
 		assert.NotEmpty(t, author.Name, "author name should not be empty")
 		assert.NotEmpty(t, author.Email, "author email should not be empty")
@@ -329,10 +328,10 @@ func TestRepo_getAuthor(t *testing.T) {
 
 	t.Run("fallback has expected values", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		author := repo.getAuthor()
+		author := r.getAuthor()
 		require.NotNil(t, author)
 		// either from global config or fallback - both are valid
 		// just ensure we got something reasonable
@@ -344,7 +343,7 @@ func TestRepo_getAuthor(t *testing.T) {
 func TestRepo_MoveFile(t *testing.T) {
 	t.Run("moves file and stages changes", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create destination directory
@@ -352,7 +351,7 @@ func TestRepo_MoveFile(t *testing.T) {
 		require.NoError(t, err)
 
 		// move the initial file
-		err = repo.MoveFile("README.md", filepath.Join("subdir", "README.md"))
+		err = r.MoveFile("README.md", filepath.Join("subdir", "README.md"))
 		require.NoError(t, err)
 
 		// verify old file removed
@@ -364,7 +363,7 @@ func TestRepo_MoveFile(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify both changes are staged
-		wt, err := repo.repo.Worktree()
+		wt, err := r.gitRepo.Worktree()
 		require.NoError(t, err)
 		status, err := wt.Status()
 		require.NoError(t, err)
@@ -378,7 +377,7 @@ func TestRepo_MoveFile(t *testing.T) {
 		dir, err := filepath.EvalSymlinks(dir)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create destination directory
@@ -389,7 +388,7 @@ func TestRepo_MoveFile(t *testing.T) {
 		// move using absolute paths
 		srcAbs := filepath.Join(dir, "README.md")
 		dstAbs := filepath.Join(subdir, "README.md")
-		err = repo.MoveFile(srcAbs, dstAbs)
+		err = r.MoveFile(srcAbs, dstAbs)
 		require.NoError(t, err)
 
 		// verify move worked
@@ -401,19 +400,19 @@ func TestRepo_MoveFile(t *testing.T) {
 
 	t.Run("fails on non-existent source file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.MoveFile("nonexistent.txt", "dest.txt")
+		err = r.MoveFile("nonexistent.txt", "dest.txt")
 		assert.Error(t, err)
 	})
 
 	t.Run("fails on path outside repo", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.MoveFile("/tmp/outside.txt", "dest.txt")
+		err = r.MoveFile("/tmp/outside.txt", "dest.txt")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "outside repository")
 	})
@@ -422,72 +421,72 @@ func TestRepo_MoveFile(t *testing.T) {
 func TestRepo_BranchExists(t *testing.T) {
 	t.Run("returns true for existing branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// master exists by default
-		assert.True(t, repo.BranchExists("master"))
+		assert.True(t, r.BranchExists("master"))
 	})
 
 	t.Run("returns false for non-existent branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		assert.False(t, repo.BranchExists("nonexistent"))
+		assert.False(t, r.BranchExists("nonexistent"))
 	})
 
 	t.Run("returns true for created branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateBranch("new-branch")
+		err = r.CreateBranch("new-branch")
 		require.NoError(t, err)
 
-		assert.True(t, repo.BranchExists("new-branch"))
+		assert.True(t, r.BranchExists("new-branch"))
 	})
 }
 
 func TestRepo_CheckoutBranch(t *testing.T) {
 	t.Run("switches to existing branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create a branch first
-		err = repo.CreateBranch("feature")
+		err = r.CreateBranch("feature")
 		require.NoError(t, err)
 
 		// switch back to master
-		err = repo.CheckoutBranch("master")
+		err = r.CheckoutBranch("master")
 		require.NoError(t, err)
 
-		branch, err := repo.CurrentBranch()
+		branch, err := r.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch)
 	})
 
 	t.Run("fails on non-existent branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CheckoutBranch("nonexistent")
+		err = r.CheckoutBranch("nonexistent")
 		assert.Error(t, err)
 	})
 
 	t.Run("preserves untracked files", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create a branch
-		err = repo.CreateBranch("feature")
+		err = r.CreateBranch("feature")
 		require.NoError(t, err)
 
 		// switch back to master
-		err = repo.CheckoutBranch("master")
+		err = r.CheckoutBranch("master")
 		require.NoError(t, err)
 
 		// create an untracked file while on master
@@ -500,7 +499,7 @@ func TestRepo_CheckoutBranch(t *testing.T) {
 		require.NoError(t, err, "untracked file should exist before checkout")
 
 		// switch to feature branch
-		err = repo.CheckoutBranch("feature")
+		err = r.CheckoutBranch("feature")
 		require.NoError(t, err)
 
 		// verify untracked file still exists after checkout
@@ -517,17 +516,17 @@ func TestRepo_CheckoutBranch(t *testing.T) {
 func TestRepo_IsDirty(t *testing.T) {
 	t.Run("clean worktree returns false", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		assert.False(t, dirty)
 	})
 
 	t.Run("staged file returns true", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create and stage a new file
@@ -535,17 +534,17 @@ func TestRepo_IsDirty(t *testing.T) {
 		err = os.WriteFile(testFile, []byte("staged content"), 0o600)
 		require.NoError(t, err)
 
-		err = repo.Add("staged.txt")
+		err = r.Add("staged.txt")
 		require.NoError(t, err)
 
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		assert.True(t, dirty)
 	})
 
 	t.Run("modified tracked file returns true", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// modify the existing README.md (which is tracked)
@@ -553,14 +552,14 @@ func TestRepo_IsDirty(t *testing.T) {
 		err = os.WriteFile(readmePath, []byte("# Modified\n"), 0o600)
 		require.NoError(t, err)
 
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		assert.True(t, dirty)
 	})
 
 	t.Run("deleted tracked file returns true", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// delete the existing README.md (which is tracked)
@@ -568,14 +567,14 @@ func TestRepo_IsDirty(t *testing.T) {
 		err = os.Remove(readmePath)
 		require.NoError(t, err)
 
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		assert.True(t, dirty)
 	})
 
 	t.Run("untracked file only returns false", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create a new file without staging it
@@ -583,7 +582,7 @@ func TestRepo_IsDirty(t *testing.T) {
 		err = os.WriteFile(testFile, []byte("untracked content"), 0o600)
 		require.NoError(t, err)
 
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		assert.False(t, dirty)
 	})
@@ -591,7 +590,7 @@ func TestRepo_IsDirty(t *testing.T) {
 	t.Run("gitignored file should not make repo dirty", func(t *testing.T) {
 		// reproduces issue #28: go-git reports gitignored files unlike native git
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create .gitignore with patterns
@@ -600,9 +599,9 @@ func TestRepo_IsDirty(t *testing.T) {
 		require.NoError(t, err)
 
 		// commit gitignore so it takes effect
-		err = repo.Add(".gitignore")
+		err = r.Add(".gitignore")
 		require.NoError(t, err)
-		err = repo.Commit("add gitignore")
+		err = r.Commit("add gitignore")
 		require.NoError(t, err)
 
 		// create files that match gitignore patterns
@@ -623,7 +622,7 @@ func TestRepo_IsDirty(t *testing.T) {
 		require.NoError(t, err)
 
 		// native git would show clean, go-git might report dirty
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		assert.False(t, dirty, "gitignored files should not make repo dirty")
 	})
@@ -631,7 +630,7 @@ func TestRepo_IsDirty(t *testing.T) {
 	t.Run("dangling symlink should not make repo dirty", func(t *testing.T) {
 		// reproduces issue #28: dangling symlinks reported as modified by go-git
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create a target file
@@ -645,15 +644,15 @@ func TestRepo_IsDirty(t *testing.T) {
 		require.NoError(t, err)
 
 		// commit both
-		err = repo.Add("target.txt")
+		err = r.Add("target.txt")
 		require.NoError(t, err)
-		err = repo.Add("link.txt")
+		err = r.Add("link.txt")
 		require.NoError(t, err)
-		err = repo.Commit("add file and symlink")
+		err = r.Commit("add file and symlink")
 		require.NoError(t, err)
 
 		// verify clean after commit
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		require.False(t, dirty, "should be clean after commit")
 
@@ -662,16 +661,16 @@ func TestRepo_IsDirty(t *testing.T) {
 		require.NoError(t, err)
 
 		// stage removal of target
-		wt, err := repo.repo.Worktree()
+		wt, err := r.gitRepo.Worktree()
 		require.NoError(t, err)
 		_, err = wt.Remove("target.txt")
 		require.NoError(t, err)
-		err = repo.Commit("remove target")
+		err = r.Commit("remove target")
 		require.NoError(t, err)
 
 		// now only the dangling symlink remains
 		// native git shows clean, go-git might report dirty
-		dirty, err = repo.IsDirty()
+		dirty, err = r.IsDirty()
 		require.NoError(t, err)
 		assert.False(t, dirty, "dangling symlink should not make repo dirty")
 	})
@@ -680,7 +679,7 @@ func TestRepo_IsDirty(t *testing.T) {
 		// documents go-git quirk: symlinks with absolute paths are reported as modified
 		// because go-git stores symlink target in index, absolute path differs from what was committed
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create a target file
@@ -694,16 +693,16 @@ func TestRepo_IsDirty(t *testing.T) {
 		require.NoError(t, err)
 
 		// commit
-		err = repo.Add("target.txt")
+		err = r.Add("target.txt")
 		require.NoError(t, err)
-		err = repo.Add("link.txt")
+		err = r.Add("link.txt")
 		require.NoError(t, err)
-		err = repo.Commit("add file and absolute symlink")
+		err = r.Commit("add file and absolute symlink")
 		require.NoError(t, err)
 
 		// go-git will report this as dirty because symlink target in worktree (absolute)
 		// differs from what git stored (relative). this is expected go-git behavior.
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		// this documents the behavior - go-git reports absolute symlinks as modified
 		assert.True(t, dirty, "go-git reports absolute symlinks as modified (expected quirk)")
@@ -713,7 +712,7 @@ func TestRepo_IsDirty(t *testing.T) {
 		// reproduces issue #28: browser state files like Chrome's SingletonSocket
 		// are gitignored but go-git reports them as modified when they dangle
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create gitignore for browser-state directory (mimics real .gitignore)
@@ -722,9 +721,9 @@ func TestRepo_IsDirty(t *testing.T) {
 		require.NoError(t, err)
 
 		// commit gitignore
-		err = repo.Add(".gitignore")
+		err = r.Add(".gitignore")
 		require.NoError(t, err)
-		err = repo.Commit("add gitignore")
+		err = r.Commit("add gitignore")
 		require.NoError(t, err)
 
 		// create gitignored directory with a symlink to external temp file
@@ -749,7 +748,7 @@ func TestRepo_IsDirty(t *testing.T) {
 
 		// this dangling symlink is in a gitignored directory
 		// native git shows clean, go-git might report it as modified
-		dirty, err := repo.IsDirty()
+		dirty, err := r.IsDirty()
 		require.NoError(t, err)
 		assert.False(t, dirty, "gitignored dangling symlink should not make repo dirty")
 	})
@@ -758,10 +757,10 @@ func TestRepo_IsDirty(t *testing.T) {
 func TestRepo_IsIgnored(t *testing.T) {
 	t.Run("returns false for non-ignored file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		ignored, err := repo.IsIgnored("README.md")
+		ignored, err := r.IsIgnored("README.md")
 		require.NoError(t, err)
 		assert.False(t, ignored)
 	})
@@ -774,28 +773,28 @@ func TestRepo_IsIgnored(t *testing.T) {
 		err := os.WriteFile(gitignore, []byte("progress-*.txt\n"), 0o600)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		ignored, err := repo.IsIgnored("progress-test.txt")
+		ignored, err := r.IsIgnored("progress-test.txt")
 		require.NoError(t, err)
 		assert.True(t, ignored)
 	})
 
 	t.Run("returns false for no gitignore", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// check arbitrary file that doesn't exist
-		ignored, err := repo.IsIgnored("somefile.txt")
+		ignored, err := r.IsIgnored("somefile.txt")
 		require.NoError(t, err)
 		assert.False(t, ignored)
 	})
 
 	t.Run("uses XDG_CONFIG_HOME for global patterns", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// isolate from real home directory to ensure LoadGlobalPatterns returns empty
@@ -808,7 +807,7 @@ func TestRepo_IsIgnored(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(fakeHome, "git"), 0o750))
 		require.NoError(t, os.WriteFile(filepath.Join(fakeHome, "git", "ignore"), []byte("*.xdgignored\n"), 0o600))
 
-		ignored, err := repo.IsIgnored("test.xdgignored")
+		ignored, err := r.IsIgnored("test.xdgignored")
 		require.NoError(t, err)
 		assert.True(t, ignored, "file matching XDG global gitignore pattern should be ignored")
 	})
@@ -830,16 +829,16 @@ func TestRepo_IsIgnored(t *testing.T) {
 		err := os.WriteFile(gitignorePath, []byte("!debug.log\n"), 0o600)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// debug.log should NOT be ignored (local un-ignore overrides global ignore)
-		ignored, err := repo.IsIgnored("debug.log")
+		ignored, err := r.IsIgnored("debug.log")
 		require.NoError(t, err)
 		assert.False(t, ignored, "local !debug.log should override global *.log")
 
 		// other.log should still be ignored (only debug.log is un-ignored)
-		ignored, err = repo.IsIgnored("other.log")
+		ignored, err = r.IsIgnored("other.log")
 		require.NoError(t, err)
 		assert.True(t, ignored, "other.log should still be ignored by global pattern")
 	})
@@ -848,31 +847,31 @@ func TestRepo_IsIgnored(t *testing.T) {
 func TestRepo_HasChangesOtherThan(t *testing.T) {
 	t.Run("returns false when no changes", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		hasOther, err := repo.HasChangesOtherThan(filepath.Join(dir, "nonexistent.md"))
+		hasOther, err := r.HasChangesOtherThan(filepath.Join(dir, "nonexistent.md"))
 		require.NoError(t, err)
 		assert.False(t, hasOther)
 	})
 
 	t.Run("returns false when only target file is untracked", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
 		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
 
-		hasOther, err := repo.HasChangesOtherThan(planFile)
+		hasOther, err := r.HasChangesOtherThan(planFile)
 		require.NoError(t, err)
 		assert.False(t, hasOther)
 	})
 
 	t.Run("returns true when other file is untracked", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
@@ -880,14 +879,14 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o600))
 
-		hasOther, err := repo.HasChangesOtherThan(planFile)
+		hasOther, err := r.HasChangesOtherThan(planFile)
 		require.NoError(t, err)
 		assert.True(t, hasOther)
 	})
 
 	t.Run("returns true when tracked file is modified", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
@@ -897,20 +896,20 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 		// modify tracked file
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified"), 0o600))
 
-		hasOther, err := repo.HasChangesOtherThan(planFile)
+		hasOther, err := r.HasChangesOtherThan(planFile)
 		require.NoError(t, err)
 		assert.True(t, hasOther)
 	})
 
 	t.Run("returns true when only other file changes no plan", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// only other file has changes, plan doesn't exist
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o600))
 
-		hasOther, err := repo.HasChangesOtherThan(filepath.Join(dir, "nonexistent.md"))
+		hasOther, err := r.HasChangesOtherThan(filepath.Join(dir, "nonexistent.md"))
 		require.NoError(t, err)
 		assert.True(t, hasOther)
 	})
@@ -918,7 +917,7 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 	t.Run("returns false when only gitignored file exists", func(t *testing.T) {
 		// reproduces issue: go-git reports gitignored files as untracked changes
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create .gitignore with pattern for progress files
@@ -927,9 +926,9 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, err)
 
 		// commit gitignore so it takes effect
-		err = repo.Add(".gitignore")
+		err = r.Add(".gitignore")
 		require.NoError(t, err)
-		err = repo.Commit("add gitignore")
+		err = r.Commit("add gitignore")
 		require.NoError(t, err)
 
 		// create the plan file (the one we're checking "other than")
@@ -943,14 +942,14 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, err)
 
 		// the gitignored file should NOT count as a change
-		hasOther, err := repo.HasChangesOtherThan(planFile)
+		hasOther, err := r.HasChangesOtherThan(planFile)
 		require.NoError(t, err)
 		assert.False(t, hasOther, "gitignored files should not count as changes")
 	})
 
 	t.Run("returns true when gitignored and non-gitignored files exist", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// create .gitignore with pattern for progress files
@@ -959,9 +958,9 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, err)
 
 		// commit gitignore
-		err = repo.Add(".gitignore")
+		err = r.Add(".gitignore")
 		require.NoError(t, err)
-		err = repo.Commit("add gitignore")
+		err = r.Commit("add gitignore")
 		require.NoError(t, err)
 
 		// create the plan file
@@ -980,7 +979,7 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, err)
 
 		// should return true because of the non-gitignored file
-		hasOther, err := repo.HasChangesOtherThan(planFile)
+		hasOther, err := r.HasChangesOtherThan(planFile)
 		require.NoError(t, err)
 		assert.True(t, hasOther, "non-gitignored files should count as changes")
 	})
@@ -989,63 +988,63 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 func TestRepo_FileHasChanges(t *testing.T) {
 	t.Run("returns false for committed file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		hasChanges, err := repo.FileHasChanges(filepath.Join(dir, "README.md"))
+		hasChanges, err := r.FileHasChanges(filepath.Join(dir, "README.md"))
 		require.NoError(t, err)
 		assert.False(t, hasChanges)
 	})
 
 	t.Run("returns true for untracked file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
 		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
 
-		hasChanges, err := repo.FileHasChanges(planFile)
+		hasChanges, err := r.FileHasChanges(planFile)
 		require.NoError(t, err)
 		assert.True(t, hasChanges)
 	})
 
 	t.Run("returns true for modified file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// modify tracked file
 		readme := filepath.Join(dir, "README.md")
 		require.NoError(t, os.WriteFile(readme, []byte("# Modified"), 0o600))
 
-		hasChanges, err := repo.FileHasChanges(readme)
+		hasChanges, err := r.FileHasChanges(readme)
 		require.NoError(t, err)
 		assert.True(t, hasChanges)
 	})
 
 	t.Run("returns true for staged file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
 		require.NoError(t, os.MkdirAll(filepath.Dir(planFile), 0o750))
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
-		require.NoError(t, repo.Add(filepath.Join("docs", "plans", "feature.md")))
+		require.NoError(t, r.Add(filepath.Join("docs", "plans", "feature.md")))
 
-		hasChanges, err := repo.FileHasChanges(planFile)
+		hasChanges, err := r.FileHasChanges(planFile)
 		require.NoError(t, err)
 		assert.True(t, hasChanges)
 	})
 
 	t.Run("returns false for nonexistent file", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		hasChanges, err := repo.FileHasChanges(filepath.Join(dir, "nonexistent.md"))
+		hasChanges, err := r.FileHasChanges(filepath.Join(dir, "nonexistent.md"))
 		require.NoError(t, err)
 		assert.False(t, hasChanges)
 	})
@@ -1054,10 +1053,10 @@ func TestRepo_FileHasChanges(t *testing.T) {
 func TestRepo_HasCommits(t *testing.T) {
 	t.Run("returns true for repo with commits", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		hasCommits, err := repo.HasCommits()
+		hasCommits, err := r.HasCommits()
 		require.NoError(t, err)
 		assert.True(t, hasCommits)
 	})
@@ -1067,10 +1066,10 @@ func TestRepo_HasCommits(t *testing.T) {
 		_, err := git.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		hasCommits, err := repo.HasCommits()
+		hasCommits, err := r.HasCommits()
 		require.NoError(t, err)
 		assert.False(t, hasCommits)
 	})
@@ -1088,27 +1087,27 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 		err = os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// verify no commits before
-		hasCommits, err := repo.HasCommits()
+		hasCommits, err := r.HasCommits()
 		require.NoError(t, err)
 		assert.False(t, hasCommits)
 
 		// create initial commit
-		err = repo.CreateInitialCommit("initial commit")
+		err = r.CreateInitialCommit("initial commit")
 		require.NoError(t, err)
 
 		// verify commit exists
-		hasCommits, err = repo.HasCommits()
+		hasCommits, err = r.HasCommits()
 		require.NoError(t, err)
 		assert.True(t, hasCommits)
 
 		// verify commit message
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
-		commit, err := repo.repo.CommitObject(head.Hash())
+		commit, err := r.gitRepo.CommitObject(head.Hash())
 		require.NoError(t, err)
 		assert.Equal(t, "initial commit", commit.Message)
 	})
@@ -1118,10 +1117,10 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 		_, err := git.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateInitialCommit("initial commit")
+		err = r.CreateInitialCommit("initial commit")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no files to commit")
 	})
@@ -1134,15 +1133,15 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 		err = os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateInitialCommit("initial commit")
+		err = r.CreateInitialCommit("initial commit")
 		require.NoError(t, err)
 
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
-		commit, err := repo.repo.CommitObject(head.Hash())
+		commit, err := r.gitRepo.CommitObject(head.Hash())
 		require.NoError(t, err)
 		assert.NotEmpty(t, commit.Author.Name)
 		assert.NotEmpty(t, commit.Author.Email)
@@ -1165,16 +1164,16 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 		err = os.WriteFile(filepath.Join(dir, "debug.log"), []byte("log content\n"), 0o600)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateInitialCommit("initial commit")
+		err = r.CreateInitialCommit("initial commit")
 		require.NoError(t, err)
 
 		// verify commit exists
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
-		commit, err := repo.repo.CommitObject(head.Hash())
+		commit, err := r.gitRepo.CommitObject(head.Hash())
 		require.NoError(t, err)
 
 		// get tree to check committed files
@@ -1214,16 +1213,16 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 		err = os.WriteFile(filepath.Join(dir, "debug.log"), []byte("log content\n"), 0o600)
 		require.NoError(t, err)
 
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateInitialCommit("initial commit")
+		err = r.CreateInitialCommit("initial commit")
 		require.NoError(t, err)
 
 		// verify commit exists
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
-		commit, err := repo.repo.CommitObject(head.Hash())
+		commit, err := r.gitRepo.CommitObject(head.Hash())
 		require.NoError(t, err)
 
 		// get tree to check committed files
@@ -1244,161 +1243,59 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 func TestRepo_IsMainBranch(t *testing.T) {
 	t.Run("returns true for master branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		isMain, err := repo.IsMainBranch()
+		isMain, err := r.IsMainBranch()
 		require.NoError(t, err)
 		assert.True(t, isMain)
 	})
 
 	t.Run("returns true for main branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// rename master to main
-		err = repo.CreateBranch("main")
+		err = r.CreateBranch("main")
 		require.NoError(t, err)
 
-		isMain, err := repo.IsMainBranch()
+		isMain, err := r.IsMainBranch()
 		require.NoError(t, err)
 		assert.True(t, isMain)
 	})
 
 	t.Run("returns false for feature branch", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
-		err = repo.CreateBranch("feature-test")
+		err = r.CreateBranch("feature-test")
 		require.NoError(t, err)
 
-		isMain, err := repo.IsMainBranch()
+		isMain, err := r.IsMainBranch()
 		require.NoError(t, err)
 		assert.False(t, isMain)
 	})
 
 	t.Run("returns false for detached HEAD", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		repo, err := Open(dir)
+		r, err := openRepo(dir)
 		require.NoError(t, err)
 
 		// get current HEAD hash
-		head, err := repo.repo.Head()
+		head, err := r.gitRepo.Head()
 		require.NoError(t, err)
 
 		// checkout the commit hash directly (detached HEAD)
-		wt, err := repo.repo.Worktree()
+		wt, err := r.gitRepo.Worktree()
 		require.NoError(t, err)
 		err = wt.Checkout(&git.CheckoutOptions{Hash: head.Hash()})
 		require.NoError(t, err)
 
-		isMain, err := repo.IsMainBranch()
+		isMain, err := r.IsMainBranch()
 		require.NoError(t, err)
 		assert.False(t, isMain)
-	})
-}
-
-func TestRepo_EnsureIgnored(t *testing.T) {
-	t.Run("adds pattern to gitignore", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := Open(dir)
-		require.NoError(t, err)
-
-		var loggedMsg string
-		logFn := func(format string, args ...any) {
-			loggedMsg = fmt.Sprintf(format, args...)
-		}
-
-		err = repo.EnsureIgnored("progress*.txt", "progress-test.txt", logFn)
-		require.NoError(t, err)
-		assert.Contains(t, loggedMsg, "progress*.txt", "log message should contain pattern")
-
-		// verify pattern was added to .gitignore
-		gitignorePath := filepath.Join(dir, ".gitignore")
-		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "progress*.txt")
-	})
-
-	t.Run("does nothing if already ignored", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := Open(dir)
-		require.NoError(t, err)
-
-		// create gitignore with pattern
-		gitignorePath := filepath.Join(dir, ".gitignore")
-		err = os.WriteFile(gitignorePath, []byte("progress*.txt\n"), 0o600)
-		require.NoError(t, err)
-
-		logged := false
-		logFn := func(format string, args ...any) {
-			logged = true
-		}
-
-		err = repo.EnsureIgnored("progress*.txt", "progress-test.txt", logFn)
-		require.NoError(t, err)
-		assert.False(t, logged, "log function should not be called if already ignored")
-
-		// verify gitignore wasn't modified (no duplicate pattern)
-		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
-		require.NoError(t, err)
-		assert.Equal(t, "progress*.txt\n", string(content))
-	})
-
-	t.Run("creates gitignore if missing", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := Open(dir)
-		require.NoError(t, err)
-
-		// verify no .gitignore exists
-		gitignorePath := filepath.Join(dir, ".gitignore")
-		_, err = os.Stat(gitignorePath)
-		assert.True(t, os.IsNotExist(err))
-
-		err = repo.EnsureIgnored("*.log", "test.log", nil)
-		require.NoError(t, err)
-
-		// verify .gitignore was created
-		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "*.log")
-	})
-
-	t.Run("works with nil log function", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := Open(dir)
-		require.NoError(t, err)
-
-		err = repo.EnsureIgnored("*.tmp", "test.tmp", nil)
-		require.NoError(t, err)
-
-		// verify pattern was added
-		gitignorePath := filepath.Join(dir, ".gitignore")
-		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "*.tmp")
-	})
-
-	t.Run("appends to existing gitignore", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		repo, err := Open(dir)
-		require.NoError(t, err)
-
-		// create gitignore with existing content
-		gitignorePath := filepath.Join(dir, ".gitignore")
-		err = os.WriteFile(gitignorePath, []byte("*.log\n"), 0o600)
-		require.NoError(t, err)
-
-		err = repo.EnsureIgnored("*.tmp", "test.tmp", nil)
-		require.NoError(t, err)
-
-		// verify both patterns exist
-		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "*.log")
-		assert.Contains(t, string(content), "*.tmp")
 	})
 }
 
