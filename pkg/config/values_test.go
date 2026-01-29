@@ -33,6 +33,8 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, 1, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
 	assert.Equal(t, "docs/plans", values.PlansDir)
+	assert.Equal(t, []string{"You've hit your limit"}, values.ClaudeErrorPatterns)
+	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexErrorPatterns)
 }
 
 func TestValuesLoader_Load_GlobalOnly(t *testing.T) {
@@ -471,6 +473,116 @@ func TestValuesLoader_parseValuesFromBytes_InvalidINI(t *testing.T) {
 	_, err := vl.parseValuesFromBytes([]byte("[unclosed"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse config")
+}
+
+func TestValuesLoader_parseValuesFromBytes_ErrorPatterns(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name           string
+		input          string
+		expectedClaude []string
+		expectedCodex  []string
+	}{
+		{
+			name:           "single pattern",
+			input:          "claude_error_patterns = rate limit",
+			expectedClaude: []string{"rate limit"},
+			expectedCodex:  nil,
+		},
+		{
+			name:           "multiple patterns comma-separated",
+			input:          "codex_error_patterns = rate limit,quota exceeded,too many requests",
+			expectedClaude: nil,
+			expectedCodex:  []string{"rate limit", "quota exceeded", "too many requests"},
+		},
+		{
+			name:           "whitespace trimming around commas",
+			input:          "claude_error_patterns =  pattern1 ,  pattern2  , pattern3 ",
+			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
+			expectedCodex:  nil,
+		},
+		{
+			name:           "empty patterns filtered out",
+			input:          "claude_error_patterns = pattern1,,pattern2,  ,pattern3",
+			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
+			expectedCodex:  nil,
+		},
+		{
+			name:           "both claude and codex patterns",
+			input:          "claude_error_patterns = hit limit\ncodex_error_patterns = rate exceeded",
+			expectedClaude: []string{"hit limit"},
+			expectedCodex:  []string{"rate exceeded"},
+		},
+		{
+			name:           "empty value",
+			input:          "claude_error_patterns = ",
+			expectedClaude: nil,
+			expectedCodex:  nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedClaude, values.ClaudeErrorPatterns)
+			assert.Equal(t, tc.expectedCodex, values.CodexErrorPatterns)
+		})
+	}
+}
+
+func TestValues_mergeFrom_ErrorPatterns(t *testing.T) {
+	t.Run("merge error patterns when src has values", func(t *testing.T) {
+		dst := Values{
+			ClaudeErrorPatterns: []string{"dst pattern"},
+			CodexErrorPatterns:  []string{"dst codex"},
+		}
+		src := Values{
+			ClaudeErrorPatterns: []string{"src pattern 1", "src pattern 2"},
+			CodexErrorPatterns:  []string{"src codex"},
+		}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.ClaudeErrorPatterns)
+		assert.Equal(t, []string{"src codex"}, dst.CodexErrorPatterns)
+	})
+
+	t.Run("preserve dst when src is empty", func(t *testing.T) {
+		dst := Values{
+			ClaudeErrorPatterns: []string{"dst pattern"},
+			CodexErrorPatterns:  []string{"dst codex"},
+		}
+		src := Values{
+			ClaudeErrorPatterns: nil,
+			CodexErrorPatterns:  nil,
+		}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"dst pattern"}, dst.ClaudeErrorPatterns)
+		assert.Equal(t, []string{"dst codex"}, dst.CodexErrorPatterns)
+	})
+}
+
+func TestValuesLoader_Load_ErrorPatternsOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global")
+	localConfig := filepath.Join(tmpDir, "local")
+
+	// global has one set of patterns
+	globalContent := `claude_error_patterns = global pattern 1, global pattern 2`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
+
+	// local overrides with different patterns
+	localContent := `claude_error_patterns = local pattern`
+	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	// local should override global completely (not merge)
+	assert.Equal(t, []string{"local pattern"}, values.ClaudeErrorPatterns)
 }
 
 func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {

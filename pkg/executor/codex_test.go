@@ -675,3 +675,112 @@ func TestCodexExecutor_Run_largeOutput(t *testing.T) {
 	}
 	assert.True(t, found, "large stderr content should be captured")
 }
+
+func TestCodexExecutor_Run_ErrorPattern(t *testing.T) {
+	tests := []struct {
+		name        string
+		stdout      string
+		patterns    []string
+		wantError   bool
+		wantPattern string
+		wantHelpCmd string
+		wantOutput  string
+	}{
+		{
+			name:       "no patterns configured",
+			stdout:     "Rate limit exceeded",
+			patterns:   nil,
+			wantError:  false,
+			wantOutput: "Rate limit exceeded",
+		},
+		{
+			name:       "pattern not matched",
+			stdout:     "Analysis complete: no issues found",
+			patterns:   []string{"rate limit", "quota exceeded"},
+			wantError:  false,
+			wantOutput: "Analysis complete: no issues found",
+		},
+		{
+			name:        "pattern matched",
+			stdout:      "Error: Rate limit exceeded, please try again later",
+			patterns:    []string{"rate limit"},
+			wantError:   true,
+			wantPattern: "rate limit",
+			wantHelpCmd: "codex /status",
+			wantOutput:  "Error: Rate limit exceeded, please try again later",
+		},
+		{
+			name:        "case insensitive match",
+			stdout:      "QUOTA EXCEEDED for your account",
+			patterns:    []string{"quota exceeded"},
+			wantError:   true,
+			wantPattern: "quota exceeded",
+			wantHelpCmd: "codex /status",
+			wantOutput:  "QUOTA EXCEEDED for your account",
+		},
+		{
+			name:        "first matching pattern returned",
+			stdout:      "rate limit and quota exceeded",
+			patterns:    []string{"rate limit", "quota exceeded"},
+			wantError:   true,
+			wantPattern: "rate limit",
+			wantHelpCmd: "codex /status",
+			wantOutput:  "rate limit and quota exceeded",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := &mockCodexRunner{
+				runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+					return mockStreams("", tc.stdout), mockWait(), nil
+				},
+			}
+			e := &CodexExecutor{
+				runner:        mock,
+				ErrorPatterns: tc.patterns,
+			}
+
+			result := e.Run(context.Background(), "analyze code")
+
+			assert.Equal(t, tc.wantOutput, result.Output)
+
+			if tc.wantError {
+				require.Error(t, result.Error)
+				var patternErr *PatternMatchError
+				require.ErrorAs(t, result.Error, &patternErr)
+				assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+				assert.Equal(t, tc.wantHelpCmd, patternErr.HelpCmd)
+			} else {
+				require.NoError(t, result.Error)
+			}
+		})
+	}
+}
+
+func TestCodexExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
+	// error pattern should still be detected even when output contains a signal
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			stdout := "Rate limit exceeded <<<RALPHEX:CODEX_REVIEW_DONE>>>"
+			return mockStreams("", stdout), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		ErrorPatterns: []string{"rate limit"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	// should have error due to pattern match
+	require.Error(t, result.Error)
+	var patternErr *PatternMatchError
+	require.ErrorAs(t, result.Error, &patternErr)
+	assert.Equal(t, "rate limit", patternErr.Pattern)
+	assert.Equal(t, "codex /status", patternErr.HelpCmd)
+
+	// should preserve output and signal
+	assert.Contains(t, result.Output, "Rate limit exceeded")
+	assert.Equal(t, "<<<RALPHEX:CODEX_REVIEW_DONE>>>", result.Signal)
+}

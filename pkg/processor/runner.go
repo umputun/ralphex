@@ -94,6 +94,7 @@ func New(cfg Config, log Logger) *Runner {
 	if cfg.AppConfig != nil {
 		claudeExec.Command = cfg.AppConfig.ClaudeCommand
 		claudeExec.Args = cfg.AppConfig.ClaudeArgs
+		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
 	}
 
 	// build codex executor with config values
@@ -109,6 +110,7 @@ func New(cfg Config, log Logger) *Runner {
 		codexExec.ReasoningEffort = cfg.AppConfig.CodexReasoningEffort
 		codexExec.TimeoutMs = cfg.AppConfig.CodexTimeoutMs
 		codexExec.Sandbox = cfg.AppConfig.CodexSandbox
+		codexExec.ErrorPatterns = cfg.AppConfig.CodexErrorPatterns
 	}
 
 	// auto-disable codex if the binary is not installed
@@ -292,6 +294,9 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 
 		result := r.claude.Run(ctx, prompt)
 		if result.Error != nil {
+			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+				return err
+			}
 			return fmt.Errorf("claude execution: %w", result.Error)
 		}
 
@@ -327,6 +332,9 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
 	result := r.claude.Run(ctx, prompt)
 	if result.Error != nil {
+		if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+			return err
+		}
 		return fmt.Errorf("claude execution: %w", result.Error)
 	}
 
@@ -357,6 +365,9 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 
 		result := r.claude.Run(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt))
 		if result.Error != nil {
+			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+				return err
+			}
 			return fmt.Errorf("claude execution: %w", result.Error)
 		}
 
@@ -402,6 +413,9 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 		// run codex analysis
 		codexResult := r.codex.Run(ctx, r.buildCodexPrompt(i == 1, claudeResponse))
 		if codexResult.Error != nil {
+			if err := r.handlePatternMatchError(codexResult.Error, "codex"); err != nil {
+				return err
+			}
 			return fmt.Errorf("codex execution: %w", codexResult.Error)
 		}
 
@@ -421,6 +435,9 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 		// restore codex phase for next iteration
 		r.log.SetPhase(PhaseCodex)
 		if claudeResult.Error != nil {
+			if err := r.handlePatternMatchError(claudeResult.Error, "claude"); err != nil {
+				return err
+			}
 			return fmt.Errorf("claude execution: %w", claudeResult.Error)
 		}
 
@@ -574,6 +591,9 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		prompt := r.buildPlanPrompt()
 		result := r.claude.Run(ctx, prompt)
 		if result.Error != nil {
+			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+				return err
+			}
 			return fmt.Errorf("claude execution: %w", result.Error)
 		}
 
@@ -614,4 +634,16 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("max plan iterations (%d) reached without completion", maxPlanIterations)
+}
+
+// handlePatternMatchError checks if err is a PatternMatchError and logs appropriate messages.
+// Returns the error if it's a pattern match (to trigger graceful exit), nil otherwise.
+func (r *Runner) handlePatternMatchError(err error, tool string) error {
+	var patternErr *executor.PatternMatchError
+	if errors.As(err, &patternErr) {
+		r.log.Print("error: detected %q in %s output", patternErr.Pattern, tool)
+		r.log.Print("run '%s' for more information", patternErr.HelpCmd)
+		return err
+	}
+	return nil
 }

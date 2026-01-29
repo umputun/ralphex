@@ -85,6 +85,22 @@ plans_dir = docs/plans
 # watch_dirs =
 
 # ------------------------------------------------------------------------------
+# error pattern detection
+# ------------------------------------------------------------------------------
+
+# claude_error_patterns: patterns to detect in claude output indicating errors
+# comma-separated list of substrings (case-insensitive matching)
+# when detected, ralphex exits gracefully with an informative message
+# default: You've hit your limit
+claude_error_patterns = You've hit your limit
+
+# codex_error_patterns: patterns to detect in codex output indicating errors
+# comma-separated list of substrings (case-insensitive matching)
+# when detected, ralphex exits gracefully with an informative message
+# default: Rate limit,quota exceeded
+codex_error_patterns = Rate limit,quota exceeded
+
+# ------------------------------------------------------------------------------
 # output colors (hex format: #RRGGBB)
 # ------------------------------------------------------------------------------
 

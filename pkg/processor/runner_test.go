@@ -699,3 +699,111 @@ func TestRunner_New_CodexNotInstalled_AutoDisables(t *testing.T) {
 	// verify runner was created (auto-disable happens at construction time)
 	assert.NotNil(t, r, "runner should be created even when codex not found")
 }
+
+func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "You've hit your limit", Error: &executor.PatternMatchError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}},
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	var patternErr *executor.PatternMatchError
+	require.ErrorAs(t, err, &patternErr)
+	assert.Equal(t, "You've hit your limit", patternErr.Pattern)
+	assert.Equal(t, "claude /usage", patternErr.HelpCmd)
+
+	// verify logging
+	var foundErrorLog, foundHelpLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "error: detected") && strings.Contains(call.Format, "%s output") {
+			foundErrorLog = true
+		}
+		if strings.Contains(call.Format, "for more information") {
+			foundHelpLog = true
+		}
+	}
+	assert.True(t, foundErrorLog, "should log error message with detected pattern")
+	assert.True(t, foundHelpLog, "should log help command")
+}
+
+func TestRunner_ErrorPatternMatch_CodexInReviewPhase(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "Rate limit exceeded", Error: &executor.PatternMatchError{Pattern: "rate limit", HelpCmd: "codex /status"}},
+	})
+
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	var patternErr *executor.PatternMatchError
+	require.ErrorAs(t, err, &patternErr)
+	assert.Equal(t, "rate limit", patternErr.Pattern)
+	assert.Equal(t, "codex /status", patternErr.HelpCmd)
+
+	// verify logging mentions codex
+	var foundErrorLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "error: detected") && strings.Contains(call.Format, "%s output") {
+			foundErrorLog = true
+		}
+	}
+	assert.True(t, foundErrorLog, "should log error message with codex")
+}
+
+func TestRunner_ErrorPatternMatch_ClaudeInReviewLoop(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "rate limited", Error: &executor.PatternMatchError{Pattern: "rate limited", HelpCmd: "claude /usage"}}, // review loop hits rate limit
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	var patternErr *executor.PatternMatchError
+	require.ErrorAs(t, err, &patternErr)
+	assert.Equal(t, "rate limited", patternErr.Pattern)
+	assert.Equal(t, "claude /usage", patternErr.HelpCmd)
+}
+
+func TestRunner_ErrorPatternMatch_ClaudeInPlanCreation(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "hit limit", Error: &executor.PatternMatchError{Pattern: "hit limit", HelpCmd: "claude /usage"}},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "test",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	r.SetInputCollector(inputCollector)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	var patternErr *executor.PatternMatchError
+	require.ErrorAs(t, err, &patternErr)
+}

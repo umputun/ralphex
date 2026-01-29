@@ -51,6 +51,10 @@ type Config struct {
 	PlansDir  string   `json:"plans_dir"`
 	WatchDirs []string `json:"watch_dirs"` // directories to watch for progress files
 
+	// error patterns to detect in executor output (e.g., rate limit messages)
+	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
+	CodexErrorPatterns  []string `json:"codex_error_patterns"`
+
 	// output colors (RGB values as comma-separated strings)
 	Colors ColorConfig `json:"-"`
 
@@ -214,6 +218,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		TaskRetryCountSet:    values.TaskRetryCountSet,
 		PlansDir:             values.PlansDir,
 		WatchDirs:            values.WatchDirs,
+		ClaudeErrorPatterns:  values.ClaudeErrorPatterns,
+		CodexErrorPatterns:   values.CodexErrorPatterns,
 		Colors:               colors,
 		TaskPrompt:           prompts.Task,
 		ReviewFirstPrompt:    prompts.ReviewFirst,
