@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1237,6 +1238,167 @@ func TestRepo_CreateInitialCommit(t *testing.T) {
 
 		assert.Contains(t, files, "README.md")
 		assert.NotContains(t, files, "debug.log", "globally gitignored files should not be committed")
+	})
+}
+
+func TestRepo_IsMainBranch(t *testing.T) {
+	t.Run("returns true for master branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		isMain, err := repo.IsMainBranch()
+		require.NoError(t, err)
+		assert.True(t, isMain)
+	})
+
+	t.Run("returns true for main branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// rename master to main
+		err = repo.CreateBranch("main")
+		require.NoError(t, err)
+
+		isMain, err := repo.IsMainBranch()
+		require.NoError(t, err)
+		assert.True(t, isMain)
+	})
+
+	t.Run("returns false for feature branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		err = repo.CreateBranch("feature-test")
+		require.NoError(t, err)
+
+		isMain, err := repo.IsMainBranch()
+		require.NoError(t, err)
+		assert.False(t, isMain)
+	})
+
+	t.Run("returns false for detached HEAD", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// get current HEAD hash
+		head, err := repo.repo.Head()
+		require.NoError(t, err)
+
+		// checkout the commit hash directly (detached HEAD)
+		wt, err := repo.repo.Worktree()
+		require.NoError(t, err)
+		err = wt.Checkout(&git.CheckoutOptions{Hash: head.Hash()})
+		require.NoError(t, err)
+
+		isMain, err := repo.IsMainBranch()
+		require.NoError(t, err)
+		assert.False(t, isMain)
+	})
+}
+
+func TestRepo_EnsureIgnored(t *testing.T) {
+	t.Run("adds pattern to gitignore", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		var loggedMsg string
+		logFn := func(format string, args ...any) {
+			loggedMsg = fmt.Sprintf(format, args...)
+		}
+
+		err = repo.EnsureIgnored("progress*.txt", "progress-test.txt", logFn)
+		require.NoError(t, err)
+		assert.Contains(t, loggedMsg, "progress*.txt", "log message should contain pattern")
+
+		// verify pattern was added to .gitignore
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "progress*.txt")
+	})
+
+	t.Run("does nothing if already ignored", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create gitignore with pattern
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		err = os.WriteFile(gitignorePath, []byte("progress*.txt\n"), 0o600)
+		require.NoError(t, err)
+
+		logged := false
+		logFn := func(format string, args ...any) {
+			logged = true
+		}
+
+		err = repo.EnsureIgnored("progress*.txt", "progress-test.txt", logFn)
+		require.NoError(t, err)
+		assert.False(t, logged, "log function should not be called if already ignored")
+
+		// verify gitignore wasn't modified (no duplicate pattern)
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Equal(t, "progress*.txt\n", string(content))
+	})
+
+	t.Run("creates gitignore if missing", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// verify no .gitignore exists
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		_, err = os.Stat(gitignorePath)
+		assert.True(t, os.IsNotExist(err))
+
+		err = repo.EnsureIgnored("*.log", "test.log", nil)
+		require.NoError(t, err)
+
+		// verify .gitignore was created
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "*.log")
+	})
+
+	t.Run("works with nil log function", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		err = repo.EnsureIgnored("*.tmp", "test.tmp", nil)
+		require.NoError(t, err)
+
+		// verify pattern was added
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "*.tmp")
+	})
+
+	t.Run("appends to existing gitignore", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := Open(dir)
+		require.NoError(t, err)
+
+		// create gitignore with existing content
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		err = os.WriteFile(gitignorePath, []byte("*.log\n"), 0o600)
+		require.NoError(t, err)
+
+		err = repo.EnsureIgnored("*.tmp", "test.tmp", nil)
+		require.NoError(t, err)
+
+		// verify both patterns exist
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "*.log")
+		assert.Contains(t, string(content), "*.tmp")
 	})
 }
 

@@ -4,6 +4,7 @@ package git
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -249,14 +250,18 @@ func (r *Repo) MoveFile(src, dst string) error {
 	// stage the removal of old path
 	if _, err := wt.Remove(srcRel); err != nil {
 		// rollback filesystem change
-		_ = os.Rename(dstAbs, srcAbs)
+		if rbErr := os.Rename(dstAbs, srcAbs); rbErr != nil {
+			log.Printf("[WARN] rollback failed after Remove error: %v", rbErr)
+		}
 		return fmt.Errorf("remove old path: %w", err)
 	}
 
 	// stage the addition of new path
 	if _, err := wt.Add(dstRel); err != nil {
 		// rollback: unstage removal and restore file
-		_ = os.Rename(dstAbs, srcAbs)
+		if rbErr := os.Rename(dstAbs, srcAbs); rbErr != nil {
+			log.Printf("[WARN] rollback failed after Add error: %v", rbErr)
+		}
 		return fmt.Errorf("add new path: %w", err)
 	}
 
@@ -514,4 +519,47 @@ func (r *Repo) normalizeToRelative(filePath string) (string, error) {
 func (r *Repo) fileHasChanges(s *git.FileStatus) bool {
 	return s.Staging != git.Unmodified ||
 		s.Worktree == git.Modified || s.Worktree == git.Deleted || s.Worktree == git.Untracked
+}
+
+// IsMainBranch returns true if the current branch is "main" or "master".
+func (r *Repo) IsMainBranch() (bool, error) {
+	branch, err := r.CurrentBranch()
+	if err != nil {
+		return false, fmt.Errorf("get current branch: %w", err)
+	}
+	return branch == "main" || branch == "master", nil
+}
+
+// EnsureIgnored ensures a pattern is in .gitignore.
+// uses probePath to check if pattern is already ignored before adding.
+// if pattern is already ignored, does nothing.
+// if pattern is not ignored, appends it to .gitignore with comment.
+// logFn function is called if pattern is added (can be nil to disable logging).
+func (r *Repo) EnsureIgnored(pattern, probePath string, logFn func(string, ...any)) error {
+	// check if already ignored
+	ignored, err := r.IsIgnored(probePath)
+	if err == nil && ignored {
+		return nil // already ignored
+	}
+
+	// write to .gitignore at repo root
+	gitignorePath := filepath.Join(r.path, ".gitignore")
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // .gitignore needs world-readable
+	if err != nil {
+		return fmt.Errorf("open .gitignore: %w", err)
+	}
+
+	if _, err := fmt.Fprintf(f, "\n# ralphex progress logs\n%s\n", pattern); err != nil {
+		f.Close()
+		return fmt.Errorf("write .gitignore: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close .gitignore: %w", err)
+	}
+
+	if logFn != nil {
+		logFn("added %s to .gitignore", pattern)
+	}
+	return nil
 }
