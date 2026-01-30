@@ -13,6 +13,23 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// skipDirs is the set of directory names to skip during recursive watching.
+// these are known high-volume or non-relevant directories that won't contain progress files.
+var skipDirs = map[string]bool{
+	".git":        true,
+	".idea":       true,
+	".vscode":     true,
+	".cache":      true,
+	".npm":        true,
+	".yarn":       true,
+	"node_modules": true,
+	"vendor":      true,
+	"__pycache__": true,
+	"target":      true,
+	"build":       true,
+	"dist":        true,
+}
+
 // Watcher monitors directories for progress file changes.
 // it uses fsnotify for efficient file system event detection
 // and notifies the SessionManager when new progress files appear.
@@ -89,13 +106,8 @@ func (w *Watcher) addRecursive(dir string) error {
 
 		if d.IsDir() {
 			name := d.Name()
-			// skip hidden directories
-			if strings.HasPrefix(name, ".") && path != dir {
-				return filepath.SkipDir
-			}
 			// skip directories that typically contain many subdirs and no progress files
-			switch name {
-			case "node_modules", "vendor", "__pycache__", "target", "build", "dist":
+			if skipDirs[name] && path != dir {
 				return filepath.SkipDir
 			}
 			// best-effort: continue walking even if we can't watch a specific directory

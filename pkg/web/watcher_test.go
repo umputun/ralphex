@@ -332,10 +332,65 @@ Started: 2026-01-22 10:00:00
 	assert.Nil(t, session, "session should be removed after file deletion")
 }
 
-func TestWatcher_SkipsHiddenDirectories(t *testing.T) {
+func TestWatcher_SkipsKnownDirectories(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+	}{
+		{"git", ".git"},
+		{"idea", ".idea"},
+		{"vscode", ".vscode"},
+		{"node_modules", "node_modules"},
+		{"vendor", "vendor"},
+		{"pycache", "__pycache__"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			skippedDir := filepath.Join(tmpDir, tc.dir)
+			require.NoError(t, os.Mkdir(skippedDir, 0o750))
+
+			sm := NewSessionManager()
+
+			w, err := NewWatcher([]string{tmpDir}, sm)
+			require.NoError(t, err)
+
+			ctx := t.Context()
+
+			// start watcher in background
+			go func() {
+				_ = w.Start(ctx)
+			}()
+
+			// give watcher time to start
+			time.Sleep(100 * time.Millisecond)
+
+			// create a progress file in skipped directory
+			progressFile := filepath.Join(skippedDir, "progress-skipped.txt")
+			header := `# Ralphex Progress Log
+Plan: skipped-plan.md
+Branch: skipped-branch
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+`
+			require.NoError(t, os.WriteFile(progressFile, []byte(header), 0o600))
+
+			// give watcher time to process
+			time.Sleep(200 * time.Millisecond)
+
+			// verify session was NOT discovered (skipped dir should not be watched)
+			session := sm.Get("skipped")
+			assert.Nil(t, session, "%s directory should not be watched", tc.dir)
+		})
+	}
+}
+
+func TestWatcher_WatchesUnknownHiddenDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
-	hiddenDir := filepath.Join(tmpDir, ".hidden")
-	require.NoError(t, os.Mkdir(hiddenDir, 0o750))
+	dotDir := filepath.Join(tmpDir, ".myconfig")
+	require.NoError(t, os.Mkdir(dotDir, 0o750))
 
 	sm := NewSessionManager()
 
@@ -352,11 +407,11 @@ func TestWatcher_SkipsHiddenDirectories(t *testing.T) {
 	// give watcher time to start
 	time.Sleep(100 * time.Millisecond)
 
-	// create a progress file in hidden directory
-	progressFile := filepath.Join(hiddenDir, "progress-hidden.txt")
+	// create a progress file in unknown hidden directory
+	progressFile := filepath.Join(dotDir, "progress-dotdir.txt")
 	header := `# Ralphex Progress Log
-Plan: hidden-plan.md
-Branch: hidden-branch
+Plan: dotdir-plan.md
+Branch: dotdir-branch
 Mode: full
 Started: 2026-01-22 10:00:00
 ------------------------------------------------------------
@@ -366,9 +421,11 @@ Started: 2026-01-22 10:00:00
 	// give watcher time to process
 	time.Sleep(200 * time.Millisecond)
 
-	// verify session was NOT discovered (hidden dir should be skipped)
-	session := sm.Get("hidden")
-	assert.Nil(t, session, "hidden directories should not be watched")
+	// verify session WAS discovered (unknown hidden dirs should be watched)
+	sessionID := sessionIDFromPath(progressFile)
+	session := sm.Get(sessionID)
+	require.NotNil(t, session, "unknown hidden directories should be watched")
+	assert.Equal(t, "dotdir-plan.md", session.GetMetadata().PlanPath)
 }
 
 func TestWatcher_StartTwiceIsIdempotent(t *testing.T) {
