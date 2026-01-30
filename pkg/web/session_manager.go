@@ -527,15 +527,16 @@ func loadProgressFileIntoSession(path string, session *Session) {
 }
 
 // phaseFromSection determines the phase from a section name.
+// checks "codex" before "review" because "Codex Review" should be PhaseCodex, not PhaseReview.
 func phaseFromSection(name string) processor.Phase {
 	nameLower := strings.ToLower(name)
 	switch {
 	case strings.Contains(nameLower, "task"):
 		return processor.PhaseTask
-	case strings.Contains(nameLower, "review"):
-		return processor.PhaseReview
 	case strings.Contains(nameLower, "codex"):
 		return processor.PhaseCodex
+	case strings.Contains(nameLower, "review"):
+		return processor.PhaseReview
 	case strings.Contains(nameLower, "claude-eval") || strings.Contains(nameLower, "claude eval"):
 		return processor.PhaseClaudeEval
 	default:
