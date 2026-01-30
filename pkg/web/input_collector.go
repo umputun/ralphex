@@ -9,6 +9,8 @@ import (
 	"log"
 	"slices"
 	"sync"
+
+	"github.com/umputun/ralphex/pkg/input"
 )
 
 // PendingQuestion represents a question waiting for an answer.
@@ -19,12 +21,27 @@ type PendingQuestion struct {
 	answerCh chan string
 }
 
+// draftReviewResponse holds the action and feedback from a draft review submission.
+type draftReviewResponse struct {
+	Action   string
+	Feedback string
+}
+
+// PendingDraftReview represents a draft review waiting for user action.
+type PendingDraftReview struct {
+	ID          string // unique review identifier
+	Question    string // the review prompt
+	PlanContent string // the plan markdown content
+	responseCh  chan draftReviewResponse
+}
+
 // WebInputCollector implements input.Collector for web-based input collection.
 // It uses channel-based coordination where AskQuestion blocks until SubmitAnswer is called.
 type WebInputCollector struct {
-	mu      sync.Mutex
-	session *Session
-	pending *PendingQuestion
+	mu           sync.Mutex
+	session      *Session
+	pending      *PendingQuestion
+	pendingDraft *PendingDraftReview
 }
 
 // NewWebInputCollector creates a new WebInputCollector for the given session.
@@ -136,6 +153,115 @@ func (w *WebInputCollector) GetPendingQuestion() *PendingQuestion {
 		ID:       w.pending.ID,
 		Question: w.pending.Question,
 		Options:  append([]string{}, w.pending.Options...), // defensive copy
+	}
+}
+
+// AskDraftReview presents a plan draft for review and blocks until the user submits an action.
+// Returns action ("accept", "revise", "reject") and feedback (non-empty only for "revise").
+// Implements input.Collector interface.
+func (w *WebInputCollector) AskDraftReview(ctx context.Context, question, planContent string) (string, string, error) {
+	reviewID := generateQuestionID()
+	responseCh := make(chan draftReviewResponse, 1)
+
+	// set pending draft review
+	w.mu.Lock()
+	w.pendingDraft = &PendingDraftReview{
+		ID:          reviewID,
+		Question:    question,
+		PlanContent: planContent,
+		responseCh:  responseCh,
+	}
+	w.mu.Unlock()
+
+	// publish draft review event to SSE clients
+	event := NewDraftReviewEvent(reviewID, question, planContent)
+	if err := w.session.Publish(event); err != nil {
+		log.Printf("[ERROR] failed to publish draft review event: %v", err)
+	} else {
+		log.Printf("[INFO] published draft review event: id=%s", reviewID)
+	}
+
+	// wait for response or context cancellation
+	var resp draftReviewResponse
+	var err error
+
+	select {
+	case resp = <-responseCh:
+		// response received
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
+
+	// clear pending draft review
+	w.mu.Lock()
+	w.pendingDraft = nil
+	w.mu.Unlock()
+
+	if err != nil {
+		return "", "", fmt.Errorf("draft review canceled: %w", err)
+	}
+	return resp.Action, resp.Feedback, nil
+}
+
+// SubmitDraftReview submits a draft review action (accept/revise/reject) with optional feedback.
+func (w *WebInputCollector) SubmitDraftReview(reviewID, action, feedback string) error {
+	// validate action
+	switch action {
+	case input.ActionAccept, input.ActionRevise, input.ActionReject:
+		// valid
+	default:
+		return fmt.Errorf("invalid action: %s (must be accept, revise, or reject)", action)
+	}
+
+	if action == input.ActionRevise && feedback == "" {
+		return errors.New("revision feedback cannot be empty")
+	}
+
+	w.mu.Lock()
+
+	if w.pendingDraft == nil {
+		w.mu.Unlock()
+		return errors.New("no pending draft review")
+	}
+
+	if w.pendingDraft.ID != reviewID {
+		w.mu.Unlock()
+		return errors.New("review ID mismatch")
+	}
+
+	// send response (non-blocking since channel is buffered)
+	select {
+	case w.pendingDraft.responseCh <- draftReviewResponse{Action: action, Feedback: feedback}:
+	default:
+		w.mu.Unlock()
+		return errors.New("draft review already submitted")
+	}
+
+	w.mu.Unlock()
+
+	// broadcast response so other clients can see the result
+	if err := w.session.Publish(NewDraftReviewSubmittedEvent(reviewID, action, feedback)); err != nil {
+		log.Printf("[WARN] failed to publish draft review response event: %v", err)
+	}
+
+	return nil
+}
+
+// GetPendingDraftReview returns the current pending draft review, or nil if none.
+// Safe for concurrent access.
+func (w *WebInputCollector) GetPendingDraftReview() *PendingDraftReview {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.pendingDraft == nil {
+		return nil
+	}
+
+	// return a copy without the response channel (internal detail)
+	return &PendingDraftReview{
+		ID:          w.pendingDraft.ID,
+		Question:    w.pendingDraft.Question,
+		PlanContent: w.pendingDraft.PlanContent,
 	}
 }
 

@@ -53,6 +53,10 @@ Rules for questions:
 
 After emitting QUESTION, STOP immediately. Do not continue. The loop will collect the answer and run another iteration.
 
+If the user's answer indicates cancellation (contains "cancel", "exit", "stop", or "quit"):
+- Output exactly: <<<RALPHEX:TASK_FAILED>>>
+- STOP immediately - the user has cancelled plan creation
+
 ## Step 3.5: Present Draft for Review
 
 When you have enough information to create a plan, present it as a draft for user review BEFORE writing to disk.

@@ -89,6 +89,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/sessions/", s.handleSessionsSubpath)
 	mux.HandleFunc("/api/answer", s.handleAnswer)
+	mux.HandleFunc("/api/draft-review", s.handleDraftReview)
 	mux.HandleFunc("/api/recent-dirs", s.handleRecentDirs)
 
 	// static files
@@ -591,6 +592,61 @@ func (s *Server) handleAnswer(w http.ResponseWriter, r *http.Request) {
 	resp := AnswerResponse{Success: true}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("[WARN] failed to encode response: %v", err)
+	}
+}
+
+// DraftReviewRequest is the request body for POST /api/draft-review.
+type DraftReviewRequest struct {
+	SessionID string `json:"session_id"`
+	ReviewID  string `json:"review_id"`
+	Action    string `json:"action"`
+	Feedback  string `json:"feedback"`
+}
+
+// handleDraftReview handles POST /api/draft-review to submit a draft review action.
+func (s *Server) handleDraftReview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.planRunner == nil {
+		http.Error(w, "plan creation not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req DraftReviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.SessionID == "" || req.ReviewID == "" || req.Action == "" {
+		http.Error(w, "session_id, review_id, and action required", http.StatusBadRequest)
+		return
+	}
+
+	session := s.planRunner.GetSession(req.SessionID)
+	if session == nil {
+		http.Error(w, "session not found: "+req.SessionID, http.StatusNotFound)
+		return
+	}
+
+	collector := session.GetInputCollector()
+	if collector == nil {
+		http.Error(w, "no input collector for session", http.StatusBadRequest)
+		return
+	}
+
+	if err := collector.SubmitDraftReview(req.ReviewID, req.Action, req.Feedback); err != nil {
+		http.Error(w, "failed to submit draft review: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(AnswerResponse{Success: true}); err != nil {
 		log.Printf("[WARN] failed to encode response: %v", err)
 	}
 }

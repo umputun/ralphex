@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -895,6 +896,149 @@ func TestServer_HandleAnswer(t *testing.T) {
 		defer resp.Body.Close()
 
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+func TestServer_HandleDraftReview(t *testing.T) {
+	t.Run("returns error when plan runner not configured", func(t *testing.T) {
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+		srv, err := NewServer(ServerConfig{Port: 8080}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/draft-review", strings.NewReader(`{"session_id":"x","review_id":"y","action":"accept"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleDraftReview(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	})
+
+	t.Run("rejects non-POST methods", func(t *testing.T) {
+		sm := NewSessionManager()
+		defer sm.Close()
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+			req := httptest.NewRequest(method, "/api/draft-review", http.NoBody)
+			w := httptest.NewRecorder()
+
+			srv.handleDraftReview(w, req)
+
+			resp := w.Result()
+			assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+			resp.Body.Close()
+		}
+	})
+
+	t.Run("rejects invalid JSON", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		runner := NewPlanRunner(cfg, sm)
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.SetPlanRunner(runner)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/draft-review", strings.NewReader("not json"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleDraftReview(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("rejects missing required fields", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		runner := NewPlanRunner(cfg, sm)
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.SetPlanRunner(runner)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/draft-review", strings.NewReader(`{"session_id":"x"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleDraftReview(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+
+	t.Run("accepts valid draft review submission", func(t *testing.T) {
+		cfg := testConfigForServer(t)
+		sm := NewSessionManager()
+		defer sm.Close()
+		runner := NewPlanRunner(cfg, sm)
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+		srv.SetPlanRunner(runner)
+
+		// create a session with a pending draft review
+		session := NewSession("test-draft", "/tmp/progress-draft.txt")
+		defer session.Close()
+		collector := NewWebInputCollector(session)
+		session.SetInputCollector(collector)
+
+		// register session in runner's internal map
+		runner.mu.Lock()
+		runner.sessions["test-draft"] = &runningPlan{
+			session:   session,
+			collector: collector,
+			dir:       t.TempDir(),
+		}
+		runner.mu.Unlock()
+
+		// start a draft review in background
+		type result struct {
+			action, feedback string
+			err              error
+		}
+		resultCh := make(chan result, 1)
+		go func() {
+			action, feedback, askErr := collector.AskDraftReview(t.Context(), "Review", "# Plan")
+			resultCh <- result{action, feedback, askErr}
+		}()
+
+		time.Sleep(50 * time.Millisecond)
+
+		pending := collector.GetPendingDraftReview()
+		require.NotNil(t, pending)
+
+		// submit via HTTP endpoint
+		body := fmt.Sprintf(`{"session_id":"test-draft","review_id":%q,"action":"accept"}`, pending.ID)
+		req := httptest.NewRequest(http.MethodPost, "/api/draft-review", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleDraftReview(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// verify AskDraftReview unblocked with correct result
+		select {
+		case r := <-resultCh:
+			require.NoError(t, r.err)
+			assert.Equal(t, "accept", r.action)
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for draft review to unblock")
+		}
 	})
 }
 

@@ -378,3 +378,54 @@ func TestEvent_ToSSEMessage(t *testing.T) {
 		assert.Contains(t, string(data), "task_start")
 	})
 }
+
+func TestNewDraftReviewEvent(t *testing.T) {
+	e := NewDraftReviewEvent("review-123", "Review the plan", "# Plan\n\n- Task 1")
+
+	assert.Equal(t, EventTypeDraftReview, e.Type)
+	assert.Equal(t, "Review the plan", e.Text)
+	require.NotNil(t, e.DraftReview)
+	assert.Equal(t, "review-123", e.DraftReview.ReviewID)
+	assert.Equal(t, "Review the plan", e.DraftReview.Question)
+	assert.Equal(t, "# Plan\n\n- Task 1", e.DraftReview.PlanContent)
+}
+
+func TestNewDraftReviewSubmittedEvent(t *testing.T) {
+	t.Run("accept without feedback", func(t *testing.T) {
+		e := NewDraftReviewSubmittedEvent("review-123", "accept", "")
+
+		assert.Equal(t, EventTypeDraftReviewSubmitted, e.Type)
+		assert.Equal(t, "accept", e.Text)
+		require.NotNil(t, e.DraftReviewResp)
+		assert.Equal(t, "review-123", e.DraftReviewResp.ReviewID)
+		assert.Equal(t, "accept", e.DraftReviewResp.Action)
+		assert.Empty(t, e.DraftReviewResp.Feedback)
+	})
+
+	t.Run("revise with feedback", func(t *testing.T) {
+		e := NewDraftReviewSubmittedEvent("review-456", "revise", "add more details")
+
+		assert.Equal(t, EventTypeDraftReviewSubmitted, e.Type)
+		require.NotNil(t, e.DraftReviewResp)
+		assert.Equal(t, "revise", e.DraftReviewResp.Action)
+		assert.Equal(t, "add more details", e.DraftReviewResp.Feedback)
+	})
+}
+
+func TestEvent_JSON_DraftReviewEvent(t *testing.T) {
+	e := NewDraftReviewEvent("review-789", "Review this", "# Plan Content")
+
+	data, err := json.Marshal(e)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	assert.Equal(t, "draft_review", decoded["type"])
+	assert.Equal(t, "Review this", decoded["text"])
+
+	draftReview, ok := decoded["draft_review"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "review-789", draftReview["review_id"])
+	assert.Equal(t, "# Plan Content", draftReview["plan_content"])
+}

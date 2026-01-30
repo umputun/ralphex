@@ -23,8 +23,10 @@ const (
 	EventTypeTaskStart        EventType = "task_start"        // task execution started
 	EventTypeTaskEnd          EventType = "task_end"          // task execution ended
 	EventTypeIterationStart   EventType = "iteration_start"   // review/codex iteration started
-	EventTypeQuestion         EventType = "question"          // interactive question for plan creation
-	EventTypeQuestionAnswered EventType = "question_answered" // answer submitted for an interactive question
+	EventTypeQuestion             EventType = "question"               // interactive question for plan creation
+	EventTypeQuestionAnswered     EventType = "question_answered"      // answer submitted for an interactive question
+	EventTypeDraftReview          EventType = "draft_review"           // plan draft for user review
+	EventTypeDraftReviewSubmitted EventType = "draft_review_submitted" // user submitted draft review action
 )
 
 // QuestionEventData contains details for interactive plan creation questions.
@@ -41,6 +43,20 @@ type AnswerEventData struct {
 	Answer     string `json:"answer"`
 }
 
+// DraftReviewEventData contains details for plan draft review.
+type DraftReviewEventData struct {
+	ReviewID    string `json:"review_id"`
+	Question    string `json:"question"`
+	PlanContent string `json:"plan_content"`
+}
+
+// DraftReviewSubmittedData contains details for a submitted draft review.
+type DraftReviewSubmittedData struct {
+	ReviewID string `json:"review_id"`
+	Action   string `json:"action"`
+	Feedback string `json:"feedback,omitempty"`
+}
+
 // Event represents a single event to be streamed to web clients.
 type Event struct {
 	Type         EventType          `json:"type"`
@@ -51,8 +67,10 @@ type Event struct {
 	Signal       string             `json:"signal,omitempty"`
 	TaskNum      int                `json:"task_num,omitempty"`      // 1-based task index from plan (matches plan.tasks[].number)
 	IterationNum int                `json:"iteration_num,omitempty"` // 1-based iteration index for review/codex phases
-	QuestionData *QuestionEventData `json:"question_data,omitempty"` // question details for plan creation mode
-	AnswerData   *AnswerEventData   `json:"answer_data,omitempty"`   // answer details for plan creation mode
+	QuestionData    *QuestionEventData        `json:"question_data,omitempty"`     // question details for plan creation mode
+	AnswerData      *AnswerEventData          `json:"answer_data,omitempty"`       // answer details for plan creation mode
+	DraftReview     *DraftReviewEventData     `json:"draft_review,omitempty"`      // draft review details for plan creation
+	DraftReviewResp *DraftReviewSubmittedData `json:"draft_review_resp,omitempty"` // draft review response details
 }
 
 // NewOutputEvent creates an output event with current timestamp.
@@ -164,6 +182,34 @@ func NewQuestionAnsweredEvent(questionID, answer string) Event {
 		AnswerData: &AnswerEventData{
 			QuestionID: questionID,
 			Answer:     answer,
+		},
+	}
+}
+
+// NewDraftReviewEvent creates a draft review event for plan creation.
+func NewDraftReviewEvent(reviewID, question, planContent string) Event {
+	return Event{
+		Type:      EventTypeDraftReview,
+		Text:      question,
+		Timestamp: time.Now(),
+		DraftReview: &DraftReviewEventData{
+			ReviewID:    reviewID,
+			Question:    question,
+			PlanContent: planContent,
+		},
+	}
+}
+
+// NewDraftReviewSubmittedEvent creates an event for a submitted draft review.
+func NewDraftReviewSubmittedEvent(reviewID, action, feedback string) Event {
+	return Event{
+		Type:      EventTypeDraftReviewSubmitted,
+		Text:      action,
+		Timestamp: time.Now(),
+		DraftReviewResp: &DraftReviewSubmittedData{
+			ReviewID: reviewID,
+			Action:   action,
+			Feedback: feedback,
 		},
 	}
 }
