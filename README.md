@@ -50,7 +50,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 - **Streaming output** - real-time progress with timestamps and colors
 - **Progress logging** - detailed execution logs for debugging
 - **Web dashboard** - browser-based real-time view with `--serve` flag
-- **Multiple modes** - full execution, review-only, codex-only, or plan creation
+- **Multiple modes** - full execution, tasks-only, review-only, codex-only, or plan creation
 
 ## Quick Start
 
@@ -198,6 +198,9 @@ ralphex --review docs/plans/feature.md
 # codex-only mode (skip tasks and first claude review, still uses claude to evaluate/fix)
 ralphex --codex-only
 
+# tasks-only mode (run only task phase, skip all reviews)
+ralphex --tasks-only docs/plans/feature.md
+
 # interactive plan creation
 ralphex --plan "add user authentication"
 
@@ -218,6 +221,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-m, --max-iterations` | Maximum task iterations | 50 |
 | `-r, --review` | Skip task execution, run full review pipeline | false |
 | `-c, --codex-only` | Skip tasks and first review, run codex → claude evaluation → fixes | false |
+| `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
 | `-p, --port` | Web dashboard port (used with `--serve`) | 8080 |

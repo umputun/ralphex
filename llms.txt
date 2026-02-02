@@ -31,6 +31,9 @@ ralphex --review docs/plans/feature.md
 # codex-only mode (skip tasks and first claude review, still uses claude to evaluate/fix)
 ralphex --codex-only
 
+# tasks-only mode (run only task phase, skip all reviews)
+ralphex --tasks-only docs/plans/feature.md
+
 # interactive plan creation
 ralphex --plan "add user authentication"
 

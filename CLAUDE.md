@@ -44,7 +44,7 @@ docs/plans/         # plan files location
 - Streaming output with timestamps
 - Progress logging to files
 - Progress file locking (flock) for active session detection
-- Multiple execution modes: full, review-only, codex-only, plan creation
+- Multiple execution modes: full, tasks-only, review-only, codex-only, plan creation
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
 
