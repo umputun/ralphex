@@ -601,20 +601,24 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// run with tasks-only mode - use short timeout to let it proceed past branch creation
-		// but cancel before lengthy execution completes
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		// run with tasks-only mode in background
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		o := opts{TasksOnly: true, PlanFile: planPath, MaxIterations: 1}
-		_ = run(ctx, o)
+		go func() {
+			o := opts{TasksOnly: true, PlanFile: planPath, MaxIterations: 1}
+			_ = run(ctx, o)
+		}()
 
 		// verify branch was created (branch name derived from plan filename)
-		gitSvc, err := git.NewService(dir, testColors().Info())
-		require.NoError(t, err)
-		branch, err := gitSvc.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "test-plan", branch, "tasks-only mode should create branch for plan")
+		require.Eventually(t, func() bool {
+			gitSvc, err := git.NewService(dir, testColors().Info())
+			if err != nil {
+				return false
+			}
+			branch, err := gitSvc.CurrentBranch()
+			return err == nil && branch == "test-plan"
+		}, 1*time.Second, 100*time.Millisecond, "tasks-only mode should create branch for plan")
 	})
 
 	t.Run("review_mode_does_not_create_branch", func(t *testing.T) {
@@ -643,14 +647,17 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// run with review mode - use short timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		// run with review mode in background
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		o := opts{Review: true, PlanFile: planPath, MaxIterations: 1}
-		_ = run(ctx, o)
+		go func() {
+			o := opts{Review: true, PlanFile: planPath, MaxIterations: 1}
+			_ = run(ctx, o)
+		}()
 
-		// verify branch was NOT created (still on master)
+		// verify branch was NOT created (still on master) - wait briefly then check
+		time.Sleep(500 * time.Millisecond)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
@@ -684,14 +691,17 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// run with codex-only mode - use short timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		// run with codex-only mode in background
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1}
-		_ = run(ctx, o)
+		go func() {
+			o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1}
+			_ = run(ctx, o)
+		}()
 
-		// verify branch was NOT created (still on master)
+		// verify branch was NOT created (still on master) - wait briefly then check
+		time.Sleep(500 * time.Millisecond)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
