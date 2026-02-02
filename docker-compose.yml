@@ -5,8 +5,9 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ${HOME}/.claude:/home/app/.claude:ro
-      - ${HOME}/.codex:/home/app/.codex:ro
+      # credentials mounted read-only to /mnt, copied at container startup
+      - ${HOME}/.claude:/mnt/claude:ro
+      - ${HOME}/.codex:/mnt/codex:ro
       - ${HOME}/.config/ralphex:/home/app/.config/ralphex:ro
       - ${HOME}/.gitconfig:/home/app/.gitconfig:ro
       - .:/workspace
@@ -14,6 +15,7 @@ services:
       - APP_UID=${UID:-1000}
       - SKIP_HOME_CHOWN=1
       - INIT_QUIET=1
+      - CLAUDE_CONFIG_DIR=/home/app/.claude
     working_dir: /workspace
     tty: true
     stdin_open: true

@@ -195,7 +195,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 **Why use Docker?** ralphex runs Claude Code with `--dangerously-skip-permissions`, giving it full access to execute commands and modify files. Running in a container provides isolation - Claude can only access the mounted project directory, not your entire system. This makes autonomous execution significantly safer.
 
 **Volume mounts:**
-- **Read-only (`:ro`)**: credentials and config directories - ralphex only reads these, never modifies
+- **Read-only**: `~/.claude` and `~/.codex` mounted to `/mnt/`, copied at startup to preserve isolation
 - **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
 
 **Requirements:**

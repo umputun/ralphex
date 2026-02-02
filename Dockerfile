@@ -27,7 +27,8 @@ LABEL org.opencontainers.image.licenses="MIT"
 RUN apk add --no-cache \
     nodejs npm \
     libgcc libstdc++ ripgrep \
-    fzf git bash
+    fzf git bash && \
+    sed -i 's|/home/app:/bin/sh|/home/app:/bin/bash|' /etc/passwd
 
 # set env for claude code on alpine (use system ripgrep)
 ENV USE_BUILTIN_RIPGREP=0
@@ -40,6 +41,24 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex && \
 # copy ralphex binary
 COPY --from=build /build/ralphex /srv/ralphex
 RUN chmod +x /srv/ralphex
+
+# create init script to copy credentials from read-only mount to writable location
+# baseimage runs /srv/init.sh if it exists before the main command
+RUN cat > /srv/init.sh << 'EOF'
+#!/bin/sh
+# copy claude credentials if mounted read-only at /mnt/claude
+# use -L to dereference symlinks (dotfiles setups use symlinks)
+if [ -d /mnt/claude ]; then
+    mkdir -p /home/app/.claude
+    cp -rL /mnt/claude/* /home/app/.claude/ 2>/dev/null || true
+fi
+# copy codex credentials if mounted
+if [ -d /mnt/codex ]; then
+    mkdir -p /home/app/.codex
+    cp -rL /mnt/codex/* /home/app/.codex/ 2>/dev/null || true
+fi
+EOF
+RUN chmod +x /srv/init.sh
 
 # expose web dashboard port
 EXPOSE 8080
