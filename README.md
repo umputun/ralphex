@@ -181,6 +181,29 @@ brew install umputun/apps/ralphex
 
 Download the appropriate binary from [releases](https://github.com/umputun/ralphex/releases).
 
+### Using Docker
+
+Download the wrapper script and install to PATH:
+
+```bash
+curl -sL https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh -o /usr/local/bin/ralphex
+chmod +x /usr/local/bin/ralphex
+```
+
+Then use `ralphex` as usual - it runs in a container with Claude Code and Codex pre-installed.
+
+**Why use Docker?** ralphex runs Claude Code with `--dangerously-skip-permissions`, giving it full access to execute commands and modify files. Running in a container provides isolation - Claude can only access the mounted project directory, not your entire system. This makes autonomous execution significantly safer.
+
+**Volume mounts:**
+- **Read-only (`:ro`)**: credentials and config directories - ralphex only reads these, never modifies
+- **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
+
+**Requirements:**
+- Docker installed and running
+- Claude Code credentials in `~/.claude/`
+- Codex credentials in `~/.codex/` (optional, for codex review phase)
+- Git config in `~/.gitconfig` (for commits)
+
 ## Usage
 
 **Note:** ralphex must be run from the repository root directory (where `.git` is located).

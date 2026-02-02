@@ -90,4 +90,10 @@ prep_site:
 	# copy raw claude assets (not rendered by mkdocs)
 	rm -rf site/site/docs/assets/claude && cp -rv assets/claude site/site/docs/assets/
 
-.PHONY: all build test lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site
+docker-build:
+	docker build -t ghcr.io/umputun/ralphex:latest .
+
+docker-run:
+	./scripts/ralphex-dk.sh $(ARGS)
+
+.PHONY: all build test lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site docker-build docker-run

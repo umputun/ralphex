@@ -1,0 +1,36 @@
+# .git not excluded - needed for version detection during build
+.gitignore
+
+# build artifacts
+.bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# test artifacts
+*.test
+coverage.out
+coverage_no_mocks.out
+profile.cov
+
+# ide
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# os
+.DS_Store
+Thumbs.db
+
+# docs and site
+site/
+docs/
+
+# progress files
+progress*.txt
+
+# local config (should be mounted, not built into image)
+.ralphex/
