@@ -30,6 +30,7 @@ type opts struct {
 	MaxIterations   int      `short:"m" long:"max-iterations" default:"50" description:"maximum task iterations"`
 	Review          bool     `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
 	CodexOnly       bool     `short:"c" long:"codex-only" description:"skip tasks and first review, run only codex loop"`
+	TasksOnly       bool     `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
 	PlanDescription string   `long:"plan" description:"create plan interactively (enter plan description)"`
 	Debug           bool     `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor         bool     `long:"no-color" description:"disable color output"`
@@ -183,7 +184,9 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// select and prepare plan file (not needed for plan mode)
-	planFile, err := selector.Select(ctx, o.PlanFile, o.Review || o.CodexOnly)
+	// plan is optional only for review modes (ModeReview, ModeCodexOnly)
+	planOptional := mode == processor.ModeReview || mode == processor.ModeCodexOnly
+	planFile, err := selector.Select(ctx, o.PlanFile, planOptional)
 	if err != nil {
 		// check for auto-plan-mode: no plans found on main/master branch
 		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, executePlanRequest{
@@ -200,7 +203,7 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// setup git for execution (branch, gitignore)
-	if planFile != "" && mode == processor.ModeFull {
+	if planFile != "" && modeRequiresBranch(mode) {
 		if err := gitSvc.CreateBranchForPlan(planFile); err != nil {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
@@ -232,7 +235,7 @@ func getCurrentBranch(gitSvc *git.Service) string {
 // tryAutoPlanMode attempts to switch to plan mode when no plans are found on main/master.
 // returns (true, nil) if user canceled, (true, err) if plan mode was attempted, or (false, nil) if auto-plan-mode doesn't apply.
 func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequest) (bool, error) {
-	if !errors.Is(err, plan.ErrNoPlansFound) || o.Review || o.CodexOnly {
+	if !errors.Is(err, plan.ErrNoPlansFound) || o.Review || o.CodexOnly || o.TasksOnly {
 		return false, nil
 	}
 
@@ -311,7 +314,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	// move completed plan to completed/ directory
-	if req.PlanFile != "" && req.Mode == processor.ModeFull {
+	if req.PlanFile != "" && modeRequiresBranch(req.Mode) {
 		if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
@@ -356,6 +359,8 @@ func determineMode(o opts) processor.Mode {
 	switch {
 	case o.PlanDescription != "":
 		return processor.ModePlan
+	case o.TasksOnly:
+		return processor.ModeTasksOnly
 	case o.CodexOnly:
 		return processor.ModeCodexOnly
 	case o.Review:
@@ -363,6 +368,12 @@ func determineMode(o opts) processor.Mode {
 	default:
 		return processor.ModeFull
 	}
+}
+
+// modeRequiresBranch returns true if the mode requires creating a feature branch.
+// ModeFull and ModeTasksOnly both execute tasks that make commits, requiring a branch.
+func modeRequiresBranch(mode processor.Mode) bool {
+	return mode == processor.ModeFull || mode == processor.ModeTasksOnly
 }
 
 // validateFlags checks for conflicting CLI flags.
@@ -546,7 +557,7 @@ func runReset() error {
 // this allows reset to work standalone (exit after reset) while also supporting
 // combined usage like "ralphex --reset docs/plans/feature.md".
 func isResetOnly(o opts) bool {
-	return o.PlanFile == "" && !o.Review && !o.CodexOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
+	return o.PlanFile == "" && !o.Review && !o.CodexOnly && !o.TasksOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
 }
 
 // ensureRepoHasCommits checks that the repository has at least one commit.

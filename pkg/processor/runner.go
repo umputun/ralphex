@@ -24,6 +24,7 @@ const (
 	ModeFull      Mode = "full"       // full execution: tasks + reviews + codex
 	ModeReview    Mode = "review"     // skip tasks, run full review pipeline
 	ModeCodexOnly Mode = "codex-only" // skip tasks and first review, run only codex loop
+	ModeTasksOnly Mode = "tasks-only" // run only task phase, skip all reviews
 	ModePlan      Mode = "plan"       // interactive plan creation mode
 )
 
@@ -170,6 +171,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		return r.runReviewOnly(ctx)
 	case ModeCodexOnly:
 		return r.runCodexOnly(ctx)
+	case ModeTasksOnly:
+		return r.runTasksOnly(ctx)
 	case ModePlan:
 		return r.runPlanCreation(ctx)
 	default:
@@ -275,6 +278,23 @@ func (r *Runner) runCodexOnly(ctx context.Context) error {
 	}
 
 	r.log.Print("codex phases completed successfully")
+	return nil
+}
+
+// runTasksOnly executes only task phase, skipping all reviews.
+func (r *Runner) runTasksOnly(ctx context.Context) error {
+	if r.cfg.PlanFile == "" {
+		return errors.New("plan file required for tasks-only mode")
+	}
+
+	r.log.SetPhase(PhaseTask)
+	r.log.PrintRaw("starting task execution phase\n")
+
+	if err := r.runTaskPhase(ctx); err != nil {
+		return fmt.Errorf("task phase: %w", err)
+	}
+
+	r.log.Print("task execution completed successfully")
 	return nil
 }
 

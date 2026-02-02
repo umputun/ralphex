@@ -198,6 +198,86 @@ func TestRunner_CodexDisabled_SkipsCodexPhase(t *testing.T) {
 	assert.Empty(t, codex.RunCalls(), "codex should not be called when disabled")
 }
 
+func TestRunner_RunTasksOnly_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	// all tasks complete - no [ ] checkboxes
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "task done", Signal: processor.SignalCompleted}, // task phase completes
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 50, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, codex.RunCalls(), "codex should not be called in tasks-only mode")
+	assert.Len(t, claude.RunCalls(), 1)
+}
+
+func TestRunner_RunTasksOnly_NoPlanFile(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	r := processor.NewWithExecutors(processor.Config{Mode: processor.ModeTasksOnly}, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plan file required")
+}
+
+func TestRunner_RunTasksOnly_TaskPhaseError(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "error", Signal: processor.SignalFailed}, // first try
+		{Output: "error", Signal: processor.SignalFailed}, // retry
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FAILED signal")
+}
+
+func TestRunner_RunTasksOnly_NoReviews(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1\n- [x] Task 2"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "task done", Signal: processor.SignalCompleted},
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:          processor.ModeTasksOnly,
+		PlanFile:      planFile,
+		MaxIterations: 50,
+		CodexEnabled:  true, // enabled but should not run in tasks-only mode
+		AppConfig:     testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// verify no review or codex phases ran - only task phase
+	assert.Len(t, claude.RunCalls(), 1, "only task phase should run")
+	assert.Empty(t, codex.RunCalls(), "codex should not run in tasks-only mode")
+}
+
 func TestRunner_TaskPhase_FailedSignal(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")

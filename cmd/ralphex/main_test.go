@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -103,9 +104,13 @@ func TestDetermineMode(t *testing.T) {
 		{name: "review_flag", opts: opts{Review: true}, expected: processor.ModeReview},
 		{name: "codex_only_flag", opts: opts{CodexOnly: true}, expected: processor.ModeCodexOnly},
 		{name: "codex_only_takes_precedence", opts: opts{Review: true, CodexOnly: true}, expected: processor.ModeCodexOnly},
+		{name: "tasks_only_flag", opts: opts{TasksOnly: true}, expected: processor.ModeTasksOnly},
+		{name: "tasks_only_takes_precedence_over_codex", opts: opts{TasksOnly: true, CodexOnly: true}, expected: processor.ModeTasksOnly},
+		{name: "tasks_only_takes_precedence_over_review", opts: opts{TasksOnly: true, Review: true}, expected: processor.ModeTasksOnly},
 		{name: "plan_flag", opts: opts{PlanDescription: "add caching"}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_review", opts: opts{PlanDescription: "add caching", Review: true}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_codex", opts: opts{PlanDescription: "add caching", CodexOnly: true}, expected: processor.ModePlan},
+		{name: "plan_takes_precedence_over_tasks_only", opts: opts{PlanDescription: "add caching", TasksOnly: true}, expected: processor.ModePlan},
 	}
 
 	for _, tc := range tests {
@@ -566,6 +571,154 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
 	})
+}
+
+func TestTasksOnlyModeBranchCreation(t *testing.T) {
+	t.Run("tasks_only_creates_branch_for_plan", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create plans dir and plan file, then commit them
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "test-plan.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# Test Plan\n\n## Tasks\n\n- [ ] task 1\n"), 0o600))
+
+		// commit the plan file so branch creation doesn't fail due to uncommitted changes
+		repo, err := gogit.PlainOpen(dir)
+		require.NoError(t, err)
+		wt, err := repo.Worktree()
+		require.NoError(t, err)
+		_, err = wt.Add("docs/plans/test-plan.md")
+		require.NoError(t, err)
+		_, err = wt.Commit("add test plan", &gogit.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com"},
+		})
+		require.NoError(t, err)
+
+		// run with tasks-only mode - use short timeout to let it proceed past branch creation
+		// but cancel before lengthy execution completes
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		o := opts{TasksOnly: true, PlanFile: planPath, MaxIterations: 1}
+		_ = run(ctx, o)
+
+		// verify branch was created (branch name derived from plan filename)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+		branch, err := gitSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "test-plan", branch, "tasks-only mode should create branch for plan")
+	})
+
+	t.Run("review_mode_does_not_create_branch", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create plans dir and plan file, then commit them
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "review-plan.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# Review Plan\n"), 0o600))
+
+		repo, err := gogit.PlainOpen(dir)
+		require.NoError(t, err)
+		wt, err := repo.Worktree()
+		require.NoError(t, err)
+		_, err = wt.Add("docs/plans/review-plan.md")
+		require.NoError(t, err)
+		_, err = wt.Commit("add review plan", &gogit.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com"},
+		})
+		require.NoError(t, err)
+
+		// run with review mode - use short timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		o := opts{Review: true, PlanFile: planPath, MaxIterations: 1}
+		_ = run(ctx, o)
+
+		// verify branch was NOT created (still on master)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+		branch, err := gitSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "master", branch, "review mode should not create branch")
+	})
+
+	t.Run("codex_only_mode_does_not_create_branch", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create plans dir and plan file, then commit them
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "codex-plan.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# Codex Plan\n"), 0o600))
+
+		repo, err := gogit.PlainOpen(dir)
+		require.NoError(t, err)
+		wt, err := repo.Worktree()
+		require.NoError(t, err)
+		_, err = wt.Add("docs/plans/codex-plan.md")
+		require.NoError(t, err)
+		_, err = wt.Commit("add codex plan", &gogit.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com"},
+		})
+		require.NoError(t, err)
+
+		// run with codex-only mode - use short timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1}
+		_ = run(ctx, o)
+
+		// verify branch was NOT created (still on master)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+		branch, err := gitSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "master", branch, "codex-only mode should not create branch")
+	})
+}
+
+func TestModeRequiresBranch(t *testing.T) {
+	// tests the modeRequiresBranch helper function used for both branch creation and plan-move
+	tests := []struct {
+		mode     processor.Mode
+		expected bool
+	}{
+		{processor.ModeFull, true},
+		{processor.ModeTasksOnly, true},
+		{processor.ModeReview, false},
+		{processor.ModeCodexOnly, false},
+		{processor.ModePlan, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.mode), func(t *testing.T) {
+			result := modeRequiresBranch(tc.mode)
+			assert.Equal(t, tc.expected, result, "mode %s should return %v", tc.mode, tc.expected)
+		})
+	}
 }
 
 // setupTestRepo creates a test git repository with an initial commit.
