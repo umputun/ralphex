@@ -12,7 +12,7 @@ RUN \
     if [ -z "$CI" ] ; then \
         echo "runs outside of CI"; \
         version=$(git describe --tags --always 2>/dev/null || echo "docker-$(date +%Y%m%dT%H%M%S)"); \
-    else version=${GIT_BRANCH}-${GITHUB_SHA:0:7}-$(date +%Y%m%dT%H:%M:%S); fi && \
+    else version=${GIT_BRANCH}-${GITHUB_SHA:0:7}-$(date +%Y%m%dT%H%M%S); fi && \
     echo "version=$version" && \
     go build -o /build/ralphex -ldflags "-X main.revision=${version} -s -w" ./cmd/ralphex
 
@@ -32,8 +32,10 @@ RUN apk add --no-cache \
 # set env for claude code on alpine (use system ripgrep)
 ENV USE_BUILTIN_RIPGREP=0
 
-# install claude code and codex globally
-RUN npm install -g @anthropic-ai/claude-code @openai/codex
+# install claude code and codex globally, verify CLI commands exist
+RUN npm install -g @anthropic-ai/claude-code @openai/codex && \
+    command -v claude >/dev/null || { echo "error: claude CLI not found"; exit 1; } && \
+    command -v codex >/dev/null || { echo "error: codex CLI not found"; exit 1; }
 
 # copy ralphex binary
 COPY --from=build /build/ralphex /srv/ralphex
