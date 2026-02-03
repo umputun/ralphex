@@ -81,8 +81,19 @@ if [[ -d "${HOME}/.codex" ]]; then
     done
 fi
 
-if [[ -e "${HOME}/.config/ralphex" ]]; then
+# ralphex config: mount directory and symlink targets under $HOME
+if [[ -d "${HOME}/.config/ralphex" ]]; then
     VOLUMES+=(-v "$(resolve "${HOME}/.config/ralphex"):/home/app/.config/ralphex:ro")
+    for target in $(symlink_target_dirs "${HOME}/.config/ralphex"); do
+        [[ -d "$target" && "$target" == "${HOME}"/* ]] && VOLUMES+=(-v "${target}:${target}:ro")
+    done
+fi
+
+# project-level .ralphex: resolve symlink targets if present (included in workspace mount)
+if [[ -d "$(pwd)/.ralphex" ]]; then
+    for target in $(symlink_target_dirs "$(pwd)/.ralphex"); do
+        [[ -d "$target" && "$target" == "${HOME}"/* ]] && VOLUMES+=(-v "${target}:${target}:ro")
+    done
 fi
 
 if [[ -e "${HOME}/.gitconfig" ]]; then
