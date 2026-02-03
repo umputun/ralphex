@@ -550,6 +550,7 @@ func TestCheckErrorPatterns(t *testing.T) {
 		{name: "empty pattern skipped", output: "some text", patterns: []string{"", "some"}, want: "some"},
 		{name: "whitespace in pattern", output: "rate  limit", patterns: []string{"rate  limit"}, want: "rate  limit"},
 		{name: "multiline output", output: "line1\nYou've hit your limit\nline3", patterns: []string{"hit your limit"}, want: "hit your limit"},
+		{name: "api error 500", output: `API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, patterns: []string{"API Error:"}, want: "API Error:"},
 	}
 
 	for _, tc := range tests {

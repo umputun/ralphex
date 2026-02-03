@@ -92,8 +92,8 @@ plans_dir = docs/plans
 # claude_error_patterns: patterns to detect in claude output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
 # when detected, ralphex exits gracefully with an informative message
-# default: You've hit your limit
-claude_error_patterns = You've hit your limit
+# default: You've hit your limit,API Error:
+claude_error_patterns = You've hit your limit,API Error:
 
 # codex_error_patterns: patterns to detect in codex output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
