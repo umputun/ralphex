@@ -42,22 +42,8 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex && \
 COPY --from=build /build/ralphex /srv/ralphex
 RUN chmod +x /srv/ralphex
 
-# create init script to copy credentials from read-only mount to writable location
-# baseimage runs /srv/init.sh if it exists before the main command
-RUN cat > /srv/init.sh << 'EOF'
-#!/bin/sh
-# copy claude credentials if mounted read-only at /mnt/claude
-# use -L to dereference symlinks (dotfiles setups use symlinks)
-if [ -d /mnt/claude ]; then
-    mkdir -p /home/app/.claude
-    cp -rL /mnt/claude/* /home/app/.claude/ 2>/dev/null || true
-fi
-# copy codex credentials if mounted
-if [ -d /mnt/codex ]; then
-    mkdir -p /home/app/.codex
-    cp -rL /mnt/codex/* /home/app/.codex/ 2>/dev/null || true
-fi
-EOF
+# copy init script (baseimage runs /srv/init.sh before main command)
+COPY scripts/init-docker.sh /srv/init.sh
 RUN chmod +x /srv/init.sh
 
 # expose web dashboard port

@@ -16,14 +16,34 @@ if [[ ! -d "${HOME}/.claude" ]]; then
     exit 1
 fi
 
+# on macOS, extract credentials from keychain if not already in ~/.claude
+CREDS_TEMP=""
+if [[ "$(uname)" == "Darwin" && ! -f "${HOME}/.claude/.credentials.json" ]]; then
+    # try to read credentials first (works if keychain already unlocked)
+    CREDS_JSON=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+    if [[ -z "$CREDS_JSON" ]]; then
+        # keychain locked - unlock and retry
+        echo "unlocking macOS keychain to extract Claude credentials (enter login password)..." >&2
+        security unlock-keychain 2>/dev/null || true
+        CREDS_JSON=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+    fi
+    if [[ -n "$CREDS_JSON" ]]; then
+        CREDS_TEMP=$(mktemp)
+        chmod 600 "$CREDS_TEMP"
+        echo "$CREDS_JSON" > "$CREDS_TEMP"
+        trap "rm -f '$CREDS_TEMP'" EXIT  # safety net
+    fi
+fi
+
 # resolve path: if symlink, return real path; otherwise return original
 resolve() { [[ -L "$1" ]] && realpath "$1" || echo "$1"; }
 
 # collect unique parent directories of symlink targets inside a directory
+# limit depth to avoid scanning tmp directories with many symlinks
 symlink_target_dirs() {
     local src="$1"
     [[ -d "$src" ]] || return
-    find "$src" -type l 2>/dev/null | while read -r link; do
+    find "$src" -maxdepth 2 -type l 2>/dev/null | while read -r link; do
         dirname "$(realpath "$link" 2>/dev/null)" 2>/dev/null
     done | sort -u
 }
@@ -33,6 +53,11 @@ VOLUMES=(
     -v "$(resolve "${HOME}/.claude"):/mnt/claude:ro"
     -v "$(pwd):/workspace"
 )
+
+# mount extracted credentials from macOS keychain (separate path, init.sh will copy)
+if [[ -n "$CREDS_TEMP" ]]; then
+    VOLUMES+=(-v "${CREDS_TEMP}:/mnt/claude-credentials.json:ro")
+fi
 
 # add mounts for symlink targets under $HOME (Docker Desktop shares $HOME by default)
 for target in $(symlink_target_dirs "${HOME}/.claude"); do
@@ -55,12 +80,27 @@ if [[ -e "${HOME}/.gitconfig" ]]; then
     VOLUMES+=(-v "$(resolve "${HOME}/.gitconfig"):/home/app/.gitconfig:ro")
 fi
 
-exec docker run -it --rm \
+# only use -it when running interactively AND not using background mode for creds cleanup
+DOCKER_FLAGS="--rm"
+[[ -t 0 && -z "$CREDS_TEMP" ]] && DOCKER_FLAGS="-it --rm"
+
+# run docker in background so we can delete temp credentials quickly
+docker run $DOCKER_FLAGS \
     -e APP_UID="$(id -u)" \
     -e SKIP_HOME_CHOWN=1 \
     -e INIT_QUIET=1 \
     -e CLAUDE_CONFIG_DIR=/home/app/.claude \
-    -p 8080:8080 \
+    -p 8099:8080 \
     "${VOLUMES[@]}" \
     -w /workspace \
-    "${IMAGE}" /srv/ralphex "$@"
+    "${IMAGE}" /srv/ralphex "$@" &
+DOCKER_PID=$!
+
+# delete temp credentials after init.sh copies them (reduces exposure window)
+# run in background so it doesn't block; 10s gives plenty of time for init.sh
+if [[ -n "$CREDS_TEMP" ]]; then
+    (sleep 10; rm -f "$CREDS_TEMP") &
+fi
+
+# wait for docker and propagate exit code
+wait $DOCKER_PID
