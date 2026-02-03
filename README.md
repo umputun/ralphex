@@ -47,9 +47,9 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 - **Automatic branch creation** - creates git branch from plan filename
 - **Plan completion tracking** - moves completed plans to `completed/` folder
 - **Automatic commits** - commits after each task and review fix
-- **Streaming output** - real-time progress with timestamps and colors
-- **Progress logging** - detailed execution logs for debugging
+- **Real-time monitoring** - streaming output with timestamps, colors, and detailed logs
 - **Web dashboard** - browser-based real-time view with `--serve` flag
+- **Docker support** - run in isolated container for safer autonomous execution
 - **Multiple modes** - full execution, tasks-only, review-only, codex-only, or plan creation
 
 ## Quick Start
@@ -193,6 +193,33 @@ chmod +x /usr/local/bin/ralphex
 Then use `ralphex` as usual - it runs in a container with Claude Code and Codex pre-installed.
 
 **Why use Docker?** ralphex runs Claude Code with `--dangerously-skip-permissions`, giving it full access to execute commands and modify files. Running in a container provides isolation - Claude can only access the mounted project directory, not your entire system. This makes autonomous execution significantly safer.
+
+<details markdown>
+<summary>Isolation details</summary>
+
+**Container CAN access (read-write):**
+- Project directory mounted at `/workspace` - full access to create, modify, delete files
+- Git operations within the project (branch, commit, etc.)
+
+**Container CAN access (read-only):**
+- `~/.claude/` - credentials and settings (copied at startup, not modified)
+- `~/.codex/` - codex credentials if present
+- `~/.config/ralphex/` - user-level ralphex configuration
+- `~/.gitconfig` - git identity for commits
+- `.ralphex/` - project-level configuration if present
+
+**Container CANNOT access:**
+- Host filesystem outside mounted directories
+- Other projects or repositories
+- SSH keys, AWS credentials, or other secrets in `~/.ssh`, `~/.aws`, etc.
+- System files, binaries, or configurations
+- Other running processes or containers
+
+**Network:** Full network access (required for Claude API calls)
+
+**Privileges:** Runs as non-root user with no elevated capabilities
+
+</details>
 
 **Volume mounts:**
 - **Read-only**: `~/.claude` and `~/.codex` mounted to `/mnt/`, copied at startup to preserve isolation
