@@ -5,11 +5,19 @@
 # example: ralphex-dk.sh docs/plans/feature.md
 # example: ralphex-dk.sh --serve docs/plans/feature.md
 # example: ralphex-dk.sh --review
+# example: ralphex-dk.sh --update  # pull latest image
 
 set -e
 
 IMAGE="${RALPHEX_IMAGE:-ghcr.io/umputun/ralphex:latest}"
 PORT="${RALPHEX_PORT:-8080}"
+
+# handle --update flag: pull latest image and exit
+if [[ "$1" == "--update" ]]; then
+    echo "pulling latest image: ${IMAGE}" >&2
+    docker pull "${IMAGE}"
+    exit 0
+fi
 
 # check required directories exist (avoid docker creating them as root)
 if [[ ! -d "${HOME}/.claude" ]]; then

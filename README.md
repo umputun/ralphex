@@ -208,6 +208,11 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - `RALPHEX_IMAGE` - Docker image to use (default: `ghcr.io/umputun/ralphex:latest`)
 - `RALPHEX_PORT` - Port for web dashboard when using `--serve` (default: `8080`)
 
+**Updating the image:**
+```bash
+ralphex --update  # pull latest image
+```
+
 Example with custom port:
 ```bash
 RALPHEX_PORT=3000 ralphex --serve --port 3000 docs/plans/feature.md
