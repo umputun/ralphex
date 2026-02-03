@@ -9,6 +9,7 @@
 set -e
 
 IMAGE="${RALPHEX_IMAGE:-ghcr.io/umputun/ralphex:latest}"
+PORT="${RALPHEX_PORT:-8080}"
 
 # check required directories exist (avoid docker creating them as root)
 if [[ ! -d "${HOME}/.claude" ]]; then
@@ -90,7 +91,7 @@ docker run $DOCKER_FLAGS \
     -e SKIP_HOME_CHOWN=1 \
     -e INIT_QUIET=1 \
     -e CLAUDE_CONFIG_DIR=/home/app/.claude \
-    -p 8099:8080 \
+    -p "${PORT}:${PORT}" \
     "${VOLUMES[@]}" \
     -w /workspace \
     "${IMAGE}" /srv/ralphex "$@" &

@@ -204,6 +204,15 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - Codex credentials in `~/.codex/` (optional, for codex review phase)
 - Git config in `~/.gitconfig` (for commits)
 
+**Environment variables:**
+- `RALPHEX_IMAGE` - Docker image to use (default: `ghcr.io/umputun/ralphex:latest`)
+- `RALPHEX_PORT` - Port for web dashboard when using `--serve` (default: `8080`)
+
+Example with custom port:
+```bash
+RALPHEX_PORT=3000 ralphex --serve --port 3000 docs/plans/feature.md
+```
+
 ## Usage
 
 **Note:** ralphex must be run from the repository root directory (where `.git` is located).
