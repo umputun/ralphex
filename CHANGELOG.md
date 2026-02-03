@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.5 - 2026-02-03
+
+### Fixed
+
+- Docker: auto-disable codex sandbox in container (Landlock doesn't work in containers)
+- Docker: run interactive mode in foreground for TTY support (fixes fzf/interactive input)
+- Docker: mount global gitignore at configured path (fixes .DS_Store showing as untracked)
+
 ## v0.7.4 - 2026-02-03
 
 ### Fixed
