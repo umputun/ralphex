@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.2 - 2026-02-03
+
+### Changed
+
+- Multiarch Docker builds with native ARM64 runners
+
 ## v0.7.1 - 2026-02-03
 
 ### Changed
