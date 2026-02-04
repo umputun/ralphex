@@ -549,6 +549,17 @@ func clickSessionByName(t *testing.T, page playwright.Page, name string) bool {
 	return clicked
 }
 
+// createPlanSession creates a progress file for a plan session with custom content.
+func createPlanSession(t *testing.T, name string, content string) string {
+	t.Helper()
+	filename := "progress-plan-" + name + ".txt"
+	path := filepath.Join(testTmpDir, filename)
+	err := atomicWriteFile(path, []byte(content), 0o600)
+	require.NoError(t, err, "create plan session progress file")
+	t.Cleanup(func() { os.Remove(path) })
+	return filename
+}
+
 // TestDashboardSmoke verifies the server is running and page loads.
 func TestDashboardSmoke(t *testing.T) {
 	page := newPage(t)

@@ -479,7 +479,6 @@ func loadProgressFileIntoSession(path string, session *Session) {
 			sectionName := matches[1]
 			if pendingSection != "" {
 				emitPendingSection(session, pendingSection, phase, time.Now())
-				pendingSection = ""
 			}
 			phase = phaseFromSection(sectionName)
 			// defer emitting section until we see a timestamped event
