@@ -777,12 +777,9 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 		if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
 			return fmt.Errorf("finalize step: %w", result.Error)
 		}
-		// check for pattern match (rate limit) - log but don't fail (best-effort)
-		var patternErr *executor.PatternMatchError
-		if errors.As(result.Error, &patternErr) {
-			r.log.Print("finalize step: detected %q in claude output", patternErr.Pattern)
-			r.log.Print("run '%s' for more information", patternErr.HelpCmd)
-			return nil
+		// pattern match (rate limit) - log via shared helper, but don't fail (best-effort)
+		if r.handlePatternMatchError(result.Error, "claude") != nil {
+			return nil //nolint:nilerr // intentional: best-effort semantics, log but don't propagate
 		}
 		// best-effort: log error but don't fail
 		r.log.Print("finalize step failed: %v", result.Error)
