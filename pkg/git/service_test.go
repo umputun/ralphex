@@ -515,3 +515,49 @@ func TestService_GetDefaultBranch(t *testing.T) {
 		assert.Equal(t, "main", branch)
 	})
 }
+
+func TestService_DiffStats(t *testing.T) {
+	t.Run("returns zero stats when on same branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		stats, err := svc.DiffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, 0, stats.Files)
+		assert.Equal(t, 0, stats.Additions)
+		assert.Equal(t, 0, stats.Deletions)
+	})
+
+	t.Run("returns zero stats for nonexistent branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		stats, err := svc.DiffStats("nonexistent")
+		require.NoError(t, err)
+		assert.Equal(t, 0, stats.Files)
+	})
+
+	t.Run("returns stats for changes on feature branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create feature branch
+		err = svc.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// add a new file
+		newFile := filepath.Join(dir, "feature.txt")
+		require.NoError(t, os.WriteFile(newFile, []byte("line1\nline2\n"), 0o600))
+		require.NoError(t, svc.repo.Add("feature.txt"))
+		require.NoError(t, svc.repo.Commit("add feature file"))
+
+		stats, err := svc.DiffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, 1, stats.Files)
+		assert.Equal(t, 2, stats.Additions)
+		assert.Equal(t, 0, stats.Deletions)
+	})
+}

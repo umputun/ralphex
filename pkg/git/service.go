@@ -204,6 +204,12 @@ func (s *Service) EnsureHasCommits(promptFn func() bool) error {
 	return nil
 }
 
+// DiffStats returns change statistics between baseBranch and HEAD.
+// returns zero stats if baseBranch doesn't exist or HEAD equals baseBranch.
+func (s *Service) DiffStats(baseBranch string) (DiffStats, error) {
+	return s.repo.diffStats(baseBranch)
+}
+
 // EnsureIgnored ensures a pattern is in .gitignore.
 // uses probePath to check if pattern is already ignored before adding.
 // if pattern is already ignored, does nothing.

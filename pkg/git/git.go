@@ -592,3 +592,91 @@ func (r *repo) getDefaultBranchFromOriginHead() string {
 	// local branch doesn't exist, use remote-tracking branch (e.g., "origin/main")
 	return target
 }
+
+// DiffStats holds statistics about changes between two commits.
+type DiffStats struct {
+	Files     int // number of files changed
+	Additions int // lines added
+	Deletions int // lines deleted
+}
+
+// diffStats returns change statistics between baseBranch and HEAD.
+// returns zero stats if branches are equal or baseBranch doesn't exist.
+func (r *repo) diffStats(baseBranch string) (DiffStats, error) {
+	// resolve base branch to commit (try local first, then remote tracking)
+	baseCommit, err := r.resolveToCommit(baseBranch)
+	if err != nil {
+		return DiffStats{}, nil //nolint:nilerr // base branch doesn't exist, return zero stats
+	}
+
+	// get HEAD commit
+	headRef, err := r.gitRepo.Head()
+	if err != nil {
+		return DiffStats{}, fmt.Errorf("get HEAD: %w", err)
+	}
+	headCommit, err := r.gitRepo.CommitObject(headRef.Hash())
+	if err != nil {
+		return DiffStats{}, fmt.Errorf("get HEAD commit: %w", err)
+	}
+
+	// return zero stats if commits are equal
+	if baseCommit.Hash == headCommit.Hash {
+		return DiffStats{}, nil
+	}
+
+	// get patch between base and HEAD
+	patch, err := baseCommit.Patch(headCommit)
+	if err != nil {
+		return DiffStats{}, fmt.Errorf("get patch: %w", err)
+	}
+
+	// count files and sum additions/deletions
+	stats := patch.Stats()
+	var result DiffStats
+	result.Files = len(stats)
+	for _, s := range stats {
+		result.Additions += s.Addition
+		result.Deletions += s.Deletion
+	}
+
+	return result, nil
+}
+
+// resolveToCommit resolves a branch name to a commit object.
+// tries local branch first, then remote tracking branch (origin/name).
+func (r *repo) resolveToCommit(branchName string) (*object.Commit, error) {
+	// try local branch first
+	localRef := plumbing.NewBranchReferenceName(branchName)
+	if ref, err := r.gitRepo.Reference(localRef, true); err == nil {
+		commit, commitErr := r.gitRepo.CommitObject(ref.Hash())
+		if commitErr != nil {
+			return nil, fmt.Errorf("get commit for local branch: %w", commitErr)
+		}
+		return commit, nil
+	}
+
+	// try remote tracking branch (origin/branchName)
+	remoteRef := plumbing.NewRemoteReferenceName("origin", branchName)
+	if ref, err := r.gitRepo.Reference(remoteRef, true); err == nil {
+		commit, commitErr := r.gitRepo.CommitObject(ref.Hash())
+		if commitErr != nil {
+			return nil, fmt.Errorf("get commit for remote branch: %w", commitErr)
+		}
+		return commit, nil
+	}
+
+	// try as-is (might be "origin/main" already)
+	if strings.HasPrefix(branchName, "origin/") {
+		remoteName := branchName[7:]
+		remoteRef := plumbing.NewRemoteReferenceName("origin", remoteName)
+		if ref, err := r.gitRepo.Reference(remoteRef, true); err == nil {
+			commit, commitErr := r.gitRepo.CommitObject(ref.Hash())
+			if commitErr != nil {
+				return nil, fmt.Errorf("get commit for origin branch: %w", commitErr)
+			}
+			return commit, nil
+		}
+	}
+
+	return nil, fmt.Errorf("branch %q not found", branchName)
+}

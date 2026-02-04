@@ -1417,6 +1417,195 @@ func TestRepo_GetDefaultBranch(t *testing.T) {
 	})
 }
 
+func TestRepo_diffStats(t *testing.T) {
+	t.Run("returns zero stats when branches are equal", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		stats, err := r.diffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, DiffStats{}, stats)
+	})
+
+	t.Run("returns zero stats when base branch does not exist", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		stats, err := r.diffStats("nonexistent-branch")
+		require.NoError(t, err)
+		assert.Equal(t, DiffStats{}, stats)
+	})
+
+	t.Run("returns stats for added file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create feature branch
+		err = r.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// add a new file with 3 lines
+		newFile := filepath.Join(dir, "new.txt")
+		require.NoError(t, os.WriteFile(newFile, []byte("line1\nline2\nline3\n"), 0o600))
+		require.NoError(t, r.Add("new.txt"))
+		require.NoError(t, r.Commit("add new file"))
+
+		stats, err := r.diffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, 1, stats.Files)
+		assert.Equal(t, 3, stats.Additions)
+		assert.Equal(t, 0, stats.Deletions)
+	})
+
+	t.Run("returns stats for modified file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create feature branch
+		err = r.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// modify existing file (README.md has 1 line "# Test\n")
+		readmePath := filepath.Join(dir, "README.md")
+		require.NoError(t, os.WriteFile(readmePath, []byte("# Modified\nNew line\n"), 0o600))
+		require.NoError(t, r.Add("README.md"))
+		require.NoError(t, r.Commit("modify readme"))
+
+		stats, err := r.diffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, 1, stats.Files)
+		assert.Equal(t, 2, stats.Additions)
+		assert.Equal(t, 1, stats.Deletions)
+	})
+
+	t.Run("returns stats for deleted file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create feature branch
+		err = r.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// delete README.md
+		require.NoError(t, os.Remove(filepath.Join(dir, "README.md")))
+		wt, err := r.gitRepo.Worktree()
+		require.NoError(t, err)
+		_, err = wt.Remove("README.md")
+		require.NoError(t, err)
+		require.NoError(t, r.Commit("delete readme"))
+
+		stats, err := r.diffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, 1, stats.Files)
+		assert.Equal(t, 0, stats.Additions)
+		assert.Equal(t, 1, stats.Deletions)
+	})
+
+	t.Run("returns stats for multiple files", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create feature branch
+		err = r.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// add new file with 5 lines
+		newFile := filepath.Join(dir, "new.txt")
+		require.NoError(t, os.WriteFile(newFile, []byte("1\n2\n3\n4\n5\n"), 0o600))
+		require.NoError(t, r.Add("new.txt"))
+
+		// modify existing file
+		readmePath := filepath.Join(dir, "README.md")
+		require.NoError(t, os.WriteFile(readmePath, []byte("# Changed\nLine2\nLine3\n"), 0o600))
+		require.NoError(t, r.Add("README.md"))
+
+		require.NoError(t, r.Commit("add and modify"))
+
+		stats, err := r.diffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, 2, stats.Files)
+		assert.Equal(t, 8, stats.Additions) // 5 from new.txt + 3 from README.md
+		assert.Equal(t, 1, stats.Deletions) // 1 from README.md
+	})
+
+	t.Run("returns stats across multiple commits", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// create feature branch
+		err = r.CreateBranch("feature")
+		require.NoError(t, err)
+
+		// first commit - add file
+		file1 := filepath.Join(dir, "file1.txt")
+		require.NoError(t, os.WriteFile(file1, []byte("line1\n"), 0o600))
+		require.NoError(t, r.Add("file1.txt"))
+		require.NoError(t, r.Commit("commit 1"))
+
+		// second commit - add another file
+		file2 := filepath.Join(dir, "file2.txt")
+		require.NoError(t, os.WriteFile(file2, []byte("line1\nline2\n"), 0o600))
+		require.NoError(t, r.Add("file2.txt"))
+		require.NoError(t, r.Commit("commit 2"))
+
+		stats, err := r.diffStats("master")
+		require.NoError(t, err)
+		assert.Equal(t, 2, stats.Files)
+		assert.Equal(t, 3, stats.Additions) // 1 from file1.txt + 2 from file2.txt
+		assert.Equal(t, 0, stats.Deletions)
+	})
+}
+
+func TestRepo_resolveToCommit(t *testing.T) {
+	t.Run("resolves local branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		commit, err := r.resolveToCommit("master")
+		require.NoError(t, err)
+		assert.NotNil(t, commit)
+	})
+
+	t.Run("returns error for nonexistent branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		_, err = r.resolveToCommit("nonexistent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("resolves origin/ prefixed branch name", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		repo, err := git.PlainOpen(dir)
+		require.NoError(t, err)
+
+		// create a remote tracking reference (simulates origin/main)
+		head, err := repo.Head()
+		require.NoError(t, err)
+		remoteRef := plumbing.NewHashReference(plumbing.NewRemoteReferenceName("origin", "main"), head.Hash())
+		require.NoError(t, repo.Storer.SetReference(remoteRef))
+
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		// should resolve "origin/main" by stripping prefix
+		commit, err := r.resolveToCommit("origin/main")
+		require.NoError(t, err)
+		assert.NotNil(t, commit)
+		assert.Equal(t, head.Hash(), commit.Hash)
+	})
+}
+
 // setupTestRepo creates a test git repository with an initial commit.
 func setupTestRepo(t *testing.T) string {
 	t.Helper()

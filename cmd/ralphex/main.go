@@ -321,7 +321,20 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	elapsed := baseLog.Elapsed()
-	req.Colors.Info().Printf("\ncompleted in %s\n", elapsed)
+
+	// get diff stats for completion message (optional - errors logged but don't block)
+	stats, statsErr := req.GitSvc.DiffStats(req.DefaultBranch)
+	if statsErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
+	}
+
+	// display completion with stats
+	if stats.Files > 0 {
+		req.Colors.Info().Printf("\ncompleted in %s (%d files, +%d/-%d lines)\n",
+			elapsed, stats.Files, stats.Additions, stats.Deletions)
+	} else {
+		req.Colors.Info().Printf("\ncompleted in %s\n", elapsed)
+	}
 
 	// keep web dashboard running after execution completes
 	if o.Serve {
