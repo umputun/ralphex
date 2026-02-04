@@ -268,6 +268,43 @@ func TestLoad_ExplicitFalseCodexEnabled(t *testing.T) {
 	assert.True(t, cfg.CodexEnabledSet)
 }
 
+func TestLoad_ExplicitTrueFinalizeEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// explicitly set finalize_enabled to true
+	configContent := `finalize_enabled = true`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// explicit true should be preserved
+	assert.True(t, cfg.FinalizeEnabled)
+	assert.True(t, cfg.FinalizeEnabledSet)
+}
+
+func TestLoad_FinalizeEnabledDefaultFalse(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// empty config - finalize_enabled should be false by default
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// finalize_enabled should default to false (disabled)
+	assert.False(t, cfg.FinalizeEnabled)
+	assert.False(t, cfg.FinalizeEnabledSet)
+}
+
 func TestLoad_AllUserValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")

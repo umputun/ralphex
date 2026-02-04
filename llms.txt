@@ -51,7 +51,7 @@ ralphex --reset
 
 Configuration directory: `~/.config/ralphex/`
 
-**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `make_plan.txt`
+**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `make_plan.txt`, `finalize.txt`
 
 **Agent files** (`~/.config/ralphex/agents/`): Custom review agents referenced via `{{agent:name}}` in prompts
 

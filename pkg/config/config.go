@@ -18,6 +18,7 @@ const (
 	reviewSecondPromptFile = "review_second.txt"
 	codexPromptFile        = "codex.txt"
 	makePlanPromptFile     = "make_plan.txt"
+	finalizePromptFile     = "finalize.txt"
 )
 
 // Config holds all configuration settings for ralphex.
@@ -30,6 +31,7 @@ const (
 //   - CodexTimeoutMsSet: tracks if codex_timeout_ms was explicitly set
 //   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
 //   - TaskRetryCountSet: tracks if task_retry_count was explicitly set
+//   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
 type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`
@@ -48,6 +50,9 @@ type Config struct {
 	TaskRetryCount      int  `json:"task_retry_count"`
 	TaskRetryCountSet   bool `json:"-"` // tracks if task_retry_count was explicitly set in config
 
+	FinalizeEnabled    bool `json:"finalize_enabled"`
+	FinalizeEnabledSet bool `json:"-"` // tracks if finalize_enabled was explicitly set in config
+
 	PlansDir  string   `json:"plans_dir"`
 	WatchDirs []string `json:"watch_dirs"` // directories to watch for progress files
 
@@ -64,6 +69,7 @@ type Config struct {
 	ReviewSecondPrompt string `json:"-"`
 	CodexPrompt        string `json:"-"`
 	MakePlanPrompt     string `json:"-"`
+	FinalizePrompt     string `json:"-"`
 
 	// custom agents (loaded separately from files)
 	CustomAgents []CustomAgent `json:"-"`
@@ -216,6 +222,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		IterationDelayMsSet:  values.IterationDelayMsSet,
 		TaskRetryCount:       values.TaskRetryCount,
 		TaskRetryCountSet:    values.TaskRetryCountSet,
+		FinalizeEnabled:      values.FinalizeEnabled,
+		FinalizeEnabledSet:   values.FinalizeEnabledSet,
 		PlansDir:             values.PlansDir,
 		WatchDirs:            values.WatchDirs,
 		ClaudeErrorPatterns:  values.ClaudeErrorPatterns,
@@ -226,6 +234,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		ReviewSecondPrompt:   prompts.ReviewSecond,
 		CodexPrompt:          prompts.Codex,
 		MakePlanPrompt:       prompts.MakePlan,
+		FinalizePrompt:       prompts.Finalize,
 		CustomAgents:         agents,
 		configDir:            globalDir,
 		localDir:             localDir,

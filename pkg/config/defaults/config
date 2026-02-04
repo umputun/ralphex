@@ -57,6 +57,15 @@ codex_timeout_ms = 3600000
 codex_sandbox = read-only
 
 # ------------------------------------------------------------------------------
+# finalize step
+# ------------------------------------------------------------------------------
+
+# finalize_enabled: whether to run finalize step after successful review phases
+# runs once at the end, best-effort (failures logged but don't block success)
+# default: false
+# finalize_enabled = false
+
+# ------------------------------------------------------------------------------
 # timing
 # ------------------------------------------------------------------------------
 

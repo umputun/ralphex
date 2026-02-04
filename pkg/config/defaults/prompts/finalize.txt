@@ -1,0 +1,38 @@
+# finalize prompt
+# this prompt runs once after successful reviews, best-effort (failures logged but don't block)
+# disabled by default (finalize_enabled = false)
+#
+# available variables:
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
+
+Post-completion finalize step.
+
+Rebase your commits onto the latest {{DEFAULT_BRANCH}} and organize them for merge.
+
+Steps:
+
+1. Fetch latest changes: `git fetch origin`
+
+2. Rebase onto {{DEFAULT_BRANCH}}:
+   - Run: `git rebase origin/{{DEFAULT_BRANCH}}`
+   - If conflicts occur, resolve them and continue rebase
+   - If rebase fails completely, abort with `git rebase --abort` and report the issue
+
+3. Review commit history:
+   - Run: `git log origin/{{DEFAULT_BRANCH}}..HEAD --oneline`
+   - If there are many small fix commits, consider squashing them
+   - Keep meaningful commit boundaries (feature commits separate from fix commits)
+
+4. Optional: Interactive rebase to clean up history:
+   - Only if there are 5+ commits that could be logically combined
+   - Run: `git rebase -i origin/{{DEFAULT_BRANCH}}`
+   - Squash related fix commits into their parent feature commits
+   - Reword commit messages if needed for clarity
+
+5. Verify the branch is ready:
+   - Run tests: `go test ./...` (or project-specific test command)
+   - Run linter if applicable
+
+Report what was done. This step is best-effort - if rebase fails, explain why and the branch remains as-is.
+
+OUTPUT FORMAT: No markdown formatting (no **bold**, `code`, # headers). Plain text and - lists are fine.

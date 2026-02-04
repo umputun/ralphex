@@ -401,6 +401,7 @@ func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mo
 		IterationDelayMs: cfg.IterationDelayMs,
 		TaskRetryCount:   cfg.TaskRetryCount,
 		CodexEnabled:     codexEnabled,
+		FinalizeEnabled:  cfg.FinalizeEnabled,
 		DefaultBranch:    defaultBranch,
 		AppConfig:        cfg,
 	}, log)

@@ -18,6 +18,7 @@ type Prompts struct {
 	ReviewSecond string
 	Codex        string
 	MakePlan     string
+	Finalize     string
 }
 
 // promptLoader implements PromptLoader with embedded filesystem fallback.
@@ -58,6 +59,11 @@ func (p *promptLoader) Load(localDir, globalDir string) (Prompts, error) {
 	prompts.MakePlan, err = p.loadPromptWithLocalFallback(localDir, globalDir, makePlanPromptFile)
 	if err != nil {
 		return Prompts{}, fmt.Errorf("load make_plan prompt: %w", err)
+	}
+
+	prompts.Finalize, err = p.loadPromptWithLocalFallback(localDir, globalDir, finalizePromptFile)
+	if err != nil {
+		return Prompts{}, fmt.Errorf("load finalize prompt: %w", err)
 	}
 
 	return prompts, nil

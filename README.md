@@ -470,6 +470,7 @@ The entire system is designed for customization - both task execution and review
 - `review_first.txt` - comprehensive review (default: 5 language-agnostic agents - quality, implementation, testing, simplification, documentation; customizable)
 - `codex.txt` - codex review prompt
 - `review_second.txt` - final review, critical/major issues only (default: 2 agents - quality, implementation; customizable)
+- `finalize.txt` - optional finalize step prompt (disabled by default)
 
 **Comment syntax:**
 Lines starting with `#` (after optional whitespace) are treated as comments and stripped when loading prompt and agent files. Use comments to document your customizations:
@@ -563,6 +564,7 @@ project/
 | `codex_sandbox` | Sandbox mode | `read-only` |
 | `iteration_delay_ms` | Delay between iterations | `2000` |
 | `task_retry_count` | Task retry attempts | `1` |
+| `finalize_enabled` | Enable finalize step after reviews | `false` |
 | `plans_dir` | Plans directory | `docs/plans` |
 | `color_task` | Task execution phase color (hex) | `#00ff00` |
 | `color_review` | Review phase color (hex) | `#00ffff` |
@@ -657,6 +659,10 @@ claude_args = --force --output-format stream-json
 ```
 
 Key differences: `agent` command (not `claude`), `--force` flag (not `--dangerously-skip-permissions`). Stream format and signals are compatible. *Note: this is community-tested, not officially supported. Compatibility depends on Cursor maintaining Claude Code compatibility.*
+
+**Can I run something after all phases complete (notifications, rebase commits, etc.)?**
+
+Yes. Enable the finalize step with `finalize_enabled = true` in config. It runs once after successful review phases (best-effort—failures are logged but don't block success). The default `finalize.txt` prompt rebases onto the default branch and optionally squashes commits into logical groups. Customize `~/.config/ralphex/prompts/finalize.txt` for other actions like sending notifications, pushing to remote, or running custom scripts.
 
 </details>
 

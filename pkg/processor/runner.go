@@ -40,6 +40,7 @@ type Config struct {
 	IterationDelayMs int            // delay between iterations in milliseconds
 	TaskRetryCount   int            // number of times to retry failed tasks
 	CodexEnabled     bool           // whether codex review is enabled
+	FinalizeEnabled  bool           // whether finalize step is enabled
 	DefaultBranch    string         // default branch name (detected from repo)
 	AppConfig        *config.Config // full application config (for executors and prompts)
 }
@@ -222,6 +223,11 @@ func (r *Runner) runFull(ctx context.Context) error {
 		return fmt.Errorf("post-codex review loop: %w", err)
 	}
 
+	// optional finalize step (best-effort, but propagates context cancellation)
+	if err := r.runFinalize(ctx); err != nil {
+		return err
+	}
+
 	r.log.Print("all phases completed successfully")
 	return nil
 }
@@ -256,6 +262,11 @@ func (r *Runner) runReviewOnly(ctx context.Context) error {
 		return fmt.Errorf("post-codex review loop: %w", err)
 	}
 
+	// optional finalize step (best-effort, but propagates context cancellation)
+	if err := r.runFinalize(ctx); err != nil {
+		return err
+	}
+
 	r.log.Print("review phases completed successfully")
 	return nil
 }
@@ -275,6 +286,11 @@ func (r *Runner) runCodexOnly(ctx context.Context) error {
 
 	if err := r.runClaudeReviewLoop(ctx); err != nil {
 		return fmt.Errorf("post-codex review loop: %w", err)
+	}
+
+	// optional finalize step (best-effort, but propagates context cancellation)
+	if err := r.runFinalize(ctx); err != nil {
+		return err
 	}
 
 	r.log.Print("codex phases completed successfully")
@@ -739,5 +755,45 @@ func (r *Runner) handlePatternMatchError(err error, tool string) error {
 		r.log.Print("run '%s' for more information", patternErr.HelpCmd)
 		return err
 	}
+	return nil
+}
+
+// runFinalize executes the optional finalize step after successful reviews.
+// runs once, best-effort: failures are logged but don't block success.
+// exception: context cancellation is propagated (user wants to abort).
+func (r *Runner) runFinalize(ctx context.Context) error {
+	if !r.cfg.FinalizeEnabled {
+		return nil
+	}
+
+	r.log.SetPhase(PhaseFinalize)
+	r.log.PrintSection(NewGenericSection("finalize step"))
+
+	prompt := r.replacePromptVariables(r.cfg.AppConfig.FinalizePrompt)
+	result := r.claude.Run(ctx, prompt)
+
+	if result.Error != nil {
+		// propagate context cancellation - user wants to abort
+		if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
+			return fmt.Errorf("finalize step: %w", result.Error)
+		}
+		// check for pattern match (rate limit) - log but don't fail (best-effort)
+		var patternErr *executor.PatternMatchError
+		if errors.As(result.Error, &patternErr) {
+			r.log.Print("finalize step: detected %q in claude output", patternErr.Pattern)
+			r.log.Print("run '%s' for more information", patternErr.HelpCmd)
+			return nil
+		}
+		// best-effort: log error but don't fail
+		r.log.Print("finalize step failed: %v", result.Error)
+		return nil
+	}
+
+	if result.Signal == SignalFailed {
+		r.log.Print("finalize step reported failure (non-blocking)")
+		return nil
+	}
+
+	r.log.Print("finalize step completed")
 	return nil
 }

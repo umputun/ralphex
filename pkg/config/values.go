@@ -30,6 +30,8 @@ type Values struct {
 	IterationDelayMsSet  bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount       int
 	TaskRetryCountSet    bool // tracks if task_retry_count was explicitly set
+	FinalizeEnabled      bool
+	FinalizeEnabledSet   bool // tracks if finalize_enabled was explicitly set
 	PlansDir             string
 	WatchDirs            []string // directories to watch for progress files
 }
@@ -188,6 +190,16 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.TaskRetryCountSet = true
 	}
 
+	// finalize settings
+	if key, err := section.GetKey("finalize_enabled"); err == nil {
+		val, boolErr := key.Bool()
+		if boolErr != nil {
+			return Values{}, fmt.Errorf("invalid finalize_enabled: %w", boolErr)
+		}
+		values.FinalizeEnabled = val
+		values.FinalizeEnabledSet = true
+	}
+
 	// paths
 	if key, err := section.GetKey("plans_dir"); err == nil {
 		values.PlansDir = key.String()
@@ -265,6 +277,10 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.TaskRetryCountSet {
 		dst.TaskRetryCount = src.TaskRetryCount
 		dst.TaskRetryCountSet = true
+	}
+	if src.FinalizeEnabledSet {
+		dst.FinalizeEnabled = src.FinalizeEnabled
+		dst.FinalizeEnabledSet = true
 	}
 	if src.PlansDir != "" {
 		dst.PlansDir = src.PlansDir

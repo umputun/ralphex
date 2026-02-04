@@ -1206,3 +1206,227 @@ func TestRunner_RunPlan_PlanDraft_WithQuestionThenDraft(t *testing.T) {
 	assert.Len(t, inputCollector.AskQuestionCalls(), 1)
 	assert.Len(t, inputCollector.AskDraftReviewCalls(), 1)
 }
+
+func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "finalize done"},                                   // finalize step
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeFull,
+		PlanFile:        planFile,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: true,
+		AppConfig:       testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// verify finalize step ran (5 claude calls total)
+	assert.Len(t, claude.RunCalls(), 5)
+
+	// verify finalize section was printed
+	var foundFinalizeSection bool
+	for _, call := range log.PrintSectionCalls() {
+		if strings.Contains(call.Section.Label, "finalize") {
+			foundFinalizeSection = true
+			break
+		}
+	}
+	assert.True(t, foundFinalizeSection, "should print finalize section header")
+}
+
+func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeFull,
+		PlanFile:        planFile,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: false, // disabled
+		AppConfig:       testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// verify finalize step did NOT run (only 4 claude calls)
+	assert.Len(t, claude.RunCalls(), 4)
+}
+
+func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+		{Error: errors.New("finalize error")},                       // finalize fails
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeFull,
+		PlanFile:        planFile,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: true,
+		AppConfig:       testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	// run should succeed despite finalize failure
+	require.NoError(t, err)
+
+	// verify finalize error was logged
+	var foundErrorLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "finalize step failed") {
+			foundErrorLog = true
+			break
+		}
+	}
+	assert.True(t, foundErrorLog, "should log finalize failure")
+}
+
+func TestRunner_Finalize_FailedSignalDoesNotBlockSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "failed", Signal: processor.SignalFailed},          // finalize reports FAILED signal
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeFull,
+		PlanFile:        planFile,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: true,
+		AppConfig:       testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	// run should succeed despite finalize FAILED signal
+	require.NoError(t, err)
+
+	// verify finalize failure was logged
+	var foundFailureLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "finalize step reported failure") {
+			foundFailureLog = true
+			break
+		}
+	}
+	assert.True(t, foundFailureLog, "should log finalize failure signal")
+}
+
+func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "finalize done"},                                   // finalize step
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeReview,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: true,
+		AppConfig:       testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// verify finalize ran (4 claude calls total)
+	assert.Len(t, claude.RunCalls(), 4)
+}
+
+func TestRunner_Finalize_RunsInCodexOnlyMode(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "finalize done"},                                   // finalize step
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeCodexOnly,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: true,
+		AppConfig:       testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// verify finalize ran (2 claude calls total)
+	assert.Len(t, claude.RunCalls(), 2)
+}
+
+func TestRunner_Finalize_ContextCancellationPropagates(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
+		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+		{Error: context.Canceled},                                   // finalize step - context canceled
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeReview,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: true,
+		AppConfig:       testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex)
+	err := r.Run(context.Background())
+
+	// run should fail with context canceled error
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}

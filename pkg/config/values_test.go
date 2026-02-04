@@ -127,6 +127,7 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 		{name: "invalid iteration_delay_ms", config: "iteration_delay_ms = not_a_number", errPart: "iteration_delay_ms"},
 		{name: "invalid codex_timeout_ms", config: "codex_timeout_ms = abc", errPart: "codex_timeout_ms"},
 		{name: "invalid codex_enabled", config: "codex_enabled = maybe", errPart: "codex_enabled"},
+		{name: "invalid finalize_enabled", config: "finalize_enabled = maybe", errPart: "finalize_enabled"},
 		{name: "negative task_retry_count", config: "task_retry_count = -1", errPart: "task_retry_count"},
 		{name: "negative codex_timeout_ms", config: "codex_timeout_ms = -100", errPart: "codex_timeout_ms"},
 		{name: "negative iteration_delay_ms", config: "iteration_delay_ms = -50", errPart: "iteration_delay_ms"},
@@ -250,6 +251,22 @@ func TestValuesLoader_Load_LocalOverridesTaskRetryCount(t *testing.T) {
 
 	assert.Equal(t, 0, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
+}
+
+func TestValuesLoader_Load_LocalOverridesFinalizeEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global")
+	localConfig := filepath.Join(tmpDir, "local")
+
+	require.NoError(t, os.WriteFile(globalConfig, []byte(`finalize_enabled = false`), 0o600))
+	require.NoError(t, os.WriteFile(localConfig, []byte(`finalize_enabled = true`), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	assert.True(t, values.FinalizeEnabled)
+	assert.True(t, values.FinalizeEnabledSet)
 }
 
 func TestValuesLoader_Load_AllValuesFromUserConfig(t *testing.T) {

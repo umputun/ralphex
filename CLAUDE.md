@@ -47,6 +47,26 @@ docs/plans/         # plan files location
 - Multiple execution modes: full, tasks-only, review-only, codex-only, plan creation
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
+- Optional finalize step after successful reviews (disabled by default)
+
+### Finalize Step
+
+Optional post-completion step that runs after successful review phases:
+
+- Triggers on: ModeFull, ModeReview, ModeCodexOnly (modes with review pipeline)
+- Disabled by default (`finalize_enabled = false` in config)
+- Uses task color (green) for output
+- Runs once, no signal loop - best effort (failures logged but don't block success)
+- Template variables supported (`{{DEFAULT_BRANCH}}`, etc.)
+
+Default behavior (when enabled): rebases commits onto default branch, optionally squashes related commits, runs tests to verify.
+
+Config option: `finalize_enabled = true` in `~/.config/ralphex/config` or `.ralphex/config`
+Prompt file: `~/.config/ralphex/prompts/finalize.txt` or `.ralphex/prompts/finalize.txt`
+
+Key files:
+- `pkg/processor/runner.go` - `runFinalize()` method called at end of review modes
+- `pkg/config/defaults/prompts/finalize.txt` - default finalize prompt
 
 ### Git Package API
 

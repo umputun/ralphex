@@ -12,6 +12,7 @@ const (
 	PhaseCodex      Phase = "codex"       // codex analysis phase (magenta)
 	PhaseClaudeEval Phase = "claude-eval" // claude evaluating codex (bright cyan)
 	PhasePlan       Phase = "plan"        // plan creation phase (info color)
+	PhaseFinalize   Phase = "finalize"    // finalize step phase (green)
 )
 
 // SectionType represents the semantic type of a section header.

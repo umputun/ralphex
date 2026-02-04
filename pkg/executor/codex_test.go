@@ -181,6 +181,9 @@ func TestCodexExecutor_Run_ContextCanceled(t *testing.T) {
 }
 
 func TestCodexExecutor_Run_DefaultSettings(t *testing.T) {
+	// clear docker env to test default sandbox behavior
+	t.Setenv("RALPHEX_DOCKER", "")
+
 	var capturedArgs []string
 	mock := &mockCodexRunner{
 		runFunc: func(_ context.Context, name string, args ...string) (CodexStreams, func() error, error) {
@@ -203,6 +206,9 @@ func TestCodexExecutor_Run_DefaultSettings(t *testing.T) {
 }
 
 func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
+	// clear docker env to test custom sandbox setting
+	t.Setenv("RALPHEX_DOCKER", "")
+
 	var capturedCmd string
 	var capturedArgs []string
 	mock := &mockCodexRunner{

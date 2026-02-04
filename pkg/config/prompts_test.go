@@ -25,6 +25,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_second.txt"), []byte("custom second review"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex.txt"), []byte("custom codex prompt"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte("custom make plan prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "finalize.txt"), []byte("custom finalize prompt"), 0o600))
 
 	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
@@ -35,6 +36,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	assert.Equal(t, "custom second review", prompts.ReviewSecond)
 	assert.Equal(t, "custom codex prompt", prompts.Codex)
 	assert.Equal(t, "custom make plan prompt", prompts.MakePlan)
+	assert.Equal(t, "custom finalize prompt", prompts.Finalize)
 }
 
 func TestPromptLoader_Load_PartialUserFiles(t *testing.T) {
@@ -528,4 +530,38 @@ func TestPromptLoader_Load_LocalAndGlobalAllCommentedFallsBackToEmbedded(t *test
 
 	// both all-commented should fall back to embedded
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "should fall back to embedded when both local and global are all-commented")
+}
+
+func TestPromptLoader_Load_FinalizePrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+
+	// test custom finalize prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "finalize.txt"), []byte("custom finalize with {{DEFAULT_BRANCH}}"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom finalize with {{DEFAULT_BRANCH}}", prompts.Finalize)
+}
+
+func TestPromptLoader_Load_FinalizePrompt_LocalOverridesGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global", "prompts")
+	localDir := filepath.Join(tmpDir, "local", "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	// global finalize prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "finalize.txt"), []byte("global finalize"), 0o600))
+	// local finalize prompt
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "finalize.txt"), []byte("local finalize"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load(localDir, globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "local finalize", prompts.Finalize)
 }

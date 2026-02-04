@@ -30,6 +30,7 @@ const (
 	PhaseCodex      = processor.PhaseCodex
 	PhaseClaudeEval = processor.PhaseClaudeEval
 	PhasePlan       = processor.PhasePlan
+	PhaseFinalize   = processor.PhaseFinalize
 )
 
 // Colors holds all color configuration for output formatting.
@@ -66,7 +67,8 @@ func NewColors(cfg config.ColorConfig) *Colors {
 	c.phases[PhaseReview] = c.review
 	c.phases[PhaseCodex] = c.codex
 	c.phases[PhaseClaudeEval] = c.claudeEval
-	c.phases[PhasePlan] = c.task // plan phase uses task color (green)
+	c.phases[PhasePlan] = c.task     // plan phase uses task color (green)
+	c.phases[PhaseFinalize] = c.task // finalize phase uses task color (green)
 
 	return c
 }
