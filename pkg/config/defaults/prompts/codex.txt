@@ -38,12 +38,15 @@ Do NOT reject issues just because they existed before this branch - fix them any
 **If there were actionable issues to fix:**
 - Fix them, run tests/linter to verify - ALL tests must pass, ALL linter issues resolved
 - Do NOT commit yet - more codex iterations may follow
-- STOP and let the external loop run codex again
+- STOP here and DO NOT output any signal - the external loop will run codex again to verify fixes
+- NEVER output CODEX_REVIEW_DONE after fixing issues
 
 **If Codex reports NO actionable issues** (empty output, "no issues found", "NO ISSUES FOUND"):
 - Run `git diff` to review ALL uncommitted changes (accumulated fixes from multiple iterations)
 - Commit all fixes with message: "fix: address codex review findings"
 - Output exactly: <<<RALPHEX:CODEX_REVIEW_DONE>>>
+
+CRITICAL: The CODEX_REVIEW_DONE signal means "codex found nothing to fix". Only output it when codex itself reported no issues. If you fixed anything, do NOT output the signal.
 
 CRITICAL: Never run codex commands yourself. The external loop handles codex execution.
 
