@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/config"
+	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
 )
 
@@ -773,6 +774,31 @@ Started: 2026-01-22 10:30:00
 		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
 		assert.Equal(t, "feature-branch", meta.Branch)
 	})
+}
+
+func TestPhaseFromSection(t *testing.T) {
+	tests := []struct {
+		name     string
+		section  string
+		expected processor.Phase
+	}{
+		{"task section", "Task 1: implement feature", processor.PhaseTask},
+		{"codex iteration", "codex iteration 1", processor.PhaseCodex},
+		{"codex external review", "codex external review", processor.PhaseCodex},
+		{"custom review iteration", "custom review iteration 1", processor.PhaseCodex},
+		{"custom iteration", "custom iteration 2", processor.PhaseCodex},
+		{"claude review", "claude review 0: all findings", processor.PhaseReview},
+		{"review loop", "review iteration 1", processor.PhaseReview},
+		{"claude eval", "claude-eval", processor.PhaseClaudeEval},
+		{"claude eval space", "claude eval", processor.PhaseClaudeEval},
+		{"unknown defaults to task", "unknown section", processor.PhaseTask},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, phaseFromSection(tt.section))
+		})
+	}
 }
 
 func TestLoadProgressFileIntoSessionLargeBuffer(t *testing.T) {
