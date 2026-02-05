@@ -33,6 +33,9 @@ dist/
 *.local.yml
 *.local.yaml
 
+# claude code project files
+.claude/
+
 # debug
 __debug_bin*
 
