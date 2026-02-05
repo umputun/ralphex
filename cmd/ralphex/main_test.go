@@ -103,13 +103,18 @@ func TestDetermineMode(t *testing.T) {
 		{name: "default_is_full", opts: opts{}, expected: processor.ModeFull},
 		{name: "review_flag", opts: opts{Review: true}, expected: processor.ModeReview},
 		{name: "codex_only_flag", opts: opts{CodexOnly: true}, expected: processor.ModeCodexOnly},
-		{name: "codex_only_takes_precedence", opts: opts{Review: true, CodexOnly: true}, expected: processor.ModeCodexOnly},
+		{name: "external_only_flag", opts: opts{ExternalOnly: true}, expected: processor.ModeCodexOnly},
+		{name: "both_external_and_codex_flags", opts: opts{ExternalOnly: true, CodexOnly: true}, expected: processor.ModeCodexOnly},
+		{name: "codex_only_takes_precedence_over_review", opts: opts{Review: true, CodexOnly: true}, expected: processor.ModeCodexOnly},
+		{name: "external_only_takes_precedence_over_review", opts: opts{Review: true, ExternalOnly: true}, expected: processor.ModeCodexOnly},
 		{name: "tasks_only_flag", opts: opts{TasksOnly: true}, expected: processor.ModeTasksOnly},
 		{name: "tasks_only_takes_precedence_over_codex", opts: opts{TasksOnly: true, CodexOnly: true}, expected: processor.ModeTasksOnly},
+		{name: "tasks_only_takes_precedence_over_external", opts: opts{TasksOnly: true, ExternalOnly: true}, expected: processor.ModeTasksOnly},
 		{name: "tasks_only_takes_precedence_over_review", opts: opts{TasksOnly: true, Review: true}, expected: processor.ModeTasksOnly},
 		{name: "plan_flag", opts: opts{PlanDescription: "add caching"}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_review", opts: opts{PlanDescription: "add caching", Review: true}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_codex", opts: opts{PlanDescription: "add caching", CodexOnly: true}, expected: processor.ModePlan},
+		{name: "plan_takes_precedence_over_external", opts: opts{PlanDescription: "add caching", ExternalOnly: true}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_tasks_only", opts: opts{PlanDescription: "add caching", TasksOnly: true}, expected: processor.ModePlan},
 	}
 
@@ -329,6 +334,33 @@ func TestAutoPlanModeDetection(t *testing.T) {
 		// this verifies auto-plan-mode is skipped for --codex-only flag
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, plan.ErrNoPlansFound, "codex-only mode should skip auto-plan-mode")
+	})
+
+	t.Run("external_only_mode_skips_auto_plan_mode", func(t *testing.T) {
+		// skip if configured claude command is not installed
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create empty plans dir
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+
+		// run in external-only mode with canceled context - should not trigger auto-plan-mode
+		// plan is optional in external-only mode, so it proceeds (then fails on canceled context)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately to avoid actual execution
+
+		o := opts{ExternalOnly: true, MaxIterations: 1}
+		err = run(ctx, o)
+		// error should be from context cancellation or runner, not "no plans found"
+		// this verifies auto-plan-mode is skipped for --external-only flag
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, plan.ErrNoPlansFound, "external-only mode should skip auto-plan-mode")
 	})
 }
 
@@ -707,6 +739,50 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		branch, err := gitSvc.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch, "codex-only mode should not create branch")
+	})
+
+	t.Run("external_only_mode_does_not_create_branch", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		err = os.Chdir(dir)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create plans dir and plan file, then commit them
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "external-plan.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# External Plan\n"), 0o600))
+
+		repo, err := gogit.PlainOpen(dir)
+		require.NoError(t, err)
+		wt, err := repo.Worktree()
+		require.NoError(t, err)
+		_, err = wt.Add("docs/plans/external-plan.md")
+		require.NoError(t, err)
+		_, err = wt.Commit("add external plan", &gogit.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com"},
+		})
+		require.NoError(t, err)
+
+		// run with external-only mode in background
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		go func() {
+			o := opts{ExternalOnly: true, PlanFile: planPath, MaxIterations: 1}
+			_ = run(ctx, o)
+		}()
+
+		// verify branch was NOT created (still on master) - wait briefly then check
+		time.Sleep(500 * time.Millisecond)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+		branch, err := gitSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "master", branch, "external-only mode should not create branch")
 	})
 }
 

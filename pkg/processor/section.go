@@ -42,6 +42,8 @@ const (
 	SectionClaudeEval
 	// SectionPlanIteration represents a plan creation iteration.
 	SectionPlanIteration
+	// SectionCustomIteration represents a custom review tool iteration.
+	SectionCustomIteration
 )
 
 // Section carries structured information about a section header.
@@ -106,5 +108,14 @@ func NewPlanIterationSection(iteration int) Section {
 		Type:      SectionPlanIteration,
 		Iteration: iteration,
 		Label:     fmt.Sprintf("plan iteration %d", iteration),
+	}
+}
+
+// NewCustomIterationSection creates a section for custom review tool iteration.
+func NewCustomIterationSection(iteration int) Section {
+	return Section{
+		Type:      SectionCustomIteration,
+		Iteration: iteration,
+		Label:     fmt.Sprintf("custom review iteration %d", iteration),
 	}
 }

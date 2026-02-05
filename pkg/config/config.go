@@ -19,6 +19,8 @@ const (
 	codexPromptFile        = "codex.txt"
 	makePlanPromptFile     = "make_plan.txt"
 	finalizePromptFile     = "finalize.txt"
+	customReviewPromptFile = "custom_review.txt"
+	customEvalPromptFile   = "custom_eval.txt"
 )
 
 // Config holds all configuration settings for ralphex.
@@ -45,6 +47,9 @@ type Config struct {
 	CodexTimeoutMsSet    bool   `json:"-"` // tracks if codex_timeout_ms was explicitly set in config
 	CodexSandbox         string `json:"codex_sandbox"`
 
+	ExternalReviewTool string `json:"external_review_tool"` // "codex", "custom", or "none"
+	CustomReviewScript string `json:"custom_review_script"` // path to custom review script
+
 	IterationDelayMs    int  `json:"iteration_delay_ms"`
 	IterationDelayMsSet bool `json:"-"` // tracks if iteration_delay_ms was explicitly set in config
 	TaskRetryCount      int  `json:"task_retry_count"`
@@ -70,6 +75,8 @@ type Config struct {
 	CodexPrompt        string `json:"-"`
 	MakePlanPrompt     string `json:"-"`
 	FinalizePrompt     string `json:"-"`
+	CustomReviewPrompt string `json:"-"`
+	CustomEvalPrompt   string `json:"-"`
 
 	// custom agents (loaded separately from files)
 	CustomAgents []CustomAgent `json:"-"`
@@ -218,6 +225,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CodexTimeoutMs:       values.CodexTimeoutMs,
 		CodexTimeoutMsSet:    values.CodexTimeoutMsSet,
 		CodexSandbox:         values.CodexSandbox,
+		ExternalReviewTool:   values.ExternalReviewTool,
+		CustomReviewScript:   values.CustomReviewScript,
 		IterationDelayMs:     values.IterationDelayMs,
 		IterationDelayMsSet:  values.IterationDelayMsSet,
 		TaskRetryCount:       values.TaskRetryCount,
@@ -235,6 +244,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CodexPrompt:          prompts.Codex,
 		MakePlanPrompt:       prompts.MakePlan,
 		FinalizePrompt:       prompts.Finalize,
+		CustomReviewPrompt:   prompts.CustomReview,
+		CustomEvalPrompt:     prompts.CustomEval,
 		CustomAgents:         agents,
 		configDir:            globalDir,
 		localDir:             localDir,

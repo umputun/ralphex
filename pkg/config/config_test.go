@@ -719,6 +719,69 @@ color_task = #123456
 	assert.Equal(t, symlinkDir, cfg.configDir)
 }
 
+func TestLoad_ExternalReviewToolConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// set external review tool config values
+	configContent := `
+external_review_tool = custom
+custom_review_script = /path/to/my-review.sh
+`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom", cfg.ExternalReviewTool)
+	assert.Equal(t, "/path/to/my-review.sh", cfg.CustomReviewScript)
+}
+
+func TestLoad_ExternalReviewToolDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// empty config - should use defaults
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	// external_review_tool should default to "codex"
+	assert.Equal(t, "codex", cfg.ExternalReviewTool)
+	assert.Empty(t, cfg.CustomReviewScript)
+}
+
+func TestLocalConfig_LocalOverridesExternalReviewTool(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+	localDir := filepath.Join(tmpDir, ".ralphex")
+
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	// global config with external_review_tool = codex
+	globalConfig := `external_review_tool = codex`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+
+	// local config disables external review
+	localConfig := `external_review_tool = none`
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
+
+	cfg, err := loadWithLocal(globalDir, localDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "none", cfg.ExternalReviewTool)
+}
+
 func TestLoad_SymlinkedLocalDir(t *testing.T) {
 	// simulates local .ralphex being a symlink to shared project config
 	tmpDir := t.TempDir()

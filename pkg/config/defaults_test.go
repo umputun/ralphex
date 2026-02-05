@@ -255,7 +255,7 @@ func TestDefaultsInstaller_installDefaultFiles_Prompts(t *testing.T) {
 	installer := &defaultsInstaller{embedFS: defaultsFS}
 	require.NoError(t, installer.installDefaultFiles(promptsDir, "defaults/prompts", "prompt"))
 
-	expectedPrompts := []string{"task.txt", "review_first.txt", "review_second.txt", "codex.txt", "make_plan.txt"}
+	expectedPrompts := []string{"task.txt", "review_first.txt", "review_second.txt", "codex.txt", "make_plan.txt", "finalize.txt", "custom_review.txt", "custom_eval.txt"}
 	for _, prompt := range expectedPrompts {
 		promptPath := filepath.Join(promptsDir, prompt)
 		assert.FileExists(t, promptPath, "prompt file %s should be installed", prompt)
@@ -297,7 +297,7 @@ func TestDefaultsInstaller_Install_InstallsPromptFiles(t *testing.T) {
 	require.NoError(t, installer.Install(configDir))
 
 	promptsDir := filepath.Join(configDir, "prompts")
-	expectedPrompts := []string{"task.txt", "review_first.txt", "review_second.txt", "codex.txt", "make_plan.txt"}
+	expectedPrompts := []string{"task.txt", "review_first.txt", "review_second.txt", "codex.txt", "make_plan.txt", "finalize.txt", "custom_review.txt", "custom_eval.txt"}
 
 	for _, prompt := range expectedPrompts {
 		promptPath := filepath.Join(promptsDir, prompt)
@@ -449,7 +449,7 @@ func TestReset_ResetsConfigFile(t *testing.T) {
 	data, err = os.ReadFile(configPath) //nolint:gosec // test
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "claude_command = claude")
-	assert.NotContains(t, string(data), "custom")
+	assert.NotContains(t, string(data), "claude_command = custom")
 }
 
 func TestReset_ResetsPromptsDirectory(t *testing.T) {

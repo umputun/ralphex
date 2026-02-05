@@ -29,7 +29,8 @@ import (
 type opts struct {
 	MaxIterations   int      `short:"m" long:"max-iterations" default:"50" description:"maximum task iterations"`
 	Review          bool     `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
-	CodexOnly       bool     `short:"c" long:"codex-only" description:"skip tasks and first review, run only codex loop"`
+	ExternalOnly    bool     `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
+	CodexOnly       bool     `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
 	TasksOnly       bool     `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
 	PlanDescription string   `long:"plan" description:"create plan interactively (enter plan description)"`
 	Debug           bool     `short:"d" long:"debug" description:"enable debug logging"`
@@ -235,7 +236,7 @@ func getCurrentBranch(gitSvc *git.Service) string {
 // tryAutoPlanMode attempts to switch to plan mode when no plans are found on main/master.
 // returns (true, nil) if user canceled, (true, err) if plan mode was attempted, or (false, nil) if auto-plan-mode doesn't apply.
 func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequest) (bool, error) {
-	if !errors.Is(err, plan.ErrNoPlansFound) || o.Review || o.CodexOnly || o.TasksOnly {
+	if !errors.Is(err, plan.ErrNoPlansFound) || o.Review || o.ExternalOnly || o.CodexOnly || o.TasksOnly {
 		return false, nil
 	}
 
@@ -374,7 +375,7 @@ func determineMode(o opts) processor.Mode {
 		return processor.ModePlan
 	case o.TasksOnly:
 		return processor.ModeTasksOnly
-	case o.CodexOnly:
+	case o.ExternalOnly || o.CodexOnly:
 		return processor.ModeCodexOnly
 	case o.Review:
 		return processor.ModeReview
@@ -571,7 +572,7 @@ func runReset() error {
 // this allows reset to work standalone (exit after reset) while also supporting
 // combined usage like "ralphex --reset docs/plans/feature.md".
 func isResetOnly(o opts) bool {
-	return o.PlanFile == "" && !o.Review && !o.CodexOnly && !o.TasksOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
+	return o.PlanFile == "" && !o.Review && !o.ExternalOnly && !o.CodexOnly && !o.TasksOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
 }
 
 // ensureRepoHasCommits checks that the repository has at least one commit.

@@ -79,6 +79,7 @@ type Runner struct {
 	log            Logger
 	claude         Executor
 	codex          Executor
+	custom         *executor.CustomExecutor
 	inputCollector InputCollector
 	iterationDelay time.Duration
 	taskRetryCount int
@@ -116,8 +117,21 @@ func New(cfg Config, log Logger) *Runner {
 		codexExec.ErrorPatterns = cfg.AppConfig.CodexErrorPatterns
 	}
 
-	// auto-disable codex if the binary is not installed
-	if cfg.CodexEnabled {
+	// build custom executor if custom review script is configured
+	var customExec *executor.CustomExecutor
+	if cfg.AppConfig != nil && cfg.AppConfig.CustomReviewScript != "" {
+		customExec = &executor.CustomExecutor{
+			Script: cfg.AppConfig.CustomReviewScript,
+			OutputHandler: func(text string) {
+				log.PrintAligned(text)
+			},
+			ErrorPatterns: cfg.AppConfig.CodexErrorPatterns, // reuse codex error patterns
+		}
+	}
+
+	// auto-disable codex if the binary is not installed AND we need codex
+	// (skip this check if using custom external review tool or external review is disabled)
+	if cfg.CodexEnabled && needsCodexBinary(cfg.AppConfig) {
 		codexCmd := codexExec.Command
 		if codexCmd == "" {
 			codexCmd = "codex"
@@ -128,11 +142,11 @@ func New(cfg Config, log Logger) *Runner {
 		}
 	}
 
-	return NewWithExecutors(cfg, log, claudeExec, codexExec)
+	return NewWithExecutors(cfg, log, claudeExec, codexExec, customExec)
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
-func NewWithExecutors(cfg Config, log Logger, claude, codex Executor) *Runner {
+func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *executor.CustomExecutor) *Runner {
 	// determine iteration delay from config or default
 	iterDelay := DefaultIterationDelay
 	if cfg.IterationDelayMs > 0 {
@@ -153,6 +167,7 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor) *Runner {
 		log:            log,
 		claude:         claude,
 		codex:          codex,
+		custom:         custom,
 		iterationDelay: iterDelay,
 		taskRetryCount: retryCount,
 	}
@@ -425,49 +440,108 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 	return nil
 }
 
-// runCodexLoop runs the codex-claude review loop until no findings.
-func (r *Runner) runCodexLoop(ctx context.Context) error {
-	// skip codex phase if disabled
+// externalReviewTool returns the effective external review tool to use.
+// handles backward compatibility: codex_enabled = false → "none"
+// the CodexEnabled flag takes precedence for backward compatibility.
+func (r *Runner) externalReviewTool() string {
+	// backward compatibility: codex_enabled = false means no external review
+	// this takes precedence over external_review_tool setting
 	if !r.cfg.CodexEnabled {
-		r.log.Print("codex review disabled, skipping...")
+		return "none"
+	}
+
+	// check explicit external_review_tool setting
+	if r.cfg.AppConfig != nil && r.cfg.AppConfig.ExternalReviewTool != "" {
+		return r.cfg.AppConfig.ExternalReviewTool
+	}
+
+	// default to codex
+	return "codex"
+}
+
+// runCodexLoop runs the external review loop (codex or custom) until no findings.
+func (r *Runner) runCodexLoop(ctx context.Context) error {
+	tool := r.externalReviewTool()
+
+	// skip external review phase if disabled
+	if tool == "none" {
+		r.log.Print("external review disabled, skipping...")
 		return nil
 	}
 
-	// codex iterations = 20% of max_iterations (min 3)
-	maxCodexIterations := max(3, r.cfg.MaxIterations/5)
+	// custom review tool
+	if tool == "custom" {
+		if r.custom == nil {
+			return errors.New("custom review script not configured")
+		}
+		return r.runExternalReviewLoop(ctx, externalReviewConfig{
+			name:           "custom",
+			runReview:      func(ctx context.Context, prompt string) executor.Result { return r.custom.Run(ctx, prompt) },
+			buildPrompt:    r.buildCustomReviewPrompt,
+			buildEvalPrompt: r.buildCustomEvaluationPrompt,
+			showSummary:    r.showCustomSummary,
+			makeSection:    NewCustomIterationSection,
+		})
+	}
+
+	// default: codex review
+	return r.runExternalReviewLoop(ctx, externalReviewConfig{
+		name:           "codex",
+		runReview:      r.codex.Run,
+		buildPrompt:    r.buildCodexPrompt,
+		buildEvalPrompt: r.buildCodexEvaluationPrompt,
+		showSummary:    r.showCodexSummary,
+		makeSection:    NewCodexIterationSection,
+	})
+}
+
+// externalReviewConfig holds callbacks for running an external review tool.
+type externalReviewConfig struct {
+	name           string                                                     // tool name for error messages
+	runReview      func(ctx context.Context, prompt string) executor.Result   // run the external review tool
+	buildPrompt    func(isFirst bool, claudeResponse string) string           // build prompt for review tool
+	buildEvalPrompt func(output string) string                                // build evaluation prompt for claude
+	showSummary    func(output string)                                        // display review findings summary
+	makeSection    func(iteration int) Section                                // create section header
+}
+
+// runExternalReviewLoop runs a generic external review tool-claude loop until no findings.
+func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewConfig) error {
+	// iterations = 20% of max_iterations (min 3)
+	maxIterations := max(3, r.cfg.MaxIterations/5)
 
 	var claudeResponse string // first iteration has no prior response
 
-	for i := 1; i <= maxCodexIterations; i++ {
+	for i := 1; i <= maxIterations; i++ {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("codex loop: %w", ctx.Err())
+			return fmt.Errorf("%s loop: %w", cfg.name, ctx.Err())
 		default:
 		}
 
-		r.log.PrintSection(NewCodexIterationSection(i))
+		r.log.PrintSection(cfg.makeSection(i))
 
-		// run codex analysis
-		codexResult := r.codex.Run(ctx, r.buildCodexPrompt(i == 1, claudeResponse))
-		if codexResult.Error != nil {
-			if err := r.handlePatternMatchError(codexResult.Error, "codex"); err != nil {
+		// run external review tool
+		reviewResult := cfg.runReview(ctx, cfg.buildPrompt(i == 1, claudeResponse))
+		if reviewResult.Error != nil {
+			if err := r.handlePatternMatchError(reviewResult.Error, cfg.name); err != nil {
 				return err
 			}
-			return fmt.Errorf("codex execution: %w", codexResult.Error)
+			return fmt.Errorf("%s execution: %w", cfg.name, reviewResult.Error)
 		}
 
-		if codexResult.Output == "" {
-			r.log.Print("codex review returned no output, skipping...")
+		if reviewResult.Output == "" {
+			r.log.Print("%s review returned no output, skipping...", cfg.name)
 			break
 		}
 
-		// show codex findings summary before Claude evaluation
-		r.showCodexSummary(codexResult.Output)
+		// show findings summary before Claude evaluation
+		cfg.showSummary(reviewResult.Output)
 
-		// pass codex output to claude for evaluation and fixing
+		// pass output to claude for evaluation and fixing
 		r.log.SetPhase(PhaseClaudeEval)
 		r.log.PrintSection(NewClaudeEvalSection())
-		claudeResult := r.claude.Run(ctx, r.buildCodexEvaluationPrompt(codexResult.Output))
+		claudeResult := r.claude.Run(ctx, cfg.buildEvalPrompt(reviewResult.Output))
 
 		// restore codex phase for next iteration
 		r.log.SetPhase(PhaseCodex)
@@ -480,16 +554,16 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 
 		claudeResponse = claudeResult.Output
 
-		// exit only when claude sees "no findings" from codex
+		// exit only when claude sees "no findings"
 		if IsCodexDone(claudeResult.Signal) {
-			r.log.Print("codex review complete - no more findings")
+			r.log.Print("%s review complete - no more findings", cfg.name)
 			return nil
 		}
 
 		time.Sleep(r.iterationDelay)
 	}
 
-	r.log.Print("max codex iterations reached, continuing to next phase...")
+	r.log.Print("max %s iterations reached, continuing to next phase...", cfg.name)
 	return nil
 }
 
@@ -566,6 +640,17 @@ func (r *Runner) hasUncompletedTasks() bool {
 // showCodexSummary displays a condensed summary of codex output before Claude evaluation.
 // extracts text until first code block or 500 chars, whichever is shorter.
 func (r *Runner) showCodexSummary(output string) {
+	r.showExternalReviewSummary("codex", output)
+}
+
+// showCustomSummary displays a condensed summary of custom review output before Claude evaluation.
+func (r *Runner) showCustomSummary(output string) {
+	r.showExternalReviewSummary("custom", output)
+}
+
+// showExternalReviewSummary displays a condensed summary of external review output.
+// extracts text until first code block or 5000 chars, whichever is shorter.
+func (r *Runner) showExternalReviewSummary(toolName, output string) {
 	summary := output
 
 	// trim to first code block if present
@@ -583,7 +668,7 @@ func (r *Runner) showCodexSummary(output string) {
 		return
 	}
 
-	r.log.Print("codex findings:")
+	r.log.Print("%s findings:", toolName)
 	for line := range strings.SplitSeq(summary, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -793,4 +878,18 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 
 	r.log.Print("finalize step completed")
 	return nil
+}
+
+// needsCodexBinary returns true if the current configuration requires the codex binary.
+// returns false when external_review_tool is "custom" or "none", since codex isn't used.
+func needsCodexBinary(appConfig *config.Config) bool {
+	if appConfig == nil {
+		return true // default behavior assumes codex
+	}
+	switch appConfig.ExternalReviewTool {
+	case "custom", "none":
+		return false
+	default:
+		return true // "codex" or empty (default) requires codex binary
+	}
 }

@@ -1,0 +1,50 @@
+# custom evaluation prompt
+# this prompt is used when claude evaluates custom external review tool output
+# the custom review tool runs in the external review phase
+#
+# available variables:
+#   {{PLAN_FILE}} - path to the plan file being executed
+#   {{GOAL}} - human-readable goal description
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
+#   {{CUSTOM_OUTPUT}} - output from the custom review tool
+
+External code review evaluation.
+
+A custom review tool analyzed the code and found:
+
+---
+{{CUSTOM_OUTPUT}}
+---
+
+## Your Task
+
+Analyze each finding critically. For EACH issue:
+
+1. Read the code at the reported location and trace the flow - find callers, see what functions it calls, understand the full context
+2. Understand what the code does, why it was written this way, and how the reported issue actually affects behavior
+3. Check {{PLAN_FILE}} - was this an intentional design decision?
+4. Assess the actual impact - is this a real problem or a style preference?
+
+Then categorize:
+
+- **Valid issues**: Fix them (edit files, run tests/linter to verify)
+- **Invalid/irrelevant issues**: Explain why they don't apply (intentional design, already mitigated, misunderstood context) - your explanation will be passed to the review tool for re-evaluation
+
+IMPORTANT: Pre-existing issues (linter errors, failed tests) should also be fixed.
+Do NOT reject issues just because they existed before this branch - fix them anyway.
+
+## After Evaluation
+
+**If there were actionable issues to fix:**
+- Fix them, run tests/linter to verify - ALL tests must pass, ALL linter issues resolved
+- Do NOT commit yet - more review iterations may follow
+- STOP and let the external loop run the review tool again
+
+**If the review tool reports NO actionable issues** (empty output, "no issues found", "NO ISSUES FOUND"):
+- Run `git diff` to review ALL uncommitted changes (accumulated fixes from multiple iterations)
+- Commit all fixes with message: "fix: address external review findings"
+- Output exactly: <<<RALPHEX:CODEX_REVIEW_DONE>>>
+
+CRITICAL: Never run the external review tool yourself. The external loop handles tool execution.
+
+OUTPUT FORMAT: No markdown formatting (no **bold**, `code`, # headers). Plain text and - lists are fine.

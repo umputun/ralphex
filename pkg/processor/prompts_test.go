@@ -614,3 +614,180 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 		assert.Equal(t, "Create plan for: custom feature\nLog: custom-progress.txt", prompt)
 	})
 }
+
+func TestRunner_getDiffInstruction(t *testing.T) {
+	t.Run("first iteration uses branch diff", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.getDiffInstruction(true)
+		assert.Equal(t, "git diff main...HEAD", result)
+	})
+
+	t.Run("subsequent iteration uses uncommitted diff", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.getDiffInstruction(false)
+		assert.Equal(t, "git diff", result)
+	})
+
+	t.Run("uses default branch fallback", func(t *testing.T) {
+		r := &Runner{cfg: Config{}}
+		result := r.getDiffInstruction(true)
+		assert.Equal(t, "git diff master...HEAD", result)
+	})
+}
+
+func TestRunner_replaceVariablesWithIteration(t *testing.T) {
+	t.Run("replaces DIFF_INSTRUCTION for first iteration", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", true)
+		assert.Equal(t, "Run: git diff main...HEAD", result)
+	})
+
+	t.Run("replaces DIFF_INSTRUCTION for subsequent iteration", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", false)
+		assert.Equal(t, "Run: git diff", result)
+	})
+
+	t.Run("replaces all variables together", func(t *testing.T) {
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/test.md",
+			ProgressPath:  "progress.txt",
+			DefaultBranch: "develop",
+		}}
+		prompt := "Plan: {{PLAN_FILE}}, Progress: {{PROGRESS_FILE}}, Goal: {{GOAL}}, Branch: {{DEFAULT_BRANCH}}, Diff: {{DIFF_INSTRUCTION}}"
+		result := r.replaceVariablesWithIteration(prompt, true)
+
+		assert.Contains(t, result, "Plan: docs/plans/test.md")
+		assert.Contains(t, result, "Progress: progress.txt")
+		assert.Contains(t, result, "Goal: implementation of plan at docs/plans/test.md")
+		assert.Contains(t, result, "Branch: develop")
+		assert.Contains(t, result, "Diff: git diff develop...HEAD")
+		assert.NotContains(t, result, "{{")
+	})
+
+	t.Run("expands agent references", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomAgents: []config.CustomAgent{{Name: "test-agent", Prompt: "test prompt"}},
+		}
+		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
+		result := r.replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}, Agent: {{agent:test-agent}}", true)
+
+		assert.Contains(t, result, "Diff: git diff main...HEAD")
+		assert.Contains(t, result, "test prompt")
+		assert.NotContains(t, result, "{{agent:test-agent}}")
+	})
+
+	t.Run("handles prompt without DIFF_INSTRUCTION", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.replaceVariablesWithIteration("Plan: {{PLAN_FILE}}", true)
+		assert.Contains(t, result, "(no plan file - reviewing current branch)")
+	})
+}
+
+func TestRunner_buildCustomReviewPrompt(t *testing.T) {
+	t.Run("first iteration uses branch diff", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/test.md",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCustomReviewPrompt(true, "")
+
+		assert.Contains(t, prompt, "git diff main...HEAD")
+		assert.Contains(t, prompt, "docs/plans/test.md")
+		assert.NotContains(t, prompt, "{{DIFF_INSTRUCTION}}")
+		assert.NotContains(t, prompt, "{{PLAN_FILE}}")
+	})
+
+	t.Run("subsequent iteration uses uncommitted diff", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCustomReviewPrompt(false, "")
+
+		assert.Contains(t, prompt, "git diff")
+		assert.NotContains(t, prompt, "main...HEAD")
+	})
+
+	t.Run("appends claude response context when present", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCustomReviewPrompt(false, "I fixed the null pointer issue")
+
+		assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+		assert.Contains(t, prompt, "I fixed the null pointer issue")
+		assert.Contains(t, prompt, "Re-evaluate considering Claude's arguments")
+	})
+
+	t.Run("custom prompt template", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomReviewPrompt: "Review {{GOAL}} using {{DIFF_INSTRUCTION}}. Branch: {{DEFAULT_BRANCH}}",
+		}
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/feature.md",
+			DefaultBranch: "develop",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCustomReviewPrompt(true, "")
+
+		assert.Contains(t, prompt, "implementation of plan at docs/plans/feature.md")
+		assert.Contains(t, prompt, "git diff develop...HEAD")
+		assert.Contains(t, prompt, "Branch: develop")
+	})
+}
+
+func TestRunner_buildCustomEvaluationPrompt(t *testing.T) {
+	t.Run("replaces CUSTOM_OUTPUT variable", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/test.md",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		customOutput := "Found issue in foo.go:10 - potential null pointer"
+		prompt := r.buildCustomEvaluationPrompt(customOutput)
+
+		assert.Contains(t, prompt, customOutput)
+		assert.NotContains(t, prompt, "{{CUSTOM_OUTPUT}}")
+	})
+
+	t.Run("replaces base variables", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/feature.md",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCustomEvaluationPrompt("test output")
+
+		assert.Contains(t, prompt, "docs/plans/feature.md")
+		assert.NotContains(t, prompt, "{{PLAN_FILE}}")
+	})
+
+	t.Run("custom prompt template", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomEvalPrompt: "Evaluate output: {{CUSTOM_OUTPUT}}. Goal: {{GOAL}}",
+		}
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/test.md",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCustomEvaluationPrompt("security issue found")
+
+		assert.Equal(t, "Evaluate output: security issue found. Goal: implementation of plan at docs/plans/test.md", prompt)
+	})
+}

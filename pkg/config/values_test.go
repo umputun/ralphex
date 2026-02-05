@@ -29,6 +29,8 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, "xhigh", values.CodexReasoningEffort)
 	assert.Equal(t, 3600000, values.CodexTimeoutMs)
 	assert.Equal(t, "read-only", values.CodexSandbox)
+	assert.Equal(t, "codex", values.ExternalReviewTool)
+	assert.Empty(t, values.CustomReviewScript)
 	assert.Equal(t, 2000, values.IterationDelayMs)
 	assert.Equal(t, 1, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
@@ -703,4 +705,153 @@ func TestValuesLoader_Load_BothAllCommentedFallsBackToEmbedded(t *testing.T) {
 	assert.Equal(t, "claude", values.ClaudeCommand)
 	assert.Equal(t, "docs/plans", values.PlansDir)
 	assert.True(t, values.CodexEnabled)
+}
+
+func TestValuesLoader_Load_ExternalReviewTool(t *testing.T) {
+	tests := []struct {
+		name         string
+		config       string
+		expectedTool string
+	}{
+		{name: "codex tool", config: "external_review_tool = codex", expectedTool: "codex"},
+		{name: "custom tool", config: "external_review_tool = custom", expectedTool: "custom"},
+		{name: "none tool", config: "external_review_tool = none", expectedTool: "none"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config")
+			require.NoError(t, os.WriteFile(configPath, []byte(tc.config), 0o600))
+
+			loader := newValuesLoader(defaultsFS)
+			values, err := loader.Load("", configPath)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectedTool, values.ExternalReviewTool)
+		})
+	}
+}
+
+func TestValuesLoader_Load_CustomReviewScript(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config")
+
+	configContent := `
+external_review_tool = custom
+custom_review_script = /path/to/my-review.sh
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", configPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom", values.ExternalReviewTool)
+	assert.Equal(t, "/path/to/my-review.sh", values.CustomReviewScript)
+}
+
+func TestValuesLoader_Load_CustomReviewScript_TildeExpansion(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config")
+
+	configContent := `custom_review_script = ~/.config/ralphex/scripts/my-review.sh`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", configPath)
+	require.NoError(t, err)
+
+	// tilde should be expanded to home directory
+	home, homeErr := os.UserHomeDir()
+	require.NoError(t, homeErr)
+	expected := home + "/.config/ralphex/scripts/my-review.sh"
+	assert.Equal(t, expected, values.CustomReviewScript)
+}
+
+func TestValuesLoader_Load_CustomReviewScript_NoTildeNoChange(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config")
+
+	configContent := `custom_review_script = /absolute/path/to/script.sh`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", configPath)
+	require.NoError(t, err)
+
+	// absolute path should not be changed
+	assert.Equal(t, "/absolute/path/to/script.sh", values.CustomReviewScript)
+}
+
+func TestExpandTilde(t *testing.T) {
+	home, homeErr := os.UserHomeDir()
+	require.NoError(t, homeErr)
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "tilde with slash", input: "~/some/path", expected: home + "/some/path"},
+		{name: "tilde with nested path", input: "~/.config/ralphex/script.sh", expected: home + "/.config/ralphex/script.sh"},
+		{name: "absolute path unchanged", input: "/absolute/path", expected: "/absolute/path"},
+		{name: "relative path unchanged", input: "relative/path", expected: "relative/path"},
+		{name: "empty string", input: "", expected: ""},
+		{name: "tilde only no slash", input: "~noslash", expected: "~noslash"}, // ~ without / is a different user, not expanded
+		{name: "tilde at end", input: "path/with/tilde~", expected: "path/with/tilde~"},
+		{name: "tilde in middle", input: "path/~/middle", expected: "path/~/middle"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := expandTilde(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestValuesLoader_Load_LocalOverridesExternalReviewTool(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global")
+	localConfig := filepath.Join(tmpDir, "local")
+
+	require.NoError(t, os.WriteFile(globalConfig, []byte(`external_review_tool = codex`), 0o600))
+	require.NoError(t, os.WriteFile(localConfig, []byte(`external_review_tool = none`), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	assert.Equal(t, "none", values.ExternalReviewTool)
+}
+
+func TestValues_mergeFrom_ExternalReviewFields(t *testing.T) {
+	t.Run("merge external review tool", func(t *testing.T) {
+		dst := Values{ExternalReviewTool: "codex"}
+		src := Values{ExternalReviewTool: "custom"}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "custom", dst.ExternalReviewTool)
+	})
+
+	t.Run("empty source doesn't overwrite external review tool", func(t *testing.T) {
+		dst := Values{ExternalReviewTool: "codex"}
+		src := Values{ExternalReviewTool: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "codex", dst.ExternalReviewTool)
+	})
+
+	t.Run("merge custom review script", func(t *testing.T) {
+		dst := Values{CustomReviewScript: "/old/script.sh"}
+		src := Values{CustomReviewScript: "/new/script.sh"}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "/new/script.sh", dst.CustomReviewScript)
+	})
+
+	t.Run("empty source doesn't overwrite custom review script", func(t *testing.T) {
+		dst := Values{CustomReviewScript: "/old/script.sh"}
+		src := Values{CustomReviewScript: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "/old/script.sh", dst.CustomReviewScript)
+	})
 }

@@ -26,6 +26,8 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex.txt"), []byte("custom codex prompt"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte("custom make plan prompt"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "finalize.txt"), []byte("custom finalize prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_review.txt"), []byte("custom review prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_eval.txt"), []byte("custom eval prompt"), 0o600))
 
 	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
@@ -37,6 +39,8 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	assert.Equal(t, "custom codex prompt", prompts.Codex)
 	assert.Equal(t, "custom make plan prompt", prompts.MakePlan)
 	assert.Equal(t, "custom finalize prompt", prompts.Finalize)
+	assert.Equal(t, "custom review prompt", prompts.CustomReview)
+	assert.Equal(t, "custom eval prompt", prompts.CustomEval)
 }
 
 func TestPromptLoader_Load_PartialUserFiles(t *testing.T) {
@@ -445,6 +449,8 @@ func TestPromptLoader_Load_AllCommentedPromptsFallbackToEmbedded(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "review_second.txt"), []byte(commentedContent), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex.txt"), []byte(commentedContent), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_review.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_eval.txt"), []byte(commentedContent), 0o600))
 
 	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
@@ -456,6 +462,8 @@ func TestPromptLoader_Load_AllCommentedPromptsFallbackToEmbedded(t *testing.T) {
 	assert.Contains(t, prompts.ReviewSecond, "{{GOAL}}", "review_second prompt should fall back to embedded")
 	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "codex prompt should fall back to embedded")
 	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}", "make_plan prompt should fall back to embedded")
+	assert.Contains(t, prompts.CustomReview, "{{DIFF_INSTRUCTION}}", "custom_review prompt should fall back to embedded")
+	assert.Contains(t, prompts.CustomEval, "{{CUSTOM_OUTPUT}}", "custom_eval prompt should fall back to embedded")
 }
 
 func TestPromptLoader_Load_MixedCommentedAndCustomPrompts(t *testing.T) {
@@ -564,4 +572,100 @@ func TestPromptLoader_Load_FinalizePrompt_LocalOverridesGlobal(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "local finalize", prompts.Finalize)
+}
+
+func TestPromptLoader_Load_CustomReviewPrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+
+	// test custom custom_review prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_review.txt"), []byte("custom review with {{DIFF_INSTRUCTION}}"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom review with {{DIFF_INSTRUCTION}}", prompts.CustomReview)
+}
+
+func TestPromptLoader_Load_CustomReviewPrompt_FallsBackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "nonexistent")
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	// should fall back to embedded custom_review prompt
+	assert.Contains(t, prompts.CustomReview, "{{DIFF_INSTRUCTION}}")
+	assert.Contains(t, prompts.CustomReview, "{{GOAL}}")
+	assert.Contains(t, prompts.CustomReview, "RALPHEX:CODEX_REVIEW_DONE")
+}
+
+func TestPromptLoader_Load_CustomReviewPrompt_LocalOverridesGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global", "prompts")
+	localDir := filepath.Join(tmpDir, "local", "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	// global custom_review prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_review.txt"), []byte("global custom review"), 0o600))
+	// local custom_review prompt
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "custom_review.txt"), []byte("local custom review"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load(localDir, globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "local custom review", prompts.CustomReview)
+}
+
+func TestPromptLoader_Load_CustomEvalPrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+
+	// test custom custom_eval prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_eval.txt"), []byte("custom eval with {{CUSTOM_OUTPUT}}"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom eval with {{CUSTOM_OUTPUT}}", prompts.CustomEval)
+}
+
+func TestPromptLoader_Load_CustomEvalPrompt_FallsBackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "nonexistent")
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load("", globalDir)
+	require.NoError(t, err)
+
+	// should fall back to embedded custom_eval prompt
+	assert.Contains(t, prompts.CustomEval, "{{CUSTOM_OUTPUT}}")
+	assert.Contains(t, prompts.CustomEval, "{{PLAN_FILE}}")
+	assert.Contains(t, prompts.CustomEval, "RALPHEX:CODEX_REVIEW_DONE")
+}
+
+func TestPromptLoader_Load_CustomEvalPrompt_LocalOverridesGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global", "prompts")
+	localDir := filepath.Join(tmpDir, "local", "prompts")
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	// global custom_eval prompt
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_eval.txt"), []byte("global custom eval"), 0o600))
+	// local custom_eval prompt
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "custom_eval.txt"), []byte("local custom eval"), 0o600))
+
+	loader := newPromptLoader(defaultsFS)
+	prompts, err := loader.Load(localDir, globalDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "local custom eval", prompts.CustomEval)
 }

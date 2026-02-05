@@ -80,6 +80,26 @@ func (r *Runner) replaceBaseVariables(prompt string) string {
 	return result
 }
 
+// getDiffInstruction returns the appropriate git diff command based on iteration.
+// first iteration: compares default branch to HEAD (all changes in feature branch)
+// subsequent iterations: shows uncommitted changes only (fixes from previous iteration)
+func (r *Runner) getDiffInstruction(isFirstIteration bool) string {
+	if isFirstIteration {
+		return fmt.Sprintf("git diff %s...HEAD", r.getDefaultBranch())
+	}
+	return "git diff"
+}
+
+// replaceVariablesWithIteration replaces all template variables including iteration-aware ones.
+// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{DIFF_INSTRUCTION}}, {{agent:name}}
+// this variant is used when iteration context is needed (e.g., custom review prompts).
+func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration bool) string {
+	result := r.replaceBaseVariables(prompt)
+	result = strings.ReplaceAll(result, "{{DIFF_INSTRUCTION}}", r.getDiffInstruction(isFirstIteration))
+	result = r.expandAgentReferences(result)
+	return result
+}
+
 // expandAgentReferences replaces {{agent:name}} patterns with Task tool instructions.
 // returns prompt unchanged if AppConfig is nil or no agents are configured.
 // missing agents log a warning and leave the reference as-is for visibility.
@@ -147,4 +167,34 @@ func (r *Runner) buildPlanPrompt() string {
 	prompt := r.cfg.AppConfig.MakePlanPrompt
 	prompt = strings.ReplaceAll(prompt, "{{PLAN_DESCRIPTION}}", r.cfg.PlanDescription)
 	return r.replaceBaseVariables(prompt)
+}
+
+// buildCustomReviewPrompt creates the prompt for custom review tool execution.
+// uses the custom_review prompt loaded from config with {{DIFF_INSTRUCTION}} expanded.
+// claudeResponse from previous iteration is appended if present.
+func (r *Runner) buildCustomReviewPrompt(isFirst bool, claudeResponse string) string {
+	prompt := r.replaceVariablesWithIteration(r.cfg.AppConfig.CustomReviewPrompt, isFirst)
+
+	if claudeResponse != "" {
+		prompt = fmt.Sprintf(`%s
+
+---
+PREVIOUS REVIEW CONTEXT:
+Claude (previous reviewer) responded to your findings:
+
+%s
+
+Re-evaluate considering Claude's arguments. If Claude's fixes are correct, acknowledge them.
+If Claude's arguments are invalid, explain why the issues still exist.`, prompt, claudeResponse)
+	}
+
+	return prompt
+}
+
+// buildCustomEvaluationPrompt creates the prompt for claude to evaluate custom review tool output.
+// uses the custom_eval prompt loaded from config (either user-provided or embedded default).
+// agent references ({{agent:name}}) are expanded via replacePromptVariables.
+func (r *Runner) buildCustomEvaluationPrompt(customOutput string) string {
+	prompt := r.replacePromptVariables(r.cfg.AppConfig.CustomEvalPrompt)
+	return strings.ReplaceAll(prompt, "{{CUSTOM_OUTPUT}}", customOutput)
 }

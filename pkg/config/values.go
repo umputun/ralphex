@@ -26,6 +26,8 @@ type Values struct {
 	CodexTimeoutMsSet    bool // tracks if codex_timeout_ms was explicitly set
 	CodexSandbox         string
 	CodexErrorPatterns   []string // patterns to detect in codex output (e.g., rate limit messages)
+	ExternalReviewTool   string   // "codex", "custom", or "none"
+	CustomReviewScript   string   // path to custom review script (when ExternalReviewTool = "custom")
 	IterationDelayMs     int
 	IterationDelayMsSet  bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount       int
@@ -166,6 +168,14 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.CodexSandbox = key.String()
 	}
 
+	// external review settings
+	if key, err := section.GetKey("external_review_tool"); err == nil {
+		values.ExternalReviewTool = key.String()
+	}
+	if key, err := section.GetKey("custom_review_script"); err == nil {
+		values.CustomReviewScript = expandTilde(key.String())
+	}
+
 	// timing settings
 	if key, err := section.GetKey("iteration_delay_ms"); err == nil {
 		val, intErr := key.Int()
@@ -270,6 +280,12 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.CodexSandbox != "" {
 		dst.CodexSandbox = src.CodexSandbox
 	}
+	if src.ExternalReviewTool != "" {
+		dst.ExternalReviewTool = src.ExternalReviewTool
+	}
+	if src.CustomReviewScript != "" {
+		dst.CustomReviewScript = src.CustomReviewScript
+	}
 	if src.IterationDelayMsSet {
 		dst.IterationDelayMs = src.IterationDelayMs
 		dst.IterationDelayMsSet = true
@@ -294,4 +310,17 @@ func (dst *Values) mergeFrom(src *Values) {
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
 	}
+}
+
+// expandTilde expands a leading ~ in a path to the user's home directory.
+// returns the original path if it doesn't start with ~/ or if home dir is unavailable.
+func expandTilde(path string) string {
+	if !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return home + path[1:] // replace ~ with home, keep the /
 }

@@ -1,0 +1,45 @@
+# custom review prompt
+# this prompt is sent to a custom external review tool (script)
+# the script receives this as a file and should run the code review
+#
+# available variables:
+#   {{DIFF_INSTRUCTION}} - git diff command appropriate for current iteration
+#   {{GOAL}} - human-readable goal description
+#   {{PLAN_FILE}} - path to the plan file being executed
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
+
+You are reviewing code changes for: {{GOAL}}
+
+## Get the Diff
+
+Run this command to see the changes:
+{{DIFF_INSTRUCTION}}
+
+## Review Focus
+
+Analyze the code for:
+
+1. Bugs and logic errors - incorrect behavior, edge cases, null/nil handling
+2. Security issues - injection, XSS, secrets exposure, improper validation
+3. Race conditions - concurrent access, shared state, missing synchronization
+4. Error handling - silent failures, ignored errors, missing fallbacks
+5. Test coverage - missing tests, inadequate edge case coverage
+6. Code quality - unnecessary complexity, poor naming, unclear logic
+
+## Output Format
+
+Report issues as a structured list:
+
+- file:line - description of issue
+- file:line - description of issue
+
+If no issues found, output: NO ISSUES FOUND
+
+## Important
+
+- Focus on real problems, not style preferences
+- Check if issues are already mitigated in the code
+- Only report issues you can verify by reading the actual code
+- Be specific about file paths and line numbers
+
+When done, output exactly: <<<RALPHEX:CODEX_REVIEW_DONE>>>

@@ -57,6 +57,26 @@ codex_timeout_ms = 3600000
 codex_sandbox = read-only
 
 # ------------------------------------------------------------------------------
+# external review
+# ------------------------------------------------------------------------------
+
+# external_review_tool: which tool to use for external code review
+# available: codex, custom, none
+# codex: use OpenAI Codex (GPT-5.2) for external review (default)
+# custom: use a custom script specified by custom_review_script
+# none: skip external review entirely
+# note: codex_enabled = false is treated as external_review_tool = none for backward compat
+# default: codex
+external_review_tool = codex
+
+# custom_review_script: path to custom review script
+# only used when external_review_tool = custom
+# script receives prompt file path as single argument
+# script should output findings to stdout and use <<<RALPHEX:CODEX_REVIEW_DONE>>> signal
+# example: custom_review_script = ~/.config/ralphex/scripts/my-review.sh
+# custom_review_script =
+
+# ------------------------------------------------------------------------------
 # finalize step
 # ------------------------------------------------------------------------------
 
