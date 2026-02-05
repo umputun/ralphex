@@ -28,7 +28,10 @@ ralphex
 # review-only mode (skip task execution)
 ralphex --review docs/plans/feature.md
 
-# codex-only mode (skip tasks and first claude review, still uses claude to evaluate/fix)
+# external-only mode (skip tasks and first claude review, run only external review)
+ralphex --external-only
+
+# codex-only mode (alias for --external-only, deprecated)
 ralphex --codex-only
 
 # tasks-only mode (run only task phase, skip all reviews)
@@ -51,7 +54,7 @@ ralphex --reset
 
 Configuration directory: `~/.config/ralphex/`
 
-**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `make_plan.txt`, `finalize.txt`
+**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `custom_review.txt`, `custom_eval.txt`, `make_plan.txt`, `finalize.txt`
 
 **Agent files** (`~/.config/ralphex/agents/`): Custom review agents referenced via `{{agent:name}}` in prompts
 
@@ -61,6 +64,9 @@ Configuration directory: `~/.config/ralphex/`
 - `{{GOAL}}` - goal description
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.)
 - `{{agent:name}}` - expands to Task tool instructions for named agent
+- `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in custom_review.txt)
+
+**Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout, ends with `<<<RALPHEX:CODEX_REVIEW_DONE>>>` signal.
 
 Run `ralphex --reset` to restore default configuration interactively.
 

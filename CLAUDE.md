@@ -44,7 +44,8 @@ docs/plans/         # plan files location
 - Streaming output with timestamps
 - Progress logging to files
 - Progress file locking (flock) for active session detection
-- Multiple execution modes: full, tasks-only, review-only, codex-only, plan creation
+- Multiple execution modes: full, tasks-only, review-only, external-only/codex-only, plan creation
+- Custom external review support via scripts (wraps any AI tool)
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
 - Optional finalize step after successful reviews (disabled by default)
@@ -67,6 +68,26 @@ Prompt file: `~/.config/ralphex/prompts/finalize.txt` or `.ralphex/prompts/final
 Key files:
 - `pkg/processor/runner.go` - `runFinalize()` method called at end of review modes
 - `pkg/config/defaults/prompts/finalize.txt` - default finalize prompt
+
+### Custom External Review
+
+Allows using custom scripts instead of codex for external code review:
+
+- Config: `external_review_tool = custom` and `custom_review_script = /path/to/script.sh`
+- Script receives prompt file path as single argument
+- Script outputs findings to stdout, ends with `<<<RALPHEX:CODEX_REVIEW_DONE>>>` signal
+- `{{DIFF_INSTRUCTION}}` template variable expands based on iteration:
+  - First iteration: `git diff main...HEAD` (all feature branch changes)
+  - Subsequent iterations: `git diff` (uncommitted changes only)
+- `--external-only` (-e) flag runs only external review; `--codex-only` (-c) is deprecated alias
+- `codex_enabled = false` backward compat: treated as `external_review_tool = none`
+
+Key files:
+- `pkg/executor/custom.go` - CustomExecutor for running external scripts
+- `pkg/config/defaults/prompts/custom_review.txt` - prompt sent to custom tool
+- `pkg/config/defaults/prompts/custom_eval.txt` - prompt for claude to evaluate custom tool output
+- `pkg/processor/prompts.go` - `getDiffInstruction()` and `replaceVariablesWithIteration()`
+- `pkg/processor/runner.go` - dispatch logic in external review loop
 
 ### Git Package API
 

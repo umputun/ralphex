@@ -50,7 +50,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 - **Real-time monitoring** - streaming output with timestamps, colors, and detailed logs
 - **Web dashboard** - browser-based real-time view with `--serve` flag
 - **Docker support** - run in isolated container for safer autonomous execution
-- **Multiple modes** - full execution, tasks-only, review-only, codex-only, or plan creation
+- **Multiple modes** - full execution, tasks-only, review-only, external-only, or plan creation
 
 ## Quick Start
 
@@ -110,11 +110,18 @@ Claude verifies findings, fixes confirmed issues, and commits.
 
 *[Default agents](https://github.com/umputun/ralphex/tree/master/pkg/config/defaults/agents) provide common, language-agnostic review steps. They can be customized and tuned for your specific needs, languages, and workflows. See [Customization](#customization) for details.*
 
-### Phase 3: Codex External Review (optional)
+### Phase 3: External Review (optional)
 
-1. Runs codex (GPT-5.2) for independent code review
-2. Claude evaluates codex findings, fixes valid issues
-3. Iterates until codex finds no open issues
+1. Runs external review tool (codex by default, or custom script)
+2. Claude evaluates findings, fixes valid issues
+3. Iterates until no open issues
+
+Supported tools:
+- **codex** (default): GPT-5.2 for independent code review
+- **custom**: Your own script wrapping any AI (OpenRouter, local LLM, etc.)
+- **none**: Skip external review entirely
+
+See [Custom External Review](#custom-external-review) for details on using custom scripts.
 
 ### Phase 4: Second Code Review
 
@@ -344,8 +351,8 @@ ralphex
 # review-only mode (skip task execution)
 ralphex --review docs/plans/feature.md
 
-# codex-only mode (skip tasks and first claude review, still uses claude to evaluate/fix)
-ralphex --codex-only
+# external-only mode (skip tasks and first review, run only external review loop)
+ralphex --external-only
 
 # tasks-only mode (run only task phase, skip all reviews)
 ralphex --tasks-only docs/plans/feature.md
@@ -369,7 +376,8 @@ ralphex --serve --port 3000 docs/plans/feature.md
 |------|-------------|---------|
 | `-m, --max-iterations` | Maximum task iterations | 50 |
 | `-r, --review` | Skip task execution, run full review pipeline | false |
-| `-c, --codex-only` | Skip tasks and first review, run codex → claude evaluation → fixes | false |
+| `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
+| `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
@@ -562,6 +570,8 @@ project/
 | `codex_reasoning_effort` | Reasoning effort level | `xhigh` |
 | `codex_timeout_ms` | Codex timeout in ms | `3600000` |
 | `codex_sandbox` | Sandbox mode | `read-only` |
+| `external_review_tool` | External review tool (`codex`, `custom`, `none`) | `codex` |
+| `custom_review_script` | Path to custom review script (when `external_review_tool = custom`) | - |
 | `iteration_delay_ms` | Delay between iterations | `2000` |
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
@@ -585,6 +595,76 @@ Error patterns use case-insensitive substring matching. When a pattern is detect
 ### Custom prompts
 
 Place custom prompt files in `~/.config/ralphex/prompts/` to override the built-in prompts. Missing files fall back to embedded defaults. See [Review Agents](#review-agents) section for agent customization.
+
+### Custom External Review
+
+Use your own AI tool for external code review instead of codex. This allows integration with OpenRouter, local LLMs, or any custom pipeline.
+
+**Configuration:**
+
+```ini
+# in ~/.config/ralphex/config
+external_review_tool = custom
+custom_review_script = ~/.config/ralphex/scripts/my-review.sh
+```
+
+**Script interface:**
+
+Your script receives a single argument: path to a prompt file containing review instructions.
+
+```bash
+#!/bin/bash
+# example: ~/.config/ralphex/scripts/my-review.sh
+prompt_file="$1"
+
+# read the prompt (contains diff instructions, goal, review focus)
+prompt=$(cat "$prompt_file")
+
+# call your AI tool (OpenRouter, local LLM, etc.)
+# example with curl to OpenRouter:
+curl -s https://openrouter.ai/api/v1/chat/completions \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"anthropic/claude-3.5-sonnet\",
+    \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt" | jq -Rs .)}]
+  }" | jq -r '.choices[0].message.content'
+
+# signal completion
+echo "<<<RALPHEX:CODEX_REVIEW_DONE>>>"
+```
+
+**Expected output format:**
+
+- Write findings to stdout as a structured list
+- Use format: `file:line - description of issue`
+- Output `NO ISSUES FOUND` when there are no problems
+- End with signal: `<<<RALPHEX:CODEX_REVIEW_DONE>>>`
+
+**Iteration behavior:**
+
+The prompt's `{{DIFF_INSTRUCTION}}` variable adapts per iteration:
+- **First iteration**: `git diff main...HEAD` (all changes in feature branch)
+- **Subsequent iterations**: `git diff` (only uncommitted changes from previous fixes)
+
+This lets the review tool focus on remaining issues after fixes.
+
+**Prompt customization:**
+
+Customize `~/.config/ralphex/prompts/custom_review.txt` to modify the prompt sent to your script. Available variables:
+- `{{DIFF_INSTRUCTION}}` - git diff command appropriate for current iteration
+- `{{GOAL}}` - human-readable description of what's being implemented
+- `{{PLAN_FILE}}` - path to the plan file
+- `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.)
+
+Customize `~/.config/ralphex/prompts/custom_eval.txt` to modify how Claude evaluates your tool's output.
+
+**Docker considerations:**
+
+When running ralphex in Docker, your script must be accessible inside the container:
+- Mount your scripts directory: `-v ~/.config/ralphex/scripts:/home/app/.config/ralphex/scripts:ro`
+- Ensure script dependencies are available (curl, jq, etc. are included in base image)
+- Environment variables (API keys) must be passed to container: `-e OPENROUTER_API_KEY`
 
 <details markdown>
 <summary><b>FAQ</b></summary>
