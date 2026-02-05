@@ -66,7 +66,7 @@ Configuration directory: `~/.config/ralphex/`
 - `{{agent:name}}` - expands to Task tool instructions for named agent
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in custom_review.txt)
 
-**Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout, ends with `<<<RALPHEX:CODEX_REVIEW_DONE>>>` signal.
+**Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing.
 
 Run `ralphex --reset` to restore default configuration interactively.
 

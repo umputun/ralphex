@@ -610,7 +610,7 @@ custom_review_script = ~/.config/ralphex/scripts/my-review.sh
 
 **Script interface:**
 
-Your script receives a single argument: path to a prompt file containing review instructions.
+Your script receives a single argument: path to a prompt file containing review instructions. The script outputs findings to stdout - ralphex passes them to Claude for evaluation and fixing.
 
 ```bash
 #!/bin/bash
@@ -629,9 +629,6 @@ curl -s https://openrouter.ai/api/v1/chat/completions \
     \"model\": \"anthropic/claude-3.5-sonnet\",
     \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt" | jq -Rs .)}]
   }" | jq -r '.choices[0].message.content'
-
-# signal completion
-echo "<<<RALPHEX:CODEX_REVIEW_DONE>>>"
 ```
 
 **Expected output format:**
@@ -639,7 +636,6 @@ echo "<<<RALPHEX:CODEX_REVIEW_DONE>>>"
 - Write findings to stdout as a structured list
 - Use format: `file:line - description of issue`
 - Output `NO ISSUES FOUND` when there are no problems
-- End with signal: `<<<RALPHEX:CODEX_REVIEW_DONE>>>`
 
 **Iteration behavior:**
 

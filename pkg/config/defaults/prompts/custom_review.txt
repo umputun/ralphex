@@ -41,5 +41,3 @@ If no issues found, output: NO ISSUES FOUND
 - Check if issues are already mitigated in the code
 - Only report issues you can verify by reading the actual code
 - Be specific about file paths and line numbers
-
-When done, output exactly: <<<RALPHEX:CODEX_REVIEW_DONE>>>

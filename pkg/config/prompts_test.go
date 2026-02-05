@@ -600,7 +600,7 @@ func TestPromptLoader_Load_CustomReviewPrompt_FallsBackToEmbedded(t *testing.T) 
 	// should fall back to embedded custom_review prompt
 	assert.Contains(t, prompts.CustomReview, "{{DIFF_INSTRUCTION}}")
 	assert.Contains(t, prompts.CustomReview, "{{GOAL}}")
-	assert.Contains(t, prompts.CustomReview, "RALPHEX:CODEX_REVIEW_DONE")
+	assert.Contains(t, prompts.CustomReview, "NO ISSUES FOUND")
 }
 
 func TestPromptLoader_Load_CustomReviewPrompt_LocalOverridesGlobal(t *testing.T) {

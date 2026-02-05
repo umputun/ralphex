@@ -75,7 +75,7 @@ Allows using custom scripts instead of codex for external code review:
 
 - Config: `external_review_tool = custom` and `custom_review_script = /path/to/script.sh`
 - Script receives prompt file path as single argument
-- Script outputs findings to stdout, ends with `<<<RALPHEX:CODEX_REVIEW_DONE>>>` signal
+- Script outputs findings to stdout (ralphex passes them to Claude for evaluation)
 - `{{DIFF_INSTRUCTION}}` template variable expands based on iteration:
   - First iteration: `git diff main...HEAD` (all feature branch changes)
   - Subsequent iterations: `git diff` (uncommitted changes only)
