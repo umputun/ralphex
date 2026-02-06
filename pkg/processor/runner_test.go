@@ -46,7 +46,6 @@ func newMockExecutor(results []executor.Result) *mocks.ExecutorMock {
 // newMockLogger creates a mock logger with no-op implementations.
 func newMockLogger(path string) *mocks.LoggerMock {
 	return &mocks.LoggerMock{
-		SetPhaseFunc:       func(_ status.Phase) {},
 		PrintFunc:          func(_ string, _ ...any) {},
 		PrintRawFunc:       func(_ string, _ ...any) {},
 		PrintSectionFunc:   func(_ status.Section) {},
@@ -1521,20 +1520,12 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var phases []status.Phase
-			log := &mocks.LoggerMock{
-				SetPhaseFunc: func(phase status.Phase) {
-					phases = append(phases, phase)
-				},
-				PrintFunc:          func(_ string, _ ...any) {},
-				PrintRawFunc:       func(_ string, _ ...any) {},
-				PrintSectionFunc:   func(_ status.Section) {},
-				PrintAlignedFunc:   func(_ string) {},
-				LogQuestionFunc:    func(_ string, _ []string) {},
-				LogAnswerFunc:      func(_ string) {},
-				LogDraftReviewFunc: func(_, _ string) {},
-				PathFunc:           func() string { return "progress.txt" },
-			}
+			holder := &status.PhaseHolder{}
+			holder.OnChange(func(_, newPhase status.Phase) {
+				phases = append(phases, newPhase)
+			})
 
+			log := newMockLogger("progress.txt")
 			claude := newMockExecutor(tc.claudeResults)
 			codex := newMockExecutor(tc.codexResults)
 
@@ -1551,6 +1542,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 				MaxIterations:   50,
 				CodexEnabled:    true,
 				FinalizeEnabled: true,
+				PhaseHolder:     holder,
 				AppConfig:       testAppConfig(t),
 			}
 			r := processor.NewWithExecutors(cfg, log, claude, codex, nil)

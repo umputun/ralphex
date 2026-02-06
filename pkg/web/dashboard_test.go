@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 func TestNewDashboard(t *testing.T) {
@@ -38,12 +39,13 @@ func TestDashboard_Start_SingleSession(t *testing.T) {
 
 	// create mock base logger
 	colors := testColors()
+	holder := &status.PhaseHolder{}
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: progressPath,
 		Mode:     "test",
 		Branch:   "main",
 		NoColor:  true,
-	}, colors)
+	}, colors, holder)
 	require.NoError(t, err)
 	defer baseLog.Close()
 
@@ -55,6 +57,7 @@ func TestDashboard_Start_SingleSession(t *testing.T) {
 		WatchDirs:       nil, // single-session mode
 		ConfigWatchDirs: nil,
 		Colors:          colors,
+		Holder:          holder,
 	}
 
 	d := NewDashboard(cfg)
@@ -76,12 +79,13 @@ func TestDashboard_Start_MultiSession(t *testing.T) {
 
 	// create mock base logger
 	colors := testColors()
+	holder := &status.PhaseHolder{}
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: progressPath,
 		Mode:     "test",
 		Branch:   "main",
 		NoColor:  true,
-	}, colors)
+	}, colors, holder)
 	require.NoError(t, err)
 	defer baseLog.Close()
 
@@ -93,6 +97,7 @@ func TestDashboard_Start_MultiSession(t *testing.T) {
 		WatchDirs:       []string{tmpDir}, // multi-session mode
 		ConfigWatchDirs: nil,
 		Colors:          colors,
+		Holder:          holder,
 	}
 
 	d := NewDashboard(cfg)

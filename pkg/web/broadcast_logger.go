@@ -12,7 +12,6 @@ import (
 
 // Logger provides progress logging for web dashboard wrapping.
 type Logger interface {
-	SetPhase(phase status.Phase)
 	Print(format string, args ...any)
 	PrintRaw(format string, args ...any)
 	PrintSection(section status.Section)
@@ -33,41 +32,41 @@ type Logger interface {
 type BroadcastLogger struct {
 	inner       Logger
 	session     *Session
-	phase       status.Phase
+	holder      *status.PhaseHolder
 	currentTask int // tracks current task number for boundary events
 }
 
 // NewBroadcastLogger creates a logger that wraps inner and broadcasts to the session's SSE server.
-func NewBroadcastLogger(inner Logger, session *Session) *BroadcastLogger {
-	return &BroadcastLogger{
+// registers an OnChange callback on the holder for phase transition events.
+func NewBroadcastLogger(inner Logger, session *Session, holder *status.PhaseHolder) *BroadcastLogger {
+	b := &BroadcastLogger{
 		inner:   inner,
 		session: session,
-		phase:   status.PhaseTask,
+		holder:  holder,
 	}
+	holder.OnChange(b.onPhaseChanged)
+	return b
 }
 
-// SetPhase sets the current execution phase for color coding.
+// onPhaseChanged handles phase transition events.
 // emits task_end event if transitioning away from task phase with an active task.
-func (b *BroadcastLogger) SetPhase(phase status.Phase) {
-	// if leaving task phase with an active task, emit task_end
-	if b.phase == status.PhaseTask && phase != status.PhaseTask && b.currentTask > 0 {
-		b.broadcast(NewTaskEndEvent(b.phase, b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
+func (b *BroadcastLogger) onPhaseChanged(old, _ status.Phase) {
+	if old == status.PhaseTask && b.currentTask > 0 {
+		b.broadcast(NewTaskEndEvent(old, b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
 		b.currentTask = 0
 	}
-	b.phase = phase
-	b.inner.SetPhase(phase)
 }
 
 // Print writes a timestamped message and broadcasts it.
 func (b *BroadcastLogger) Print(format string, args ...any) {
 	b.inner.Print(format, args...)
-	b.broadcast(NewOutputEvent(b.phase, formatText(format, args...)))
+	b.broadcast(NewOutputEvent(b.holder.Get(), formatText(format, args...)))
 }
 
 // PrintRaw writes without timestamp and broadcasts it.
 func (b *BroadcastLogger) PrintRaw(format string, args ...any) {
 	b.inner.PrintRaw(format, args...)
-	b.broadcast(NewOutputEvent(b.phase, formatText(format, args...)))
+	b.broadcast(NewOutputEvent(b.holder.Get(), formatText(format, args...)))
 }
 
 // PrintSection writes a section header and broadcasts it.
@@ -80,16 +79,16 @@ func (b *BroadcastLogger) PrintSection(section status.Section) {
 	case status.SectionTaskIteration:
 		// emit task end for previous task (if any)
 		if b.currentTask > 0 {
-			b.broadcast(NewTaskEndEvent(b.phase, b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
+			b.broadcast(NewTaskEndEvent(b.holder.Get(), b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
 		}
 		b.currentTask = section.Iteration
-		b.broadcast(NewTaskStartEvent(b.phase, section.Iteration, section.Label))
+		b.broadcast(NewTaskStartEvent(b.holder.Get(), section.Iteration, section.Label))
 
 	case status.SectionClaudeReview:
-		b.broadcast(NewIterationStartEvent(b.phase, section.Iteration, section.Label))
+		b.broadcast(NewIterationStartEvent(b.holder.Get(), section.Iteration, section.Label))
 
 	case status.SectionCodexIteration:
-		b.broadcast(NewIterationStartEvent(b.phase, section.Iteration, section.Label))
+		b.broadcast(NewIterationStartEvent(b.holder.Get(), section.Iteration, section.Label))
 
 	case status.SectionGeneric, status.SectionClaudeEval:
 		// no additional events for generic sections or claude eval
@@ -99,38 +98,38 @@ func (b *BroadcastLogger) PrintSection(section status.Section) {
 	}
 
 	// always emit the section event
-	b.broadcast(NewSectionEvent(b.phase, section.Label))
+	b.broadcast(NewSectionEvent(b.holder.Get(), section.Label))
 }
 
 // PrintAligned writes text with timestamp on each line and broadcasts it.
 func (b *BroadcastLogger) PrintAligned(text string) {
 	b.inner.PrintAligned(text)
-	b.broadcast(NewOutputEvent(b.phase, text))
+	b.broadcast(NewOutputEvent(b.holder.Get(), text))
 
 	if signal := extractTerminalSignal(text); signal != "" {
-		b.broadcast(NewSignalEvent(b.phase, signal))
+		b.broadcast(NewSignalEvent(b.holder.Get(), signal))
 	}
 }
 
 // LogQuestion logs a question and its options for plan creation mode.
 func (b *BroadcastLogger) LogQuestion(question string, options []string) {
 	b.inner.LogQuestion(question, options)
-	b.broadcast(NewOutputEvent(b.phase, "QUESTION: "+question))
-	b.broadcast(NewOutputEvent(b.phase, "OPTIONS: "+strings.Join(options, ", ")))
+	b.broadcast(NewOutputEvent(b.holder.Get(), "QUESTION: "+question))
+	b.broadcast(NewOutputEvent(b.holder.Get(), "OPTIONS: "+strings.Join(options, ", ")))
 }
 
 // LogAnswer logs the user's answer for plan creation mode.
 func (b *BroadcastLogger) LogAnswer(answer string) {
 	b.inner.LogAnswer(answer)
-	b.broadcast(NewOutputEvent(b.phase, "ANSWER: "+answer))
+	b.broadcast(NewOutputEvent(b.holder.Get(), "ANSWER: "+answer))
 }
 
 // LogDraftReview logs the user's draft review action and optional feedback.
 func (b *BroadcastLogger) LogDraftReview(action, feedback string) {
 	b.inner.LogDraftReview(action, feedback)
-	b.broadcast(NewOutputEvent(b.phase, "DRAFT REVIEW: "+action))
+	b.broadcast(NewOutputEvent(b.holder.Get(), "DRAFT REVIEW: "+action))
 	if feedback != "" {
-		b.broadcast(NewOutputEvent(b.phase, "FEEDBACK: "+feedback))
+		b.broadcast(NewOutputEvent(b.holder.Get(), "FEEDBACK: "+feedback))
 	}
 }
 

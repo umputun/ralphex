@@ -12,7 +12,6 @@ import (
 
 func TestNewBroadcastLogger(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc:     func(status.Phase) {},
 		PrintFunc:        func(string, ...any) {},
 		PrintRawFunc:     func(string, ...any) {},
 		PrintSectionFunc: func(status.Section) {},
@@ -22,45 +21,32 @@ func TestNewBroadcastLogger(t *testing.T) {
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
 
-	bl := NewBroadcastLogger(mockLogger, session)
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	assert.NotNil(t, bl)
-	assert.Equal(t, status.PhaseTask, bl.phase)
+	assert.Equal(t, status.Phase(""), holder.Get()) // default phase is empty
 }
 
-func TestBroadcastLogger_SetPhase(t *testing.T) {
+func TestBroadcastLogger_PhaseTransition_EmitsTaskEnd(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc: func(status.Phase) {},
-	}
-	session := NewSession("test", "/tmp/test.txt")
-	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
-
-	bl.SetPhase(status.PhaseReview)
-
-	assert.Equal(t, status.PhaseReview, bl.phase)
-	require.Len(t, mockLogger.SetPhaseCalls(), 1)
-	assert.Equal(t, status.PhaseReview, mockLogger.SetPhaseCalls()[0].Phase)
-}
-
-func TestBroadcastLogger_SetPhase_EmitsTaskEnd(t *testing.T) {
-	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc:     func(status.Phase) {},
 		PrintSectionFunc: func(status.Section) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	// set task phase and start a task
-	bl.SetPhase(status.PhaseTask)
+	holder.Set(status.PhaseTask)
 	bl.PrintSection(status.NewTaskIterationSection(1))
 
 	// track current task
 	assert.Equal(t, 1, bl.currentTask)
 
-	// transition away from task phase - should reset currentTask
-	bl.SetPhase(status.PhaseReview)
+	// transition away from task phase - should reset currentTask via OnChange callback
+	holder.Set(status.PhaseReview)
 
 	// currentTask should be reset to 0
 	assert.Equal(t, 0, bl.currentTask)
@@ -72,7 +58,9 @@ func TestBroadcastLogger_Print(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	bl.Print("hello %s", "world")
 
@@ -88,7 +76,9 @@ func TestBroadcastLogger_PrintRaw(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	bl.PrintRaw("raw %d", 42)
 
@@ -104,7 +94,9 @@ func TestBroadcastLogger_PrintSection(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	section := status.NewGenericSection("Test Section")
 	bl.PrintSection(section)
@@ -120,7 +112,9 @@ func TestBroadcastLogger_PrintAligned(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	bl.PrintAligned("aligned text")
 
@@ -135,7 +129,9 @@ func TestBroadcastLogger_Path(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	path := bl.Path()
 
@@ -145,20 +141,21 @@ func TestBroadcastLogger_Path(t *testing.T) {
 
 func TestBroadcastLogger_PhaseAffectsEvents(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc: func(status.Phase) {},
-		PrintFunc:    func(string, ...any) {},
+		PrintFunc: func(string, ...any) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
 
-	// print with default phase (task)
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
+
+	// print with default phase (empty)
 	bl.Print("task message")
-	assert.Equal(t, status.PhaseTask, bl.phase)
+	assert.Equal(t, status.Phase(""), holder.Get())
 
 	// change phase and verify it's updated
-	bl.SetPhase(status.PhaseCodex)
-	assert.Equal(t, status.PhaseCodex, bl.phase)
+	holder.Set(status.PhaseCodex)
+	assert.Equal(t, status.PhaseCodex, holder.Get())
 }
 
 func TestFormatText(t *testing.T) {
@@ -187,7 +184,9 @@ func TestBroadcastLogger_PrintSection_TaskBoundaryEvents(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	// emit task iteration section - should set currentTask
 	bl.PrintSection(status.NewTaskIterationSection(1))
@@ -201,21 +200,22 @@ func TestBroadcastLogger_PrintSection_TaskBoundaryEvents(t *testing.T) {
 func TestBroadcastLogger_PrintSection_IterationEvents(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
 		PrintSectionFunc: func(status.Section) {},
-		SetPhaseFunc:     func(status.Phase) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	// test claude review iteration pattern
-	bl.SetPhase(status.PhaseReview)
+	holder.Set(status.PhaseReview)
 	bl.PrintSection(status.NewClaudeReviewSection(3, ": critical/major"))
 
 	// verify inner logger was called
 	require.Len(t, mockLogger.PrintSectionCalls(), 1)
 
 	// test codex iteration pattern
-	bl.SetPhase(status.PhaseCodex)
+	holder.Set(status.PhaseCodex)
 	bl.PrintSection(status.NewCodexIterationSection(5))
 
 	// verify inner logger was called again
@@ -228,7 +228,9 @@ func TestBroadcastLogger_LogQuestion(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	bl.LogQuestion("Which database?", []string{"PostgreSQL", "MySQL", "SQLite"})
 
@@ -243,7 +245,9 @@ func TestBroadcastLogger_LogAnswer(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	bl.LogAnswer("PostgreSQL")
 
@@ -257,7 +261,9 @@ func TestBroadcastLogger_LogDraftReview_Accept(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	bl.LogDraftReview("accept", "")
 
@@ -272,7 +278,9 @@ func TestBroadcastLogger_LogDraftReview_ReviseWithFeedback(t *testing.T) {
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
-	bl := NewBroadcastLogger(mockLogger, session)
+
+	holder := &status.PhaseHolder{}
+	bl := NewBroadcastLogger(mockLogger, session, holder)
 
 	bl.LogDraftReview("revise", "Please add more details to Task 3")
 

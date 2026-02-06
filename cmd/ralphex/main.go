@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 	"github.com/umputun/ralphex/pkg/web"
 )
 
@@ -54,6 +56,7 @@ type startupInfo struct {
 	Mode            processor.Mode
 	MaxIterations   int
 	ProgressPath    string
+	Models          config.ClaudeModels
 }
 
 // executePlanRequest holds parameters for plan execution.
@@ -260,13 +263,16 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	branch := getCurrentBranch(req.GitSvc)
 
+	// create shared phase holder (single source of truth for current phase)
+	holder := &status.PhaseHolder{}
+
 	// create progress logger
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: req.PlanFile,
 		Mode:     string(req.Mode),
 		Branch:   branch,
 		NoColor:  o.NoColor,
-	}, req.Colors)
+	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
@@ -291,6 +297,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			WatchDirs:       o.Watch,
 			ConfigWatchDirs: req.Config.WatchDirs,
 			Colors:          req.Colors,
+			Holder:          holder,
 		})
 		var dashErr error
 		runnerLog, dashErr = dashboard.Start(ctx)
@@ -306,10 +313,11 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		Mode:          req.Mode,
 		MaxIterations: o.MaxIterations,
 		ProgressPath:  baseLog.Path(),
+		Models:        req.Config.Models,
 	}, req.Colors)
 
 	// create and run the runner
-	r := createRunner(req.Config, o, req.PlanFile, req.Mode, runnerLog, req.DefaultBranch)
+	r := createRunner(req.Config, o, req.PlanFile, req.Mode, runnerLog, req.DefaultBranch, holder)
 	if runErr := r.Run(ctx); runErr != nil {
 		return fmt.Errorf("runner: %w", runErr)
 	}
@@ -399,7 +407,8 @@ func validateFlags(o opts) error {
 }
 
 // createRunner creates a processor.Runner with the given configuration.
-func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mode, log processor.Logger, defaultBranch string) *processor.Runner {
+func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mode,
+	log processor.Logger, defaultBranch string, holder *status.PhaseHolder) *processor.Runner {
 	// --codex-only mode forces codex enabled regardless of config
 	codexEnabled := cfg.CodexEnabled
 	if mode == processor.ModeCodexOnly {
@@ -418,6 +427,7 @@ func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mo
 		FinalizeEnabled:  cfg.FinalizeEnabled,
 		DefaultBranch:    defaultBranch,
 		AppConfig:        cfg,
+		PhaseHolder:      holder,
 	}, log)
 }
 
@@ -440,7 +450,18 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 	}
 	colors.Info().Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, info.MaxIterations, modeStr)
 	colors.Info().Printf("branch: %s\n", info.Branch)
-	colors.Info().Printf("progress log: %s\n\n", info.ProgressPath)
+	colors.Info().Printf("progress log: %s\n", info.ProgressPath)
+	colors.Info().Printf("models: %s\n\n", formatModels(info.Models))
+}
+
+func formatModels(models config.ClaudeModels) string {
+	if models == (config.ClaudeModels{}) {
+		return "(default)"
+	}
+	return fmt.Sprintf("task=%s, review=%s, plan=%s",
+		cmp.Or(models.Task, "default"),
+		cmp.Or(models.Review, "default"),
+		cmp.Or(models.Plan, "default"))
 }
 
 // runPlanMode executes interactive plan creation mode.
@@ -454,13 +475,16 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 
 	branch := getCurrentBranch(req.GitSvc)
 
+	// create shared phase holder (single source of truth for current phase)
+	holder := &status.PhaseHolder{}
+
 	// create progress logger for plan mode
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanDescription: o.PlanDescription,
 		Mode:            string(processor.ModePlan),
 		Branch:          branch,
 		NoColor:         o.NoColor,
-	}, req.Colors)
+	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
@@ -477,6 +501,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		Mode:            processor.ModePlan,
 		MaxIterations:   o.MaxIterations,
 		ProgressPath:    baseLog.Path(),
+		Models:          req.Config.Models,
 	}, req.Colors)
 
 	// create input collector
@@ -496,6 +521,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		IterationDelayMs: req.Config.IterationDelayMs,
 		DefaultBranch:    req.DefaultBranch,
 		AppConfig:        req.Config,
+		PhaseHolder:      holder,
 	}, baseLog)
 	r.SetInputCollector(collector)
 

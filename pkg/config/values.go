@@ -36,6 +36,9 @@ type Values struct {
 	FinalizeEnabledSet   bool // tracks if finalize_enabled was explicitly set
 	PlansDir             string
 	WatchDirs            []string // directories to watch for progress files
+	ClaudeModelTask      string   // per-phase model for task execution
+	ClaudeModelReview    string   // per-phase model for review phases
+	ClaudeModelPlan      string   // per-phase model for plan creation
 }
 
 // valuesLoader implements ValuesLoader with embedded filesystem fallback.
@@ -249,6 +252,17 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		}
 	}
 
+	// per-phase claude models
+	if key, err := section.GetKey("claude_model_task"); err == nil {
+		values.ClaudeModelTask = key.String()
+	}
+	if key, err := section.GetKey("claude_model_review"); err == nil {
+		values.ClaudeModelReview = key.String()
+	}
+	if key, err := section.GetKey("claude_model_plan"); err == nil {
+		values.ClaudeModelPlan = key.String()
+	}
+
 	return values, nil
 }
 
@@ -309,6 +323,15 @@ func (dst *Values) mergeFrom(src *Values) {
 	}
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
+	}
+	if src.ClaudeModelTask != "" {
+		dst.ClaudeModelTask = src.ClaudeModelTask
+	}
+	if src.ClaudeModelReview != "" {
+		dst.ClaudeModelReview = src.ClaudeModelReview
+	}
+	if src.ClaudeModelPlan != "" {
+		dst.ClaudeModelPlan = src.ClaudeModelPlan
 	}
 }
 

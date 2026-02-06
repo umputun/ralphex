@@ -382,7 +382,7 @@ func TestIsActive(t *testing.T) {
 			PlanFile: planPath,
 			Mode:     "full",
 			Branch:   "main",
-		}, testColors())
+		}, testColors(), &status.PhaseHolder{})
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			_ = logger.Close()
