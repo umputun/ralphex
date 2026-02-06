@@ -23,7 +23,9 @@ Run both commands to understand what was done:
 
 ## Step 2: Launch ALL 5 Review Agents IN PARALLEL
 
-Use the Task tool to launch all 5 agents in parallel (multiple Task calls in one response).
+Launch all agents using the Task tool with run_in_background=true (all in one response).
+Then immediately call TaskOutput(task_id, block=true) for EACH agent to wait for its completion.
+Collect ALL results before proceeding.
 
 Agents to launch:
 {{agent:quality}}

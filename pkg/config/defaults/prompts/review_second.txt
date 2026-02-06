@@ -23,7 +23,11 @@ Run both commands to understand what was done:
 
 ## Step 2: Launch Review Agents IN PARALLEL
 
-Use Task tool to launch these 2 agents in parallel:
+Launch both agents using the Task tool with run_in_background=true (both in one response).
+Then immediately call TaskOutput(task_id, block=true) for EACH agent to wait for its completion.
+Collect ALL results before proceeding.
+
+Agents to launch:
 {{agent:quality}}
 {{agent:implementation}}
 

@@ -309,7 +309,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}, req.Colors)
 
 	// create and run the runner
-	r := createRunner(req.Config, o, req.PlanFile, req.Mode, runnerLog, req.DefaultBranch)
+	r := createRunner(req, o, runnerLog)
 	if runErr := r.Run(ctx); runErr != nil {
 		return fmt.Errorf("runner: %w", runErr)
 	}
@@ -399,26 +399,30 @@ func validateFlags(o opts) error {
 }
 
 // createRunner creates a processor.Runner with the given configuration.
-func createRunner(cfg *config.Config, o opts, planFile string, mode processor.Mode, log processor.Logger, defaultBranch string) *processor.Runner {
+func createRunner(req executePlanRequest, o opts, log processor.Logger) *processor.Runner {
 	// --codex-only mode forces codex enabled regardless of config
-	codexEnabled := cfg.CodexEnabled
-	if mode == processor.ModeCodexOnly {
+	codexEnabled := req.Config.CodexEnabled
+	if req.Mode == processor.ModeCodexOnly {
 		codexEnabled = true
 	}
-	return processor.New(processor.Config{
-		PlanFile:         planFile,
+	r := processor.New(processor.Config{
+		PlanFile:         req.PlanFile,
 		ProgressPath:     log.Path(),
-		Mode:             mode,
+		Mode:             req.Mode,
 		MaxIterations:    o.MaxIterations,
 		Debug:            o.Debug,
 		NoColor:          o.NoColor,
-		IterationDelayMs: cfg.IterationDelayMs,
-		TaskRetryCount:   cfg.TaskRetryCount,
+		IterationDelayMs: req.Config.IterationDelayMs,
+		TaskRetryCount:   req.Config.TaskRetryCount,
 		CodexEnabled:     codexEnabled,
-		FinalizeEnabled:  cfg.FinalizeEnabled,
-		DefaultBranch:    defaultBranch,
-		AppConfig:        cfg,
+		FinalizeEnabled:  req.Config.FinalizeEnabled,
+		DefaultBranch:    req.DefaultBranch,
+		AppConfig:        req.Config,
 	}, log)
+	if req.GitSvc != nil {
+		r.SetGitChecker(req.GitSvc)
+	}
+	return r
 }
 
 func printStartupInfo(info startupInfo, colors *progress.Colors) {

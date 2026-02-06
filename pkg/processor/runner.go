@@ -59,6 +59,7 @@ type Config struct {
 //go:generate moq -out mocks/executor.go -pkg mocks -skip-ensure -fmt goimports . Executor
 //go:generate moq -out mocks/logger.go -pkg mocks -skip-ensure -fmt goimports . Logger
 //go:generate moq -out mocks/input_collector.go -pkg mocks -skip-ensure -fmt goimports . InputCollector
+//go:generate moq -out mocks/git_checker.go -pkg mocks -skip-ensure -fmt goimports . GitChecker
 
 // Executor runs CLI commands and returns results.
 type Executor interface {
@@ -84,6 +85,11 @@ type InputCollector interface {
 	AskDraftReview(ctx context.Context, question string, planContent string) (action string, feedback string, err error)
 }
 
+// GitChecker provides git state inspection for the review loop.
+type GitChecker interface {
+	HeadHash() (string, error)
+}
+
 // Runner orchestrates the execution loop.
 type Runner struct {
 	cfg            Config
@@ -91,6 +97,7 @@ type Runner struct {
 	claude         Executor
 	codex          Executor
 	custom         *executor.CustomExecutor
+	git            GitChecker
 	inputCollector InputCollector
 	iterationDelay time.Duration
 	taskRetryCount int
@@ -187,6 +194,11 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *ex
 // SetInputCollector sets the input collector for plan creation mode.
 func (r *Runner) SetInputCollector(c InputCollector) {
 	r.inputCollector = c
+}
+
+// SetGitChecker sets the git checker for no-commit detection in review loops.
+func (r *Runner) SetGitChecker(g GitChecker) {
+	r.git = g
 }
 
 // Run executes the main loop based on configured mode.
@@ -402,6 +414,9 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 
 		r.log.PrintSection(status.NewClaudeReviewSection(i, ": critical/major"))
 
+		// capture HEAD hash before running claude for no-commit detection
+		headBefore := r.headHash()
+
 		result := r.claude.Run(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt))
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
@@ -419,12 +434,33 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 			return nil
 		}
 
+		// fallback: if HEAD hash hasn't changed, claude found nothing to fix
+		if headBefore != "" {
+			if headAfter := r.headHash(); headAfter == headBefore {
+				r.log.Print("claude review complete - no changes detected")
+				return nil
+			}
+		}
+
 		r.log.Print("issues fixed, running another review iteration...")
 		time.Sleep(r.iterationDelay)
 	}
 
 	r.log.Print("max claude review iterations reached, continuing...")
 	return nil
+}
+
+// headHash returns the current HEAD commit hash, or empty string if unavailable.
+func (r *Runner) headHash() string {
+	if r.git == nil {
+		return ""
+	}
+	hash, err := r.git.HeadHash()
+	if err != nil {
+		r.log.Print("warning: failed to get HEAD hash: %v", err)
+		return ""
+	}
+	return hash
 }
 
 // externalReviewTool returns the effective external review tool to use.

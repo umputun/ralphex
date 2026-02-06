@@ -385,20 +385,16 @@ func TestCheckClaudeDep(t *testing.T) {
 
 func TestCreateRunner(t *testing.T) {
 	t.Run("creates_runner_without_panic", func(t *testing.T) {
-		cfg := &config.Config{
-			IterationDelayMs: 5000,
-			TaskRetryCount:   3,
-			CodexEnabled:     false,
-		}
+		cfg := &config.Config{IterationDelayMs: 5000, TaskRetryCount: 3, CodexEnabled: false}
 		o := opts{MaxIterations: 100, Debug: true, NoColor: true}
 
-		// create a dummy logger for the test
 		colors := testColors()
 		log, err := progress.NewLogger(progress.Config{PlanFile: "", Mode: "full", Branch: "test", NoColor: true}, colors)
 		require.NoError(t, err)
 		defer log.Close()
 
-		runner := createRunner(cfg, o, "/path/to/plan.md", processor.ModeFull, log, "master")
+		req := executePlanRequest{PlanFile: "/path/to/plan.md", Mode: processor.ModeFull, Config: cfg, DefaultBranch: "master"}
+		runner := createRunner(req, o, log)
 		assert.NotNil(t, runner)
 	})
 
@@ -412,7 +408,8 @@ func TestCreateRunner(t *testing.T) {
 		defer log.Close()
 
 		// tests that codex-only mode code path runs without panic
-		runner := createRunner(cfg, o, "", processor.ModeCodexOnly, log, "main")
+		req := executePlanRequest{Mode: processor.ModeCodexOnly, Config: cfg, DefaultBranch: "main"}
+		runner := createRunner(req, o, log)
 		assert.NotNil(t, runner)
 	})
 }

@@ -1746,3 +1746,135 @@ func (m *mockCustomRunnerImpl) Run(_ context.Context, _, _ string) (io.Reader, f
 	*m.idx++
 	return strings.NewReader(result.Output), func() error { return result.Error }, nil
 }
+
+func TestRunner_ReviewLoop_NoCommitExit(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
+		{Output: "looked at code, nothing to fix"},         // post-codex review loop iteration - no signal
+	})
+	codex := newMockExecutor(nil)
+
+	// mock git checker returns same hash both times (no commits made)
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) {
+			return "abc123def456abc123def456abc123def456abcd", nil
+		},
+	}
+
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil)
+	r.SetGitChecker(gitMock)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 3)
+
+	// verify "no changes detected" was logged
+	var foundNoChanges bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "no changes detected") {
+			foundNoChanges = true
+			break
+		}
+	}
+	assert.True(t, foundNoChanges, "should log no changes detected")
+}
+
+func TestRunner_ReviewLoop_CommitDetected_ContinuesLoop(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
+		{Output: "fixed issues"},                           // post-codex review loop iteration 1 - no signal
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop iteration 2 - done
+	})
+	codex := newMockExecutor(nil)
+
+	// mock git checker: hash changes between before/after calls within an iteration
+	// simulating that claude made a commit during the review
+	hashes := []string{
+		"aaaa00000000000000000000000000000000aaaa", // pre-codex loop: headBefore (REVIEW_DONE exits before headAfter)
+		"aaaa00000000000000000000000000000000aaaa", // post-codex loop iter 1: headBefore
+		"bbbb00000000000000000000000000000000bbbb", // post-codex loop iter 1: headAfter (different = commit detected)
+		"bbbb00000000000000000000000000000000bbbb", // post-codex loop iter 2: headBefore (REVIEW_DONE exits)
+	}
+	hashIdx := 0
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) {
+			require.Less(t, hashIdx, len(hashes), "unexpected extra HeadHash call #%d", hashIdx)
+			h := hashes[hashIdx]
+			hashIdx++
+			return h, nil
+		},
+	}
+
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil)
+	r.SetGitChecker(gitMock)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 4)
+	assert.Len(t, gitMock.HeadHashCalls(), 4, "expected exactly 4 HeadHash calls")
+}
+
+func TestRunner_ReviewLoop_GitCheckerNil_SkipsNoCommitCheck(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	// max review iterations = max(3, 30/10) = 3 per loop
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
+		{Output: "looking at code"},                        // post-codex review loop 1
+		{Output: "looking at code"},                        // post-codex review loop 2
+		{Output: "looking at code"},                        // post-codex review loop 3
+	})
+	codex := newMockExecutor(nil)
+
+	// no git checker - nil
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// first review + pre-codex loop (1 iteration) + post-codex loop (3 iterations, max reached)
+	assert.Len(t, claude.RunCalls(), 5)
+}
+
+func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	// max review iterations = max(3, 30/10) = 3 per loop
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
+		{Output: "looking at code"},                        // post-codex review loop 1
+		{Output: "looking at code"},                        // post-codex review loop 2
+		{Output: "looking at code"},                        // post-codex review loop 3
+	})
+	codex := newMockExecutor(nil)
+
+	// git checker always returns error — should degrade gracefully (run to max iterations)
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) {
+			return "", errors.New("git HEAD error")
+		},
+	}
+
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil)
+	r.SetGitChecker(gitMock)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	// first review + pre-codex loop (1 iteration) + post-codex loop (3 iterations, max reached)
+	assert.Len(t, claude.RunCalls(), 5)
+}

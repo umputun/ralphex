@@ -1606,6 +1606,51 @@ func TestRepo_resolveToCommit(t *testing.T) {
 	})
 }
 
+func TestRepo_headHash(t *testing.T) {
+	t.Run("returns valid 40-char hex string", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		hash, err := r.headHash()
+		require.NoError(t, err)
+		assert.Len(t, hash, 40)
+		assert.Regexp(t, `^[0-9a-f]{40}$`, hash)
+	})
+
+	t.Run("changes after new commit", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		hash1, err := r.headHash()
+		require.NoError(t, err)
+
+		// create a new commit
+		testFile := filepath.Join(dir, "new.txt")
+		require.NoError(t, os.WriteFile(testFile, []byte("new"), 0o600))
+		require.NoError(t, r.Add("new.txt"))
+		require.NoError(t, r.Commit("second commit"))
+
+		hash2, err := r.headHash()
+		require.NoError(t, err)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("fails on empty repo", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := git.PlainInit(dir, false)
+		require.NoError(t, err)
+
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		_, err = r.headHash()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "get HEAD")
+	})
+}
+
 // setupTestRepo creates a test git repository with an initial commit.
 func setupTestRepo(t *testing.T) string {
 	t.Helper()

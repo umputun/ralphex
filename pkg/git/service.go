@@ -39,6 +39,11 @@ func (s *Service) Root() string {
 	return s.repo.Root()
 }
 
+// HeadHash returns the current HEAD commit hash as a hex string.
+func (s *Service) HeadHash() (string, error) {
+	return s.repo.headHash()
+}
+
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD state.
 func (s *Service) CurrentBranch() (string, error) {
 	return s.repo.CurrentBranch()

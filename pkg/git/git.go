@@ -26,6 +26,15 @@ type repo struct {
 	path    string // absolute path to repository root
 }
 
+// headHash returns the current HEAD commit hash as a hex string.
+func (r *repo) headHash() (string, error) {
+	head, err := r.gitRepo.Head()
+	if err != nil {
+		return "", fmt.Errorf("get HEAD: %w", err)
+	}
+	return head.Hash().String(), nil
+}
+
 // Root returns the absolute path to the repository root.
 func (r *repo) Root() string {
 	return r.path
