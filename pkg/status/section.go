@@ -1,19 +1,6 @@
-package processor
+package status
 
 import "fmt"
-
-// Phase represents execution phase for color coding.
-type Phase string
-
-// Phase constants for execution stages.
-const (
-	PhaseTask       Phase = "task"        // execution phase (green)
-	PhaseReview     Phase = "review"      // code review phase (cyan)
-	PhaseCodex      Phase = "codex"       // codex analysis phase (magenta)
-	PhaseClaudeEval Phase = "claude-eval" // claude evaluating codex (bright cyan)
-	PhasePlan       Phase = "plan"        // plan creation phase (info color)
-	PhaseFinalize   Phase = "finalize"    // finalize step phase (green)
-)
 
 // SectionType represents the semantic type of a section header.
 // the web layer uses these types to emit appropriate boundary events:

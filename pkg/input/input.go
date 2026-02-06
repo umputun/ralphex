@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/umputun/ralphex/pkg/render"
+	"github.com/charmbracelet/glamour"
 )
 
 // ReadLineResult holds the result of reading a line
@@ -196,7 +196,7 @@ func (c *TerminalCollector) AskDraftReview(ctx context.Context, question, planCo
 	stdin := c.getStdin()
 
 	// render and display the plan
-	rendered, err := render.RenderMarkdown(planContent, c.noColor)
+	rendered, err := c.renderMarkdown(planContent)
 	if err != nil {
 		return "", "", fmt.Errorf("render plan: %w", err)
 	}
@@ -234,4 +234,24 @@ func (c *TerminalCollector) AskDraftReview(ctx context.Context, question, planCo
 	}
 
 	return actionLower, "", nil
+}
+
+// renderMarkdown renders markdown content for terminal display.
+// if noColor is true, returns the content unchanged.
+func (c *TerminalCollector) renderMarkdown(content string) (string, error) {
+	if c.noColor {
+		return content, nil
+	}
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(80),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create renderer: %w", err)
+	}
+	result, err := renderer.Render(content)
+	if err != nil {
+		return "", fmt.Errorf("render markdown: %w", err)
+	}
+	return result, nil
 }

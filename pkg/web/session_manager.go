@@ -13,18 +13,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/umputun/ralphex/pkg/processor"
+	"github.com/umputun/ralphex/pkg/executor"
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // MaxCompletedSessions is the maximum number of completed sessions to retain.
 // active sessions are never evicted. oldest completed sessions are removed
 // when this limit is exceeded to prevent unbounded memory growth.
 const MaxCompletedSessions = 100
-
-// maxScannerBuffer is the maximum buffer size for bufio.Scanner.
-// set to 64MB to handle large outputs (e.g., diffs of large JSON files).
-const maxScannerBuffer = 64 * 1024 * 1024
 
 // SessionManager maintains a registry of all discovered sessions.
 // it handles discovery of progress files, state detection via flock,
@@ -65,13 +62,14 @@ func (m *SessionManager) Discover(dir string) ([]string, error) {
 		if existing != nil {
 			// update existing session state
 			if err := m.updateSession(existing); err != nil {
-				// log error but continue with other sessions
+				log.Printf("[WARN] failed to update session %s: %v", id, err)
 				continue
 			}
 		} else {
 			// create new session
 			session := NewSession(id, path)
 			if err := m.updateSession(session); err != nil {
+				log.Printf("[WARN] failed to create session %s: %v", id, err)
 				continue
 			}
 			m.mu.Lock()
@@ -174,7 +172,7 @@ func (m *SessionManager) updateSession(session *Session) error {
 	// this handles sessions discovered after they finished.
 	// MarkLoadedIfNot is atomic to prevent double-loading from concurrent goroutines.
 	if newState == SessionStateCompleted && session.MarkLoadedIfNot() {
-		loadProgressFileIntoSession(session.Path, session)
+		m.loadProgressFileIntoSession(session.Path, session)
 	}
 
 	// parse metadata from file header
@@ -405,7 +403,7 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 	scanner := bufio.NewScanner(f)
 	// increase buffer size for large lines (matching executor)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxScannerBuffer)
+	scanner.Buffer(buf, executor.MaxScannerBuffer)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -440,7 +438,7 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 // loadProgressFileIntoSession reads a progress file and publishes events to the session's SSE server.
 // used for completed sessions that were discovered after they finished.
 // errors are silently ignored since this is best-effort loading.
-func loadProgressFileIntoSession(path string, session *Session) {
+func (m *SessionManager) loadProgressFileIntoSession(path string, session *Session) {
 	f, err := os.Open(path) //nolint:gosec // path from user-controlled glob pattern, acceptable for session discovery
 	if err != nil {
 		return
@@ -450,103 +448,72 @@ func loadProgressFileIntoSession(path string, session *Session) {
 	scanner := bufio.NewScanner(f)
 	// increase buffer size for large lines (matching executor)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxScannerBuffer)
+	scanner.Buffer(buf, executor.MaxScannerBuffer)
 	inHeader := true
-	phase := processor.PhaseTask
+	phase := status.PhaseTask
 	var pendingSection string // section header waiting for first timestamped event
 
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		// skip empty lines
 		if line == "" {
 			continue
 		}
 
-		// check for header separator (line of dashes without spaces)
-		if strings.HasPrefix(line, "---") && strings.Count(line, "-") > 20 && !strings.Contains(line, " ") {
-			inHeader = false
-			continue
-		}
+		parsed, newInHeader := parseProgressLine(line, inHeader)
+		inHeader = newInHeader
 
-		// skip header lines
-		if inHeader {
+		switch parsed.Type {
+		case ParsedLineSkip:
 			continue
-		}
-
-		// check for section header (--- section name ---)
-		if matches := sectionRegex.FindStringSubmatch(line); matches != nil {
-			sectionName := matches[1]
-			phase = phaseFromSection(sectionName)
+		case ParsedLineSection:
+			phase = parsed.Phase
 			// defer emitting section until we see a timestamped event
-			pendingSection = sectionName
-			continue
-		}
-
-		// check for timestamped line
-		if matches := timestampRegex.FindStringSubmatch(line); matches != nil {
-			text := matches[2]
-
-			// parse timestamp
-			ts, err := time.Parse("06-01-02 15:04:05", matches[1])
-			if err != nil {
-				ts = time.Now()
-			}
-
+			pendingSection = parsed.Section
+		case ParsedLineTimestamp:
 			// emit pending section with this event's timestamp (for accurate durations)
 			if pendingSection != "" {
-				emitPendingSection(session, pendingSection, phase, ts)
+				m.emitPendingSection(session, pendingSection, phase, parsed.Timestamp)
 				pendingSection = ""
 			}
-
-			eventType := detectEventType(text)
-			event := Event{
-				Type:      eventType,
+			_ = session.Publish(Event{
+				Type:      parsed.EventType,
 				Phase:     phase,
-				Text:      text,
-				Timestamp: ts,
-			}
-
-			if sig := extractSignalFromText(text); sig != "" {
-				event.Signal = sig
-				event.Type = EventTypeSignal
-			}
-
-			_ = session.Publish(event)
-			continue
+				Text:      parsed.Text,
+				Timestamp: parsed.Timestamp,
+				Signal:    parsed.Signal,
+			})
+		case ParsedLinePlain:
+			_ = session.Publish(Event{
+				Type:      EventTypeOutput,
+				Phase:     phase,
+				Text:      parsed.Text,
+				Timestamp: time.Now(),
+			})
 		}
-
-		// plain line (no timestamp)
-		_ = session.Publish(Event{
-			Type:      EventTypeOutput,
-			Phase:     phase,
-			Text:      line,
-			Timestamp: time.Now(),
-		})
 	}
 }
 
 // phaseFromSection determines the phase from a section name.
 // checks "codex"/"custom" before "review" because external review sections should be PhaseCodex.
-func phaseFromSection(name string) processor.Phase {
+func phaseFromSection(name string) status.Phase {
 	nameLower := strings.ToLower(name)
 	switch {
 	case strings.Contains(nameLower, "task"):
-		return processor.PhaseTask
+		return status.PhaseTask
 	case strings.Contains(nameLower, "codex"), strings.Contains(nameLower, "custom"):
-		return processor.PhaseCodex
+		return status.PhaseCodex
 	case strings.Contains(nameLower, "review"):
-		return processor.PhaseReview
+		return status.PhaseReview
 	case strings.Contains(nameLower, "claude-eval") || strings.Contains(nameLower, "claude eval"):
-		return processor.PhaseClaudeEval
+		return status.PhaseClaudeEval
 	default:
-		return processor.PhaseTask
+		return status.PhaseTask
 	}
 }
 
 // emitPendingSection publishes section and task_start events for a pending section.
 // task_start is emitted before section for task iteration sections.
-func emitPendingSection(session *Session, sectionName string, phase processor.Phase, ts time.Time) {
+func (m *SessionManager) emitPendingSection(session *Session, sectionName string, phase status.Phase, ts time.Time) {
 	// emit task_start event for task iteration sections
 	if matches := taskIterationRegex.FindStringSubmatch(sectionName); matches != nil {
 		taskNum, err := strconv.Atoi(matches[1])

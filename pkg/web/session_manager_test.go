@@ -1,8 +1,11 @@
 package web
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/config"
-	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 func TestNewSessionManager(t *testing.T) {
@@ -108,6 +111,64 @@ func TestSessionManager_Discover(t *testing.T) {
 		// should update metadata
 		assert.Equal(t, "feature", s.GetMetadata().Branch)
 	})
+}
+
+func TestSessionManager_DiscoverLogsErrorForBrokenFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod doesn't restrict read access on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permissions, can't simulate unreadable file")
+	}
+
+	dir := t.TempDir()
+
+	// create a valid progress file
+	validPath := filepath.Join(dir, "progress-valid.txt")
+	createProgressFile(t, validPath, "valid.md", "main", "full")
+
+	// create a broken progress file (unreadable)
+	brokenPath := filepath.Join(dir, "progress-broken.txt")
+	createProgressFile(t, brokenPath, "broken.md", "main", "full")
+	require.NoError(t, os.Chmod(brokenPath, 0o000))
+	t.Cleanup(func() {
+		_ = os.Chmod(brokenPath, 0o600) // restore for cleanup
+	})
+
+	// capture log output
+	var buf bytes.Buffer
+	origOut := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(origOut)
+		log.SetFlags(origFlags)
+	})
+
+	m := NewSessionManager()
+	defer m.Close()
+
+	ids, err := m.Discover(dir)
+	require.NoError(t, err)
+
+	// both IDs should be returned (Discover adds to list before updateSession)
+	assert.Len(t, ids, 2)
+
+	// valid session should be processed successfully
+	validID := sessionIDFromPath(validPath)
+	validSession := m.Get(validID)
+	require.NotNil(t, validSession, "valid session should be processed despite broken sibling")
+
+	// broken session should have been skipped (not added to manager)
+	brokenID := sessionIDFromPath(brokenPath)
+	brokenSession := m.Get(brokenID)
+	assert.Nil(t, brokenSession, "broken session should not be in manager")
+
+	// verify error was logged
+	logOutput := buf.String()
+	assert.Contains(t, logOutput, "[WARN]", "should log warning for broken file")
+	assert.Contains(t, logOutput, "broken", "log should reference the broken session")
 }
 
 func TestSessionManager_Get(t *testing.T) {
@@ -408,7 +469,7 @@ Branch: main
 	})
 }
 
-func TestLoadProgressFileIntoSession(t *testing.T) {
+func TestSessionManager_LoadProgressFileIntoSession(t *testing.T) {
 	t.Run("loads completed session content without panic", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "progress-test.txt")
@@ -430,19 +491,23 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test", path)
 		defer session.Close()
 
 		// should not panic and should process the file
-		loadProgressFileIntoSession(path, session)
+		m.loadProgressFileIntoSession(path, session)
 	})
 
 	t.Run("handles missing file gracefully", func(t *testing.T) {
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test", "/nonexistent/file.txt")
 		defer session.Close()
 
 		// should not panic
-		loadProgressFileIntoSession("/nonexistent/file.txt", session)
+		m.loadProgressFileIntoSession("/nonexistent/file.txt", session)
 	})
 
 	t.Run("skips header lines", func(t *testing.T) {
@@ -459,15 +524,17 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test", path)
 		defer session.Close()
 
 		// should not panic
-		loadProgressFileIntoSession(path, session)
+		m.loadProgressFileIntoSession(path, session)
 	})
 }
 
-func TestEmitPendingSection(t *testing.T) {
+func TestSessionManager_EmitPendingSection(t *testing.T) {
 	t.Run("task iteration section emits task_start event", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "progress-task-start.txt")
@@ -488,11 +555,13 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test-task-start", path)
 		defer session.Close()
 
 		// load should not panic and should emit task_start events
-		loadProgressFileIntoSession(path, session)
+		m.loadProgressFileIntoSession(path, session)
 	})
 
 	t.Run("non-task sections do not emit task_start", func(t *testing.T) {
@@ -516,11 +585,13 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test-non-task", path)
 		defer session.Close()
 
 		// should not panic - these sections won't match taskIterationRegex
-		loadProgressFileIntoSession(path, session)
+		m.loadProgressFileIntoSession(path, session)
 	})
 
 	t.Run("invalid task number handling", func(t *testing.T) {
@@ -542,11 +613,13 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test-edge", path)
 		defer session.Close()
 
 		// should not panic
-		loadProgressFileIntoSession(path, session)
+		m.loadProgressFileIntoSession(path, session)
 	})
 
 	t.Run("task iteration section triggers task_start with correct task number", func(t *testing.T) {
@@ -570,11 +643,13 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test-tasknum", path)
 		defer session.Close()
 
 		// should process all task iterations without panic
-		loadProgressFileIntoSession(path, session)
+		m.loadProgressFileIntoSession(path, session)
 	})
 }
 
@@ -780,18 +855,18 @@ func TestPhaseFromSection(t *testing.T) {
 	tests := []struct {
 		name     string
 		section  string
-		expected processor.Phase
+		expected status.Phase
 	}{
-		{"task section", "Task 1: implement feature", processor.PhaseTask},
-		{"codex iteration", "codex iteration 1", processor.PhaseCodex},
-		{"codex external review", "codex external review", processor.PhaseCodex},
-		{"custom review iteration", "custom review iteration 1", processor.PhaseCodex},
-		{"custom iteration", "custom iteration 2", processor.PhaseCodex},
-		{"claude review", "claude review 0: all findings", processor.PhaseReview},
-		{"review loop", "review iteration 1", processor.PhaseReview},
-		{"claude eval", "claude-eval", processor.PhaseClaudeEval},
-		{"claude eval space", "claude eval", processor.PhaseClaudeEval},
-		{"unknown defaults to task", "unknown section", processor.PhaseTask},
+		{"task section", "Task 1: implement feature", status.PhaseTask},
+		{"codex iteration", "codex iteration 1", status.PhaseCodex},
+		{"codex external review", "codex external review", status.PhaseCodex},
+		{"custom review iteration", "custom review iteration 1", status.PhaseCodex},
+		{"custom iteration", "custom iteration 2", status.PhaseCodex},
+		{"claude review", "claude review 0: all findings", status.PhaseReview},
+		{"review loop", "review iteration 1", status.PhaseReview},
+		{"claude eval", "claude-eval", status.PhaseClaudeEval},
+		{"claude eval space", "claude eval", status.PhaseClaudeEval},
+		{"unknown defaults to task", "unknown section", status.PhaseTask},
 	}
 
 	for _, tt := range tests {
@@ -801,7 +876,7 @@ func TestPhaseFromSection(t *testing.T) {
 	}
 }
 
-func TestLoadProgressFileIntoSessionLargeBuffer(t *testing.T) {
+func TestSessionManager_LoadProgressFileIntoSessionLargeBuffer(t *testing.T) {
 	// test that lines larger than 64KB (default bufio.Scanner limit) are handled
 	t.Run("handles lines larger than default scanner buffer", func(t *testing.T) {
 		dir := t.TempDir()
@@ -824,10 +899,12 @@ Started: 2026-01-22 10:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
+		m := NewSessionManager()
+		defer m.Close()
 		session := NewSession("test-large", path)
 		defer session.Close()
 
 		// should not panic or error with "token too long"
-		loadProgressFileIntoSession(path, session)
+		m.loadProgressFileIntoSession(path, session)
 	})
 }

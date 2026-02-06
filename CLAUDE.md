@@ -23,8 +23,9 @@ pkg/config/         # configuration loading, defaults, prompts, agents
 pkg/executor/       # claude and codex CLI execution
 pkg/git/            # git operations using go-git library
 pkg/plan/           # plan file selection and manipulation
-pkg/processor/      # orchestration loop, prompts, signals
+pkg/processor/      # orchestration loop, prompts, signal helpers
 pkg/progress/       # timestamped logging with color
+pkg/status/         # shared execution model types: signals, phases, sections
 pkg/web/            # web dashboard, SSE streaming, session management
 e2e/                # playwright e2e tests for web dashboard
 docs/plans/         # plan files location
@@ -39,7 +40,7 @@ docs/plans/         # plan files location
 
 ## Key Patterns
 
-- Signal-based completion detection (COMPLETED, FAILED, REVIEW_DONE signals)
+- Signal-based completion detection (COMPLETED, FAILED, REVIEW_DONE signals) — constants in `pkg/status/`
 - Plan creation signals: QUESTION (with JSON payload) and PLAN_READY
 - Streaming output with timestamps
 - Progress logging to files
@@ -119,8 +120,8 @@ Plan creation signals:
 
 Key files:
 - `pkg/input/input.go` - terminal input collector (fzf/fallback, draft review)
-- `pkg/processor/signals.go` - QUESTION/PLAN_DRAFT/PLAN_READY signal parsing
-- `pkg/render/markdown.go` - glamour-based markdown rendering for draft preview
+- `pkg/status/status.go` - shared signal constants (COMPLETED, FAILED, REVIEW_DONE, etc.)
+- `pkg/processor/signals.go` - signal detection helpers (IsReviewDone, IsCodexDone, etc.)
 - `pkg/config/defaults/prompts/make_plan.txt` - plan creation prompt
 
 ## Platform Support

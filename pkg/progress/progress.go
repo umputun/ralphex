@@ -15,22 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/umputun/ralphex/pkg/config"
-	"github.com/umputun/ralphex/pkg/processor"
-)
-
-// Phase is an alias to processor.Phase for backwards compatibility.
-//
-// Deprecated: use processor.Phase directly.
-type Phase = processor.Phase
-
-// Phase constants for execution stages - aliases to processor constants.
-const (
-	PhaseTask       = processor.PhaseTask
-	PhaseReview     = processor.PhaseReview
-	PhaseCodex      = processor.PhaseCodex
-	PhaseClaudeEval = processor.PhaseClaudeEval
-	PhasePlan       = processor.PhasePlan
-	PhaseFinalize   = processor.PhaseFinalize
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // Colors holds all color configuration for output formatting.
@@ -45,14 +30,14 @@ type Colors struct {
 	signal     *color.Color
 	timestamp  *color.Color
 	info       *color.Color
-	phases     map[Phase]*color.Color
+	phases     map[status.Phase]*color.Color
 }
 
 // NewColors creates Colors from config.ColorConfig.
 // all colors must be provided - use config with embedded defaults fallback.
 // panics if any color value is invalid (configuration error).
 func NewColors(cfg config.ColorConfig) *Colors {
-	c := &Colors{phases: make(map[Phase]*color.Color)}
+	c := &Colors{phases: make(map[status.Phase]*color.Color)}
 	c.task = parseColorOrPanic(cfg.Task, "task")
 	c.review = parseColorOrPanic(cfg.Review, "review")
 	c.codex = parseColorOrPanic(cfg.Codex, "codex")
@@ -63,12 +48,12 @@ func NewColors(cfg config.ColorConfig) *Colors {
 	c.timestamp = parseColorOrPanic(cfg.Timestamp, "timestamp")
 	c.info = parseColorOrPanic(cfg.Info, "info")
 
-	c.phases[PhaseTask] = c.task
-	c.phases[PhaseReview] = c.review
-	c.phases[PhaseCodex] = c.codex
-	c.phases[PhaseClaudeEval] = c.claudeEval
-	c.phases[PhasePlan] = c.task     // plan phase uses task color (green)
-	c.phases[PhaseFinalize] = c.task // finalize phase uses task color (green)
+	c.phases[status.PhaseTask] = c.task
+	c.phases[status.PhaseReview] = c.review
+	c.phases[status.PhaseCodex] = c.codex
+	c.phases[status.PhaseClaudeEval] = c.claudeEval
+	c.phases[status.PhasePlan] = c.task     // plan phase uses task color (green)
+	c.phases[status.PhaseFinalize] = c.task // finalize phase uses task color (green)
 
 	return c
 }
@@ -111,7 +96,7 @@ func parseColorOrPanic(s, name string) *color.Color {
 func (c *Colors) Info() *color.Color { return c.info }
 
 // ForPhase returns the color for the given execution phase.
-func (c *Colors) ForPhase(p Phase) *color.Color { return c.phases[p] }
+func (c *Colors) ForPhase(p status.Phase) *color.Color { return c.phases[p] }
 
 // Timestamp returns the timestamp color.
 func (c *Colors) Timestamp() *color.Color { return c.timestamp }
@@ -130,7 +115,7 @@ type Logger struct {
 	file      *os.File
 	stdout    io.Writer
 	startTime time.Time
-	phase     Phase
+	phase     status.Phase
 	colors    *Colors
 }
 
@@ -177,7 +162,7 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 		file:      f,
 		stdout:    os.Stdout,
 		startTime: time.Now(),
-		phase:     PhaseTask,
+		phase:     status.PhaseTask,
 		colors:    colors,
 	}
 
@@ -205,7 +190,7 @@ func (l *Logger) Path() string {
 }
 
 // SetPhase sets the current execution phase for color coding.
-func (l *Logger) SetPhase(phase Phase) {
+func (l *Logger) SetPhase(phase status.Phase) {
 	l.phase = phase
 }
 
@@ -236,7 +221,7 @@ func (l *Logger) PrintRaw(format string, args ...any) {
 
 // PrintSection writes a section header without timestamp in yellow.
 // format: "\n--- {label} ---\n"
-func (l *Logger) PrintSection(section processor.Section) {
+func (l *Logger) PrintSection(section status.Section) {
 	header := fmt.Sprintf("\n--- %s ---\n", section.Label)
 	l.writeFile("%s", header)
 	l.writeStdout("%s", l.colors.Warn().Sprint(header))

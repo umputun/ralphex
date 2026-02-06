@@ -12,10 +12,21 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/executor"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // DefaultIterationDelay is the pause between iterations to allow system to settle.
 const DefaultIterationDelay = 2 * time.Second
+
+const (
+	minReviewIterations    = 3    // minimum claude review iterations
+	reviewIterationDivisor = 10   // review iterations = max_iterations / divisor
+	minCodexIterations     = 3    // minimum codex review iterations
+	codexIterationDivisor  = 5    // codex iterations = max_iterations / divisor
+	minPlanIterations      = 5    // minimum plan creation iterations
+	planIterationDivisor   = 5    // plan iterations = max_iterations / divisor
+	maxCodexSummaryLen     = 5000 // max chars for codex output summary
+)
 
 // Mode represents the execution mode.
 type Mode string
@@ -56,10 +67,10 @@ type Executor interface {
 
 // Logger provides logging functionality.
 type Logger interface {
-	SetPhase(phase Phase)
+	SetPhase(phase status.Phase)
 	Print(format string, args ...any)
 	PrintRaw(format string, args ...any)
-	PrintSection(section Section)
+	PrintSection(section status.Section)
 	PrintAligned(text string)
 	LogQuestion(question string, options []string)
 	LogAnswer(answer string)
@@ -203,7 +214,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 	}
 
 	// phase 1: task execution
-	r.log.SetPhase(PhaseTask)
+	r.log.SetPhase(status.PhaseTask)
 	r.log.PrintRaw("starting task execution phase\n")
 
 	if err := r.runTaskPhase(ctx); err != nil {
@@ -211,8 +222,8 @@ func (r *Runner) runFull(ctx context.Context) error {
 	}
 
 	// phase 2: first review pass - address ALL findings
-	r.log.SetPhase(PhaseReview)
-	r.log.PrintSection(NewGenericSection("claude review 0: all findings"))
+	r.log.SetPhase(status.PhaseReview)
+	r.log.PrintSection(status.NewGenericSection("claude review 0: all findings"))
 
 	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
 		return fmt.Errorf("first review: %w", err)
@@ -223,23 +234,8 @@ func (r *Runner) runFull(ctx context.Context) error {
 		return fmt.Errorf("pre-codex review loop: %w", err)
 	}
 
-	// phase 2.5: codex external review loop
-	r.log.SetPhase(PhaseCodex)
-	r.log.PrintSection(NewGenericSection("codex external review"))
-
-	if err := r.runCodexLoop(ctx); err != nil {
-		return fmt.Errorf("codex loop: %w", err)
-	}
-
-	// phase 3: claude review loop (critical/major) after codex
-	r.log.SetPhase(PhaseReview)
-
-	if err := r.runClaudeReviewLoop(ctx); err != nil {
-		return fmt.Errorf("post-codex review loop: %w", err)
-	}
-
-	// optional finalize step (best-effort, but propagates context cancellation)
-	if err := r.runFinalize(ctx); err != nil {
+	// phase 2.5+3: codex → post-codex review → finalize
+	if err := r.runCodexAndPostReview(ctx); err != nil {
 		return err
 	}
 
@@ -250,8 +246,8 @@ func (r *Runner) runFull(ctx context.Context) error {
 // runReviewOnly executes only the review pipeline: review → codex → review.
 func (r *Runner) runReviewOnly(ctx context.Context) error {
 	// phase 1: first review
-	r.log.SetPhase(PhaseReview)
-	r.log.PrintSection(NewGenericSection("claude review 0: all findings"))
+	r.log.SetPhase(status.PhaseReview)
+	r.log.PrintSection(status.NewGenericSection("claude review 0: all findings"))
 
 	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
 		return fmt.Errorf("first review: %w", err)
@@ -262,23 +258,8 @@ func (r *Runner) runReviewOnly(ctx context.Context) error {
 		return fmt.Errorf("pre-codex review loop: %w", err)
 	}
 
-	// phase 2: codex external review loop
-	r.log.SetPhase(PhaseCodex)
-	r.log.PrintSection(NewGenericSection("codex external review"))
-
-	if err := r.runCodexLoop(ctx); err != nil {
-		return fmt.Errorf("codex loop: %w", err)
-	}
-
-	// phase 3: claude review loop (critical/major) after codex
-	r.log.SetPhase(PhaseReview)
-
-	if err := r.runClaudeReviewLoop(ctx); err != nil {
-		return fmt.Errorf("post-codex review loop: %w", err)
-	}
-
-	// optional finalize step (best-effort, but propagates context cancellation)
-	if err := r.runFinalize(ctx); err != nil {
+	// phase 2+3: codex → post-codex review → finalize
+	if err := r.runCodexAndPostReview(ctx); err != nil {
 		return err
 	}
 
@@ -286,30 +267,36 @@ func (r *Runner) runReviewOnly(ctx context.Context) error {
 	return nil
 }
 
-// runCodexOnly executes only the codex pipeline: codex → review.
+// runCodexOnly executes only the codex pipeline: codex → review → finalize.
 func (r *Runner) runCodexOnly(ctx context.Context) error {
-	// phase 1: codex external review loop
-	r.log.SetPhase(PhaseCodex)
-	r.log.PrintSection(NewGenericSection("codex external review"))
+	if err := r.runCodexAndPostReview(ctx); err != nil {
+		return err
+	}
+
+	r.log.Print("codex phases completed successfully")
+	return nil
+}
+
+// runCodexAndPostReview runs the shared codex → post-codex claude review → finalize pipeline.
+// used by runFull, runReviewOnly, and runCodexOnly to avoid duplicating this sequence.
+func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
+	// codex external review loop
+	r.log.SetPhase(status.PhaseCodex)
+	r.log.PrintSection(status.NewGenericSection("codex external review"))
 
 	if err := r.runCodexLoop(ctx); err != nil {
 		return fmt.Errorf("codex loop: %w", err)
 	}
 
-	// phase 2: claude review loop (critical/major) after codex
-	r.log.SetPhase(PhaseReview)
+	// claude review loop (critical/major) after codex
+	r.log.SetPhase(status.PhaseReview)
 
 	if err := r.runClaudeReviewLoop(ctx); err != nil {
 		return fmt.Errorf("post-codex review loop: %w", err)
 	}
 
 	// optional finalize step (best-effort, but propagates context cancellation)
-	if err := r.runFinalize(ctx); err != nil {
-		return err
-	}
-
-	r.log.Print("codex phases completed successfully")
-	return nil
+	return r.runFinalize(ctx)
 }
 
 // runTasksOnly executes only task phase, skipping all reviews.
@@ -318,7 +305,7 @@ func (r *Runner) runTasksOnly(ctx context.Context) error {
 		return errors.New("plan file required for tasks-only mode")
 	}
 
-	r.log.SetPhase(PhaseTask)
+	r.log.SetPhase(status.PhaseTask)
 	r.log.PrintRaw("starting task execution phase\n")
 
 	if err := r.runTaskPhase(ctx); err != nil {
@@ -342,7 +329,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 		default:
 		}
 
-		r.log.PrintSection(NewTaskIterationSection(i))
+		r.log.PrintSection(status.NewTaskIterationSection(i))
 
 		result := r.claude.Run(ctx, prompt)
 		if result.Error != nil {
@@ -403,8 +390,8 @@ func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
 
 // runClaudeReviewLoop runs claude review iterations using second review prompt.
 func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
-	// review iterations = 10% of max_iterations (min 3)
-	maxReviewIterations := max(3, r.cfg.MaxIterations/10)
+	// review iterations = 10% of max_iterations
+	maxReviewIterations := max(minReviewIterations, r.cfg.MaxIterations/reviewIterationDivisor)
 
 	for i := 1; i <= maxReviewIterations; i++ {
 		select {
@@ -413,7 +400,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 		default:
 		}
 
-		r.log.PrintSection(NewClaudeReviewSection(i, ": critical/major"))
+		r.log.PrintSection(status.NewClaudeReviewSection(i, ": critical/major"))
 
 		result := r.claude.Run(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt))
 		if result.Error != nil {
@@ -480,7 +467,7 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 			buildPrompt:     r.buildCustomReviewPrompt,
 			buildEvalPrompt: r.buildCustomEvaluationPrompt,
 			showSummary:     r.showCustomSummary,
-			makeSection:     NewCustomIterationSection,
+			makeSection:     status.NewCustomIterationSection,
 		})
 	}
 
@@ -491,7 +478,7 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 		buildPrompt:     r.buildCodexPrompt,
 		buildEvalPrompt: r.buildCodexEvaluationPrompt,
 		showSummary:     r.showCodexSummary,
-		makeSection:     NewCodexIterationSection,
+		makeSection:     status.NewCodexIterationSection,
 	})
 }
 
@@ -502,7 +489,7 @@ type externalReviewConfig struct {
 	buildPrompt     func(isFirst bool, claudeResponse string) string         // build prompt for review tool
 	buildEvalPrompt func(output string) string                               // build evaluation prompt for claude
 	showSummary     func(output string)                                      // display review findings summary
-	makeSection     func(iteration int) Section                              // create section header
+	makeSection     func(iteration int) status.Section                       // create section header
 }
 
 // runExternalReviewLoop runs a generic external review tool-claude loop until no findings.
@@ -539,12 +526,12 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		cfg.showSummary(reviewResult.Output)
 
 		// pass output to claude for evaluation and fixing
-		r.log.SetPhase(PhaseClaudeEval)
-		r.log.PrintSection(NewClaudeEvalSection())
+		r.log.SetPhase(status.PhaseClaudeEval)
+		r.log.PrintSection(status.NewClaudeEvalSection())
 		claudeResult := r.claude.Run(ctx, cfg.buildEvalPrompt(reviewResult.Output))
 
 		// restore codex phase for next iteration
-		r.log.SetPhase(PhaseCodex)
+		r.log.SetPhase(status.PhaseCodex)
 		if claudeResult.Error != nil {
 			if err := r.handlePatternMatchError(claudeResult.Error, "claude"); err != nil {
 				return err
@@ -638,7 +625,7 @@ func (r *Runner) hasUncompletedTasks() bool {
 }
 
 // showCodexSummary displays a condensed summary of codex output before Claude evaluation.
-// extracts text until first code block or 500 chars, whichever is shorter.
+// extracts text until first code block or maxCodexSummaryLen chars, whichever is shorter.
 func (r *Runner) showCodexSummary(output string) {
 	r.showExternalReviewSummary("codex", output)
 }
@@ -658,9 +645,9 @@ func (r *Runner) showExternalReviewSummary(toolName, output string) {
 		summary = summary[:idx]
 	}
 
-	// limit to 5000 chars
-	if len(summary) > 5000 {
-		summary = summary[:5000] + "..."
+	// limit to maxCodexSummaryLen chars
+	if len(summary) > maxCodexSummaryLen {
+		summary = summary[:maxCodexSummaryLen] + "..."
 	}
 
 	summary = strings.TrimSpace(summary)
@@ -759,12 +746,12 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		return errors.New("input collector required for plan mode")
 	}
 
-	r.log.SetPhase(PhasePlan)
+	r.log.SetPhase(status.PhasePlan)
 	r.log.PrintRaw("starting interactive plan creation\n")
 	r.log.Print("plan request: %s", r.cfg.PlanDescription)
 
-	// plan iterations use 20% of max_iterations (min 5)
-	maxPlanIterations := max(5, r.cfg.MaxIterations/5)
+	// plan iterations use 20% of max_iterations
+	maxPlanIterations := max(minPlanIterations, r.cfg.MaxIterations/planIterationDivisor)
 
 	// track revision feedback for context in next iteration
 	var lastRevisionFeedback string
@@ -776,7 +763,7 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		default:
 		}
 
-		r.log.PrintSection(NewPlanIterationSection(i))
+		r.log.PrintSection(status.NewPlanIterationSection(i))
 
 		prompt := r.buildPlanPrompt()
 		// append revision feedback context if present
@@ -851,8 +838,8 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 		return nil
 	}
 
-	r.log.SetPhase(PhaseFinalize)
-	r.log.PrintSection(NewGenericSection("finalize step"))
+	r.log.SetPhase(status.PhaseFinalize)
+	r.log.PrintSection(status.NewGenericSection("finalize step"))
 
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.FinalizePrompt)
 	result := r.claude.Run(ctx, prompt)

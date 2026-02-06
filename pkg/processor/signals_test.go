@@ -7,26 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsTerminalSignal(t *testing.T) {
-	tests := []struct {
-		signal string
-		want   bool
-	}{
-		{SignalCompleted, true},
-		{SignalFailed, true},
-		{SignalReviewDone, false},
-		{SignalCodexDone, false},
-		{"", false},
-		{"OTHER", false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.signal, func(t *testing.T) {
-			assert.Equal(t, tc.want, IsTerminalSignal(tc.signal))
-		})
-	}
-}
-
 func TestIsReviewDone(t *testing.T) {
 	tests := []struct {
 		signal string
@@ -265,28 +245,6 @@ func TestParseQuestionPayload_NoSignal(t *testing.T) {
 			result, err := ParseQuestionPayload(tc.output)
 			require.ErrorIs(t, err, ErrNoQuestionSignal)
 			assert.Nil(t, result)
-		})
-	}
-}
-
-func TestIsPlanDraft(t *testing.T) {
-	tests := []struct {
-		signal string
-		want   bool
-	}{
-		{SignalPlanDraft, true},
-		{SignalCompleted, false},
-		{SignalFailed, false},
-		{SignalReviewDone, false},
-		{SignalCodexDone, false},
-		{SignalQuestion, false},
-		{SignalPlanReady, false},
-		{"", false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.signal, func(t *testing.T) {
-			assert.Equal(t, tc.want, IsPlanDraft(tc.signal))
 		})
 	}
 }

@@ -6,18 +6,20 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/umputun/ralphex/pkg/status"
 )
 
-// Signal constants for execution control.
-// using <<<RALPHEX:...>>> format for clear detection.
+// signal constants are aliases to the shared status package for convenience within processor.
+// all signal values are defined in pkg/status to avoid circular dependencies.
 const (
-	SignalCompleted  = "<<<RALPHEX:ALL_TASKS_DONE>>>"
-	SignalFailed     = "<<<RALPHEX:TASK_FAILED>>>"
-	SignalReviewDone = "<<<RALPHEX:REVIEW_DONE>>>"
-	SignalCodexDone  = "<<<RALPHEX:CODEX_REVIEW_DONE>>>"
-	SignalQuestion   = "<<<RALPHEX:QUESTION>>>"
-	SignalPlanReady  = "<<<RALPHEX:PLAN_READY>>>"
-	SignalPlanDraft  = "<<<RALPHEX:PLAN_DRAFT>>>"
+	SignalCompleted  = status.Completed
+	SignalFailed     = status.Failed
+	SignalReviewDone = status.ReviewDone
+	SignalCodexDone  = status.CodexDone
+	SignalQuestion   = status.Question
+	SignalPlanReady  = status.PlanReady
+	SignalPlanDraft  = status.PlanDraft
 )
 
 // questionSignalRe matches the QUESTION signal block with JSON payload
@@ -33,11 +35,6 @@ type QuestionPayload struct {
 	Context  string   `json:"context,omitempty"`
 }
 
-// IsTerminalSignal returns true if signal indicates execution should stop.
-func IsTerminalSignal(signal string) bool {
-	return signal == SignalCompleted || signal == SignalFailed
-}
-
 // IsReviewDone returns true if signal indicates review phase is complete.
 func IsReviewDone(signal string) bool {
 	return signal == SignalReviewDone
@@ -51,11 +48,6 @@ func IsCodexDone(signal string) bool {
 // IsPlanReady returns true if signal indicates plan creation is complete.
 func IsPlanReady(signal string) bool {
 	return signal == SignalPlanReady
-}
-
-// IsPlanDraft returns true if signal indicates a plan draft is ready for review.
-func IsPlanDraft(signal string) bool {
-	return signal == SignalPlanDraft
 }
 
 // ErrNoQuestionSignal indicates no question signal was found in output

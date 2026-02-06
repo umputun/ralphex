@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/config"
-	"github.com/umputun/ralphex/pkg/processor"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // testColors returns a Colors instance for testing with valid RGB values.
@@ -128,7 +128,7 @@ func TestLogger_PrintSection(t *testing.T) {
 	var buf bytes.Buffer
 	l.stdout = &buf
 
-	section := processor.NewGenericSection("test section")
+	section := status.NewGenericSection("test section")
 	l.PrintSection(section)
 
 	content, err := os.ReadFile(l.Path())
@@ -245,13 +245,13 @@ func TestLogger_SetPhase(t *testing.T) {
 	var buf bytes.Buffer
 	l.stdout = &buf
 
-	l.SetPhase(PhaseTask)
+	l.SetPhase(status.PhaseTask)
 	l.Print("task output")
 
-	l.SetPhase(PhaseReview)
+	l.SetPhase(status.PhaseReview)
 	l.Print("review output")
 
-	l.SetPhase(PhaseCodex)
+	l.SetPhase(status.PhaseCodex)
 	l.Print("codex output")
 
 	output := buf.String()
@@ -279,7 +279,7 @@ func TestLogger_ColorDisabled(t *testing.T) {
 	var buf bytes.Buffer
 	l.stdout = &buf
 
-	l.SetPhase(PhaseTask)
+	l.SetPhase(status.PhaseTask)
 	l.Print("no color output")
 
 	output := buf.String()
@@ -547,10 +547,10 @@ func TestNewColors(t *testing.T) {
 		assert.NotNil(t, colors.Error())
 		assert.NotNil(t, colors.Signal())
 		assert.NotNil(t, colors.Timestamp())
-		assert.NotNil(t, colors.ForPhase(PhaseTask))
-		assert.NotNil(t, colors.ForPhase(PhaseReview))
-		assert.NotNil(t, colors.ForPhase(PhaseCodex))
-		assert.NotNil(t, colors.ForPhase(PhaseClaudeEval))
+		assert.NotNil(t, colors.ForPhase(status.PhaseTask))
+		assert.NotNil(t, colors.ForPhase(status.PhaseReview))
+		assert.NotNil(t, colors.ForPhase(status.PhaseCodex))
+		assert.NotNil(t, colors.ForPhase(status.PhaseClaudeEval))
 	})
 
 	t.Run("panics on invalid task color", func(t *testing.T) {
@@ -613,10 +613,10 @@ func TestColors_Methods(t *testing.T) {
 	})
 
 	t.Run("ForPhase returns phase colors", func(t *testing.T) {
-		assert.NotNil(t, colors.ForPhase(PhaseTask))
-		assert.NotNil(t, colors.ForPhase(PhaseReview))
-		assert.NotNil(t, colors.ForPhase(PhaseCodex))
-		assert.NotNil(t, colors.ForPhase(PhaseClaudeEval))
+		assert.NotNil(t, colors.ForPhase(status.PhaseTask))
+		assert.NotNil(t, colors.ForPhase(status.PhaseReview))
+		assert.NotNil(t, colors.ForPhase(status.PhaseCodex))
+		assert.NotNil(t, colors.ForPhase(status.PhaseClaudeEval))
 	})
 }
 

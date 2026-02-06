@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/executor/mocks"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 func TestClaudeExecutor_Run_Success(t *testing.T) {
@@ -325,10 +326,11 @@ func TestDetectSignal(t *testing.T) {
 		want string
 	}{
 		{"some text", ""},
-		{"task done <<<RALPHEX:ALL_TASKS_DONE>>>", "<<<RALPHEX:ALL_TASKS_DONE>>>"},
-		{"<<<RALPHEX:TASK_FAILED>>> error", "<<<RALPHEX:TASK_FAILED>>>"},
-		{"review complete <<<RALPHEX:REVIEW_DONE>>>", "<<<RALPHEX:REVIEW_DONE>>>"},
-		{"<<<RALPHEX:CODEX_REVIEW_DONE>>> analysis done", "<<<RALPHEX:CODEX_REVIEW_DONE>>>"},
+		{"task done " + status.Completed, status.Completed},
+		{status.Failed + " error", status.Failed},
+		{"review complete " + status.ReviewDone, status.ReviewDone},
+		{status.CodexDone + " analysis done", status.CodexDone},
+		{"plan complete " + status.PlanReady, status.PlanReady},
 		{"no signal here", ""},
 	}
 

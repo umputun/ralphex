@@ -316,3 +316,56 @@ func (r *sequentialLineReader) Read(p []byte) (n int, err error) {
 	r.index++
 	return copy(p, line), nil
 }
+
+func TestTerminalCollector_renderMarkdown(t *testing.T) {
+	t.Run("with color enabled renders markdown", func(t *testing.T) {
+		c := &TerminalCollector{noColor: false}
+		content := "# Heading\n\nSome **bold** text."
+		result, err := c.renderMarkdown(content)
+		require.NoError(t, err)
+		assert.NotEqual(t, content, result)
+		assert.Contains(t, result, "Heading")
+		assert.Contains(t, result, "bold")
+	})
+
+	t.Run("with noColor returns plain content", func(t *testing.T) {
+		c := &TerminalCollector{noColor: true}
+		content := "# Heading\n\nSome **bold** text."
+		result, err := c.renderMarkdown(content)
+		require.NoError(t, err)
+		assert.Equal(t, content, result)
+	})
+
+	t.Run("handles empty content", func(t *testing.T) {
+		c := &TerminalCollector{noColor: false}
+		result, err := c.renderMarkdown("")
+		require.NoError(t, err)
+		assert.Empty(t, strings.TrimSpace(result))
+	})
+
+	t.Run("handles empty content with noColor", func(t *testing.T) {
+		c := &TerminalCollector{noColor: true}
+		result, err := c.renderMarkdown("")
+		require.NoError(t, err)
+		assert.Empty(t, result)
+	})
+
+	t.Run("handles code blocks", func(t *testing.T) {
+		c := &TerminalCollector{noColor: false}
+		content := "```go\nfunc main() {}\n```"
+		result, err := c.renderMarkdown(content)
+		require.NoError(t, err)
+		assert.Contains(t, result, "func")
+		assert.Contains(t, result, "main")
+	})
+
+	t.Run("handles lists", func(t *testing.T) {
+		c := &TerminalCollector{noColor: false}
+		content := "- item 1\n- item 2\n- item 3"
+		result, err := c.renderMarkdown(content)
+		require.NoError(t, err)
+		assert.Contains(t, result, "item 1")
+		assert.Contains(t, result, "item 2")
+		assert.Contains(t, result, "item 3")
+	})
+}

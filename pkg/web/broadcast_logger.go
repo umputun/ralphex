@@ -5,10 +5,25 @@ import (
 	"log"
 	"strings"
 
-	"github.com/umputun/ralphex/pkg/processor"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
-// BroadcastLogger wraps a processor.Logger and broadcasts events to SSE clients.
+//go:generate moq -out mocks/logger.go -pkg mocks -skip-ensure -fmt goimports . Logger
+
+// Logger provides progress logging for web dashboard wrapping.
+type Logger interface {
+	SetPhase(phase status.Phase)
+	Print(format string, args ...any)
+	PrintRaw(format string, args ...any)
+	PrintSection(section status.Section)
+	PrintAligned(text string)
+	LogQuestion(question string, options []string)
+	LogAnswer(answer string)
+	LogDraftReview(action string, feedback string)
+	Path() string
+}
+
+// BroadcastLogger wraps a Logger and broadcasts events to SSE clients.
 // implements the decorator pattern - all calls are forwarded to the inner logger
 // while also being converted to events for web streaming.
 //
@@ -16,26 +31,26 @@ import (
 // from a single goroutine (typically the main execution loop). The SSE server
 // it writes to handles concurrent access from SSE clients.
 type BroadcastLogger struct {
-	inner       processor.Logger
+	inner       Logger
 	session     *Session
-	phase       processor.Phase
+	phase       status.Phase
 	currentTask int // tracks current task number for boundary events
 }
 
 // NewBroadcastLogger creates a logger that wraps inner and broadcasts to the session's SSE server.
-func NewBroadcastLogger(inner processor.Logger, session *Session) *BroadcastLogger {
+func NewBroadcastLogger(inner Logger, session *Session) *BroadcastLogger {
 	return &BroadcastLogger{
 		inner:   inner,
 		session: session,
-		phase:   processor.PhaseTask,
+		phase:   status.PhaseTask,
 	}
 }
 
 // SetPhase sets the current execution phase for color coding.
 // emits task_end event if transitioning away from task phase with an active task.
-func (b *BroadcastLogger) SetPhase(phase processor.Phase) {
+func (b *BroadcastLogger) SetPhase(phase status.Phase) {
 	// if leaving task phase with an active task, emit task_end
-	if b.phase == processor.PhaseTask && phase != processor.PhaseTask && b.currentTask > 0 {
+	if b.phase == status.PhaseTask && phase != status.PhaseTask && b.currentTask > 0 {
 		b.broadcast(NewTaskEndEvent(b.phase, b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
 		b.currentTask = 0
 	}
@@ -57,12 +72,12 @@ func (b *BroadcastLogger) PrintRaw(format string, args ...any) {
 
 // PrintSection writes a section header and broadcasts it.
 // emits task/iteration boundary events based on section type.
-func (b *BroadcastLogger) PrintSection(section processor.Section) {
+func (b *BroadcastLogger) PrintSection(section status.Section) {
 	b.inner.PrintSection(section)
 
 	// emit boundary events based on section type
 	switch section.Type {
-	case processor.SectionTaskIteration:
+	case status.SectionTaskIteration:
 		// emit task end for previous task (if any)
 		if b.currentTask > 0 {
 			b.broadcast(NewTaskEndEvent(b.phase, b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
@@ -70,13 +85,13 @@ func (b *BroadcastLogger) PrintSection(section processor.Section) {
 		b.currentTask = section.Iteration
 		b.broadcast(NewTaskStartEvent(b.phase, section.Iteration, section.Label))
 
-	case processor.SectionClaudeReview:
+	case status.SectionClaudeReview:
 		b.broadcast(NewIterationStartEvent(b.phase, section.Iteration, section.Label))
 
-	case processor.SectionCodexIteration:
+	case status.SectionCodexIteration:
 		b.broadcast(NewIterationStartEvent(b.phase, section.Iteration, section.Label))
 
-	case processor.SectionGeneric, processor.SectionClaudeEval:
+	case status.SectionGeneric, status.SectionClaudeEval:
 		// no additional events for generic sections or claude eval
 
 	default:
@@ -142,13 +157,13 @@ func formatText(format string, args ...any) string {
 
 func extractTerminalSignal(text string) string {
 	switch {
-	case strings.Contains(text, processor.SignalCompleted):
+	case strings.Contains(text, status.Completed):
 		return "COMPLETED"
-	case strings.Contains(text, processor.SignalFailed):
+	case strings.Contains(text, status.Failed):
 		return "FAILED"
-	case strings.Contains(text, processor.SignalReviewDone):
+	case strings.Contains(text, status.ReviewDone):
 		return "REVIEW_DONE"
-	case strings.Contains(text, processor.SignalCodexDone):
+	case strings.Contains(text, status.CodexDone):
 		return "CODEX_REVIEW_DONE"
 	default:
 		return ""

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/umputun/ralphex/pkg/processor"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 func TestNewTailer(t *testing.T) {
@@ -18,19 +18,19 @@ func TestNewTailer(t *testing.T) {
 
 		assert.Equal(t, "/tmp/test.txt", tailer.path)
 		assert.Equal(t, 100*time.Millisecond, tailer.config.PollInterval)
-		assert.Equal(t, processor.PhaseTask, tailer.config.InitialPhase)
+		assert.Equal(t, status.PhaseTask, tailer.config.InitialPhase)
 		assert.False(t, tailer.running)
 	})
 
 	t.Run("uses provided config", func(t *testing.T) {
 		cfg := TailerConfig{
 			PollInterval: 200 * time.Millisecond,
-			InitialPhase: processor.PhaseReview,
+			InitialPhase: status.PhaseReview,
 		}
 		tailer := NewTailer("/tmp/test.txt", cfg)
 
 		assert.Equal(t, 200*time.Millisecond, tailer.config.PollInterval)
-		assert.Equal(t, processor.PhaseReview, tailer.config.InitialPhase)
+		assert.Equal(t, status.PhaseReview, tailer.config.InitialPhase)
 	})
 }
 
@@ -44,7 +44,7 @@ func TestTailer_ParseLine(t *testing.T) {
 		require.NotNil(t, event)
 		assert.Equal(t, EventTypeOutput, event.Type)
 		assert.Equal(t, "Hello world", event.Text)
-		assert.Equal(t, processor.PhaseTask, event.Phase)
+		assert.Equal(t, status.PhaseTask, event.Phase)
 		assert.Equal(t, 2026, event.Timestamp.Year())
 		assert.Equal(t, time.January, event.Timestamp.Month())
 		assert.Equal(t, 22, event.Timestamp.Day())
@@ -117,27 +117,26 @@ func TestTailer_ParseLine(t *testing.T) {
 	})
 }
 
-func TestTailer_UpdatePhaseFromSection(t *testing.T) {
+func TestTailer_PhaseFromSection(t *testing.T) {
 	tests := []struct {
 		name     string
 		section  string
-		expected processor.Phase
+		expected status.Phase
 	}{
-		{"task section", "task iteration 1", processor.PhaseTask},
-		{"review section", "review iteration 2", processor.PhaseReview},
-		{"codex section", "codex analysis", processor.PhaseCodex},
-		{"claude-eval section", "claude-eval phase", processor.PhaseClaudeEval},
-		{"claude eval section", "claude eval phase", processor.PhaseClaudeEval},
-		{"uppercase task", "TASK Phase", processor.PhaseTask},
+		{"task section", "task iteration 1", status.PhaseTask},
+		{"review section", "review iteration 2", status.PhaseReview},
+		{"codex section", "codex analysis", status.PhaseCodex},
+		{"claude-eval section", "claude-eval phase", status.PhaseClaudeEval},
+		{"claude eval section", "claude eval phase", status.PhaseClaudeEval},
+		{"uppercase task", "TASK Phase", status.PhaseTask},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
-			tailer.inHeader = false
-
-			tailer.updatePhaseFromSection(tt.section)
-			assert.Equal(t, tt.expected, tailer.phase)
+			line := "--- " + tt.section + " ---"
+			parsed, _ := parseProgressLine(line, false)
+			assert.Equal(t, ParsedLineSection, parsed.Type)
+			assert.Equal(t, tt.expected, parsed.Phase)
 		})
 	}
 }
@@ -162,7 +161,7 @@ Started: 2026-01-22 10:30:00
 
 		tailer := NewTailer(progressFile, TailerConfig{
 			PollInterval: 10 * time.Millisecond,
-			InitialPhase: processor.PhaseTask,
+			InitialPhase: status.PhaseTask,
 		})
 
 		err = tailer.Start(true)
@@ -215,7 +214,7 @@ Started: 2026-01-22 10:30:00
 
 		tailer := NewTailer(progressFile, TailerConfig{
 			PollInterval: 10 * time.Millisecond,
-			InitialPhase: processor.PhaseTask,
+			InitialPhase: status.PhaseTask,
 		})
 
 		err = tailer.Start(true)
@@ -265,7 +264,7 @@ Started: 2026-01-22 10:30:00
 
 		tailer := NewTailer(progressFile, TailerConfig{
 			PollInterval: 10 * time.Millisecond,
-			InitialPhase: processor.PhaseTask,
+			InitialPhase: status.PhaseTask,
 		})
 
 		// start from end (not fromStart)

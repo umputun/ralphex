@@ -338,14 +338,12 @@ func (d *defaultsInstaller) resetAgentsDir(agentsDir string, scanner *bufio.Scan
 	}
 
 	// display different files with dates
-	if len(differentFiles) > 0 {
-		fmt.Fprintf(stdout, "  Different from current defaults:\n")
-		for _, f := range differentFiles {
-			if f.missing {
-				fmt.Fprintf(stdout, "    %s (missing)\n", f.name)
-			} else {
-				fmt.Fprintf(stdout, "    %s (%s)\n", f.name, f.modTime.Format("2006-01-02"))
-			}
+	fmt.Fprintf(stdout, "  Different from current defaults:\n")
+	for _, f := range differentFiles {
+		if f.missing {
+			fmt.Fprintf(stdout, "    %s (missing)\n", f.name)
+		} else {
+			fmt.Fprintf(stdout, "    %s (%s)\n", f.name, f.modTime.Format("2006-01-02"))
 		}
 	}
 

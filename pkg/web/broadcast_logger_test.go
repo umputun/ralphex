@@ -6,16 +6,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/umputun/ralphex/pkg/processor"
-	"github.com/umputun/ralphex/pkg/processor/mocks"
+	"github.com/umputun/ralphex/pkg/status"
+	"github.com/umputun/ralphex/pkg/web/mocks"
 )
 
 func TestNewBroadcastLogger(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc:     func(processor.Phase) {},
+		SetPhaseFunc:     func(status.Phase) {},
 		PrintFunc:        func(string, ...any) {},
 		PrintRawFunc:     func(string, ...any) {},
-		PrintSectionFunc: func(processor.Section) {},
+		PrintSectionFunc: func(status.Section) {},
 		PrintAlignedFunc: func(string) {},
 		PathFunc:         func() string { return "/test/path" },
 	}
@@ -25,42 +25,42 @@ func TestNewBroadcastLogger(t *testing.T) {
 	bl := NewBroadcastLogger(mockLogger, session)
 
 	assert.NotNil(t, bl)
-	assert.Equal(t, processor.PhaseTask, bl.phase)
+	assert.Equal(t, status.PhaseTask, bl.phase)
 }
 
 func TestBroadcastLogger_SetPhase(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc: func(processor.Phase) {},
+		SetPhaseFunc: func(status.Phase) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
 	bl := NewBroadcastLogger(mockLogger, session)
 
-	bl.SetPhase(processor.PhaseReview)
+	bl.SetPhase(status.PhaseReview)
 
-	assert.Equal(t, processor.PhaseReview, bl.phase)
+	assert.Equal(t, status.PhaseReview, bl.phase)
 	require.Len(t, mockLogger.SetPhaseCalls(), 1)
-	assert.Equal(t, processor.PhaseReview, mockLogger.SetPhaseCalls()[0].Phase)
+	assert.Equal(t, status.PhaseReview, mockLogger.SetPhaseCalls()[0].Phase)
 }
 
 func TestBroadcastLogger_SetPhase_EmitsTaskEnd(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc:     func(processor.Phase) {},
-		PrintSectionFunc: func(processor.Section) {},
+		SetPhaseFunc:     func(status.Phase) {},
+		PrintSectionFunc: func(status.Section) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
 	bl := NewBroadcastLogger(mockLogger, session)
 
 	// set task phase and start a task
-	bl.SetPhase(processor.PhaseTask)
-	bl.PrintSection(processor.NewTaskIterationSection(1))
+	bl.SetPhase(status.PhaseTask)
+	bl.PrintSection(status.NewTaskIterationSection(1))
 
 	// track current task
 	assert.Equal(t, 1, bl.currentTask)
 
 	// transition away from task phase - should reset currentTask
-	bl.SetPhase(processor.PhaseReview)
+	bl.SetPhase(status.PhaseReview)
 
 	// currentTask should be reset to 0
 	assert.Equal(t, 0, bl.currentTask)
@@ -100,13 +100,13 @@ func TestBroadcastLogger_PrintRaw(t *testing.T) {
 
 func TestBroadcastLogger_PrintSection(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		PrintSectionFunc: func(processor.Section) {},
+		PrintSectionFunc: func(status.Section) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
 	bl := NewBroadcastLogger(mockLogger, session)
 
-	section := processor.NewGenericSection("Test Section")
+	section := status.NewGenericSection("Test Section")
 	bl.PrintSection(section)
 
 	// verify inner logger was called
@@ -145,7 +145,7 @@ func TestBroadcastLogger_Path(t *testing.T) {
 
 func TestBroadcastLogger_PhaseAffectsEvents(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		SetPhaseFunc: func(processor.Phase) {},
+		SetPhaseFunc: func(status.Phase) {},
 		PrintFunc:    func(string, ...any) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
@@ -154,11 +154,11 @@ func TestBroadcastLogger_PhaseAffectsEvents(t *testing.T) {
 
 	// print with default phase (task)
 	bl.Print("task message")
-	assert.Equal(t, processor.PhaseTask, bl.phase)
+	assert.Equal(t, status.PhaseTask, bl.phase)
 
 	// change phase and verify it's updated
-	bl.SetPhase(processor.PhaseCodex)
-	assert.Equal(t, processor.PhaseCodex, bl.phase)
+	bl.SetPhase(status.PhaseCodex)
+	assert.Equal(t, status.PhaseCodex, bl.phase)
 }
 
 func TestFormatText(t *testing.T) {
@@ -183,40 +183,40 @@ func TestFormatText(t *testing.T) {
 
 func TestBroadcastLogger_PrintSection_TaskBoundaryEvents(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		PrintSectionFunc: func(processor.Section) {},
+		PrintSectionFunc: func(status.Section) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
 	bl := NewBroadcastLogger(mockLogger, session)
 
 	// emit task iteration section - should set currentTask
-	bl.PrintSection(processor.NewTaskIterationSection(1))
+	bl.PrintSection(status.NewTaskIterationSection(1))
 	assert.Equal(t, 1, bl.currentTask)
 
 	// emit another task iteration - should update currentTask
-	bl.PrintSection(processor.NewTaskIterationSection(2))
+	bl.PrintSection(status.NewTaskIterationSection(2))
 	assert.Equal(t, 2, bl.currentTask)
 }
 
 func TestBroadcastLogger_PrintSection_IterationEvents(t *testing.T) {
 	mockLogger := &mocks.LoggerMock{
-		PrintSectionFunc: func(processor.Section) {},
-		SetPhaseFunc:     func(processor.Phase) {},
+		PrintSectionFunc: func(status.Section) {},
+		SetPhaseFunc:     func(status.Phase) {},
 	}
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
 	bl := NewBroadcastLogger(mockLogger, session)
 
 	// test claude review iteration pattern
-	bl.SetPhase(processor.PhaseReview)
-	bl.PrintSection(processor.NewClaudeReviewSection(3, ": critical/major"))
+	bl.SetPhase(status.PhaseReview)
+	bl.PrintSection(status.NewClaudeReviewSection(3, ": critical/major"))
 
 	// verify inner logger was called
 	require.Len(t, mockLogger.PrintSectionCalls(), 1)
 
 	// test codex iteration pattern
-	bl.SetPhase(processor.PhaseCodex)
-	bl.PrintSection(processor.NewCodexIterationSection(5))
+	bl.SetPhase(status.PhaseCodex)
+	bl.PrintSection(status.NewCodexIterationSection(5))
 
 	// verify inner logger was called again
 	require.Len(t, mockLogger.PrintSectionCalls(), 2)
@@ -287,31 +287,11 @@ func TestExtractTerminalSignal(t *testing.T) {
 		text   string
 		signal string
 	}{
-		{
-			name:   "completed",
-			text:   "task done <<<RALPHEX:ALL_TASKS_DONE>>>",
-			signal: "COMPLETED",
-		},
-		{
-			name:   "failed",
-			text:   "task failed <<<RALPHEX:TASK_FAILED>>>",
-			signal: "FAILED",
-		},
-		{
-			name:   "review-done",
-			text:   "review done <<<RALPHEX:REVIEW_DONE>>>",
-			signal: "REVIEW_DONE",
-		},
-		{
-			name:   "codex-review-done",
-			text:   "codex done <<<RALPHEX:CODEX_REVIEW_DONE>>>",
-			signal: "CODEX_REVIEW_DONE",
-		},
-		{
-			name:   "no signal",
-			text:   "regular output",
-			signal: "",
-		},
+		{name: "completed", text: "task done " + status.Completed, signal: "COMPLETED"},
+		{name: "failed", text: "task failed " + status.Failed, signal: "FAILED"},
+		{name: "review-done", text: "review done " + status.ReviewDone, signal: "REVIEW_DONE"},
+		{name: "codex-review-done", text: "codex done " + status.CodexDone, signal: "CODEX_REVIEW_DONE"},
+		{name: "no signal", text: "regular output", signal: ""},
 	}
 
 	for _, tc := range cases {

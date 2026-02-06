@@ -133,7 +133,7 @@ func (e *CustomExecutor) processOutput(ctx context.Context, r io.Reader) (output
 	scanner := bufio.NewScanner(r)
 	// increase buffer size for large output lines
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxScannerBuffer)
+	scanner.Buffer(buf, MaxScannerBuffer)
 
 	for scanner.Scan() {
 		select {

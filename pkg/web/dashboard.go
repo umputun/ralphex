@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
 )
 
@@ -17,7 +16,7 @@ const serverStartupTimeout = 100 * time.Millisecond
 
 // DashboardConfig holds configuration for dashboard initialization.
 type DashboardConfig struct {
-	BaseLog         processor.Logger // base progress logger
+	BaseLog         Logger           // base progress logger
 	Port            int              // web server port
 	PlanFile        string           // path to plan file (empty for watch-only mode)
 	Branch          string           // current git branch
@@ -31,7 +30,7 @@ type Dashboard struct {
 	port            int
 	planFile        string
 	branch          string
-	baseLog         processor.Logger
+	baseLog         Logger
 	watchDirs       []string
 	configWatchDirs []string
 	colors          *progress.Colors
@@ -53,7 +52,7 @@ func NewDashboard(cfg DashboardConfig) *Dashboard {
 // Start creates the web server and broadcast logger, starting the server in background.
 // returns the broadcast logger to use for execution, or error if server fails to start.
 // when watchDirs is non-empty, creates multi-session mode with file watching.
-func (d *Dashboard) Start(ctx context.Context) (processor.Logger, error) {
+func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 	// create session for SSE streaming (handles both live streaming and history replay)
 	session := NewSession("main", d.baseLog.Path())
 	broadcastLog := NewBroadcastLogger(d.baseLog, session)

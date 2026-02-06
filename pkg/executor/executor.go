@@ -10,13 +10,15 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 //go:generate moq -out mocks/command_runner.go -pkg mocks -skip-ensure -fmt goimports . CommandRunner
 
-// maxScannerBuffer is the maximum buffer size for bufio.Scanner.
+// MaxScannerBuffer is the maximum buffer size for bufio.Scanner.
 // set to 64MB to handle large outputs (e.g., diffs of large JSON files).
-const maxScannerBuffer = 64 * 1024 * 1024
+const MaxScannerBuffer = 64 * 1024 * 1024
 
 // Result holds execution result with output and detected signal.
 type Result struct {
@@ -237,7 +239,7 @@ func (e *ClaudeExecutor) parseStream(r io.Reader) Result {
 	scanner := bufio.NewScanner(r)
 	// increase buffer size for large JSON lines (large diffs with parallel agents)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxScannerBuffer)
+	scanner.Buffer(buf, MaxScannerBuffer)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -324,17 +326,17 @@ func (e *ClaudeExecutor) extractText(event *streamEvent) string {
 	return ""
 }
 
-// detectSignal checks text for completion signals.
-// Looks for <<<RALPHEX:...>>> format signals.
+// detectSignal checks text for completion status.
+// looks for <<<RALPHEX:...>>> format status.
 func detectSignal(text string) string {
-	signals := []string{
-		"<<<RALPHEX:ALL_TASKS_DONE>>>",
-		"<<<RALPHEX:TASK_FAILED>>>",
-		"<<<RALPHEX:REVIEW_DONE>>>",
-		"<<<RALPHEX:CODEX_REVIEW_DONE>>>",
-		"<<<RALPHEX:PLAN_READY>>>",
+	knownSignals := []string{
+		status.Completed,
+		status.Failed,
+		status.ReviewDone,
+		status.CodexDone,
+		status.PlanReady,
 	}
-	for _, sig := range signals {
+	for _, sig := range knownSignals {
 		if strings.Contains(text, sig) {
 			return sig
 		}

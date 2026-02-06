@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/config"
+	"github.com/umputun/ralphex/pkg/processor/mocks"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // testAppConfig loads config with embedded defaults for testing.
@@ -16,32 +18,17 @@ func testAppConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-// stubLogger is a simple logger stub for internal tests that need to test
-// methods on Runner without using the mock package (to avoid import cycles).
-type stubLogger struct {
-	path       string
-	printCalls []printCall
-}
-
-type printCall struct {
-	Format string
-	Args   []any
-}
-
-func (s *stubLogger) SetPhase(_ Phase) {}
-func (s *stubLogger) Print(f string, a ...any) {
-	s.printCalls = append(s.printCalls, printCall{Format: f, Args: a})
-}
-func (s *stubLogger) PrintRaw(_ string, _ ...any)      {}
-func (s *stubLogger) PrintSection(_ Section)           {}
-func (s *stubLogger) PrintAligned(_ string)            {}
-func (s *stubLogger) LogQuestion(_ string, _ []string) {}
-func (s *stubLogger) LogAnswer(_ string)               {}
-func (s *stubLogger) LogDraftReview(_, _ string)       {}
-func (s *stubLogger) Path() string                     { return s.path }
-func (s *stubLogger) PrintCalls() []printCall          { return s.printCalls }
-
-// newMockLogger creates a stub logger for internal tests.
-func newMockLogger(path string) *stubLogger { //nolint:unparam // path is used by callers
-	return &stubLogger{path: path}
+// newMockLogger creates a moq-generated logger mock with no-op implementations.
+func newMockLogger(path string) *mocks.LoggerMock { //nolint:unparam // path is used by callers
+	return &mocks.LoggerMock{
+		SetPhaseFunc:       func(_ status.Phase) {},
+		PrintFunc:          func(_ string, _ ...any) {},
+		PrintRawFunc:       func(_ string, _ ...any) {},
+		PrintSectionFunc:   func(_ status.Section) {},
+		PrintAlignedFunc:   func(_ string) {},
+		LogQuestionFunc:    func(_ string, _ []string) {},
+		LogAnswerFunc:      func(_ string) {},
+		LogDraftReviewFunc: func(_, _ string) {},
+		PathFunc:           func() string { return path },
+	}
 }

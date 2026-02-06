@@ -9,11 +9,11 @@ import (
 	"github.com/umputun/ralphex/pkg/status"
 )
 
-// LoggerMock is a mock implementation of processor.Logger.
+// LoggerMock is a mock implementation of web.Logger.
 //
 //	func TestSomethingThatUsesLogger(t *testing.T) {
 //
-//		// make and configure a mocked processor.Logger
+//		// make and configure a mocked web.Logger
 //		mockedLogger := &LoggerMock{
 //			LogAnswerFunc: func(answer string)  {
 //				panic("mock out the LogAnswer method")
@@ -44,7 +44,7 @@ import (
 //			},
 //		}
 //
-//		// use mockedLogger in code that requires processor.Logger
+//		// use mockedLogger in code that requires web.Logger
 //		// and then make assertions.
 //
 //	}

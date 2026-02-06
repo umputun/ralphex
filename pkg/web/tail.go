@@ -11,20 +11,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/umputun/ralphex/pkg/processor"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // TailerConfig holds configuration for the Tailer.
 type TailerConfig struct {
-	PollInterval time.Duration   // how often to check for new content (default: 100ms)
-	InitialPhase processor.Phase // phase to use for events (default: PhaseTask)
+	PollInterval time.Duration // how often to check for new content (default: 100ms)
+	InitialPhase status.Phase  // phase to use for events (default: PhaseTask)
 }
 
 // DefaultTailerConfig returns default configuration.
 func DefaultTailerConfig() TailerConfig {
 	return TailerConfig{
 		PollInterval: 100 * time.Millisecond,
-		InitialPhase: processor.PhaseTask,
+		InitialPhase: status.PhaseTask,
 	}
 }
 
@@ -42,7 +42,7 @@ type Tailer struct {
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 	eventCh  chan Event
-	phase    processor.Phase
+	phase    status.Phase
 	inHeader bool // true until we pass the header separator
 }
 
@@ -53,7 +53,7 @@ func NewTailer(path string, config TailerConfig) *Tailer {
 		config.PollInterval = 100 * time.Millisecond
 	}
 	if config.InitialPhase == "" {
-		config.InitialPhase = processor.PhaseTask
+		config.InitialPhase = status.PhaseTask
 	}
 
 	return &Tailer{
@@ -232,71 +232,39 @@ var taskIterationRegex = regexp.MustCompile(`(?i)^task iteration (\d+)$`)
 // parseLine parses a progress file line and returns an Event.
 // returns nil for lines that should be skipped (header lines).
 func (t *Tailer) parseLine(line string) *Event {
-	// check for header separator
-	if strings.HasPrefix(line, "---") && strings.Count(line, "-") > 20 && !strings.Contains(line, " ") {
-		t.inHeader = false
-		return nil
-	}
+	parsed, newInHeader := parseProgressLine(line, t.inHeader)
+	t.inHeader = newInHeader
 
-	// skip header lines
-	if t.inHeader {
+	switch parsed.Type {
+	case ParsedLineSkip:
 		return nil
-	}
-
-	// check for section header
-	if matches := sectionRegex.FindStringSubmatch(line); matches != nil {
-		sectionName := matches[1]
-		t.updatePhaseFromSection(sectionName)
+	case ParsedLineSection:
+		t.phase = parsed.Phase
 		return &Event{
 			Type:      EventTypeSection,
 			Phase:     t.phase,
-			Section:   sectionName,
-			Text:      sectionName,
+			Section:   parsed.Section,
+			Text:      parsed.Text,
 			Timestamp: time.Now(),
 		}
-	}
-
-	// check for timestamped line
-	if matches := timestampRegex.FindStringSubmatch(line); matches != nil {
-		text := matches[2]
-
-		// parse timestamp
-		ts, err := time.Parse("06-01-02 15:04:05", matches[1])
-		if err != nil {
-			ts = time.Now()
-		}
-
-		// detect event type from content
-		eventType := detectEventType(text)
-		event := Event{
-			Type:      eventType,
+	case ParsedLineTimestamp:
+		return &Event{
+			Type:      parsed.EventType,
 			Phase:     t.phase,
-			Text:      text,
-			Timestamp: ts,
+			Text:      parsed.Text,
+			Timestamp: parsed.Timestamp,
+			Signal:    parsed.Signal,
 		}
-
-		// extract signal if present
-		if sig := extractSignalFromText(text); sig != "" {
-			event.Signal = sig
-			event.Type = EventTypeSignal
+	case ParsedLinePlain:
+		return &Event{
+			Type:      EventTypeOutput,
+			Phase:     t.phase,
+			Text:      parsed.Text,
+			Timestamp: time.Now(),
 		}
-
-		return &event
+	default:
+		return nil
 	}
-
-	// plain line (no timestamp) - treat as output
-	return &Event{
-		Type:      EventTypeOutput,
-		Phase:     t.phase,
-		Text:      line,
-		Timestamp: time.Now(),
-	}
-}
-
-// updatePhaseFromSection updates the current phase based on section name.
-// uses the shared phaseFromSection helper to avoid duplicate logic.
-func (t *Tailer) updatePhaseFromSection(name string) {
-	t.phase = phaseFromSection(name)
 }
 
 // detectEventType determines the event type from line content.

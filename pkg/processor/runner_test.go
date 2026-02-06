@@ -17,6 +17,7 @@ import (
 	"github.com/umputun/ralphex/pkg/executor"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/processor/mocks"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // testAppConfig loads config with embedded defaults for testing.
@@ -45,10 +46,10 @@ func newMockExecutor(results []executor.Result) *mocks.ExecutorMock {
 // newMockLogger creates a mock logger with no-op implementations.
 func newMockLogger(path string) *mocks.LoggerMock {
 	return &mocks.LoggerMock{
-		SetPhaseFunc:       func(_ processor.Phase) {},
+		SetPhaseFunc:       func(_ status.Phase) {},
 		PrintFunc:          func(_ string, _ ...any) {},
 		PrintRawFunc:       func(_ string, _ ...any) {},
-		PrintSectionFunc:   func(_ processor.Section) {},
+		PrintSectionFunc:   func(_ status.Section) {},
 		PrintAlignedFunc:   func(_ string) {},
 		LogQuestionFunc:    func(_ string, _ []string) {},
 		LogAnswerFunc:      func(_ string) {},
@@ -89,11 +90,11 @@ func TestRunner_RunFull_Success(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted},    // task phase completes
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "done", Signal: processor.SignalCodexDone},         // codex evaluation
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "task done", Signal: status.Completed},    // task phase completes
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "done", Signal: status.CodexDone},         // codex evaluation
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: "found issue in foo.go"}, // codex finds issues
@@ -114,10 +115,10 @@ func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted},
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "task done", Signal: status.Completed},
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: ""}, // codex finds nothing
@@ -133,10 +134,10 @@ func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 func TestRunner_RunReviewOnly_Success(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "done", Signal: processor.SignalCodexDone},         // codex evaluation
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "done", Signal: status.CodexDone},         // codex evaluation
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: "found issue"},
@@ -153,8 +154,8 @@ func TestRunner_RunReviewOnly_Success(t *testing.T) {
 func TestRunner_RunCodexOnly_Success(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone},         // codex evaluation
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "done", Signal: status.CodexDone},         // codex evaluation
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: "found issue"},
@@ -171,7 +172,7 @@ func TestRunner_RunCodexOnly_Success(t *testing.T) {
 func TestRunner_RunCodexOnly_NoFindings(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: ""}, // no findings
@@ -187,7 +188,7 @@ func TestRunner_RunCodexOnly_NoFindings(t *testing.T) {
 func TestRunner_CodexDisabled_SkipsCodexPhase(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor(nil)
 
@@ -207,7 +208,7 @@ func TestRunner_RunTasksOnly_Success(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted}, // task phase completes
+		{Output: "task done", Signal: status.Completed}, // task phase completes
 	})
 	codex := newMockExecutor(nil)
 
@@ -239,8 +240,8 @@ func TestRunner_RunTasksOnly_TaskPhaseError(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: processor.SignalFailed}, // first try
-		{Output: "error", Signal: processor.SignalFailed}, // retry
+		{Output: "error", Signal: status.Failed}, // first try
+		{Output: "error", Signal: status.Failed}, // retry
 	})
 	codex := newMockExecutor(nil)
 
@@ -259,7 +260,7 @@ func TestRunner_RunTasksOnly_NoReviews(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted},
+		{Output: "task done", Signal: status.Completed},
 	})
 	codex := newMockExecutor(nil)
 
@@ -286,8 +287,8 @@ func TestRunner_TaskPhase_FailedSignal(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: processor.SignalFailed}, // first try
-		{Output: "error", Signal: processor.SignalFailed}, // retry
+		{Output: "error", Signal: status.Failed}, // first try
+		{Output: "error", Signal: status.Failed}, // retry
 	})
 	codex := newMockExecutor(nil)
 
@@ -343,7 +344,7 @@ func TestRunner_TaskPhase_ContextCanceled(t *testing.T) {
 func TestRunner_ClaudeReview_FailedSignal(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: processor.SignalFailed},
+		{Output: "error", Signal: status.Failed},
 	})
 	codex := newMockExecutor(nil)
 
@@ -358,8 +359,8 @@ func TestRunner_ClaudeReview_FailedSignal(t *testing.T) {
 func TestRunner_CodexPhase_Error(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Error: errors.New("codex error")},
@@ -543,9 +544,9 @@ func TestRunner_TaskRetryCount_UsedCorrectly(t *testing.T) {
 
 	// test with TaskRetryCount=2 - should retry twice before failing
 	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: processor.SignalFailed}, // first try
-		{Output: "error", Signal: processor.SignalFailed}, // retry 1
-		{Output: "error", Signal: processor.SignalFailed}, // retry 2
+		{Output: "error", Signal: status.Failed}, // first try
+		{Output: "error", Signal: status.Failed}, // retry 1
+		{Output: "error", Signal: status.Failed}, // retry 2
 	})
 	codex := newMockExecutor(nil)
 
@@ -585,7 +586,7 @@ func newMockInputCollector(answers []string) *mocks.InputCollectorMock {
 func TestRunner_RunPlan_Success(t *testing.T) {
 	log := newMockLogger("progress-plan.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "plan created", Signal: processor.SignalPlanReady},
+		{Output: "plan created", Signal: status.PlanReady},
 	})
 	codex := newMockExecutor(nil)
 	inputCollector := newMockInputCollector(nil)
@@ -614,8 +615,8 @@ func TestRunner_RunPlan_WithQuestion(t *testing.T) {
 <<<RALPHEX:END>>>`
 
 	claude := newMockExecutor([]executor.Result{
-		{Output: questionSignal},                                    // first iteration - asks question
-		{Output: "plan created", Signal: processor.SignalPlanReady}, // second iteration - completes
+		{Output: questionSignal},                           // first iteration - asks question
+		{Output: "plan created", Signal: status.PlanReady}, // second iteration - completes
 	})
 	codex := newMockExecutor(nil)
 	inputCollector := newMockInputCollector([]string{"Redis"})
@@ -670,7 +671,7 @@ func TestRunner_RunPlan_NoInputCollector(t *testing.T) {
 func TestRunner_RunPlan_FailedSignal(t *testing.T) {
 	log := newMockLogger("progress-plan.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: processor.SignalFailed},
+		{Output: "error", Signal: status.Failed},
 	})
 	codex := newMockExecutor(nil)
 	inputCollector := newMockInputCollector(nil)
@@ -928,8 +929,8 @@ func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
 func TestRunner_ErrorPatternMatch_CodexInReviewPhase(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: "Rate limit exceeded", Error: &executor.PatternMatchError{Pattern: "rate limit", HelpCmd: "codex /status"}},
@@ -958,7 +959,7 @@ func TestRunner_ErrorPatternMatch_CodexInReviewPhase(t *testing.T) {
 func TestRunner_ErrorPatternMatch_ClaudeInReviewLoop(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone},                                                     // first review
+		{Output: "review done", Signal: status.ReviewDone},                                                              // first review
 		{Output: "rate limited", Error: &executor.PatternMatchError{Pattern: "rate limited", HelpCmd: "claude /usage"}}, // review loop hits rate limit
 	})
 	codex := newMockExecutor(nil)
@@ -1041,8 +1042,8 @@ This is a test plan.
 <<<RALPHEX:END>>>`
 
 	claude := newMockExecutor([]executor.Result{
-		{Output: planDraftSignal},                                   // first iteration - emits draft
-		{Output: "plan created", Signal: processor.SignalPlanReady}, // second iteration - completes
+		{Output: planDraftSignal},                          // first iteration - emits draft
+		{Output: "plan created", Signal: status.PlanReady}, // second iteration - completes
 	})
 	codex := newMockExecutor(nil)
 	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
@@ -1086,9 +1087,9 @@ func TestRunner_RunPlan_PlanDraft_ReviseFlow(t *testing.T) {
 <<<RALPHEX:END>>>`
 
 	claude := newMockExecutor([]executor.Result{
-		{Output: planDraftSignal},                                   // first iteration - initial draft
-		{Output: revisedDraftSignal},                                // second iteration - revised draft
-		{Output: "plan created", Signal: processor.SignalPlanReady}, // third iteration - completes
+		{Output: planDraftSignal},                          // first iteration - initial draft
+		{Output: revisedDraftSignal},                       // second iteration - revised draft
+		{Output: "plan created", Signal: status.PlanReady}, // third iteration - completes
 	})
 	codex := newMockExecutor(nil)
 	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
@@ -1199,8 +1200,8 @@ func TestRunner_RunPlan_PlanDraft_MalformedSignal(t *testing.T) {
 This content has no END marker`
 
 	claude := newMockExecutor([]executor.Result{
-		{Output: malformedDraftSignal},                              // first iteration - malformed draft
-		{Output: "plan created", Signal: processor.SignalPlanReady}, // second iteration - completes anyway
+		{Output: malformedDraftSignal},                     // first iteration - malformed draft
+		{Output: "plan created", Signal: status.PlanReady}, // second iteration - completes anyway
 	})
 	codex := newMockExecutor(nil)
 	inputCollector := newMockInputCollectorWithDraftReview(nil, nil)
@@ -1241,9 +1242,9 @@ func TestRunner_RunPlan_PlanDraft_WithQuestionThenDraft(t *testing.T) {
 <<<RALPHEX:END>>>`
 
 	claude := newMockExecutor([]executor.Result{
-		{Output: questionSignal},                                    // first iteration - question
-		{Output: planDraftSignal},                                   // second iteration - draft
-		{Output: "plan created", Signal: processor.SignalPlanReady}, // third iteration - completes
+		{Output: questionSignal},                           // first iteration - question
+		{Output: planDraftSignal},                          // second iteration - draft
+		{Output: "plan created", Signal: status.PlanReady}, // third iteration - completes
 	})
 	codex := newMockExecutor(nil)
 	inputCollector := newMockInputCollectorWithDraftReview([]string{"Gin"}, []struct {
@@ -1278,11 +1279,11 @@ func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "finalize done"},                                   // finalize step
+		{Output: "task done", Signal: status.Completed},    // task phase
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "finalize done"},                          // finalize step
 	})
 	codex := newMockExecutor(nil)
 
@@ -1319,10 +1320,10 @@ func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "task done", Signal: status.Completed},    // task phase
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
 	})
 	codex := newMockExecutor(nil)
 
@@ -1349,11 +1350,11 @@ func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
-		{Error: errors.New("finalize error")},                       // finalize fails
+		{Output: "task done", Signal: status.Completed},    // task phase
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
+		{Error: errors.New("finalize error")},              // finalize fails
 	})
 	codex := newMockExecutor(nil)
 
@@ -1389,11 +1390,11 @@ func TestRunner_Finalize_FailedSignalDoesNotBlockSuccess(t *testing.T) {
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: processor.SignalCompleted},    // task phase
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "failed", Signal: processor.SignalFailed},          // finalize reports FAILED signal
+		{Output: "task done", Signal: status.Completed},    // task phase
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "failed", Signal: status.Failed},          // finalize reports FAILED signal
 	})
 	codex := newMockExecutor(nil)
 
@@ -1425,10 +1426,10 @@ func TestRunner_Finalize_FailedSignalDoesNotBlockSuccess(t *testing.T) {
 func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "finalize done"},                                   // finalize step
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "finalize done"},                          // finalize step
 	})
 	codex := newMockExecutor(nil)
 
@@ -1450,8 +1451,8 @@ func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
 func TestRunner_Finalize_RunsInCodexOnlyMode(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "finalize done"},                                   // finalize step
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
+		{Output: "finalize done"},                          // finalize step
 	})
 	codex := newMockExecutor(nil)
 
@@ -1470,13 +1471,106 @@ func TestRunner_Finalize_RunsInCodexOnlyMode(t *testing.T) {
 	assert.Len(t, claude.RunCalls(), 2)
 }
 
+func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
+	tests := []struct {
+		name          string
+		mode          processor.Mode
+		planFile      bool
+		claudeResults []executor.Result
+		codexResults  []executor.Result
+		expClaude     int // expected claude call count
+		expCodex      int // expected codex call count
+		expPhases     []status.Phase
+	}{
+		{
+			name: "codex-only runs codex then review then finalize",
+			mode: processor.ModeCodexOnly,
+			claudeResults: []executor.Result{
+				{Output: "done", Signal: status.CodexDone},         // codex evaluation
+				{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+				{Output: "finalize done"},                          // finalize step
+			},
+			codexResults: []executor.Result{
+				{Output: "found issue"},
+			},
+			expClaude: 3,
+			expCodex:  1,
+			expPhases: []status.Phase{status.PhaseCodex, status.PhaseClaudeEval, status.PhaseCodex, status.PhaseReview, status.PhaseFinalize},
+		},
+		{
+			name: "review-only runs first review then codex then review then finalize",
+			mode: processor.ModeReview,
+			claudeResults: []executor.Result{
+				{Output: "review done", Signal: status.ReviewDone}, // first review
+				{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+				{Output: "done", Signal: status.CodexDone},         // codex evaluation
+				{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+				{Output: "finalize done"},                          // finalize step
+			},
+			codexResults: []executor.Result{
+				{Output: "found issue"},
+			},
+			expClaude: 5,
+			expCodex:  1,
+			// review phase set once at start (covers first review + pre-codex loop),
+			// then codex → claude-eval → codex (within codex loop), then review, then finalize
+			expPhases: []status.Phase{status.PhaseReview, status.PhaseCodex, status.PhaseClaudeEval, status.PhaseCodex, status.PhaseReview, status.PhaseFinalize},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var phases []status.Phase
+			log := &mocks.LoggerMock{
+				SetPhaseFunc: func(phase status.Phase) {
+					phases = append(phases, phase)
+				},
+				PrintFunc:          func(_ string, _ ...any) {},
+				PrintRawFunc:       func(_ string, _ ...any) {},
+				PrintSectionFunc:   func(_ status.Section) {},
+				PrintAlignedFunc:   func(_ string) {},
+				LogQuestionFunc:    func(_ string, _ []string) {},
+				LogAnswerFunc:      func(_ string) {},
+				LogDraftReviewFunc: func(_, _ string) {},
+				PathFunc:           func() string { return "progress.txt" },
+			}
+
+			claude := newMockExecutor(tc.claudeResults)
+			codex := newMockExecutor(tc.codexResults)
+
+			var planFile string
+			if tc.planFile {
+				tmpDir := t.TempDir()
+				planFile = filepath.Join(tmpDir, "plan.md")
+				require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+			}
+
+			cfg := processor.Config{
+				Mode:            tc.mode,
+				PlanFile:        planFile,
+				MaxIterations:   50,
+				CodexEnabled:    true,
+				FinalizeEnabled: true,
+				AppConfig:       testAppConfig(t),
+			}
+			r := processor.NewWithExecutors(cfg, log, claude, codex, nil)
+			err := r.Run(context.Background())
+
+			require.NoError(t, err)
+			assert.Len(t, claude.RunCalls(), tc.expClaude)
+			assert.Len(t, codex.RunCalls(), tc.expCodex)
+			assert.Equal(t, tc.expPhases, phases, "phase transitions should match expected order")
+		})
+	}
+}
+
 func TestRunner_Finalize_ContextCancellationPropagates(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // first review
-		{Output: "review done", Signal: processor.SignalReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop (codex disabled)
-		{Error: context.Canceled},                                   // finalize step - context canceled
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
+		{Error: context.Canceled},                          // finalize step - context canceled
 	})
 	codex := newMockExecutor(nil)
 

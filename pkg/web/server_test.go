@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/umputun/ralphex/pkg/processor"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 func TestNewServer(t *testing.T) {
@@ -83,9 +83,9 @@ func TestServer_HandleEvents(t *testing.T) {
 		defer session.Close()
 
 		// publish events - should succeed
-		require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseTask, "test event 1")))
-		require.NoError(t, session.Publish(NewSectionEvent(processor.PhaseReview, "Review")))
-		require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseReview, "test event 2")))
+		require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "test event 1")))
+		require.NoError(t, session.Publish(NewSectionEvent(status.PhaseReview, "Review")))
+		require.NoError(t, session.Publish(NewOutputEvent(status.PhaseReview, "test event 2")))
 
 		// verify SSE server exists
 		assert.NotNil(t, session.SSE)
@@ -200,9 +200,9 @@ func TestServer_SSE_LateJoiningClient(t *testing.T) {
 	assert.NotNil(t, session.SSE)
 
 	// publish some events before any client connects - should succeed
-	require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseTask, "event 1")))
-	require.NoError(t, session.Publish(NewSectionEvent(processor.PhaseReview, "Review Section")))
-	require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseReview, "event 2")))
+	require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "event 1")))
+	require.NoError(t, session.Publish(NewSectionEvent(status.PhaseReview, "Review Section")))
+	require.NoError(t, session.Publish(NewOutputEvent(status.PhaseReview, "event 2")))
 }
 
 func TestServer_HandlePlan(t *testing.T) {
@@ -518,7 +518,7 @@ Started: 2026-01-22 10:30:00
 		assert.NotNil(t, session.SSE)
 
 		// publishing events should succeed
-		require.NoError(t, session.Publish(NewOutputEvent(processor.PhaseTask, "test event")))
+		require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "test event")))
 	})
 }
 
