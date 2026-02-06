@@ -67,6 +67,17 @@ func TestCustomChannel_Send(t *testing.T) {
 		assert.Contains(t, err.Error(), "script failed")
 	})
 
+	t.Run("stdout included in error message", func(t *testing.T) {
+		script := filepath.Join("testdata", "fail_with_stdout.sh")
+		ch := newCustomChannel(script)
+
+		err := ch.send(context.Background(), Result{Status: "success"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "stdout info")
+		assert.Contains(t, err.Error(), "stderr info")
+		assert.Contains(t, err.Error(), "output:")
+	})
+
 	t.Run("timeout kills script", func(t *testing.T) {
 		script := filepath.Join("testdata", "slow.sh")
 		ch := newCustomChannel(script)

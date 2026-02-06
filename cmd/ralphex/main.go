@@ -344,8 +344,10 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
 	}
 
-	// send success notification
-	req.NotifySvc.Send(ctx, notify.Result{
+	// send success notification.
+	// use context.Background() because the parent ctx may be canceled (e.g. SIGINT),
+	// and the notification timeout is applied inside Send() independently.
+	req.NotifySvc.Send(context.Background(), notify.Result{
 		Status:    "success",
 		Mode:      string(req.Mode),
 		PlanFile:  req.PlanFile,

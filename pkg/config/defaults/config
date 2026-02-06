@@ -142,11 +142,11 @@ codex_error_patterns = Rate limit,quota exceeded
 
 # notify_on_error: send notification when execution fails
 # default: true
-notify_on_error = true
+# notify_on_error = true
 
 # notify_on_complete: send notification when execution succeeds
 # default: true
-notify_on_complete = true
+# notify_on_complete = true
 
 # notify_timeout_ms: total timeout for all notification channels in milliseconds
 # default: 10000

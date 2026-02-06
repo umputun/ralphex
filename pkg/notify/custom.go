@@ -28,12 +28,14 @@ func (c *customChannel) send(ctx context.Context, r Result) error {
 	cmd := exec.CommandContext(ctx, c.scriptPath) //nolint:gosec // path comes from user config, not user input
 	cmd.Stdin = bytes.NewReader(data)
 
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err = cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return fmt.Errorf("script %s: %w, stderr: %s", c.scriptPath, err, stderr.String())
+		combined := stderr.String() + stdout.String()
+		if combined != "" {
+			return fmt.Errorf("script %s: %w, output: %s", c.scriptPath, err, combined)
 		}
 		return fmt.Errorf("script %s: %w", c.scriptPath, err)
 	}

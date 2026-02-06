@@ -275,6 +275,14 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		localDir:           localDir,
 	}
 
+	// notify_on_error and notify_on_complete default to true when not explicitly set
+	if !values.NotifyOnErrorSet {
+		c.NotifyParams.OnError = true
+	}
+	if !values.NotifyOnCompleteSet {
+		c.NotifyParams.OnComplete = true
+	}
+
 	return c, nil
 }
 
