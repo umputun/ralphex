@@ -22,6 +22,8 @@ cmd/ralphex/        # main entry point, CLI parsing
 pkg/config/         # configuration loading, defaults, prompts, agents
 pkg/executor/       # claude and codex CLI execution
 pkg/git/            # git operations using go-git library
+pkg/input/          # terminal input collector (fzf/fallback, draft review)
+pkg/notify/         # notification delivery (telegram, email, slack, webhook, custom)
 pkg/plan/           # plan file selection and manipulation
 pkg/processor/      # orchestration loop, prompts, signal helpers
 pkg/progress/       # timestamped logging with color
@@ -50,6 +52,7 @@ docs/plans/         # plan files location
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
 - Optional finalize step after successful reviews (disabled by default)
+- Optional notifications on completion/failure via Telegram, Email, Slack, Webhook, or custom script (best-effort, disabled by default)
 
 ### Finalize Step
 
@@ -157,6 +160,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Precedence: CLI flags > local config > global config > embedded defaults
 - Custom prompts: `~/.config/ralphex/prompts/*.txt` or `.ralphex/prompts/*.txt`
 - Custom agents: `~/.config/ralphex/agents/*.txt` or `.ralphex/agents/*.txt`
+- Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
 
 ### Local Project Config (.ralphex/)
 

@@ -50,6 +50,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 - **Real-time monitoring** - streaming output with timestamps, colors, and detailed logs
 - **Web dashboard** - browser-based real-time view with `--serve` flag
 - **Docker support** - run in isolated container for safer autonomous execution
+- **Notifications** - optional alerts on completion/failure via Telegram, Email, Slack, Webhook, or custom script
 - **Multiple modes** - full execution, tasks-only, review-only, external-only, or plan creation
 
 ## Quick Start
@@ -644,6 +645,22 @@ The prompt's `{{DIFF_INSTRUCTION}}` variable adapts per iteration:
 - **Subsequent iterations**: `git diff` (only uncommitted changes from previous fixes)
 
 This lets the review tool focus on remaining issues after fixes.
+
+### Notifications
+
+ralphex can send notifications when execution completes or fails. Notifications are optional, disabled by default, and best-effort - failures are logged but never affect the exit code.
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+notify_channels = telegram, webhook
+notify_telegram_token = 123456:ABC-DEF
+notify_telegram_chat = -1001234567890
+notify_webhook_urls = https://hooks.example.com/notify
+```
+
+Supported channels: `telegram`, `email`, `slack`, `webhook`, `custom` (script). Misconfigured channels are detected at startup.
+
+See [docs/notifications.md](docs/notifications.md) for setup guides, message format examples, and custom script integration.
 
 **Prompt customization:**
 
