@@ -19,6 +19,7 @@ import (
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
 	"github.com/umputun/ralphex/pkg/input"
+	"github.com/umputun/ralphex/pkg/notify"
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
@@ -46,6 +47,14 @@ type opts struct {
 
 var revision = "unknown"
 
+// stderrLog is a simple logger that writes to stderr.
+// satisfies notify.logger interface for use before progress logger is available.
+type stderrLog struct{}
+
+func (stderrLog) Print(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
+
 // startupInfo holds parameters for printing startup information.
 type startupInfo struct {
 	PlanFile        string
@@ -65,6 +74,7 @@ type executePlanRequest struct {
 	Colors        *progress.Colors
 	Selector      *plan.Selector
 	DefaultBranch string
+	NotifySvc     *notify.Service
 }
 
 func main() {
@@ -129,18 +139,16 @@ func run(ctx context.Context, o opts) error {
 	// create colors from config (all colors guaranteed populated via fallback)
 	colors := progress.NewColors(cfg.Colors)
 
+	// create notification service (nil if no channels configured)
+	notifySvc, err := notify.New(cfg.NotifyParams, stderrLog{})
+	if err != nil {
+		return fmt.Errorf("create notification service: %w", err)
+	}
+
 	// watch-only mode: --serve with watch dirs (CLI or config) and no plan file
 	// runs web dashboard without plan execution, can run from any directory
 	if isWatchOnlyMode(o, cfg.WatchDirs) {
-		dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
-		dashboard := web.NewDashboard(web.DashboardConfig{
-			Port:   o.Port,
-			Colors: colors,
-		})
-		if watchErr := dashboard.RunWatchOnly(ctx, dirs); watchErr != nil {
-			return fmt.Errorf("run watch-only mode: %w", watchErr)
-		}
-		return nil
+		return runWatchOnly(ctx, o, cfg, colors)
 	}
 
 	// check dependencies using configured command (or default "claude")
@@ -181,6 +189,7 @@ func run(ctx context.Context, o opts) error {
 			Colors:        colors,
 			Selector:      selector,
 			DefaultBranch: defaultBranch,
+			NotifySvc:     notifySvc,
 		})
 	}
 
@@ -196,6 +205,7 @@ func run(ctx context.Context, o opts) error {
 			Colors:        colors,
 			Selector:      selector,
 			DefaultBranch: defaultBranch,
+			NotifySvc:     notifySvc,
 		})
 		if handled {
 			return autoPlanErr
@@ -221,6 +231,7 @@ func run(ctx context.Context, o opts) error {
 		Colors:        colors,
 		Selector:      selector,
 		DefaultBranch: defaultBranch,
+		NotifySvc:     notifySvc,
 	})
 }
 
@@ -311,14 +322,18 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	// create and run the runner
 	r := createRunner(req, o, runnerLog)
 	if runErr := r.Run(ctx); runErr != nil {
+		// send failure notification before returning error.
+		// use context.Background() because the parent ctx may be canceled (e.g. SIGINT),
+		// and the notification timeout is applied inside Send() independently.
+		req.NotifySvc.Send(context.Background(), notify.Result{
+			Status:   "failure",
+			Mode:     string(req.Mode),
+			PlanFile: req.PlanFile,
+			Branch:   branch,
+			Duration: baseLog.Elapsed(),
+			Error:    runErr.Error(),
+		})
 		return fmt.Errorf("runner: %w", runErr)
-	}
-
-	// move completed plan to completed/ directory
-	if req.PlanFile != "" && modeRequiresBranch(req.Mode) {
-		if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
-		}
 	}
 
 	elapsed := baseLog.Elapsed()
@@ -327,6 +342,25 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	stats, statsErr := req.GitSvc.DiffStats(req.DefaultBranch)
 	if statsErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
+	}
+
+	// send success notification
+	req.NotifySvc.Send(ctx, notify.Result{
+		Status:    "success",
+		Mode:      string(req.Mode),
+		PlanFile:  req.PlanFile,
+		Branch:    branch,
+		Duration:  elapsed,
+		Files:     stats.Files,
+		Additions: stats.Additions,
+		Deletions: stats.Deletions,
+	})
+
+	// move completed plan to completed/ directory
+	if req.PlanFile != "" && modeRequiresBranch(req.Mode) {
+		if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
+		}
 	}
 
 	// display completion with stats
@@ -366,6 +400,19 @@ func checkClaudeDep(cfg *config.Config) error {
 // watch-only mode runs the web dashboard without executing any plan.
 func isWatchOnlyMode(o opts, configWatchDirs []string) bool {
 	return o.Serve && o.PlanFile == "" && o.PlanDescription == "" && (len(o.Watch) > 0 || len(configWatchDirs) > 0)
+}
+
+// runWatchOnly starts the web dashboard in watch-only mode without plan execution.
+func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progress.Colors) error {
+	dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
+	dashboard := web.NewDashboard(web.DashboardConfig{
+		Port:   o.Port,
+		Colors: colors,
+	})
+	if watchErr := dashboard.RunWatchOnly(ctx, dirs); watchErr != nil {
+		return fmt.Errorf("run watch-only mode: %w", watchErr)
+	}
+	return nil
 }
 
 // determineMode returns the execution mode based on CLI flags.
@@ -559,6 +606,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		Config:        req.Config,
 		Colors:        req.Colors,
 		DefaultBranch: req.DefaultBranch,
+		NotifySvc:     req.NotifySvc,
 	})
 }
 
