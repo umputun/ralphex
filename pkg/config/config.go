@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/umputun/ralphex/pkg/notify"
 )
 
 //go:embed defaults/config defaults/prompts/* defaults/agents/*
@@ -64,6 +66,9 @@ type Config struct {
 	// error patterns to detect in executor output (e.g., rate limit messages)
 	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
 	CodexErrorPatterns  []string `json:"codex_error_patterns"`
+
+	// notification parameters
+	NotifyParams notify.Params `json:"-"`
 
 	// output colors (RGB values as comma-separated strings)
 	Colors ColorConfig `json:"-"`
@@ -237,18 +242,37 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		WatchDirs:            values.WatchDirs,
 		ClaudeErrorPatterns:  values.ClaudeErrorPatterns,
 		CodexErrorPatterns:   values.CodexErrorPatterns,
-		Colors:               colors,
-		TaskPrompt:           prompts.Task,
-		ReviewFirstPrompt:    prompts.ReviewFirst,
-		ReviewSecondPrompt:   prompts.ReviewSecond,
-		CodexPrompt:          prompts.Codex,
-		MakePlanPrompt:       prompts.MakePlan,
-		FinalizePrompt:       prompts.Finalize,
-		CustomReviewPrompt:   prompts.CustomReview,
-		CustomEvalPrompt:     prompts.CustomEval,
-		CustomAgents:         agents,
-		configDir:            globalDir,
-		localDir:             localDir,
+		NotifyParams: notify.Params{
+			Channels:      values.NotifyChannels,
+			OnError:       values.NotifyOnError,
+			OnComplete:    values.NotifyOnComplete,
+			TimeoutMs:     values.NotifyTimeoutMs,
+			TelegramToken: values.NotifyTelegramToken,
+			TelegramChat:  values.NotifyTelegramChat,
+			SlackToken:    values.NotifySlackToken,
+			SlackChannel:  values.NotifySlackChannel,
+			SMTPHost:      values.NotifySMTPHost,
+			SMTPPort:      values.NotifySMTPPort,
+			SMTPUsername:  values.NotifySMTPUsername,
+			SMTPPassword:  values.NotifySMTPPassword,
+			SMTPStartTLS:  values.NotifySMTPStartTLS,
+			EmailFrom:     values.NotifyEmailFrom,
+			EmailTo:       values.NotifyEmailTo,
+			WebhookURLs:   values.NotifyWebhookURLs,
+			CustomScript:  values.NotifyCustomScript,
+		},
+		Colors:             colors,
+		TaskPrompt:         prompts.Task,
+		ReviewFirstPrompt:  prompts.ReviewFirst,
+		ReviewSecondPrompt: prompts.ReviewSecond,
+		CodexPrompt:        prompts.Codex,
+		MakePlanPrompt:     prompts.MakePlan,
+		FinalizePrompt:     prompts.Finalize,
+		CustomReviewPrompt: prompts.CustomReview,
+		CustomEvalPrompt:   prompts.CustomEval,
+		CustomAgents:       agents,
+		configDir:          globalDir,
+		localDir:           localDir,
 	}
 
 	return c, nil
