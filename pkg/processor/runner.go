@@ -41,20 +41,19 @@ const (
 
 // Config holds runner configuration.
 type Config struct {
-	PlanFile         string              // path to plan file (required for full mode)
-	PlanDescription  string              // plan description for interactive plan creation mode
-	ProgressPath     string              // path to progress file
-	Mode             Mode                // execution mode
-	MaxIterations    int                 // maximum iterations for task phase
-	Debug            bool                // enable debug output
-	NoColor          bool                // disable color output
-	IterationDelayMs int                 // delay between iterations in milliseconds
-	TaskRetryCount   int                 // number of times to retry failed tasks
-	CodexEnabled     bool                // whether codex review is enabled
-	FinalizeEnabled  bool                // whether finalize step is enabled
-	DefaultBranch    string              // default branch name (detected from repo)
-	AppConfig        *config.Config      // full application config (for executors and prompts)
-	PhaseHolder      *status.PhaseHolder // shared phase holder (single source of truth)
+	PlanFile         string         // path to plan file (required for full mode)
+	PlanDescription  string         // plan description for interactive plan creation mode
+	ProgressPath     string         // path to progress file
+	Mode             Mode           // execution mode
+	MaxIterations    int            // maximum iterations for task phase
+	Debug            bool           // enable debug output
+	NoColor          bool           // disable color output
+	IterationDelayMs int            // delay between iterations in milliseconds
+	TaskRetryCount   int            // number of times to retry failed tasks
+	CodexEnabled     bool           // whether codex review is enabled
+	FinalizeEnabled  bool           // whether finalize step is enabled
+	DefaultBranch    string         // default branch name (detected from repo)
+	AppConfig        *config.Config // full application config (for executors and prompts)
 }
 
 //go:generate moq -out mocks/executor.go -pkg mocks -skip-ensure -fmt goimports . Executor
@@ -99,20 +98,21 @@ type Runner struct {
 	custom         *executor.CustomExecutor
 	git            GitChecker
 	inputCollector InputCollector
+	phaseHolder    *status.PhaseHolder
 	iterationDelay time.Duration
 	taskRetryCount int
 }
 
-// New creates a new Runner with the given configuration.
+// New creates a new Runner with the given configuration and shared phase holder.
 // If codex is enabled but the binary is not found in PATH, it is automatically disabled with a warning.
-func New(cfg Config, log Logger) *Runner {
+func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 	// build claude executor with config values
 	claudeExec := &executor.ClaudeExecutor{
 		OutputHandler: func(text string) {
 			log.PrintAligned(text)
 		},
 		Debug:  cfg.Debug,
-		Holder: cfg.PhaseHolder,
+		Holder: holder,
 	}
 	if cfg.AppConfig != nil {
 		claudeExec.Command = cfg.AppConfig.ClaudeCommand
@@ -162,11 +162,12 @@ func New(cfg Config, log Logger) *Runner {
 		}
 	}
 
-	return NewWithExecutors(cfg, log, claudeExec, codexExec, customExec)
+	return NewWithExecutors(cfg, log, claudeExec, codexExec, customExec, holder)
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
-func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *executor.CustomExecutor) *Runner {
+// holder is optional — if nil, a default PhaseHolder is created.
+func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *executor.CustomExecutor, holder *status.PhaseHolder) *Runner {
 	// determine iteration delay from config or default
 	iterDelay := DefaultIterationDelay
 	if cfg.IterationDelayMs > 0 {
@@ -182,9 +183,8 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *ex
 		retryCount = cfg.TaskRetryCount
 	}
 
-	// default phase holder if not provided
-	if cfg.PhaseHolder == nil {
-		cfg.PhaseHolder = &status.PhaseHolder{}
+	if holder == nil {
+		holder = &status.PhaseHolder{}
 	}
 
 	return &Runner{
@@ -193,6 +193,7 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *ex
 		claude:         claude,
 		codex:          codex,
 		custom:         custom,
+		phaseHolder:    holder,
 		iterationDelay: iterDelay,
 		taskRetryCount: retryCount,
 	}
@@ -233,7 +234,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 	}
 
 	// phase 1: task execution
-	r.cfg.PhaseHolder.Set(status.PhaseTask)
+	r.phaseHolder.Set(status.PhaseTask)
 	r.log.PrintRaw("starting task execution phase\n")
 
 	if err := r.runTaskPhase(ctx); err != nil {
@@ -241,7 +242,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 	}
 
 	// phase 2: first review pass - address ALL findings
-	r.cfg.PhaseHolder.Set(status.PhaseReview)
+	r.phaseHolder.Set(status.PhaseReview)
 	r.log.PrintSection(status.NewGenericSection("claude review 0: all findings"))
 
 	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
@@ -265,7 +266,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 // runReviewOnly executes only the review pipeline: review → codex → review.
 func (r *Runner) runReviewOnly(ctx context.Context) error {
 	// phase 1: first review
-	r.cfg.PhaseHolder.Set(status.PhaseReview)
+	r.phaseHolder.Set(status.PhaseReview)
 	r.log.PrintSection(status.NewGenericSection("claude review 0: all findings"))
 
 	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
@@ -300,7 +301,7 @@ func (r *Runner) runCodexOnly(ctx context.Context) error {
 // used by runFull, runReviewOnly, and runCodexOnly to avoid duplicating this sequence.
 func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
 	// codex external review loop
-	r.cfg.PhaseHolder.Set(status.PhaseCodex)
+	r.phaseHolder.Set(status.PhaseCodex)
 	r.log.PrintSection(status.NewGenericSection("codex external review"))
 
 	if err := r.runCodexLoop(ctx); err != nil {
@@ -308,7 +309,7 @@ func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
 	}
 
 	// claude review loop (critical/major) after codex
-	r.cfg.PhaseHolder.Set(status.PhaseReview)
+	r.phaseHolder.Set(status.PhaseReview)
 
 	if err := r.runClaudeReviewLoop(ctx); err != nil {
 		return fmt.Errorf("post-codex review loop: %w", err)
@@ -324,7 +325,7 @@ func (r *Runner) runTasksOnly(ctx context.Context) error {
 		return errors.New("plan file required for tasks-only mode")
 	}
 
-	r.cfg.PhaseHolder.Set(status.PhaseTask)
+	r.phaseHolder.Set(status.PhaseTask)
 	r.log.PrintRaw("starting task execution phase\n")
 
 	if err := r.runTaskPhase(ctx); err != nil {
@@ -569,12 +570,12 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		cfg.showSummary(reviewResult.Output)
 
 		// pass output to claude for evaluation and fixing
-		r.cfg.PhaseHolder.Set(status.PhaseClaudeEval)
+		r.phaseHolder.Set(status.PhaseClaudeEval)
 		r.log.PrintSection(status.NewClaudeEvalSection())
 		claudeResult := r.claude.Run(ctx, cfg.buildEvalPrompt(reviewResult.Output))
 
 		// restore codex phase for next iteration
-		r.cfg.PhaseHolder.Set(status.PhaseCodex)
+		r.phaseHolder.Set(status.PhaseCodex)
 		if claudeResult.Error != nil {
 			if err := r.handlePatternMatchError(claudeResult.Error, "claude"); err != nil {
 				return err
@@ -789,7 +790,7 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		return errors.New("input collector required for plan mode")
 	}
 
-	r.cfg.PhaseHolder.Set(status.PhasePlan)
+	r.phaseHolder.Set(status.PhasePlan)
 	r.log.PrintRaw("starting interactive plan creation\n")
 	r.log.Print("plan request: %s", r.cfg.PlanDescription)
 
@@ -881,7 +882,7 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 		return nil
 	}
 
-	r.cfg.PhaseHolder.Set(status.PhaseFinalize)
+	r.phaseHolder.Set(status.PhaseFinalize)
 	r.log.PrintSection(status.NewGenericSection("finalize step"))
 
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.FinalizePrompt)

@@ -475,8 +475,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		FinalizeEnabled:  req.Config.FinalizeEnabled,
 		DefaultBranch:    req.DefaultBranch,
 		AppConfig:        req.Config,
-		PhaseHolder:      holder,
-	}, log)
+	}, log, holder)
 	if req.GitSvc != nil {
 		r.SetGitChecker(req.GitSvc)
 	}
@@ -574,8 +573,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		IterationDelayMs: req.Config.IterationDelayMs,
 		DefaultBranch:    req.DefaultBranch,
 		AppConfig:        req.Config,
-		PhaseHolder:      holder,
-	}, baseLog)
+	}, baseLog, holder)
 	r.SetInputCollector(collector)
 
 	// run the plan creation loop
