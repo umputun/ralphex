@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.0 - 2026-02-06
+
+### Added
+
+- Notification system - alerts on completion/failure via Telegram, Email, Slack, Webhook, or custom script (#71)
+- Docker wrapper self-update via `--update-script` flag
+
+### Fixed
+
+- Exit review loop when no changes detected (#70)
+- Docker: only bind port when `--serve`/`-s` is requested to avoid conflicts with concurrent instances
+
+### Changed
+
+- Code review findings and package structure improvements (#68)
+
 ## v0.8.0 - 2026-02-05
 
 ### Added
