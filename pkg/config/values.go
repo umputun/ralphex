@@ -36,9 +36,9 @@ type Values struct {
 	FinalizeEnabledSet   bool // tracks if finalize_enabled was explicitly set
 	PlansDir             string
 	WatchDirs            []string // directories to watch for progress files
-	ClaudeModelTask   string // per-phase model for task execution
-	ClaudeModelReview string // per-phase model for review phases
-	ClaudeModelPlan   string // per-phase model for plan creation
+	ClaudeModelTask      string // per-phase model for task execution
+	ClaudeModelReview    string // per-phase model for review phases
+	ClaudeModelPlan      string // per-phase model for plan creation
 
 	// notification settings
 	NotifyChannels        []string // channels to use: telegram, email, webhook, slack, custom
