@@ -248,9 +248,10 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - `RALPHEX_IMAGE` - Docker image to use (default: `ghcr.io/umputun/ralphex:latest`)
 - `RALPHEX_PORT` - Port for web dashboard when using `--serve` (default: `8080`)
 
-**Updating the image:**
+**Updating:**
 ```bash
-ralphex --update  # pull latest image
+ralphex --update         # pull latest docker image
+ralphex --update-script  # update the wrapper script itself
 ```
 
 <details markdown>
