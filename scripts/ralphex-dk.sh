@@ -5,7 +5,8 @@
 # example: ralphex-dk.sh docs/plans/feature.md
 # example: ralphex-dk.sh --serve docs/plans/feature.md
 # example: ralphex-dk.sh --review
-# example: ralphex-dk.sh --update  # pull latest image
+# example: ralphex-dk.sh --update         # pull latest docker image
+# example: ralphex-dk.sh --update-script  # update this wrapper script
 
 set -e
 
@@ -16,6 +17,37 @@ PORT="${RALPHEX_PORT:-8080}"
 if [[ "$1" == "--update" ]]; then
     echo "pulling latest image: ${IMAGE}" >&2
     docker pull "${IMAGE}"
+    exit 0
+fi
+
+# handle --update-script flag: update this wrapper script and exit
+if [[ "$1" == "--update-script" ]]; then
+    SCRIPT_URL="https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
+    SCRIPT_PATH="$(realpath "$0")"
+    TEMP_SCRIPT=$(mktemp)
+    trap "rm -f '$TEMP_SCRIPT'" EXIT
+
+    echo "checking for ralphex docker wrapper updates..." >&2
+    if curl -sfL "$SCRIPT_URL" -o "$TEMP_SCRIPT"; then
+        if ! diff -q "$SCRIPT_PATH" "$TEMP_SCRIPT" >/dev/null 2>&1; then
+            echo "wrapper update available:" >&2
+            git diff --no-index "$SCRIPT_PATH" "$TEMP_SCRIPT" >&2 || true
+            printf "update wrapper? (y/N) " >&2
+            read -r answer
+            if [[ "$answer" =~ ^[Yy]$ ]]; then
+                cp "$TEMP_SCRIPT" "$SCRIPT_PATH"
+                chmod +x "$SCRIPT_PATH"
+                echo "wrapper updated" >&2
+            else
+                echo "wrapper update skipped" >&2
+            fi
+        else
+            echo "wrapper is up to date" >&2
+        fi
+    else
+        echo "warning: failed to check for wrapper updates" >&2
+    fi
+    rm -f "$TEMP_SCRIPT"
     exit 0
 fi
 
@@ -114,6 +146,15 @@ if [[ -n "$CREDS_TEMP" ]]; then
     (sleep 10; rm -f "$CREDS_TEMP") &
 fi
 
+# only bind port when --serve/-s is requested (avoids conflicts with concurrent instances)
+PORT_ARGS=()
+for arg in "$@"; do
+    if [[ "$arg" == "--serve" || "$arg" == "-s" ]]; then
+        PORT_ARGS=(-p "${PORT}:${PORT}")
+        break
+    fi
+done
+
 # run docker - foreground for interactive (TTY needed), background for non-interactive
 if [[ -t 0 ]]; then
     # interactive mode: run in foreground so TTY works
@@ -122,7 +163,7 @@ if [[ -t 0 ]]; then
         -e SKIP_HOME_CHOWN=1 \
         -e INIT_QUIET=1 \
         -e CLAUDE_CONFIG_DIR=/home/app/.claude \
-        -p "${PORT}:${PORT}" \
+        "${PORT_ARGS[@]}" \
         "${VOLUMES[@]}" \
         -w /workspace \
         "${IMAGE}" /srv/ralphex "$@"
@@ -133,7 +174,7 @@ else
         -e SKIP_HOME_CHOWN=1 \
         -e INIT_QUIET=1 \
         -e CLAUDE_CONFIG_DIR=/home/app/.claude \
-        -p "${PORT}:${PORT}" \
+        "${PORT_ARGS[@]}" \
         "${VOLUMES[@]}" \
         -w /workspace \
         "${IMAGE}" /srv/ralphex "$@" &

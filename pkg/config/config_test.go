@@ -782,6 +782,90 @@ func TestLocalConfig_LocalOverridesExternalReviewTool(t *testing.T) {
 	assert.Equal(t, "none", cfg.ExternalReviewTool)
 }
 
+func TestLoad_NotifyParamsPopulated(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	configContent := `
+notify_channels = telegram, webhook
+notify_on_error = true
+notify_on_complete = false
+notify_timeout_ms = 15000
+notify_telegram_token = bot123:ABC
+notify_telegram_chat = -100123
+notify_webhook_urls = https://hook.example.com
+`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"telegram", "webhook"}, cfg.NotifyParams.Channels)
+	assert.True(t, cfg.NotifyParams.OnError)
+	assert.False(t, cfg.NotifyParams.OnComplete)
+	assert.Equal(t, 15000, cfg.NotifyParams.TimeoutMs)
+	assert.Equal(t, "bot123:ABC", cfg.NotifyParams.TelegramToken)
+	assert.Equal(t, "-100123", cfg.NotifyParams.TelegramChat)
+	assert.Equal(t, []string{"https://hook.example.com"}, cfg.NotifyParams.WebhookURLs)
+}
+
+func TestLoad_NotifyParamsDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// empty config - uses embedded defaults for notify flags
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Empty(t, cfg.NotifyParams.Channels)
+	assert.True(t, cfg.NotifyParams.OnError)
+	assert.True(t, cfg.NotifyParams.OnComplete)
+	assert.Equal(t, 0, cfg.NotifyParams.TimeoutMs)
+	assert.Empty(t, cfg.NotifyParams.TelegramToken)
+}
+
+func TestLocalConfig_LocalOverridesNotifyParams(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+	localDir := filepath.Join(tmpDir, ".ralphex")
+
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	globalConfig := `
+notify_channels = telegram
+notify_telegram_token = global-token
+notify_timeout_ms = 10000
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+
+	localConfig := `
+notify_channels = slack
+notify_timeout_ms = 5000
+`
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
+
+	cfg, err := loadWithLocal(globalDir, localDir)
+	require.NoError(t, err)
+
+	// local overrides channels and timeout
+	assert.Equal(t, []string{"slack"}, cfg.NotifyParams.Channels)
+	assert.Equal(t, 5000, cfg.NotifyParams.TimeoutMs)
+
+	// global telegram token preserved (not in local)
+	assert.Equal(t, "global-token", cfg.NotifyParams.TelegramToken)
+}
+
 func TestLoad_SymlinkedLocalDir(t *testing.T) {
 	// simulates local .ralphex being a symlink to shared project config
 	tmpDir := t.TempDir()

@@ -811,6 +811,317 @@ func TestExpandTilde(t *testing.T) {
 	}
 }
 
+func TestValuesLoader_parseValuesFromBytes_NotifyFields(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	t.Run("all notification fields", func(t *testing.T) {
+		data := []byte(`
+notify_channels = telegram, email, webhook, slack, custom
+notify_on_error = true
+notify_on_complete = false
+notify_timeout_ms = 15000
+notify_telegram_token = bot123:ABC
+notify_telegram_chat = -100123456
+notify_slack_token = xoxb-slack-token
+notify_slack_channel = general
+notify_smtp_host = smtp.example.com
+notify_smtp_port = 587
+notify_smtp_username = user@example.com
+notify_smtp_password = secret
+notify_smtp_starttls = true
+notify_email_from = noreply@example.com
+notify_email_to = dev@example.com, ops@example.com
+notify_webhook_urls = https://hook1.example.com, https://hook2.example.com
+notify_custom_script = /usr/local/bin/notify.sh
+`)
+		values, err := vl.parseValuesFromBytes(data)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"telegram", "email", "webhook", "slack", "custom"}, values.NotifyChannels)
+		assert.True(t, values.NotifyChannelsSet)
+		assert.True(t, values.NotifyOnError)
+		assert.True(t, values.NotifyOnErrorSet)
+		assert.False(t, values.NotifyOnComplete)
+		assert.True(t, values.NotifyOnCompleteSet)
+		assert.Equal(t, 15000, values.NotifyTimeoutMs)
+		assert.True(t, values.NotifyTimeoutMsSet)
+		assert.Equal(t, "bot123:ABC", values.NotifyTelegramToken)
+		assert.Equal(t, "-100123456", values.NotifyTelegramChat)
+		assert.Equal(t, "xoxb-slack-token", values.NotifySlackToken)
+		assert.Equal(t, "general", values.NotifySlackChannel)
+		assert.Equal(t, "smtp.example.com", values.NotifySMTPHost)
+		assert.Equal(t, 587, values.NotifySMTPPort)
+		assert.True(t, values.NotifySMTPPortSet)
+		assert.Equal(t, "user@example.com", values.NotifySMTPUsername)
+		assert.Equal(t, "secret", values.NotifySMTPPassword)
+		assert.True(t, values.NotifySMTPStartTLS)
+		assert.True(t, values.NotifySMTPStartTLSSet)
+		assert.Equal(t, "noreply@example.com", values.NotifyEmailFrom)
+		assert.Equal(t, []string{"dev@example.com", "ops@example.com"}, values.NotifyEmailTo)
+		assert.True(t, values.NotifyEmailToSet)
+		assert.Equal(t, []string{"https://hook1.example.com", "https://hook2.example.com"}, values.NotifyWebhookURLs)
+		assert.True(t, values.NotifyWebhookURLsSet)
+		assert.Equal(t, "/usr/local/bin/notify.sh", values.NotifyCustomScript)
+	})
+
+	t.Run("empty notify config", func(t *testing.T) {
+		data := []byte("")
+		values, err := vl.parseValuesFromBytes(data)
+		require.NoError(t, err)
+
+		assert.Empty(t, values.NotifyChannels)
+		assert.False(t, values.NotifyChannelsSet)
+		assert.False(t, values.NotifyOnErrorSet)
+		assert.False(t, values.NotifyOnCompleteSet)
+		assert.False(t, values.NotifyTimeoutMsSet)
+		assert.Empty(t, values.NotifyTelegramToken)
+	})
+
+	t.Run("empty notify_channels key disables notifications", func(t *testing.T) {
+		data := []byte(`notify_channels =`)
+		values, err := vl.parseValuesFromBytes(data)
+		require.NoError(t, err)
+
+		assert.Empty(t, values.NotifyChannels)
+		assert.True(t, values.NotifyChannelsSet, "set flag should be true when key is present but empty")
+	})
+
+	t.Run("empty email_to and webhook_urls keys set flags", func(t *testing.T) {
+		data := []byte("notify_email_to =\nnotify_webhook_urls =\n")
+		values, err := vl.parseValuesFromBytes(data)
+		require.NoError(t, err)
+
+		assert.Empty(t, values.NotifyEmailTo)
+		assert.True(t, values.NotifyEmailToSet)
+		assert.Empty(t, values.NotifyWebhookURLs)
+		assert.True(t, values.NotifyWebhookURLsSet)
+	})
+
+	t.Run("tilde expansion for custom script", func(t *testing.T) {
+		data := []byte(`notify_custom_script = ~/.config/ralphex/scripts/notify.sh`)
+		values, err := vl.parseValuesFromBytes(data)
+		require.NoError(t, err)
+
+		home, homeErr := os.UserHomeDir()
+		require.NoError(t, homeErr)
+		assert.Equal(t, home+"/.config/ralphex/scripts/notify.sh", values.NotifyCustomScript)
+	})
+}
+
+func TestValuesLoader_Load_InvalidNotifyConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		errPart string
+	}{
+		{name: "invalid notify_on_error", config: "notify_on_error = maybe", errPart: "notify_on_error"},
+		{name: "invalid notify_on_complete", config: "notify_on_complete = nope", errPart: "notify_on_complete"},
+		{name: "invalid notify_timeout_ms", config: "notify_timeout_ms = abc", errPart: "notify_timeout_ms"},
+		{name: "negative notify_timeout_ms", config: "notify_timeout_ms = -100", errPart: "notify_timeout_ms"},
+		{name: "invalid notify_smtp_port", config: "notify_smtp_port = xyz", errPart: "notify_smtp_port"},
+		{name: "negative notify_smtp_port", config: "notify_smtp_port = -1", errPart: "notify_smtp_port"},
+		{name: "invalid notify_smtp_starttls", config: "notify_smtp_starttls = dunno", errPart: "notify_smtp_starttls"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config")
+			require.NoError(t, os.WriteFile(configPath, []byte(tc.config), 0o600))
+
+			loader := newValuesLoader(defaultsFS)
+			_, err := loader.Load("", configPath)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errPart)
+		})
+	}
+}
+
+func TestValues_mergeFrom_NotifyFields(t *testing.T) {
+	t.Run("merge notify channels and strings", func(t *testing.T) {
+		dst := Values{NotifyChannels: []string{"telegram"}, NotifyChannelsSet: true, NotifyTelegramToken: "old-token"}
+		src := Values{NotifyChannels: []string{"slack", "webhook"}, NotifyChannelsSet: true, NotifyTelegramToken: "new-token"}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"slack", "webhook"}, dst.NotifyChannels)
+		assert.Equal(t, "new-token", dst.NotifyTelegramToken)
+	})
+
+	t.Run("empty source preserves dst notify fields", func(t *testing.T) {
+		dst := Values{
+			NotifyChannels:      []string{"telegram"},
+			NotifyTelegramToken: "keep-token",
+			NotifySMTPHost:      "keep-host",
+		}
+		src := Values{}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"telegram"}, dst.NotifyChannels)
+		assert.Equal(t, "keep-token", dst.NotifyTelegramToken)
+		assert.Equal(t, "keep-host", dst.NotifySMTPHost)
+	})
+
+	t.Run("set flags control bool and int notify merging", func(t *testing.T) {
+		dst := Values{NotifyOnError: true, NotifyOnErrorSet: true, NotifyTimeoutMs: 10000, NotifyTimeoutMsSet: true}
+		src := Values{NotifyOnError: false, NotifyOnErrorSet: true, NotifyTimeoutMs: 0, NotifyTimeoutMsSet: true}
+		dst.mergeFrom(&src)
+
+		assert.False(t, dst.NotifyOnError)
+		assert.Equal(t, 0, dst.NotifyTimeoutMs)
+	})
+
+	t.Run("unset flags dont merge notify bools", func(t *testing.T) {
+		dst := Values{NotifyOnError: true, NotifyOnErrorSet: true, NotifySMTPPort: 587, NotifySMTPPortSet: true}
+		src := Values{NotifyOnError: false, NotifyOnErrorSet: false, NotifySMTPPort: 0, NotifySMTPPortSet: false}
+		dst.mergeFrom(&src)
+
+		assert.True(t, dst.NotifyOnError)
+		assert.Equal(t, 587, dst.NotifySMTPPort)
+	})
+
+	t.Run("merge all notify string fields", func(t *testing.T) {
+		dst := Values{}
+		src := Values{
+			NotifyTelegramChat: "chat-123",
+			NotifySlackToken:   "slack-tok",
+			NotifySlackChannel: "dev",
+			NotifySMTPHost:     "smtp.test.com",
+			NotifySMTPUsername: "user",
+			NotifySMTPPassword: "pass",
+			NotifyEmailFrom:    "from@test.com",
+			NotifyCustomScript: "/bin/script.sh",
+		}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, "chat-123", dst.NotifyTelegramChat)
+		assert.Equal(t, "slack-tok", dst.NotifySlackToken)
+		assert.Equal(t, "dev", dst.NotifySlackChannel)
+		assert.Equal(t, "smtp.test.com", dst.NotifySMTPHost)
+		assert.Equal(t, "user", dst.NotifySMTPUsername)
+		assert.Equal(t, "pass", dst.NotifySMTPPassword)
+		assert.Equal(t, "from@test.com", dst.NotifyEmailFrom)
+		assert.Equal(t, "/bin/script.sh", dst.NotifyCustomScript)
+	})
+
+	t.Run("merge notify slice fields", func(t *testing.T) {
+		dst := Values{NotifyEmailTo: []string{"old@test.com"}, NotifyWebhookURLs: []string{"https://old.hook"}}
+		src := Values{NotifyEmailTo: []string{"new@test.com", "new2@test.com"}, NotifyEmailToSet: true, NotifyWebhookURLs: []string{"https://new.hook"}, NotifyWebhookURLsSet: true}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"new@test.com", "new2@test.com"}, dst.NotifyEmailTo)
+		assert.Equal(t, []string{"https://new.hook"}, dst.NotifyWebhookURLs)
+	})
+
+	t.Run("empty channels with set flag disables inherited notifications", func(t *testing.T) {
+		dst := Values{NotifyChannels: []string{"telegram", "slack"}, NotifyChannelsSet: true}
+		src := Values{NotifyChannelsSet: true} // explicitly set to empty
+		dst.mergeFrom(&src)
+
+		assert.Empty(t, dst.NotifyChannels)
+		assert.True(t, dst.NotifyChannelsSet)
+	})
+
+	t.Run("empty email_to with set flag disables inherited recipients", func(t *testing.T) {
+		dst := Values{NotifyEmailTo: []string{"user@test.com"}, NotifyEmailToSet: true}
+		src := Values{NotifyEmailToSet: true} // explicitly set to empty
+		dst.mergeFrom(&src)
+
+		assert.Empty(t, dst.NotifyEmailTo)
+		assert.True(t, dst.NotifyEmailToSet)
+	})
+
+	t.Run("empty webhook_urls with set flag disables inherited urls", func(t *testing.T) {
+		dst := Values{NotifyWebhookURLs: []string{"https://old.hook"}, NotifyWebhookURLsSet: true}
+		src := Values{NotifyWebhookURLsSet: true} // explicitly set to empty
+		dst.mergeFrom(&src)
+
+		assert.Empty(t, dst.NotifyWebhookURLs)
+		assert.True(t, dst.NotifyWebhookURLsSet)
+	})
+
+	t.Run("unset channels flag preserves dst channels", func(t *testing.T) {
+		dst := Values{NotifyChannels: []string{"telegram"}, NotifyChannelsSet: true}
+		src := Values{} // not set at all
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"telegram"}, dst.NotifyChannels)
+	})
+
+	t.Run("merge smtp starttls set flag", func(t *testing.T) {
+		dst := Values{NotifySMTPStartTLS: false, NotifySMTPStartTLSSet: false}
+		src := Values{NotifySMTPStartTLS: true, NotifySMTPStartTLSSet: true}
+		dst.mergeFrom(&src)
+
+		assert.True(t, dst.NotifySMTPStartTLS)
+		assert.True(t, dst.NotifySMTPStartTLSSet)
+	})
+
+	t.Run("merge notify on complete set flag", func(t *testing.T) {
+		dst := Values{NotifyOnComplete: true, NotifyOnCompleteSet: true}
+		src := Values{NotifyOnComplete: false, NotifyOnCompleteSet: true}
+		dst.mergeFrom(&src)
+
+		assert.False(t, dst.NotifyOnComplete)
+		assert.True(t, dst.NotifyOnCompleteSet)
+	})
+}
+
+func TestValuesLoader_Load_NotifyLocalOverridesGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global")
+	localConfig := filepath.Join(tmpDir, "local")
+
+	globalContent := `
+notify_channels = telegram
+notify_telegram_token = global-token
+notify_timeout_ms = 10000
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
+
+	localContent := `
+notify_channels = slack, webhook
+notify_timeout_ms = 5000
+`
+	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	// local overrides
+	assert.Equal(t, []string{"slack", "webhook"}, values.NotifyChannels)
+	assert.Equal(t, 5000, values.NotifyTimeoutMs)
+
+	// global preserved when not overridden
+	assert.Equal(t, "global-token", values.NotifyTelegramToken)
+}
+
+func TestValuesLoader_Load_EmptyLocalDisablesGlobalNotifications(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global")
+	localConfig := filepath.Join(tmpDir, "local")
+
+	globalContent := `
+notify_channels = telegram
+notify_telegram_token = global-token
+notify_telegram_chat = -100123
+`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
+
+	// local config explicitly sets notify_channels to empty to disable notifications
+	localContent := `notify_channels =`
+	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	assert.Empty(t, values.NotifyChannels, "local empty notify_channels should disable global notifications")
+	assert.True(t, values.NotifyChannelsSet)
+	// global token still preserved (only channels are disabled)
+	assert.Equal(t, "global-token", values.NotifyTelegramToken)
+}
+
 func TestValuesLoader_Load_LocalOverridesExternalReviewTool(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "global")

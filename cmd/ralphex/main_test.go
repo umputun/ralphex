@@ -17,6 +17,7 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
+	"github.com/umputun/ralphex/pkg/notify"
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
@@ -386,21 +387,17 @@ func TestCheckClaudeDep(t *testing.T) {
 
 func TestCreateRunner(t *testing.T) {
 	t.Run("creates_runner_without_panic", func(t *testing.T) {
-		cfg := &config.Config{
-			IterationDelayMs: 5000,
-			TaskRetryCount:   3,
-			CodexEnabled:     false,
-		}
+		cfg := &config.Config{IterationDelayMs: 5000, TaskRetryCount: 3, CodexEnabled: false}
 		o := opts{MaxIterations: 100, Debug: true, NoColor: true}
 
-		// create a dummy logger for the test
 		colors := testColors()
 		holder := &status.PhaseHolder{}
 		log, err := progress.NewLogger(progress.Config{PlanFile: "", Mode: "full", Branch: "test", NoColor: true}, colors, holder)
 		require.NoError(t, err)
 		defer log.Close()
 
-		runner := createRunner(cfg, o, "/path/to/plan.md", processor.ModeFull, log, "master", holder)
+		req := executePlanRequest{PlanFile: "/path/to/plan.md", Mode: processor.ModeFull, Config: cfg, DefaultBranch: "master"}
+		runner := createRunner(req, o, log, holder)
 		assert.NotNil(t, runner)
 	})
 
@@ -415,7 +412,8 @@ func TestCreateRunner(t *testing.T) {
 		defer log.Close()
 
 		// tests that codex-only mode code path runs without panic
-		runner := createRunner(cfg, o, "", processor.ModeCodexOnly, log, "main", holder)
+		req := executePlanRequest{Mode: processor.ModeCodexOnly, Config: cfg, DefaultBranch: "main"}
+		runner := createRunner(req, o, log, holder)
 		assert.NotNil(t, runner)
 	})
 }
@@ -808,6 +806,52 @@ func TestModeRequiresBranch(t *testing.T) {
 			assert.Equal(t, tc.expected, result, "mode %s should return %v", tc.mode, tc.expected)
 		})
 	}
+}
+
+func TestStderrLog(t *testing.T) {
+	// verify stderrLog has Print method with correct signature
+	var log stderrLog
+	log.Print("test %s %d", "message", 42)
+}
+
+func TestNotificationServiceCreation(t *testing.T) {
+	t.Run("nil_service_when_no_channels", func(t *testing.T) {
+		// run() creates notify service from config.NotifyParams.
+		// with default config (no channels), notifySvc should be nil.
+		// this is tested indirectly - existing tests call run() which now creates notifySvc.
+		// nil service is nil-safe on Send(), so existing tests pass without changes.
+		svc, err := notify.New(notify.Params{}, stderrLog{})
+		require.NoError(t, err)
+		assert.Nil(t, svc)
+	})
+
+	t.Run("error_on_misconfigured_channel", func(t *testing.T) {
+		// missing required fields should return error (fail fast at startup)
+		svc, err := notify.New(notify.Params{
+			Channels: []string{"telegram"},
+			// missing TelegramToken and TelegramChat
+		}, stderrLog{})
+		require.Error(t, err)
+		assert.Nil(t, svc)
+		assert.Contains(t, err.Error(), "telegram")
+	})
+
+	t.Run("nil_service_send_is_noop", func(t *testing.T) {
+		// verify nil-safe Send doesn't panic
+		var svc *notify.Service
+		svc.Send(context.Background(), notify.Result{Status: "success"})
+	})
+}
+
+func TestExecutePlanRequestHasNotifySvc(t *testing.T) {
+	// verify the struct has NotifySvc field and it works with nil
+	req := executePlanRequest{
+		NotifySvc: nil,
+	}
+	assert.Nil(t, req.NotifySvc)
+
+	// verify nil-safe call through the struct
+	req.NotifySvc.Send(context.Background(), notify.Result{Status: "success"})
 }
 
 // setupTestRepo creates a test git repository with an initial commit.

@@ -9,6 +9,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-git/go-billy/v5 v5.7.0
 	github.com/go-git/go-git/v5 v5.16.4
+	github.com/go-pkgz/notify v1.3.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/playwright-community/playwright-go v0.5200.1
 	github.com/stretchr/testify v1.11.1
@@ -38,9 +39,13 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
+	github.com/go-pkgz/email v0.6.0 // indirect
+	github.com/go-pkgz/lgr v0.12.1 // indirect
+	github.com/go-pkgz/repeater v1.2.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
@@ -55,6 +60,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
+	github.com/slack-go/slack v0.17.3 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect

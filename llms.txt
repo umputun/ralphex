@@ -68,6 +68,8 @@ Configuration directory: `~/.config/ralphex/`
 
 **Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing.
 
+**Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
+
 Run `ralphex --reset` to restore default configuration interactively.
 
 ## Docker Images

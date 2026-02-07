@@ -143,6 +143,83 @@ codex_error_patterns = Rate limit,quota exceeded
 # claude_model_plan = claude-opus-4-5
 
 # ------------------------------------------------------------------------------
+# notifications (optional, disabled by default)
+# ------------------------------------------------------------------------------
+
+# notify_channels: comma-separated list of channels to use
+# available: telegram, email, slack, webhook, custom
+# leave empty or omit to disable notifications entirely
+# example: notify_channels = telegram, webhook
+# notify_channels =
+
+# notify_on_error: send notification when execution fails
+# default: true
+# notify_on_error = true
+
+# notify_on_complete: send notification when execution succeeds
+# default: true
+# notify_on_complete = true
+
+# notify_timeout_ms: total timeout for all notification channels in milliseconds
+# default: 10000
+# notify_timeout_ms = 10000
+
+# --- telegram ---
+
+# notify_telegram_token: bot token from BotFather
+# notify_telegram_token =
+
+# notify_telegram_chat: chat ID or channel name (e.g., @mychannel or 123456789)
+# notify_telegram_chat =
+
+# --- slack ---
+
+# notify_slack_token: slack bot oauth token (xoxb-...)
+# notify_slack_token =
+
+# notify_slack_channel: channel name or ID to post to
+# notify_slack_channel =
+
+# --- email (SMTP) ---
+
+# notify_smtp_host: SMTP server hostname
+# notify_smtp_host =
+
+# notify_smtp_port: SMTP server port
+# default: 587
+# notify_smtp_port = 587
+
+# notify_smtp_username: SMTP authentication username
+# notify_smtp_username =
+
+# notify_smtp_password: SMTP authentication password
+# notify_smtp_password =
+
+# notify_smtp_starttls: use STARTTLS for SMTP connection
+# default: false
+# notify_smtp_starttls = false
+
+# notify_email_from: sender email address
+# notify_email_from =
+
+# notify_email_to: comma-separated list of recipient email addresses
+# notify_email_to =
+
+# --- webhook ---
+
+# notify_webhook_urls: comma-separated list of webhook endpoint URLs
+# the notification message is POSTed as plain text to each URL
+# notify_webhook_urls =
+
+# --- custom script ---
+
+# notify_custom_script: path to custom notification script
+# script receives Result JSON on stdin, exit 0 = success, non-zero = failure
+# timeout controlled by notify_timeout_ms
+# example: notify_custom_script = ~/.config/ralphex/scripts/notify.sh
+# notify_custom_script =
+
+# ------------------------------------------------------------------------------
 # output colors (hex format: #RRGGBB)
 # ------------------------------------------------------------------------------
 
