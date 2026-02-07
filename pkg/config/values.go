@@ -356,6 +356,13 @@ func (dst *Values) mergeFrom(src *Values) {
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
 	}
+	dst.mergeModelsFrom(src)
+	dst.mergeNotifyFrom(src)
+}
+
+// mergeModelsFrom merges per-phase claude model fields from src into dst.
+// called from mergeFrom to manage cyclomatic complexity.
+func (dst *Values) mergeModelsFrom(src *Values) {
 	if src.ClaudeModelTask != "" {
 		dst.ClaudeModelTask = src.ClaudeModelTask
 	}
@@ -365,8 +372,6 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.ClaudeModelPlan != "" {
 		dst.ClaudeModelPlan = src.ClaudeModelPlan
 	}
-
-	dst.mergeNotifyFrom(src)
 }
 
 // mergeNotifyFrom merges notification-related fields from src into dst.
