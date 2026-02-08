@@ -36,6 +36,7 @@ type Values struct {
 	FinalizeEnabledSet   bool // tracks if finalize_enabled was explicitly set
 	PlansDir             string
 	WatchDirs            []string // directories to watch for progress files
+
 	// notification settings
 	NotifyChannels        []string // channels to use: telegram, email, webhook, slack, custom
 	NotifyChannelsSet     bool     // tracks if notify_channels was explicitly set (allows empty to disable)
@@ -341,6 +342,7 @@ func (dst *Values) mergeFrom(src *Values) {
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
 	}
+
 	dst.mergeNotifyFrom(src)
 }
 
