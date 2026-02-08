@@ -532,6 +532,35 @@ Started: 2026-01-22 10:00:00
 		// should not panic
 		m.loadProgressFileIntoSession(path, session)
 	})
+
+	t.Run("captures diffstats from output line", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-diffstats.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+[26-01-22 10:00:01] running task
+[26-01-22 10:00:02] DIFFSTATS: files=3 additions=10 deletions=4
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		session := NewSession("test-diffstats", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		stats := session.GetDiffStats()
+		require.NotNil(t, stats)
+		assert.Equal(t, 3, stats.Files)
+		assert.Equal(t, 10, stats.Additions)
+		assert.Equal(t, 4, stats.Deletions)
+	})
 }
 
 func TestSessionManager_EmitPendingSection(t *testing.T) {

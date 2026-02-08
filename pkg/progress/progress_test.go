@@ -322,6 +322,40 @@ func TestLogger_Close(t *testing.T) {
 	assert.Contains(t, string(content), strings.Repeat("-", 60))
 }
 
+func TestLogger_LogDiffStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors())
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	l.LogDiffStats(3, 4, 5)
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "DIFFSTATS: files=3 additions=4 deletions=5")
+}
+
+func TestLogger_LogDiffStats_ZeroFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors())
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	l.LogDiffStats(0, 5, 6)
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	assert.NotContains(t, string(content), "DIFFSTATS:")
+}
+
 func TestGetProgressFilename(t *testing.T) {
 	tests := []struct {
 		name            string

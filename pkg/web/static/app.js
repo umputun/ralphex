@@ -13,6 +13,7 @@
     const output = document.getElementById('output');
     const statusBadge = document.getElementById('status-badge');
     const elapsedTimeEl = document.getElementById('elapsed-time');
+    const diffStatsEl = document.getElementById('diff-stats');
     const searchInput = document.getElementById('search');
     const scrollIndicator = document.getElementById('scroll-indicator');
     const scrollToBottomBtn = document.getElementById('scroll-to-bottom');
@@ -77,6 +78,7 @@
         // session state
         sessions: [],
         currentSessionId: null,
+        currentSession: null,
         sessionPollInterval: null,
 
         // timing state
@@ -268,11 +270,75 @@
 
     // regex pattern for task iteration sections (hoisted for performance)
     var TASK_ITERATION_PATTERN = /^task iteration \d+$/i;
+    var TASK_ITERATION_NUMBER_PATTERN = /^task iteration (\d+)$/i;
+    var DIFF_STATS_PATTERN = /^DIFFSTATS:\s*files=(\d+)\s+additions=(\d+)\s+deletions=(\d+)\s*$/i;
 
     // check if section text is a task iteration pattern
     function isTaskIteration(sectionText) {
         if (!sectionText) return false;
         return TASK_ITERATION_PATTERN.test(sectionText);
+    }
+
+    function extractTaskIterationNumber(sectionText) {
+        if (!sectionText) return null;
+        var matches = TASK_ITERATION_NUMBER_PATTERN.exec(sectionText);
+        if (!matches) return null;
+        var num = parseInt(matches[1], 10);
+        return isNaN(num) ? null : num;
+    }
+
+    function formatDiffStats(stats) {
+        if (!stats || !stats.files) return '';
+        return stats.files + ' files +' + stats.additions + '/-' + stats.deletions;
+    }
+
+    function updateDiffStats(stats) {
+        if (!diffStatsEl) return;
+        var text = formatDiffStats(stats);
+        if (!text) {
+            diffStatsEl.textContent = '';
+            diffStatsEl.removeAttribute('title');
+            return;
+        }
+        var additions = typeof stats.additions === 'number' ? stats.additions : 0;
+        var deletions = typeof stats.deletions === 'number' ? stats.deletions : 0;
+        diffStatsEl.textContent = '';
+        var filesSpan = document.createElement('span');
+        filesSpan.className = 'diff-files';
+        filesSpan.textContent = stats.files + ' files ';
+
+        var addSpan = document.createElement('span');
+        addSpan.className = 'diff-additions';
+        addSpan.textContent = '+' + additions;
+
+        var slashSpan = document.createElement('span');
+        slashSpan.className = 'diff-separator';
+        slashSpan.textContent = '/';
+
+        var delSpan = document.createElement('span');
+        delSpan.className = 'diff-deletions';
+        delSpan.textContent = '-' + deletions;
+
+        diffStatsEl.appendChild(filesSpan);
+        diffStatsEl.appendChild(addSpan);
+        diffStatsEl.appendChild(slashSpan);
+        diffStatsEl.appendChild(delSpan);
+        if (text) {
+            diffStatsEl.title = text;
+        } else {
+            diffStatsEl.removeAttribute('title');
+        }
+    }
+
+    function parseDiffStatsText(text) {
+        if (!text) return null;
+        var matches = DIFF_STATS_PATTERN.exec(text);
+        if (!matches) return null;
+        return {
+            files: parseInt(matches[1], 10),
+            additions: parseInt(matches[2], 10),
+            deletions: parseInt(matches[3], 10)
+        };
     }
 
     // look up task title by number from plan data
@@ -289,14 +355,18 @@
     // format section title for task iterations using current active task
     // stores task number in data attribute for later refresh if plan loads after events
     function formatSectionTitle(sectionText, sectionElement) {
-        if (isTaskIteration(sectionText) && state.currentTaskNum) {
-            // store the task number for later refresh
-            if (sectionElement) {
-                sectionElement.dataset.taskNum = state.currentTaskNum;
-            }
-            var title = getTaskTitle(state.currentTaskNum);
-            if (title) {
-                return 'Task ' + state.currentTaskNum + ': ' + title;
+        if (isTaskIteration(sectionText)) {
+            var taskNum = state.currentTaskNum || extractTaskIterationNumber(sectionText);
+            if (taskNum) {
+                // store the task number for later refresh
+                if (sectionElement) {
+                    sectionElement.dataset.taskNum = taskNum;
+                }
+                var title = getTaskTitle(taskNum);
+                if (title) {
+                    return 'Task ' + taskNum + ': ' + title;
+                }
+                return 'Task ' + taskNum;
             }
         }
         return sectionText;
@@ -602,6 +672,7 @@
     // handle task boundary events
     function handleTaskStart(event) {
         state.currentTaskNum = event.task_num;
+        clearActiveTasksExcept(event.task_num);
         updatePlanTaskStatus(event.task_num, 'active');
     }
 
@@ -644,18 +715,56 @@
         }
     }
 
+    // ensure only one task is highlighted as active
+    function clearActiveTasksExcept(taskNum) {
+        var activeTasks = planContent.querySelectorAll('.plan-task.active');
+        activeTasks.forEach(function(taskEl) {
+            var num = parseInt(taskEl.dataset.taskNum, 10);
+            if (num === taskNum) {
+                return;
+            }
+            taskEl.classList.remove('active');
+            var statusEl = taskEl.querySelector('.plan-task-status');
+            if (!statusEl) {
+                return;
+            }
+            statusEl.classList.remove('active', 'pending', 'done', 'failed');
+            var unchecked = taskEl.querySelectorAll('.plan-checkbox:not(.checked)');
+            if (unchecked.length === 0) {
+                statusEl.classList.add('done');
+                statusEl.textContent = '✓';
+            } else {
+                statusEl.classList.add('pending');
+                statusEl.textContent = '○';
+            }
+        });
+    }
+
     // render event to output
     function renderEvent(event) {
         var eventTimestamp = new Date(event.timestamp).getTime();
 
         // track execution start time
-        if (!state.executionStartTime) {
+        if (!state.executionStartTime || eventTimestamp < state.executionStartTime) {
             state.executionStartTime = eventTimestamp;
+        }
+        if (state.executionStartTime && !state.elapsedTimerInterval && !state.isTerminalState) {
             startElapsedTimer();
         }
 
         // always update lastEventTimestamp for duration calculations
         state.lastEventTimestamp = eventTimestamp;
+
+        if (event && event.type === 'output') {
+            var diffStats = parseDiffStatsText(event.text);
+            if (diffStats) {
+                if (state.currentSession) {
+                    state.currentSession.diffStats = diffStats;
+                }
+                updateDiffStats(diffStats);
+                return; // metadata line, don't render
+            }
+        }
 
         // update status badge
         updateStatusBadge(event);
@@ -1044,6 +1153,25 @@
         }
     }
 
+    function parseTimeMs(value) {
+        if (!value) return null;
+        var ts = new Date(value).getTime();
+        if (!isFinite(ts) || ts <= 0) return null;
+        return ts;
+    }
+
+    function seedExecutionStartTimeFromSession(session) {
+        var startMs = session ? parseTimeMs(session.startTime) : null;
+        if (!startMs) return;
+        if (!state.executionStartTime || startMs < state.executionStartTime) {
+            state.executionStartTime = startMs;
+        }
+        if (state.executionStartTime && !state.elapsedTimerInterval && !state.isTerminalState) {
+            startElapsedTimer();
+        }
+        updateTimers();
+    }
+
     // extract plan name from path
     function extractPlanName(path) {
         if (!path) return 'Unknown';
@@ -1305,6 +1433,9 @@
             if (branchNameEl) {
                 branchNameEl.textContent = session.branch || '';
             }
+            state.currentSession = session;
+            updateDiffStats(session.diffStats);
+            seedExecutionStartTimeFromSession(session);
         }
 
         // reconnect SSE to new session
@@ -1345,7 +1476,8 @@
         }
 
         // reset output state
-        resetOutputState();
+        var sessionStartTime = state.currentSession && state.currentSession.startTime;
+        resetOutputState({ seedStartTime: sessionStartTime });
         state.isFirstConnect = true;
         state.reconnectDelay = SSE_INITIAL_RECONNECT_MS;
         state.pendingScrollRestore = true; // restore scroll position after events load
@@ -1402,7 +1534,8 @@
         }
     }
 
-    function resetOutputState() {
+    function resetOutputState(options) {
+        var seedStartTime = options && options.seedStartTime;
         clearElement(output);
         state.currentSection = null;
         state.sectionStartTimes = {};
@@ -1422,6 +1555,10 @@
             state.elapsedTimerInterval = null;
         }
         elapsedTimeEl.textContent = '';
+        updateDiffStats(null);
+        if (seedStartTime) {
+            seedExecutionStartTimeFromSession({ startTime: seedStartTime });
+        }
     }
 
     // create plan loading/error message element
@@ -1471,16 +1608,19 @@
             taskEl.className = 'plan-task';
             taskEl.dataset.taskNum = task.number;
 
-            if (task.status === 'active') {
-                taskEl.classList.add('active');
+            var displayStatus = task.status;
+            if (displayStatus === 'active') {
+                var allChecked = task.checkboxes && task.checkboxes.length > 0 &&
+                    task.checkboxes.every(function(cb) { return cb.checked; });
+                displayStatus = allChecked ? 'done' : 'pending';
             }
 
             const header = document.createElement('div');
             header.className = 'plan-task-header';
 
             const statusIcon = document.createElement('span');
-            statusIcon.className = 'plan-task-status ' + task.status;
-            switch (task.status) {
+            statusIcon.className = 'plan-task-status ' + displayStatus;
+            switch (displayStatus) {
                 case 'pending': statusIcon.textContent = '○'; break;
                 case 'active': statusIcon.textContent = '●'; break;
                 case 'done': statusIcon.textContent = '✓'; break;
@@ -1527,6 +1667,9 @@
 
         // update any section headers that were rendered before plan data loaded
         refreshSectionTitles();
+        if (state.currentTaskNum) {
+            updatePlanTaskStatus(state.currentTaskNum, 'active');
+        }
     }
 
     // event listeners

@@ -437,6 +437,227 @@ func TestExtractSignalFromText(t *testing.T) {
 	}
 }
 
+func TestTailer_ParseLineDeferred(t *testing.T) {
+	t.Run("defers section until timestamped line", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = false
+		tailer.deferSections = true
+
+		// section header alone should not produce events yet
+		events := tailer.parseLineDeferred("--- task iteration 1 ---")
+		assert.Empty(t, events)
+		assert.Equal(t, "task iteration 1", tailer.pendingSection)
+
+		// timestamped line should emit section + content
+		events = tailer.parseLineDeferred("[26-01-22 10:30:45] Hello world")
+		require.Len(t, events, 3) // TaskStart + Section + Output
+		assert.Equal(t, EventTypeTaskStart, events[0].Type)
+		assert.Equal(t, 1, events[0].TaskNum)
+		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, "task iteration 1", events[1].Section)
+		assert.Equal(t, EventTypeOutput, events[2].Type)
+		assert.Equal(t, "Hello world", events[2].Text)
+
+		// all three events should share the same timestamp from the content line
+		assert.Equal(t, events[2].Timestamp, events[0].Timestamp)
+		assert.Equal(t, events[2].Timestamp, events[1].Timestamp)
+		assert.Empty(t, tailer.pendingSection)
+	})
+
+	t.Run("defers section until plain line", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = false
+		tailer.deferSections = true
+
+		events := tailer.parseLineDeferred("--- review iteration 1 ---")
+		assert.Empty(t, events)
+
+		// plain line triggers deferred emission with time.Now()
+		events = tailer.parseLineDeferred("some plain text")
+		require.Len(t, events, 2) // Section + Output (review sections don't produce TaskStart)
+		assert.Equal(t, EventTypeSection, events[0].Type)
+		assert.Equal(t, "review iteration 1", events[0].Section)
+		assert.Equal(t, status.PhaseReview, events[0].Phase)
+		assert.Equal(t, EventTypeOutput, events[1].Type)
+		assert.Equal(t, "some plain text", events[1].Text)
+	})
+
+	t.Run("consecutive sections flush previous", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = false
+		tailer.deferSections = true
+
+		// first section - queued
+		events := tailer.parseLineDeferred("--- task iteration 1 ---")
+		assert.Empty(t, events)
+
+		// second section - should flush the first
+		events = tailer.parseLineDeferred("--- task iteration 2 ---")
+		require.Len(t, events, 2) // TaskStart + Section for task 1
+		assert.Equal(t, EventTypeTaskStart, events[0].Type)
+		assert.Equal(t, 1, events[0].TaskNum)
+		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, "task iteration 1", events[1].Section)
+
+		// pending should now be task 2
+		assert.Equal(t, "task iteration 2", tailer.pendingSection)
+	})
+
+	t.Run("skips header lines", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = true
+		tailer.deferSections = true
+
+		events := tailer.parseLineDeferred("Plan: /path/to/plan.md")
+		assert.Empty(t, events)
+
+		events = tailer.parseLineDeferred("------------------------------------------------------------")
+		assert.Empty(t, events)
+		assert.False(t, tailer.inHeader)
+	})
+
+	t.Run("updates phase from section", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = false
+		tailer.deferSections = true
+
+		_ = tailer.parseLineDeferred("--- codex analysis ---")
+		events := tailer.parseLineDeferred("[26-01-22 10:30:45] codex output")
+
+		require.Len(t, events, 2) // Section + Output
+		assert.Equal(t, status.PhaseCodex, events[0].Phase)
+		assert.Equal(t, status.PhaseCodex, events[1].Phase)
+	})
+}
+
+func TestTailer_EmitPendingSection(t *testing.T) {
+	ts := time.Date(2026, 1, 22, 10, 30, 0, 0, time.UTC)
+
+	t.Run("task iteration emits TaskStart and Section", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.pendingSection = "task iteration 3"
+		tailer.pendingPhase = status.PhaseTask
+
+		events := tailer.emitPendingSection(ts)
+		require.Len(t, events, 2)
+
+		assert.Equal(t, EventTypeTaskStart, events[0].Type)
+		assert.Equal(t, 3, events[0].TaskNum)
+		assert.Equal(t, status.PhaseTask, events[0].Phase)
+		assert.Equal(t, ts, events[0].Timestamp)
+
+		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, "task iteration 3", events[1].Section)
+		assert.Equal(t, status.PhaseTask, events[1].Phase)
+		assert.Equal(t, ts, events[1].Timestamp)
+
+		// pending should be cleared
+		assert.Empty(t, tailer.pendingSection)
+	})
+
+	t.Run("non-task section emits Section only", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.pendingSection = "review iteration 1"
+		tailer.pendingPhase = status.PhaseReview
+
+		events := tailer.emitPendingSection(ts)
+		require.Len(t, events, 1)
+
+		assert.Equal(t, EventTypeSection, events[0].Type)
+		assert.Equal(t, "review iteration 1", events[0].Section)
+		assert.Equal(t, status.PhaseReview, events[0].Phase)
+		assert.Equal(t, ts, events[0].Timestamp)
+	})
+
+	t.Run("empty pending returns nil", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.pendingSection = ""
+
+		events := tailer.emitPendingSection(ts)
+		assert.Nil(t, events)
+	})
+
+	t.Run("case-insensitive task iteration match", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.pendingSection = "Task Iteration 5"
+		tailer.pendingPhase = status.PhaseTask
+
+		events := tailer.emitPendingSection(ts)
+		require.Len(t, events, 2)
+		assert.Equal(t, EventTypeTaskStart, events[0].Type)
+		assert.Equal(t, 5, events[0].TaskNum)
+	})
+}
+
+func TestTailer_SendEvent(t *testing.T) {
+	t.Run("enqueues when channel has space", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		event := Event{Type: EventTypeOutput, Text: "hello"}
+
+		tailer.sendEvent(event)
+
+		select {
+		case got := <-tailer.eventCh:
+			assert.Equal(t, "hello", got.Text)
+		default:
+			t.Fatal("expected event in channel")
+		}
+	})
+
+	t.Run("drops non-priority event when channel full", func(t *testing.T) {
+		// create tailer with tiny channel for testing
+		tailer := &Tailer{
+			eventCh: make(chan Event, 1),
+		}
+
+		// fill the channel
+		tailer.eventCh <- Event{Type: EventTypeOutput, Text: "filler"}
+
+		// non-priority event should be silently dropped
+		tailer.sendEvent(Event{Type: EventTypeOutput, Text: "dropped"})
+
+		got := <-tailer.eventCh
+		assert.Equal(t, "filler", got.Text, "original event should remain")
+	})
+
+	t.Run("priority event displaces when channel full", func(t *testing.T) {
+		tailer := &Tailer{
+			eventCh: make(chan Event, 1),
+		}
+
+		// fill with non-priority
+		tailer.eventCh <- Event{Type: EventTypeOutput, Text: "old"}
+
+		// priority event should displace the old one
+		tailer.sendEvent(Event{Type: EventTypeSection, Text: "important"})
+
+		got := <-tailer.eventCh
+		assert.Equal(t, "important", got.Text, "priority event should displace old event")
+	})
+}
+
+func TestIsPriorityEvent(t *testing.T) {
+	tests := []struct {
+		name     string
+		evType   EventType
+		expected bool
+	}{
+		{"section is priority", EventTypeSection, true},
+		{"task_start is priority", EventTypeTaskStart, true},
+		{"task_end is priority", EventTypeTaskEnd, true},
+		{"signal is priority", EventTypeSignal, true},
+		{"output is not priority", EventTypeOutput, false},
+		{"error is not priority", EventTypeError, false},
+		{"warn is not priority", EventTypeWarn, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isPriorityEvent(tt.evType))
+		})
+	}
+}
+
 func TestNormalizeTokenSignal(t *testing.T) {
 	tests := []struct {
 		input    string

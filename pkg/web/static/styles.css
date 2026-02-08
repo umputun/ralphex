@@ -533,6 +533,37 @@ header h1 {
     font-weight: 500;
 }
 
+.diff-stats {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.diff-stats:empty {
+    display: none;
+}
+
+.diff-stats .diff-files {
+    color: var(--text-muted);
+}
+
+.diff-stats .diff-additions {
+    color: var(--phase-task);
+}
+
+.diff-stats .diff-deletions {
+    color: var(--color-error);
+}
+
+.diff-stats .diff-separator {
+    color: var(--text-muted);
+}
+
 .export-btn {
     font-family: var(--font-sans);
     font-size: 11px;
