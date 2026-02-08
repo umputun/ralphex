@@ -48,6 +48,24 @@ func TestParseOptions(t *testing.T) {
 	}
 }
 
+func TestOptions_String(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Options
+		want string
+	}{
+		{"empty options", Options{}, "model=default, subagent=general-purpose"},
+		{"model only", Options{Model: "haiku"}, "model=haiku, subagent=general-purpose"},
+		{"agent only", Options{AgentType: "code-reviewer"}, "model=default, subagent=code-reviewer"},
+		{"both fields", Options{Model: "opus", AgentType: "code-reviewer"}, "model=opus, subagent=code-reviewer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.opts.String())
+		})
+	}
+}
+
 func TestOptions_Validate(t *testing.T) {
 	tests := []struct {
 		name     string

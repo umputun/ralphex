@@ -17,6 +17,19 @@ var validModels = map[string]bool{
 	"haiku": true, "sonnet": true, "opus": true,
 }
 
+// String returns a human-readable summary of the options for logging.
+func (o Options) String() string {
+	model := o.Model
+	if model == "" {
+		model = "default"
+	}
+	subagent := o.AgentType
+	if subagent == "" {
+		subagent = "general-purpose"
+	}
+	return fmt.Sprintf("model=%s, subagent=%s", model, subagent)
+}
+
 // Validate returns warnings for invalid option values.
 func (o Options) Validate() []string {
 	var warnings []string

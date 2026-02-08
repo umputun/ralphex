@@ -140,6 +140,8 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 			return match
 		}
 
+		r.log.Print("agent %q: %s", name, agent.Options)
+
 		// expand variables in agent content (no agent expansion to avoid recursion)
 		agentPrompt := r.replaceBaseVariables(agent.Prompt)
 
