@@ -111,14 +111,12 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		OutputHandler: func(text string) {
 			log.PrintAligned(text)
 		},
-		Debug:  cfg.Debug,
-		Holder: holder,
+		Debug: cfg.Debug,
 	}
 	if cfg.AppConfig != nil {
 		claudeExec.Command = cfg.AppConfig.ClaudeCommand
 		claudeExec.Args = cfg.AppConfig.ClaudeArgs
 		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
-		claudeExec.Models = &cfg.AppConfig.Models
 	}
 
 	// build codex executor with config values
