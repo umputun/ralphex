@@ -1,6 +1,8 @@
 package status
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,4 +55,39 @@ func TestPhaseHolder_OnChange_NilCallbackSafe(t *testing.T) {
 	// no callback registered - should not panic
 	h.Set(PhaseTask)
 	assert.Equal(t, PhaseTask, h.Get())
+}
+
+func TestPhaseHolder_ConcurrentAccess(t *testing.T) {
+	h := &PhaseHolder{}
+	phases := []Phase{PhaseTask, PhaseReview, PhaseCodex, PhaseClaudeEval, PhaseFinalize}
+
+	var cbCount atomic.Int64
+	h.OnChange(func(_, _ Phase) {
+		_ = h.Get() // exercise read path from callback (deadlock risk if lock held)
+		cbCount.Add(1)
+	})
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	workers := 32
+	iters := 500
+	for w := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := range iters {
+				h.Set(phases[(w+i)%len(phases)])
+				h.Get()
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	got := h.Get()
+	assert.Contains(t, phases, got)
+	assert.Greater(t, cbCount.Load(), int64(0))
 }
