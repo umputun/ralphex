@@ -91,8 +91,11 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 
 		name := strings.TrimSuffix(entry.Name(), ".txt")
 		opts, body := parseOptions(prompt)
-		for _, w := range opts.Validate() {
-			fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
+		if warnings := opts.Validate(); len(warnings) > 0 {
+			for _, w := range warnings {
+				fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
+			}
+			opts = Options{} // drop invalid options, use defaults
 		}
 		agents = append(agents, CustomAgent{Name: name, Prompt: body, Options: opts})
 	}
@@ -158,8 +161,11 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 
 		name := strings.TrimSuffix(entry.Name(), ".txt")
 		opts, body := parseOptions(prompt)
-		for _, w := range opts.Validate() {
-			fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
+		if warnings := opts.Validate(); len(warnings) > 0 {
+			for _, w := range warnings {
+				fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
+			}
+			opts = Options{} // drop invalid options, use defaults
 		}
 		agents = append(agents, CustomAgent{Name: name, Prompt: body, Options: opts})
 	}

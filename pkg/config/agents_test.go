@@ -454,7 +454,8 @@ func TestAgentLoader_Load_WarnsOnInvalidModel(t *testing.T) {
 	output := string(buf[:n])
 
 	require.Len(t, agents, 1)
-	assert.Equal(t, "gpt-5", agents[0].Model)
+	assert.Empty(t, agents[0].Model, "invalid model should be dropped")
+	assert.Equal(t, "Review code.", agents[0].Prompt)
 	assert.Contains(t, output, `[WARN] agent bad: unknown model "gpt-5"`)
 }
 
