@@ -466,6 +466,9 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 		case ParsedLineSkip:
 			continue
 		case ParsedLineSection:
+			if pendingSection != "" {
+				m.emitPendingSection(session, pendingSection, phase, time.Now())
+			}
 			phase = parsed.Phase
 			// defer emitting section until we see a timestamped event
 			pendingSection = parsed.Section
@@ -475,13 +478,19 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 				m.emitPendingSection(session, pendingSection, phase, parsed.Timestamp)
 				pendingSection = ""
 			}
-			_ = session.Publish(Event{
+			event := Event{
 				Type:      parsed.EventType,
 				Phase:     phase,
 				Text:      parsed.Text,
 				Timestamp: parsed.Timestamp,
 				Signal:    parsed.Signal,
-			})
+			}
+			if event.Type == EventTypeOutput {
+				if stats, ok := parseDiffStats(event.Text); ok {
+					session.SetDiffStats(stats)
+				}
+			}
+			_ = session.Publish(event)
 		case ParsedLinePlain:
 			_ = session.Publish(Event{
 				Type:      EventTypeOutput,
@@ -490,6 +499,10 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 				Timestamp: time.Now(),
 			})
 		}
+	}
+
+	if pendingSection != "" {
+		m.emitPendingSection(session, pendingSection, phase, time.Now())
 	}
 }
 

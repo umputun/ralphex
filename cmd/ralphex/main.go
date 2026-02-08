@@ -367,6 +367,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// display completion with stats
 	if stats.Files > 0 {
+		baseLog.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
 		req.Colors.Info().Printf("\ncompleted in %s (%d files, +%d/-%d lines)\n",
 			elapsed, stats.Files, stats.Additions, stats.Deletions)
 	} else {

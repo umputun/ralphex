@@ -320,12 +320,13 @@ type SessionInfo struct {
 	// dir is the short display name for the project (last path segment of session directory).
 	Dir string `json:"dir"`
 	// DirPath is the full filesystem path to the session directory (used for grouping and copy-to-clipboard).
-	DirPath      string    `json:"dirPath,omitempty"`
-	PlanPath     string    `json:"planPath,omitempty"`
-	Branch       string    `json:"branch,omitempty"`
-	Mode         string    `json:"mode,omitempty"`
-	StartTime    time.Time `json:"startTime"`
-	LastModified time.Time `json:"lastModified"`
+	DirPath      string     `json:"dirPath,omitempty"`
+	PlanPath     string     `json:"planPath,omitempty"`
+	Branch       string     `json:"branch,omitempty"`
+	Mode         string     `json:"mode,omitempty"`
+	StartTime    time.Time  `json:"startTime"`
+	LastModified time.Time  `json:"lastModified"`
+	DiffStats    *DiffStats `json:"diffStats,omitempty"`
 }
 
 // handleSessions returns a list of all discovered sessions.
@@ -373,6 +374,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			Mode:         meta.Mode,
 			StartTime:    meta.StartTime,
 			LastModified: session.GetLastModified(),
+			DiffStats:    session.GetDiffStats(),
 		})
 	}
 

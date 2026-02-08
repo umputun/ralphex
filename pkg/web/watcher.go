@@ -16,18 +16,18 @@ import (
 // skipDirs is the set of directory names to skip during recursive watching.
 // these are known high-volume or non-relevant directories that won't contain progress files.
 var skipDirs = map[string]bool{
-	".git":        true,
-	".idea":       true,
-	".vscode":     true,
-	".cache":      true,
-	".npm":        true,
-	".yarn":       true,
+	".git":         true,
+	".idea":        true,
+	".vscode":      true,
+	".cache":       true,
+	".npm":         true,
+	".yarn":        true,
 	"node_modules": true,
-	"vendor":      true,
-	"__pycache__": true,
-	"target":      true,
-	"build":       true,
-	"dist":        true,
+	"vendor":       true,
+	"__pycache__":  true,
+	"target":       true,
+	"build":        true,
+	"dist":         true,
 }
 
 // Watcher monitors directories for progress file changes.

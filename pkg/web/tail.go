@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,11 @@ type Tailer struct {
 	eventCh  chan Event
 	phase    status.Phase
 	inHeader bool // true until we pass the header separator
+
+	// defer section emission until first timestamped line (useful when reading from start)
+	deferSections  bool
+	pendingSection string
+	pendingPhase   status.Phase
 }
 
 // NewTailer creates a new Tailer for the given progress file.
@@ -61,7 +67,7 @@ func NewTailer(path string, config TailerConfig) *Tailer {
 		config:   config,
 		stopCh:   make(chan struct{}),
 		doneCh:   make(chan struct{}),
-		eventCh:  make(chan Event, 256),
+		eventCh:  make(chan Event, 2048),
 		phase:    config.InitialPhase,
 		inHeader: true,
 	}
@@ -99,6 +105,9 @@ func (t *Tailer) Start(fromStart bool) error {
 		t.offset = offset
 		t.inHeader = false // assume we're past header if starting from end
 	}
+	t.deferSections = fromStart
+	t.pendingSection = ""
+	t.pendingPhase = ""
 
 	t.file = f
 	t.reader = bufio.NewReader(f)
@@ -208,15 +217,55 @@ func (t *Tailer) readNewLines() {
 			continue
 		}
 
+		if t.deferSections {
+			events := t.parseLineDeferred(line)
+			for i := range events {
+				t.sendEvent(events[i])
+			}
+			continue
+		}
+
 		// parse line and emit event
 		event := t.parseLine(line)
 		if event != nil {
-			select {
-			case t.eventCh <- *event:
-			default:
-				// channel full, drop event
-			}
+			t.sendEvent(*event)
 		}
+	}
+}
+
+// sendEvent tries to enqueue an event; when the queue is full, it prefers
+// keeping high-priority events (sections, task boundaries, signals) by dropping
+// older events to make space.
+func (t *Tailer) sendEvent(event Event) {
+	select {
+	case t.eventCh <- event:
+		return
+	default:
+	}
+
+	if !isPriorityEvent(event.Type) {
+		return
+	}
+
+	// drop one event to make room (best-effort)
+	select {
+	case <-t.eventCh:
+	default:
+	}
+
+	select {
+	case t.eventCh <- event:
+	default:
+		// still full; drop
+	}
+}
+
+func isPriorityEvent(eventType EventType) bool {
+	switch eventType {
+	case EventTypeSection, EventTypeTaskStart, EventTypeTaskEnd, EventTypeSignal:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -265,6 +314,89 @@ func (t *Tailer) parseLine(line string) *Event {
 	default:
 		return nil
 	}
+}
+
+// parseLineDeferred parses a line and defers section emission until the first
+// timestamped or output line, so section timestamps align with log timestamps.
+func (t *Tailer) parseLineDeferred(line string) []Event {
+	parsed, newInHeader := parseProgressLine(line, t.inHeader)
+	t.inHeader = newInHeader
+
+	switch parsed.Type {
+	case ParsedLineSkip:
+		return nil
+	case ParsedLineSection:
+		t.phase = parsed.Phase
+		var events []Event
+		if t.pendingSection != "" {
+			events = append(events, t.emitPendingSection(time.Now())...)
+		}
+		t.pendingSection = parsed.Section
+		t.pendingPhase = parsed.Phase
+		return events
+	case ParsedLineTimestamp:
+		var events []Event
+		if t.pendingSection != "" {
+			events = append(events, t.emitPendingSection(parsed.Timestamp)...)
+		}
+		events = append(events, Event{
+			Type:      parsed.EventType,
+			Phase:     t.phase,
+			Text:      parsed.Text,
+			Timestamp: parsed.Timestamp,
+			Signal:    parsed.Signal,
+		})
+		return events
+	case ParsedLinePlain:
+		var events []Event
+		if t.pendingSection != "" {
+			events = append(events, t.emitPendingSection(time.Now())...)
+		}
+		events = append(events, Event{
+			Type:      EventTypeOutput,
+			Phase:     t.phase,
+			Text:      parsed.Text,
+			Timestamp: time.Now(),
+		})
+		return events
+	default:
+		return nil
+	}
+}
+
+// emitPendingSection returns events for a pending section and clears it.
+func (t *Tailer) emitPendingSection(ts time.Time) []Event {
+	if t.pendingSection == "" {
+		return nil
+	}
+
+	sectionName := t.pendingSection
+	phase := t.pendingPhase
+	t.pendingSection = ""
+	t.pendingPhase = ""
+
+	var events []Event
+	if matches := taskIterationRegex.FindStringSubmatch(sectionName); matches != nil {
+		if taskNum, err := strconv.Atoi(matches[1]); err == nil {
+			events = append(events, Event{
+				Type:      EventTypeTaskStart,
+				Phase:     phase,
+				TaskNum:   taskNum,
+				Text:      sectionName,
+				Timestamp: ts,
+			})
+		}
+	}
+
+	events = append(events, Event{
+		Type:      EventTypeSection,
+		Phase:     phase,
+		Section:   sectionName,
+		Text:      sectionName,
+		Timestamp: ts,
+	})
+
+	return events
 }
 
 // detectEventType determines the event type from line content.
