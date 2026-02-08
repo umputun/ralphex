@@ -90,7 +90,8 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 		}
 
 		name := strings.TrimSuffix(entry.Name(), ".txt")
-		agents = append(agents, CustomAgent{Name: name, Prompt: prompt})
+		model, agentType, body := parseFrontmatter(prompt)
+		agents = append(agents, CustomAgent{Name: name, Prompt: body, Model: model, AgentType: agentType})
 	}
 
 	sort.Slice(agents, func(i, j int) bool {
@@ -153,7 +154,8 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 		}
 
 		name := strings.TrimSuffix(entry.Name(), ".txt")
-		agents = append(agents, CustomAgent{Name: name, Prompt: prompt})
+		model, agentType, body := parseFrontmatter(prompt)
+		agents = append(agents, CustomAgent{Name: name, Prompt: body, Model: model, AgentType: agentType})
 	}
 
 	sort.Slice(agents, func(i, j int) bool {

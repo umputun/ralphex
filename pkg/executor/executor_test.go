@@ -408,6 +408,53 @@ func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 	assert.Equal(t, []string{"--skip-perms", "--verbose", "-p", "the prompt"}, capturedArgs)
 }
 
+func TestClaudeExecutor_Run_WithModel(t *testing.T) {
+	t.Run("model flag injected before prompt", func(t *testing.T) {
+		var capturedArgs []string
+		mock := &mocks.CommandRunnerMock{
+			RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+				capturedArgs = args
+				return strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+			},
+		}
+		e := &ClaudeExecutor{cmdRunner: mock, Model: "sonnet"}
+
+		result := e.Run(context.Background(), "test prompt")
+
+		require.NoError(t, result.Error)
+		assert.Contains(t, capturedArgs, "--model")
+		assert.Contains(t, capturedArgs, "sonnet")
+		// --model should appear before -p
+		modelIdx := -1
+		promptIdx := -1
+		for i, arg := range capturedArgs {
+			if arg == "--model" {
+				modelIdx = i
+			}
+			if arg == "-p" {
+				promptIdx = i
+			}
+		}
+		assert.Greater(t, promptIdx, modelIdx, "--model should appear before -p")
+	})
+
+	t.Run("empty model not injected", func(t *testing.T) {
+		var capturedArgs []string
+		mock := &mocks.CommandRunnerMock{
+			RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+				capturedArgs = args
+				return strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+			},
+		}
+		e := &ClaudeExecutor{cmdRunner: mock}
+
+		result := e.Run(context.Background(), "test prompt")
+
+		require.NoError(t, result.Error)
+		assert.NotContains(t, capturedArgs, "--model")
+	})
+}
+
 func TestSplitArgs(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -6,16 +6,28 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/umputun/ralphex/pkg/config"
 )
 
 // agentRefPattern matches {{agent:name}} template syntax
 var agentRefPattern = regexp.MustCompile(`\{\{agent:([a-zA-Z0-9_-]+)\}\}`)
 
-// agentExpansionTemplate is the wrapper for expanded agent references
-const agentExpansionTemplate = `Use the Task tool to launch a general-purpose agent with this prompt:
-"%s"
+// formatAgentExpansion creates the Task tool instruction for an agent, respecting frontmatter overrides.
+func formatAgentExpansion(prompt, model, agentType string) string {
+	subagent := "general-purpose"
+	if agentType != "" {
+		subagent = agentType
+	}
 
-Report findings only - no positive observations.`
+	var modelClause string
+	if model != "" {
+		modelClause = " with model=" + model
+	}
+
+	return fmt.Sprintf("Use the Task tool%s to launch a %s agent with this prompt:\n\"%s\"\n\nReport findings only - no positive observations.", //nolint:gocritic // %q escapes special chars in prompts
+		modelClause, subagent, prompt)
+}
 
 // getGoal returns the goal string based on whether a plan file is configured.
 func (r *Runner) getGoal() string {
@@ -113,25 +125,25 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 	}
 
 	// build agent lookup map
-	agentMap := make(map[string]string, len(agents))
+	agentMap := make(map[string]config.CustomAgent, len(agents))
 	for _, agent := range agents {
-		agentMap[agent.Name] = agent.Prompt
+		agentMap[agent.Name] = agent
 	}
 
 	return agentRefPattern.ReplaceAllStringFunc(prompt, func(match string) string {
 		// extract name directly from match: {{agent:NAME}} -> NAME
 		name := match[8 : len(match)-2] // skip "{{agent:" and "}}"
 
-		agentPrompt, ok := agentMap[name]
+		agent, ok := agentMap[name]
 		if !ok {
 			r.log.Print("[WARN] agent %q not found, leaving reference unexpanded", name)
 			return match
 		}
 
 		// expand variables in agent content (no agent expansion to avoid recursion)
-		agentPrompt = r.replaceBaseVariables(agentPrompt)
+		agentPrompt := r.replaceBaseVariables(agent.Prompt)
 
-		return fmt.Sprintf(agentExpansionTemplate, agentPrompt)
+		return formatAgentExpansion(agentPrompt, agent.Model, agent.AgentType)
 	})
 }
 

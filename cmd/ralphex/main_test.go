@@ -12,6 +12,7 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/jessevdk/go-flags"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -150,6 +151,25 @@ func TestIsWatchOnlyMode(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func TestModelFlag(t *testing.T) {
+	t.Run("model_flag_parsed_into_opts", func(t *testing.T) {
+		var o opts
+		parser := flags.NewParser(&o, flags.Default)
+		_, err := parser.ParseArgs([]string{"--model", "sonnet", "--plan", "add feature"})
+		require.NoError(t, err)
+		assert.Equal(t, "sonnet", o.Model)
+		assert.Equal(t, "add feature", o.PlanDescription)
+	})
+
+	t.Run("model_flag_empty_by_default", func(t *testing.T) {
+		var o opts
+		parser := flags.NewParser(&o, flags.Default)
+		_, err := parser.ParseArgs([]string{"--plan", "add feature"})
+		require.NoError(t, err)
+		assert.Empty(t, o.Model)
+	})
 }
 
 func TestPlanFlagConflict(t *testing.T) {

@@ -94,8 +94,10 @@ type Config struct {
 
 // CustomAgent represents a user-defined review agent.
 type CustomAgent struct {
-	Name   string // filename without extension
-	Prompt string // contents of the agent file
+	Name      string // filename without extension
+	Prompt    string // contents of the agent file (body after frontmatter)
+	Model     string // optional: model override from frontmatter (e.g., "haiku")
+	AgentType string // optional: subagent type from frontmatter (e.g., "code-reviewer")
 }
 
 // ColorConfig holds RGB values for output colors.

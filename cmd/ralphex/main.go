@@ -35,6 +35,7 @@ type opts struct {
 	CodexOnly       bool     `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
 	TasksOnly       bool     `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
 	PlanDescription string   `long:"plan" description:"create plan interactively (enter plan description)"`
+	Model           string   `long:"model" description:"claude model to use (applies to plan mode)"`
 	Debug           bool     `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor         bool     `long:"no-color" description:"disable color output"`
 	Version         bool     `short:"v" long:"version" description:"print version and exit"`
@@ -569,6 +570,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		NoColor:          o.NoColor,
 		IterationDelayMs: req.Config.IterationDelayMs,
 		DefaultBranch:    req.DefaultBranch,
+		Model:            o.Model,
 		AppConfig:        req.Config,
 	}, baseLog, holder)
 	r.SetInputCollector(collector)

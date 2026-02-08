@@ -534,6 +534,65 @@ func TestRunner_expandAgentReferences_CaseSensitivity(t *testing.T) {
 	})
 }
 
+func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
+	t.Run("both model and agent type", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomAgents: []config.CustomAgent{
+				{Name: "docs", Prompt: "Check docs.", Model: "haiku", AgentType: "code-reviewer"},
+			},
+		}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+
+		result := r.expandAgentReferences("Launch {{agent:docs}}")
+		assert.Contains(t, result, "model=haiku")
+		assert.Contains(t, result, "code-reviewer")
+		assert.Contains(t, result, "Check docs.")
+		assert.NotContains(t, result, "general-purpose")
+	})
+
+	t.Run("model only uses default agent type", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomAgents: []config.CustomAgent{
+				{Name: "lint", Prompt: "Lint code.", Model: "sonnet"},
+			},
+		}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+
+		result := r.expandAgentReferences("Run {{agent:lint}}")
+		assert.Contains(t, result, "model=sonnet")
+		assert.Contains(t, result, "general-purpose")
+		assert.Contains(t, result, "Lint code.")
+	})
+
+	t.Run("agent type only uses no model clause", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomAgents: []config.CustomAgent{
+				{Name: "review", Prompt: "Review code.", AgentType: "code-reviewer"},
+			},
+		}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+
+		result := r.expandAgentReferences("Run {{agent:review}}")
+		assert.NotContains(t, result, "model=")
+		assert.Contains(t, result, "code-reviewer")
+		assert.Contains(t, result, "Review code.")
+	})
+
+	t.Run("no overrides uses defaults", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomAgents: []config.CustomAgent{
+				{Name: "basic", Prompt: "Basic check."},
+			},
+		}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+
+		result := r.expandAgentReferences("Run {{agent:basic}}")
+		assert.NotContains(t, result, "model=")
+		assert.Contains(t, result, "general-purpose")
+		assert.Contains(t, result, "Basic check.")
+	})
+}
+
 func TestRunner_expandAgentReferences_PercentInPrompt(t *testing.T) {
 	appCfg := &config.Config{
 		CustomAgents: []config.CustomAgent{

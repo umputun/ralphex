@@ -428,3 +428,21 @@ func TestAgentLoader_loadFromDir_NonexistentFallsBackToEmbedded(t *testing.T) {
 	}
 	assert.Contains(t, names, "quality", "should include quality agent from embedded")
 }
+
+func TestAgentLoader_Load_ParsesFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
+
+	content := "---\nmodel: haiku\nagent: code-reviewer\n---\nReview code for issues."
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(content), 0o600))
+
+	loader := newAgentLoader(defaultsFS)
+	agents, err := loader.Load("", agentsDir)
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.Equal(t, "quality", agents[0].Name)
+	assert.Equal(t, "Review code for issues.", agents[0].Prompt)
+	assert.Equal(t, "haiku", agents[0].Model)
+	assert.Equal(t, "code-reviewer", agents[0].AgentType)
+}
