@@ -17,12 +17,12 @@ const serverStartupTimeout = 100 * time.Millisecond
 
 // DashboardConfig holds configuration for dashboard initialization.
 type DashboardConfig struct {
-	BaseLog         Logger              // base progress logger
-	Port            int                 // web server port
-	PlanFile        string              // path to plan file (empty for watch-only mode)
-	Branch          string              // current git branch
-	WatchDirs       []string            // CLI watch directories
-	ConfigWatchDirs []string            // config file watch directories
+	BaseLog         Logger           // base progress logger
+	Port            int              // web server port
+	PlanFile        string           // path to plan file (empty for watch-only mode)
+	Branch          string           // current git branch
+	WatchDirs       []string         // CLI watch directories
+	ConfigWatchDirs []string         // config file watch directories
 	Colors          *progress.Colors // colors for output
 }
 
