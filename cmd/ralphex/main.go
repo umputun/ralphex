@@ -2,7 +2,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -65,7 +64,6 @@ type startupInfo struct {
 	Mode            processor.Mode
 	MaxIterations   int
 	ProgressPath    string
-	Models          config.ClaudeModels
 }
 
 // executePlanRequest holds parameters for plan execution.
@@ -323,7 +321,6 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		Mode:          req.Mode,
 		MaxIterations: o.MaxIterations,
 		ProgressPath:  baseLog.Path(),
-		Models:        req.Config.Models,
 	}, req.Colors)
 
 	// create and run the runner
@@ -486,8 +483,7 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 		colors.Info().Printf("starting interactive plan creation\n")
 		colors.Info().Printf("request: %s\n", info.PlanDescription)
 		colors.Info().Printf("branch: %s (max %d iterations)\n", info.Branch, info.MaxIterations)
-		colors.Info().Printf("progress log: %s\n", info.ProgressPath)
-		colors.Info().Printf("models: %s\n\n", formatModels(info.Models))
+		colors.Info().Printf("progress log: %s\n\n", info.ProgressPath)
 		return
 	}
 
@@ -501,18 +497,7 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 	}
 	colors.Info().Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, info.MaxIterations, modeStr)
 	colors.Info().Printf("branch: %s\n", info.Branch)
-	colors.Info().Printf("progress log: %s\n", info.ProgressPath)
-	colors.Info().Printf("models: %s\n\n", formatModels(info.Models))
-}
-
-func formatModels(models config.ClaudeModels) string {
-	if models == (config.ClaudeModels{}) {
-		return "(default)"
-	}
-	return fmt.Sprintf("task=%s, review=%s, plan=%s",
-		cmp.Or(models.Task, "default"),
-		cmp.Or(models.Review, "default"),
-		cmp.Or(models.Plan, "default"))
+	colors.Info().Printf("progress log: %s\n\n", info.ProgressPath)
 }
 
 // runPlanMode executes interactive plan creation mode.
@@ -552,7 +537,6 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		Mode:            processor.ModePlan,
 		MaxIterations:   o.MaxIterations,
 		ProgressPath:    baseLog.Path(),
-		Models:          req.Config.Models,
 	}, req.Colors)
 
 	// create input collector
