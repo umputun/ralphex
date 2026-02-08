@@ -168,12 +168,12 @@ type streamEvent struct {
 
 // ClaudeExecutor runs claude CLI commands with streaming JSON parsing.
 type ClaudeExecutor struct {
-	Command       string               // command to execute, defaults to "claude"
-	Args          string               // additional arguments (space-separated), defaults to standard args
-	OutputHandler func(text string)    // called for each text chunk, can be nil
-	Debug         bool                 // enable debug output
-	ErrorPatterns []string       // patterns to detect in output (e.g., rate limit messages)
-	cmdRunner     CommandRunner // for testing, nil uses default
+	Command       string            // command to execute, defaults to "claude"
+	Args          string            // additional arguments (space-separated), defaults to standard args
+	OutputHandler func(text string) // called for each text chunk, can be nil
+	Debug         bool              // enable debug output
+	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
+	cmdRunner     CommandRunner     // for testing, nil uses default
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.

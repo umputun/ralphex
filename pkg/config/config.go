@@ -271,8 +271,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CustomReviewPrompt: prompts.CustomReview,
 		CustomEvalPrompt:   prompts.CustomEval,
 		CustomAgents:       agents,
-		configDir:    globalDir,
-		localDir:     localDir,
+		configDir:          globalDir,
+		localDir:           localDir,
 	}
 
 	// notify_on_error and notify_on_complete default to true when not explicitly set
