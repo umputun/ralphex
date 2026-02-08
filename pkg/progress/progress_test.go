@@ -54,7 +54,8 @@ func TestNewLogger(t *testing.T) {
 			require.NoError(t, os.Chdir(tmpDir))
 			defer func() { _ = os.Chdir(origDir) }()
 
-			l, err := NewLogger(tc.cfg, colors, &status.PhaseHolder{})
+			holder := &status.PhaseHolder{}
+			l, err := NewLogger(tc.cfg, colors, holder)
 			require.NoError(t, err)
 			defer l.Close()
 
@@ -75,7 +76,8 @@ func TestLogger_Print(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -100,7 +102,8 @@ func TestLogger_PrintRaw(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -121,7 +124,8 @@ func TestLogger_PrintSection(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -143,7 +147,8 @@ func TestLogger_PrintAligned(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -173,7 +178,8 @@ func TestLogger_PrintAligned_Empty(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -191,7 +197,8 @@ func TestLogger_Error(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -212,7 +219,8 @@ func TestLogger_Warn(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -296,7 +304,8 @@ func TestLogger_Elapsed(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), holder)
 	require.NoError(t, err)
 	defer l.Close()
 
@@ -311,7 +320,8 @@ func TestLogger_Close(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), holder)
 	require.NoError(t, err)
 
 	l.Print("some output")
@@ -679,7 +689,8 @@ func TestLogger_LogQuestion(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -707,7 +718,8 @@ func TestLogger_LogAnswer(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -731,7 +743,8 @@ func TestLogger_LogDraftReview_Accept(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -759,7 +772,8 @@ func TestLogger_LogDraftReview_ReviseWithFeedback(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), &status.PhaseHolder{})
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -809,7 +823,8 @@ func TestLogger_PlanModeFilename(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			l, err := NewLogger(tc.cfg, testColors(), &status.PhaseHolder{})
+			holder := &status.PhaseHolder{}
+			l, err := NewLogger(tc.cfg, testColors(), holder)
 			require.NoError(t, err)
 			defer l.Close()
 
