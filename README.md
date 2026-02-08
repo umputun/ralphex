@@ -440,6 +440,25 @@ These 5 agents cover common review concerns and work well out of the box. Custom
 | `simplification` | 1st only | detects over-engineering |
 | `documentation` | 1st only | checks if docs need updates |
 
+### Agent Options (Frontmatter)
+
+Agent files support optional YAML frontmatter for per-agent configuration:
+
+```txt
+---
+model: haiku
+agent: code-reviewer
+---
+Review the code for quality issues...
+```
+
+| Option | Values | Description |
+|--------|--------|-------------|
+| `model` | `haiku`, `sonnet`, `opus` | Claude model for this agent |
+| `agent` | any string | Claude Code Task tool subagent type |
+
+Both options are optional. Without frontmatter, agents use default model and `general-purpose` subagent type. Invalid model values are dropped with a warning.
+
 ### Template Syntax
 
 Custom prompt files support variable expansion. All variables use the `{{VARIABLE}}` syntax.

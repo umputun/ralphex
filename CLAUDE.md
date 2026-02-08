@@ -221,6 +221,12 @@ Implementation:
 - `simplification.txt` - detects over-engineering
 - `testing.txt` - reviews test coverage and quality
 
+**Frontmatter options:** Agent files support optional YAML frontmatter (`---` delimited) for per-agent model and subagent type:
+- `model: haiku|sonnet|opus` — Claude model for this agent
+- `agent: <type>` — Claude Code Task tool subagent type (default: `general-purpose`)
+- Parsed by `parseOptions()` in `pkg/config/frontmatter.go`, validated by `Options.Validate()`
+- Invalid model values are dropped with a warning, falling back to defaults
+
 **Template variables:** Prompt files support variable expansion via `replacePromptVariables()` in `pkg/processor/prompts.go`:
 - `{{PLAN_FILE}}` - path to plan file or fallback text
 - `{{PROGRESS_FILE}}` - path to progress log or fallback text
