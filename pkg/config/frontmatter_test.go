@@ -10,7 +10,7 @@ func TestParseOptions(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		opts Options
+		opts  Options
 		body  string
 	}{
 		{"no frontmatter", "just a prompt", Options{}, "just a prompt"},
