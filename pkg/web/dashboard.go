@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // serverStartupTimeout is the time to wait for server startup before assuming success.
@@ -34,10 +35,11 @@ type Dashboard struct {
 	watchDirs       []string
 	configWatchDirs []string
 	colors          *progress.Colors
+	holder          *status.PhaseHolder
 }
 
 // NewDashboard creates a new dashboard with the given configuration.
-func NewDashboard(cfg DashboardConfig) *Dashboard {
+func NewDashboard(cfg DashboardConfig, holder *status.PhaseHolder) *Dashboard {
 	return &Dashboard{
 		port:            cfg.Port,
 		planFile:        cfg.PlanFile,
@@ -46,6 +48,7 @@ func NewDashboard(cfg DashboardConfig) *Dashboard {
 		watchDirs:       cfg.WatchDirs,
 		configWatchDirs: cfg.ConfigWatchDirs,
 		colors:          cfg.Colors,
+		holder:          holder,
 	}
 }
 
@@ -55,7 +58,7 @@ func NewDashboard(cfg DashboardConfig) *Dashboard {
 func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 	// create session for SSE streaming (handles both live streaming and history replay)
 	session := NewSession("main", d.baseLog.Path())
-	broadcastLog := NewBroadcastLogger(d.baseLog, session)
+	broadcastLog := NewBroadcastLogger(d.baseLog, session, d.holder)
 
 	// extract plan name for display
 	planName := "(no plan)"

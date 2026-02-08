@@ -23,6 +23,7 @@ import (
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 	"github.com/umputun/ralphex/pkg/web"
 )
 
@@ -271,13 +272,16 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	branch := getCurrentBranch(req.GitSvc)
 
+	// create shared phase holder (single source of truth for current phase)
+	holder := &status.PhaseHolder{}
+
 	// create progress logger
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: req.PlanFile,
 		Mode:     string(req.Mode),
 		Branch:   branch,
 		NoColor:  o.NoColor,
-	}, req.Colors)
+	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
@@ -302,7 +306,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			WatchDirs:       o.Watch,
 			ConfigWatchDirs: req.Config.WatchDirs,
 			Colors:          req.Colors,
-		})
+		}, holder)
 		var dashErr error
 		runnerLog, dashErr = dashboard.Start(ctx)
 		if dashErr != nil {
@@ -320,7 +324,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}, req.Colors)
 
 	// create and run the runner
-	r := createRunner(req, o, runnerLog)
+	r := createRunner(req, o, runnerLog, holder)
 	if runErr := r.Run(ctx); runErr != nil {
 		// send failure notification before returning error.
 		// use context.Background() because the parent ctx may be canceled (e.g. SIGINT),
@@ -410,7 +414,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 	dashboard := web.NewDashboard(web.DashboardConfig{
 		Port:   o.Port,
 		Colors: colors,
-	})
+	}, nil)
 	if watchErr := dashboard.RunWatchOnly(ctx, dirs); watchErr != nil {
 		return fmt.Errorf("run watch-only mode: %w", watchErr)
 	}
@@ -448,7 +452,7 @@ func validateFlags(o opts) error {
 }
 
 // createRunner creates a processor.Runner with the given configuration.
-func createRunner(req executePlanRequest, o opts, log processor.Logger) *processor.Runner {
+func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *status.PhaseHolder) *processor.Runner {
 	// --codex-only mode forces codex enabled regardless of config
 	codexEnabled := req.Config.CodexEnabled
 	if req.Mode == processor.ModeCodexOnly {
@@ -467,7 +471,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger) *process
 		FinalizeEnabled:  req.Config.FinalizeEnabled,
 		DefaultBranch:    req.DefaultBranch,
 		AppConfig:        req.Config,
-	}, log)
+	}, log, holder)
 	if req.GitSvc != nil {
 		r.SetGitChecker(req.GitSvc)
 	}
@@ -507,13 +511,16 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 
 	branch := getCurrentBranch(req.GitSvc)
 
+	// create shared phase holder (single source of truth for current phase)
+	holder := &status.PhaseHolder{}
+
 	// create progress logger for plan mode
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanDescription: o.PlanDescription,
 		Mode:            string(processor.ModePlan),
 		Branch:          branch,
 		NoColor:         o.NoColor,
-	}, req.Colors)
+	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
@@ -549,7 +556,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		IterationDelayMs: req.Config.IterationDelayMs,
 		DefaultBranch:    req.DefaultBranch,
 		AppConfig:        req.Config,
-	}, baseLog)
+	}, baseLog, holder)
 	r.SetInputCollector(collector)
 
 	// run the plan creation loop

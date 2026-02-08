@@ -10,10 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 func TestNewDashboard(t *testing.T) {
 	colors := testColors()
+	holder := &status.PhaseHolder{}
 	cfg := DashboardConfig{
 		Port:            8080,
 		PlanFile:        "test.md",
@@ -23,7 +25,7 @@ func TestNewDashboard(t *testing.T) {
 		Colors:          colors,
 	}
 
-	d := NewDashboard(cfg)
+	d := NewDashboard(cfg, holder)
 	require.NotNil(t, d)
 	assert.Equal(t, 8080, d.port)
 	assert.Equal(t, "test.md", d.planFile)
@@ -38,12 +40,13 @@ func TestDashboard_Start_SingleSession(t *testing.T) {
 
 	// create mock base logger
 	colors := testColors()
+	holder := &status.PhaseHolder{}
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: progressPath,
 		Mode:     "test",
 		Branch:   "main",
 		NoColor:  true,
-	}, colors)
+	}, colors, holder)
 	require.NoError(t, err)
 	defer baseLog.Close()
 
@@ -57,7 +60,7 @@ func TestDashboard_Start_SingleSession(t *testing.T) {
 		Colors:          colors,
 	}
 
-	d := NewDashboard(cfg)
+	d := NewDashboard(cfg, holder)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -76,12 +79,13 @@ func TestDashboard_Start_MultiSession(t *testing.T) {
 
 	// create mock base logger
 	colors := testColors()
+	holder := &status.PhaseHolder{}
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: progressPath,
 		Mode:     "test",
 		Branch:   "main",
 		NoColor:  true,
-	}, colors)
+	}, colors, holder)
 	require.NoError(t, err)
 	defer baseLog.Close()
 
@@ -95,7 +99,7 @@ func TestDashboard_Start_MultiSession(t *testing.T) {
 		Colors:          colors,
 	}
 
-	d := NewDashboard(cfg)
+	d := NewDashboard(cfg, holder)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -110,12 +114,13 @@ func TestDashboard_Start_MultiSession(t *testing.T) {
 
 func TestDashboard_RunWatchOnly_NoWatchDirs(t *testing.T) {
 	colors := testColors()
+	holder := &status.PhaseHolder{}
 	cfg := DashboardConfig{
 		Port:   8080,
 		Colors: colors,
 	}
 
-	d := NewDashboard(cfg)
+	d := NewDashboard(cfg, holder)
 	ctx := context.Background()
 
 	err := d.RunWatchOnly(ctx, nil)
@@ -127,12 +132,13 @@ func TestDashboard_RunWatchOnly_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	colors := testColors()
+	holder := &status.PhaseHolder{}
 	cfg := DashboardConfig{
 		Port:   0, // use random port
 		Colors: colors,
 	}
 
-	d := NewDashboard(cfg)
+	d := NewDashboard(cfg, holder)
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 

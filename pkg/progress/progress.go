@@ -96,7 +96,12 @@ func parseColorOrPanic(s, name string) *color.Color {
 func (c *Colors) Info() *color.Color { return c.info }
 
 // ForPhase returns the color for the given execution phase.
-func (c *Colors) ForPhase(p status.Phase) *color.Color { return c.phases[p] }
+func (c *Colors) ForPhase(p status.Phase) *color.Color {
+	if clr, ok := c.phases[p]; ok {
+		return clr
+	}
+	return c.task // fallback to task color for unknown/empty phase
+}
 
 // Timestamp returns the timestamp color.
 func (c *Colors) Timestamp() *color.Color { return c.timestamp }
@@ -115,7 +120,7 @@ type Logger struct {
 	file      *os.File
 	stdout    io.Writer
 	startTime time.Time
-	phase     status.Phase
+	holder    *status.PhaseHolder
 	colors    *Colors
 }
 
@@ -130,7 +135,8 @@ type Config struct {
 
 // NewLogger creates a logger writing to both a progress file and stdout.
 // colors must be provided (created via NewColors from config).
-func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
+// holder is the shared PhaseHolder for reading the current execution phase.
+func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger, error) {
 	// set global color setting
 	if cfg.NoColor {
 		color.NoColor = true
@@ -162,7 +168,7 @@ func NewLogger(cfg Config, colors *Colors) (*Logger, error) {
 		file:      f,
 		stdout:    os.Stdout,
 		startTime: time.Now(),
-		phase:     status.PhaseTask,
+		holder:    holder,
 		colors:    colors,
 	}
 
@@ -189,11 +195,6 @@ func (l *Logger) Path() string {
 	return l.file.Name()
 }
 
-// SetPhase sets the current execution phase for color coding.
-func (l *Logger) SetPhase(phase status.Phase) {
-	l.phase = phase
-}
-
 // timestampFormat is the format for timestamps: YY-MM-DD HH:MM:SS
 const timestampFormat = "06-01-02 15:04:05"
 
@@ -206,7 +207,7 @@ func (l *Logger) Print(format string, args ...any) {
 	l.writeFile("[%s] %s\n", timestamp, msg)
 
 	// write to stdout with color
-	phaseColor := l.colors.ForPhase(l.phase)
+	phaseColor := l.colors.ForPhase(l.holder.Get())
 	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
 	msgStr := phaseColor.Sprint(msg)
 	l.writeStdout("%s %s\n", tsStr, msgStr)
@@ -302,7 +303,7 @@ func (l *Logger) PrintAligned(text string) {
 		return
 	}
 
-	phaseColor := l.colors.ForPhase(l.phase)
+	phaseColor := l.colors.ForPhase(l.holder.Get())
 
 	// wrap text to terminal width
 	width := getTerminalWidth()

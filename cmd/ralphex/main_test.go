@@ -21,6 +21,7 @@ import (
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // testColors returns a Colors instance for testing.
@@ -390,12 +391,13 @@ func TestCreateRunner(t *testing.T) {
 		o := opts{MaxIterations: 100, Debug: true, NoColor: true}
 
 		colors := testColors()
-		log, err := progress.NewLogger(progress.Config{PlanFile: "", Mode: "full", Branch: "test", NoColor: true}, colors)
+		holder := &status.PhaseHolder{}
+		log, err := progress.NewLogger(progress.Config{PlanFile: "", Mode: "full", Branch: "test", NoColor: true}, colors, holder)
 		require.NoError(t, err)
 		defer log.Close()
 
 		req := executePlanRequest{PlanFile: "/path/to/plan.md", Mode: processor.ModeFull, Config: cfg, DefaultBranch: "master"}
-		runner := createRunner(req, o, log)
+		runner := createRunner(req, o, log, holder)
 		assert.NotNil(t, runner)
 	})
 
@@ -404,13 +406,14 @@ func TestCreateRunner(t *testing.T) {
 		o := opts{MaxIterations: 50}
 
 		colors := testColors()
-		log, err := progress.NewLogger(progress.Config{PlanFile: "", Mode: "codex", Branch: "test", NoColor: true}, colors)
+		holder := &status.PhaseHolder{}
+		log, err := progress.NewLogger(progress.Config{PlanFile: "", Mode: "codex", Branch: "test", NoColor: true}, colors, holder)
 		require.NoError(t, err)
 		defer log.Close()
 
 		// tests that codex-only mode code path runs without panic
 		req := executePlanRequest{Mode: processor.ModeCodexOnly, Config: cfg, DefaultBranch: "main"}
-		runner := createRunner(req, o, log)
+		runner := createRunner(req, o, log, holder)
 		assert.NotNil(t, runner)
 	})
 }

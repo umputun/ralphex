@@ -378,11 +378,12 @@ func TestIsActive(t *testing.T) {
 			_ = os.Chdir(oldWd)
 		})
 
+		holder := &status.PhaseHolder{}
 		logger, err := progress.NewLogger(progress.Config{
 			PlanFile: planPath,
 			Mode:     "full",
 			Branch:   "main",
-		}, testColors())
+		}, testColors(), holder)
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			_ = logger.Close()

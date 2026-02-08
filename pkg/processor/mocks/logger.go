@@ -39,9 +39,6 @@ import (
 //			PrintSectionFunc: func(section status.Section)  {
 //				panic("mock out the PrintSection method")
 //			},
-//			SetPhaseFunc: func(phase status.Phase)  {
-//				panic("mock out the SetPhase method")
-//			},
 //		}
 //
 //		// use mockedLogger in code that requires processor.Logger
@@ -72,9 +69,6 @@ type LoggerMock struct {
 
 	// PrintSectionFunc mocks the PrintSection method.
 	PrintSectionFunc func(section status.Section)
-
-	// SetPhaseFunc mocks the SetPhase method.
-	SetPhaseFunc func(phase status.Phase)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -124,11 +118,6 @@ type LoggerMock struct {
 			// Section is the section argument value.
 			Section status.Section
 		}
-		// SetPhase holds details about calls to the SetPhase method.
-		SetPhase []struct {
-			// Phase is the phase argument value.
-			Phase status.Phase
-		}
 	}
 	lockLogAnswer      sync.RWMutex
 	lockLogDraftReview sync.RWMutex
@@ -138,7 +127,6 @@ type LoggerMock struct {
 	lockPrintAligned   sync.RWMutex
 	lockPrintRaw       sync.RWMutex
 	lockPrintSection   sync.RWMutex
-	lockSetPhase       sync.RWMutex
 }
 
 // LogAnswer calls LogAnswerFunc.
@@ -405,37 +393,5 @@ func (mock *LoggerMock) PrintSectionCalls() []struct {
 	mock.lockPrintSection.RLock()
 	calls = mock.calls.PrintSection
 	mock.lockPrintSection.RUnlock()
-	return calls
-}
-
-// SetPhase calls SetPhaseFunc.
-func (mock *LoggerMock) SetPhase(phase status.Phase) {
-	if mock.SetPhaseFunc == nil {
-		panic("LoggerMock.SetPhaseFunc: method is nil but Logger.SetPhase was just called")
-	}
-	callInfo := struct {
-		Phase status.Phase
-	}{
-		Phase: phase,
-	}
-	mock.lockSetPhase.Lock()
-	mock.calls.SetPhase = append(mock.calls.SetPhase, callInfo)
-	mock.lockSetPhase.Unlock()
-	mock.SetPhaseFunc(phase)
-}
-
-// SetPhaseCalls gets all the calls that were made to SetPhase.
-// Check the length with:
-//
-//	len(mockedLogger.SetPhaseCalls())
-func (mock *LoggerMock) SetPhaseCalls() []struct {
-	Phase status.Phase
-} {
-	var calls []struct {
-		Phase status.Phase
-	}
-	mock.lockSetPhase.RLock()
-	calls = mock.calls.SetPhase
-	mock.lockSetPhase.RUnlock()
 	return calls
 }
