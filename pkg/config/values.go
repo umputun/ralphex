@@ -36,10 +36,6 @@ type Values struct {
 	FinalizeEnabledSet   bool // tracks if finalize_enabled was explicitly set
 	PlansDir             string
 	WatchDirs            []string // directories to watch for progress files
-	ClaudeModelTask      string   // per-phase model for task execution
-	ClaudeModelReview    string   // per-phase model for review phases
-	ClaudeModelPlan      string   // per-phase model for plan creation
-
 	// notification settings
 	NotifyChannels        []string // channels to use: telegram, email, webhook, slack, custom
 	NotifyChannelsSet     bool     // tracks if notify_channels was explicitly set (allows empty to disable)
@@ -284,17 +280,6 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		}
 	}
 
-	// per-phase claude models
-	if key, err := section.GetKey("claude_model_task"); err == nil {
-		values.ClaudeModelTask = key.String()
-	}
-	if key, err := section.GetKey("claude_model_review"); err == nil {
-		values.ClaudeModelReview = key.String()
-	}
-	if key, err := section.GetKey("claude_model_plan"); err == nil {
-		values.ClaudeModelPlan = key.String()
-	}
-
 	return values, nil
 }
 
@@ -356,22 +341,7 @@ func (dst *Values) mergeFrom(src *Values) {
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
 	}
-	dst.mergeModelsFrom(src)
 	dst.mergeNotifyFrom(src)
-}
-
-// mergeModelsFrom merges per-phase claude model fields from src into dst.
-// called from mergeFrom to manage cyclomatic complexity.
-func (dst *Values) mergeModelsFrom(src *Values) {
-	if src.ClaudeModelTask != "" {
-		dst.ClaudeModelTask = src.ClaudeModelTask
-	}
-	if src.ClaudeModelReview != "" {
-		dst.ClaudeModelReview = src.ClaudeModelReview
-	}
-	if src.ClaudeModelPlan != "" {
-		dst.ClaudeModelPlan = src.ClaudeModelPlan
-	}
 }
 
 // mergeNotifyFrom merges notification-related fields from src into dst.

@@ -131,18 +131,6 @@ claude_error_patterns = You've hit your limit,API Error:
 codex_error_patterns = Rate limit,quota exceeded
 
 # ------------------------------------------------------------------------------
-# per-phase claude models
-# ------------------------------------------------------------------------------
-
-# override the claude model for specific execution phases.
-# when set, ralphex passes --model <value> to the claude CLI for that phase.
-# when not set (default), claude uses its own default model.
-#
-# claude_model_task = claude-sonnet-4-5
-# claude_model_review = claude-opus-4-5
-# claude_model_plan = claude-opus-4-5
-
-# ------------------------------------------------------------------------------
 # notifications (optional, disabled by default)
 # ------------------------------------------------------------------------------
 

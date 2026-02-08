@@ -63,9 +63,6 @@ type Config struct {
 	PlansDir  string   `json:"plans_dir"`
 	WatchDirs []string `json:"watch_dirs"` // directories to watch for progress files
 
-	// per-phase claude model configuration
-	Models ClaudeModels `json:"models"`
-
 	// error patterns to detect in executor output (e.g., rate limit messages)
 	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
 	CodexErrorPatterns  []string `json:"codex_error_patterns"`
@@ -273,12 +270,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		FinalizePrompt:     prompts.Finalize,
 		CustomReviewPrompt: prompts.CustomReview,
 		CustomEvalPrompt:   prompts.CustomEval,
-		Models: ClaudeModels{
-			Task:   values.ClaudeModelTask,
-			Review: values.ClaudeModelReview,
-			Plan:   values.ClaudeModelPlan,
-		},
-		CustomAgents: agents,
+		CustomAgents:       agents,
 		configDir:    globalDir,
 		localDir:     localDir,
 	}
