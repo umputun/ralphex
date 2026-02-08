@@ -308,8 +308,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			WatchDirs:       o.Watch,
 			ConfigWatchDirs: req.Config.WatchDirs,
 			Colors:          req.Colors,
-			Holder:          holder,
-		})
+		}, holder)
 		var dashErr error
 		runnerLog, dashErr = dashboard.Start(ctx)
 		if dashErr != nil {
@@ -418,7 +417,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 	dashboard := web.NewDashboard(web.DashboardConfig{
 		Port:   o.Port,
 		Colors: colors,
-	})
+	}, nil)
 	if watchErr := dashboard.RunWatchOnly(ctx, dirs); watchErr != nil {
 		return fmt.Errorf("run watch-only mode: %w", watchErr)
 	}

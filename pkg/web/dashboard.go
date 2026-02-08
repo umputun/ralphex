@@ -23,8 +23,7 @@ type DashboardConfig struct {
 	Branch          string              // current git branch
 	WatchDirs       []string            // CLI watch directories
 	ConfigWatchDirs []string            // config file watch directories
-	Colors          *progress.Colors    // colors for output
-	Holder          *status.PhaseHolder // shared phase holder
+	Colors          *progress.Colors // colors for output
 }
 
 // Dashboard manages web server and file watching for progress monitoring.
@@ -40,7 +39,7 @@ type Dashboard struct {
 }
 
 // NewDashboard creates a new dashboard with the given configuration.
-func NewDashboard(cfg DashboardConfig) *Dashboard {
+func NewDashboard(cfg DashboardConfig, holder *status.PhaseHolder) *Dashboard {
 	return &Dashboard{
 		port:            cfg.Port,
 		planFile:        cfg.PlanFile,
@@ -49,7 +48,7 @@ func NewDashboard(cfg DashboardConfig) *Dashboard {
 		watchDirs:       cfg.WatchDirs,
 		configWatchDirs: cfg.ConfigWatchDirs,
 		colors:          cfg.Colors,
-		holder:          cfg.Holder,
+		holder:          holder,
 	}
 }
 
