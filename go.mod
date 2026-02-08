@@ -15,6 +15,7 @@ require (
 	github.com/tmaxmax/go-sse v0.11.0
 	golang.org/x/term v0.40.0
 	gopkg.in/ini.v1 v1.67.1
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -72,5 +73,4 @@ require (
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

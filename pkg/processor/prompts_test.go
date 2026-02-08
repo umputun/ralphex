@@ -538,7 +538,7 @@ func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
 	t.Run("both model and agent type", func(t *testing.T) {
 		appCfg := &config.Config{
 			CustomAgents: []config.CustomAgent{
-				{Name: "docs", Prompt: "Check docs.", Model: "haiku", AgentType: "code-reviewer"},
+				{Name: "docs", Prompt: "Check docs.", Options: config.Options{Model: "haiku", AgentType: "code-reviewer"}},
 			},
 		}
 		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
@@ -553,7 +553,7 @@ func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
 	t.Run("model only uses default agent type", func(t *testing.T) {
 		appCfg := &config.Config{
 			CustomAgents: []config.CustomAgent{
-				{Name: "lint", Prompt: "Lint code.", Model: "sonnet"},
+				{Name: "lint", Prompt: "Lint code.", Options: config.Options{Model: "sonnet"}},
 			},
 		}
 		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
@@ -567,7 +567,7 @@ func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
 	t.Run("agent type only uses no model clause", func(t *testing.T) {
 		appCfg := &config.Config{
 			CustomAgents: []config.CustomAgent{
-				{Name: "review", Prompt: "Review code.", AgentType: "code-reviewer"},
+				{Name: "review", Prompt: "Review code.", Options: config.Options{AgentType: "code-reviewer"}},
 			},
 		}
 		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}

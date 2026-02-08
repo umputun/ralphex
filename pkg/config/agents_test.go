@@ -429,7 +429,36 @@ func TestAgentLoader_loadFromDir_NonexistentFallsBackToEmbedded(t *testing.T) {
 	assert.Contains(t, names, "quality", "should include quality agent from embedded")
 }
 
-func TestAgentLoader_Load_ParsesFrontmatter(t *testing.T) {
+func TestAgentLoader_Load_WarnsOnInvalidModel(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
+
+	content := "---\nmodel: gpt-5\n---\nReview code."
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "bad.txt"), []byte(content), 0o600))
+
+	// capture stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	loader := newAgentLoader(defaultsFS)
+	agents, err := loader.Load("", agentsDir)
+	require.NoError(t, err)
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf [1024]byte
+	n, _ := r.Read(buf[:])
+	output := string(buf[:n])
+
+	require.Len(t, agents, 1)
+	assert.Equal(t, "gpt-5", agents[0].Model)
+	assert.Contains(t, output, `[WARN] agent bad: unknown model "gpt-5"`)
+}
+
+func TestAgentLoader_Load_ParsesOptions(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0o750))

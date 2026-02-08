@@ -1,35 +1,55 @@
 package config
 
-import "strings"
+import (
+	"fmt"
+	"strings"
 
-// parseFrontmatter extracts model and agent type from YAML-like frontmatter.
-// format: ---\nkey: value\n---\nbody
-// returns model, agentType, body. if no frontmatter, returns empty strings and original content.
-func parseFrontmatter(content string) (model, agentType, body string) {
-	if !strings.HasPrefix(content, "---\n") {
-		return "", "", content
+	"gopkg.in/yaml.v3"
+)
+
+// Options holds agent options parsed from YAML frontmatter in agent files.
+type Options struct {
+	Model     string `yaml:"model"`
+	AgentType string `yaml:"agent"`
+}
+
+var validModels = map[string]bool{
+	"haiku": true, "sonnet": true, "opus": true,
+}
+
+// Validate returns warnings for invalid option values.
+func (o Options) Validate() []string {
+	var warnings []string
+	if o.Model != "" && !validModels[o.Model] {
+		warnings = append(warnings, fmt.Sprintf("unknown model %q, expected: haiku, sonnet, opus", o.Model))
+	}
+	return warnings
+}
+
+// parseOptions extracts agent options from YAML frontmatter delimited by "---".
+// we only support YAML with "---" delimiters because agent files are our own format —
+// no need for TOML/JSON/multi-format support that libraries like adrg/frontmatter provide.
+// CutPrefix + Cut handle delimiter splitting without index arithmetic.
+// returns parsed options and body. if no frontmatter, returns zero value and original content.
+func parseOptions(content string) (Options, string) {
+	after, found := strings.CutPrefix(content, "---\n")
+	if !found {
+		return Options{}, content
 	}
 
-	end := strings.Index(content[4:], "\n---")
-	if end == -1 {
-		return "", "", content
+	header, body, found := strings.Cut(after, "\n---")
+	if !found {
+		return Options{}, content
+	}
+	// closing delimiter must be on its own line
+	if body != "" && body[0] != '\n' {
+		return Options{}, content
 	}
 
-	header := content[4 : 4+end]
-	body = strings.TrimSpace(content[4+end+4:])
-
-	for line := range strings.SplitSeq(header, "\n") {
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		switch strings.TrimSpace(key) {
-		case "model":
-			model = strings.TrimSpace(val)
-		case "agent":
-			agentType = strings.TrimSpace(val)
-		}
+	var opts Options
+	if err := yaml.Unmarshal([]byte(header), &opts); err != nil {
+		return Options{}, content // malformed YAML → treat as no frontmatter
 	}
 
-	return model, agentType, body
+	return opts, strings.TrimSpace(body)
 }

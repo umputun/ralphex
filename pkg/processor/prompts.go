@@ -14,15 +14,15 @@ import (
 var agentRefPattern = regexp.MustCompile(`\{\{agent:([a-zA-Z0-9_-]+)\}\}`)
 
 // formatAgentExpansion creates the Task tool instruction for an agent, respecting frontmatter overrides.
-func formatAgentExpansion(prompt, model, agentType string) string {
+func formatAgentExpansion(prompt string, opts config.Options) string {
 	subagent := "general-purpose"
-	if agentType != "" {
-		subagent = agentType
+	if opts.AgentType != "" {
+		subagent = opts.AgentType
 	}
 
 	var modelClause string
-	if model != "" {
-		modelClause = " with model=" + model
+	if opts.Model != "" {
+		modelClause = " with model=" + opts.Model
 	}
 
 	return fmt.Sprintf("Use the Task tool%s to launch a %s agent with this prompt:\n\"%s\"\n\nReport findings only - no positive observations.", //nolint:gocritic // %q escapes special chars in prompts
@@ -143,7 +143,7 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 		// expand variables in agent content (no agent expansion to avoid recursion)
 		agentPrompt := r.replaceBaseVariables(agent.Prompt)
 
-		return formatAgentExpansion(agentPrompt, agent.Model, agent.AgentType)
+		return formatAgentExpansion(agentPrompt, agent.Options)
 	})
 }
 
