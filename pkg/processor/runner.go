@@ -53,7 +53,6 @@ type Config struct {
 	CodexEnabled     bool           // whether codex review is enabled
 	FinalizeEnabled  bool           // whether finalize step is enabled
 	DefaultBranch    string         // default branch name (detected from repo)
-	Model            string         // explicit model override for claude CLI (--model flag)
 	AppConfig        *config.Config // full application config (for executors and prompts)
 }
 
@@ -112,7 +111,6 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		OutputHandler: func(text string) {
 			log.PrintAligned(text)
 		},
-		Model: cfg.Model,
 		Debug: cfg.Debug,
 	}
 	if cfg.AppConfig != nil {

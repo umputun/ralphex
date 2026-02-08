@@ -170,7 +170,6 @@ type streamEvent struct {
 type ClaudeExecutor struct {
 	Command       string            // command to execute, defaults to "claude"
 	Args          string            // additional arguments (space-separated), defaults to standard args
-	Model         string            // explicit model override, passed as --model to claude CLI
 	OutputHandler func(text string) // called for each text chunk, can be nil
 	Debug         bool              // enable debug output
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
@@ -194,9 +193,6 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 			"--output-format", "stream-json",
 			"--verbose",
 		}
-	}
-	if e.Model != "" {
-		args = append(args, "--model", e.Model)
 	}
 	args = append(args, "-p", prompt)
 
