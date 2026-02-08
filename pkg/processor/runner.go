@@ -166,7 +166,6 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
-// holder is optional — if nil, a default PhaseHolder is created.
 func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *executor.CustomExecutor, holder *status.PhaseHolder) *Runner {
 	// determine iteration delay from config or default
 	iterDelay := DefaultIterationDelay
@@ -181,10 +180,6 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *ex
 		retryCount = cfg.TaskRetryCount
 	} else if cfg.TaskRetryCount > 0 {
 		retryCount = cfg.TaskRetryCount
-	}
-
-	if holder == nil {
-		holder = &status.PhaseHolder{}
 	}
 
 	return &Runner{
