@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/status"
 )
 
@@ -173,10 +172,8 @@ type ClaudeExecutor struct {
 	Args          string               // additional arguments (space-separated), defaults to standard args
 	OutputHandler func(text string)    // called for each text chunk, can be nil
 	Debug         bool                 // enable debug output
-	ErrorPatterns []string             // patterns to detect in output (e.g., rate limit messages)
-	Models        *config.ClaudeModels // per-phase model configuration
-	Holder        *status.PhaseHolder  // shared phase holder for model selection
-	cmdRunner     CommandRunner        // for testing, nil uses default
+	ErrorPatterns []string       // patterns to detect in output (e.g., rate limit messages)
+	cmdRunner     CommandRunner // for testing, nil uses default
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -197,11 +194,6 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 			"--verbose",
 		}
 	}
-	// append phase-specific model if configured
-	if model := e.modelForCurrentPhase(); model != "" {
-		args = append(args, "--model", model)
-	}
-
 	args = append(args, "-p", prompt)
 
 	runner := e.cmdRunner
@@ -237,23 +229,6 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	}
 
 	return result
-}
-
-// modelForCurrentPhase returns the configured model for the current execution phase.
-func (e *ClaudeExecutor) modelForCurrentPhase() string {
-	if e.Models == nil || e.Holder == nil {
-		return ""
-	}
-	switch e.Holder.Get() {
-	case status.PhaseTask:
-		return e.Models.Task
-	case status.PhaseReview, status.PhaseClaudeEval:
-		return e.Models.Review
-	case status.PhasePlan:
-		return e.Models.Plan
-	default:
-		return ""
-	}
 }
 
 // parseStream reads and parses the JSON stream from claude CLI.
