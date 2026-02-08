@@ -73,15 +73,13 @@ func TestPhaseHolder_ConcurrentAccess(t *testing.T) {
 	workers := 32
 	iters := 500
 	for w := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			for i := range iters {
 				h.Set(phases[(w+i)%len(phases)])
 				h.Get()
 			}
-		}()
+		})
 	}
 
 	close(start)
@@ -89,5 +87,5 @@ func TestPhaseHolder_ConcurrentAccess(t *testing.T) {
 
 	got := h.Get()
 	assert.Contains(t, phases, got)
-	assert.Greater(t, cbCount.Load(), int64(0))
+	assert.Positive(t, cbCount.Load())
 }

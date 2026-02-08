@@ -26,7 +26,7 @@ claude_args = --dangerously-skip-permissions --output-format stream-json --verbo
 # codex executor
 # ------------------------------------------------------------------------------
 
-# codex_enabled: whether to run codex (GPT-5.2) external review phase
+# codex_enabled: whether to run codex external review phase
 # set to false to skip codex review entirely
 # default: true
 codex_enabled = true
@@ -36,7 +36,7 @@ codex_enabled = true
 codex_command = codex
 
 # codex_model: model ID for codex
-# available models: gpt-5.3-codex, gpt-5.2-codex, gpt-5.2-codex-preview
+# available models: gpt-5.3-codex, gpt-5.3-codex-mini, gpt-5.2-codex
 # default: gpt-5.3-codex
 codex_model = gpt-5.3-codex
 
@@ -62,7 +62,7 @@ codex_sandbox = read-only
 
 # external_review_tool: which tool to use for external code review
 # available: codex, custom, none
-# codex: use OpenAI Codex (GPT-5.2) for external review (default)
+# codex: use OpenAI Codex for external review (default)
 # custom: use a custom script specified by custom_review_script
 # none: skip external review entirely
 # note: codex_enabled = false is treated as external_review_tool = none for backward compat

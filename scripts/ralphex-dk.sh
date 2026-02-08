@@ -95,6 +95,15 @@ VOLUMES=(
     -v "$(pwd):/workspace"
 )
 
+# detect git worktree and mount the main repo's .git directory
+if [[ -f "$(pwd)/.git" ]]; then
+    GIT_COMMON_DIR=$(git -C "$(pwd)" rev-parse --git-common-dir 2>/dev/null || true)
+    if [[ -n "$GIT_COMMON_DIR" && -d "$GIT_COMMON_DIR" ]]; then
+        GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd)  # resolve to absolute
+        VOLUMES+=(-v "${GIT_COMMON_DIR}:${GIT_COMMON_DIR}")
+    fi
+fi
+
 # mount extracted credentials from macOS keychain (separate path, init.sh will copy)
 if [[ -n "$CREDS_TEMP" ]]; then
     VOLUMES+=(-v "${CREDS_TEMP}:/mnt/claude-credentials.json:ro")

@@ -1,5 +1,5 @@
 # codex evaluation prompt
-# this prompt is used when claude evaluates codex (GPT-5.2) review output
+# this prompt is used when claude evaluates codex review output
 # codex runs in phase 3, between first and second claude reviews
 #
 # available variables:
@@ -10,7 +10,7 @@
 
 External code review evaluation.
 
-Codex (GPT-5.2) reviewed the code and found:
+Codex reviewed the code and found:
 
 ---
 {{CODEX_OUTPUT}}

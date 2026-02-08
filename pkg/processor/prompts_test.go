@@ -103,7 +103,7 @@ func TestRunner_buildCodexEvaluationPrompt(t *testing.T) {
 
 	assert.Contains(t, prompt, findings)
 	assert.Contains(t, prompt, "<<<RALPHEX:CODEX_REVIEW_DONE>>>")
-	assert.Contains(t, prompt, "Codex (GPT-5.2)")
+	assert.Contains(t, prompt, "Codex reviewed the code")
 	assert.Contains(t, prompt, "Valid issues")
 	assert.Contains(t, prompt, "Invalid/irrelevant issues")
 }

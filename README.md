@@ -118,7 +118,7 @@ Claude verifies findings, fixes confirmed issues, and commits.
 3. Iterates until no open issues
 
 Supported tools:
-- **codex** (default): GPT-5.2 for independent code review
+- **codex** (default): OpenAI Codex for independent code review
 - **custom**: Your own script wrapping any AI (OpenRouter, local LLM, etc.)
 - **none**: Skip external review entirely
 
