@@ -99,8 +99,8 @@ func (m *SessionManager) DiscoverRecursive(root string) ([]string, error) {
 			return nil
 		}
 
-		// skip hidden directories
-		if d.IsDir() && strings.HasPrefix(d.Name(), ".") && path != root {
+		// skip directories that typically contain many subdirs and no progress files
+		if d.IsDir() && skipDirs[d.Name()] && path != root {
 			return filepath.SkipDir
 		}
 
