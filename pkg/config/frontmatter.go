@@ -13,9 +13,7 @@ type Options struct {
 	AgentType string `yaml:"agent"`
 }
 
-var validModels = map[string]bool{
-	"haiku": true, "sonnet": true, "opus": true,
-}
+var validModelKeywords = []string{"haiku", "sonnet", "opus"}
 
 // String returns a human-readable summary of the options for logging.
 func (o Options) String() string {
@@ -31,12 +29,34 @@ func (o Options) String() string {
 }
 
 // Validate returns warnings for invalid option values.
+// called after parseOptions which normalizes model to keyword form.
 func (o Options) Validate() []string {
 	var warnings []string
-	if o.Model != "" && !validModels[o.Model] {
-		warnings = append(warnings, fmt.Sprintf("unknown model %q, expected: haiku, sonnet, opus", o.Model))
+	if o.Model != "" {
+		valid := false
+		for _, kw := range validModelKeywords {
+			if o.Model == kw {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			warnings = append(warnings, fmt.Sprintf("unknown model %q, must be one of: haiku, sonnet, opus", o.Model))
+		}
 	}
 	return warnings
+}
+
+// normalizeModel extracts the keyword (haiku, sonnet, opus) from a model string.
+// e.g. "claude-sonnet-4-5-20250929" → "sonnet", "opus" → "opus", "" → "".
+func normalizeModel(model string) string {
+	lower := strings.ToLower(model)
+	for _, kw := range validModelKeywords {
+		if strings.Contains(lower, kw) {
+			return kw
+		}
+	}
+	return model // return as-is if no keyword found (Validate will catch it)
 }
 
 // parseOptions extracts agent options from YAML frontmatter delimited by "---".
@@ -63,6 +83,8 @@ func parseOptions(content string) (Options, string) {
 	if err := yaml.Unmarshal([]byte(header), &opts); err != nil {
 		return Options{}, content // malformed YAML → treat as no frontmatter
 	}
+
+	opts.Model = normalizeModel(opts.Model)
 
 	return opts, strings.TrimSpace(body)
 }

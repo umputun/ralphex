@@ -25,7 +25,7 @@ func formatAgentExpansion(prompt string, opts config.Options) string {
 		modelClause = " with model=" + opts.Model
 	}
 
-	return fmt.Sprintf("Use the Task tool%s to launch a %s agent with this prompt:\n\"%s\"\n\nReport findings only - no positive observations.", //nolint:gocritic // %q escapes special chars in prompts
+	return fmt.Sprintf("Use the Task tool%s to launch a %s agent with this prompt:\n\"%s\"\n\nReport findings only - no positive observations.",
 		modelClause, subagent, prompt)
 }
 

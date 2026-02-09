@@ -120,6 +120,7 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 		return content, nil
 	}
 	// fall back to embedded default
+	fmt.Fprintf(os.Stderr, "[INFO] agent %s: using embedded default (file has no active content)\n", filename)
 	return al.loadFromEmbedFS(filename)
 }
 
