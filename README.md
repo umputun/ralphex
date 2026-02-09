@@ -578,6 +578,7 @@ project/
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
 | `plans_dir` | Plans directory | `docs/plans` |
+| `git_backend` | Git backend (`internal` for go-git, `external` for git CLI) | `internal` |
 | `color_task` | Task execution phase color (hex) | `#00ff00` |
 | `color_review` | Review phase color (hex) | `#00ffff` |
 | `color_codex` | Codex review color (hex) | `#ff00ff` |
