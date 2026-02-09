@@ -40,6 +40,24 @@ func TestNewService(t *testing.T) {
 		_, err := NewService(dir, noopServiceLogger())
 		assert.Error(t, err)
 	})
+
+	t.Run("opens valid repo with external backend", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger(), WithExternalGit())
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+
+		// resolve symlinks for consistent path comparison (macOS /var -> /private/var)
+		expected, err := filepath.EvalSymlinks(dir)
+		require.NoError(t, err)
+		assert.Equal(t, expected, svc.Root())
+	})
+
+	t.Run("external backend fails on non-repo", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := NewService(dir, noopServiceLogger(), WithExternalGit())
+		assert.Error(t, err)
+	})
 }
 
 func TestService_CreateBranchForPlan(t *testing.T) {
