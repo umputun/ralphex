@@ -30,7 +30,7 @@ Steps:
    - Reword commit messages if needed for clarity
 
 5. Verify the branch is ready:
-   - Run tests: `go test ./...` (or project-specific test command)
+   - Run tests using the project's test command (check CLAUDE.md or plan file for the correct command)
    - Run linter if applicable
 
 Report what was done. This step is best-effort - if rebase fails, explain why and the branch remains as-is.

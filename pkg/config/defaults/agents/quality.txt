@@ -6,7 +6,7 @@ Review code for bugs, security issues, and quality problems.
 2. Edge cases - empty inputs, nil/null values, boundary conditions, concurrent access
 3. Error handling - all errors checked, appropriate error wrapping, no silent failures
 4. Resource management - proper cleanup, no leaks, correct resource release
-5. Concurrency issues - race conditions, deadlocks, thread/goroutine leaks
+5. Concurrency issues - race conditions, deadlocks, thread/coroutine leaks
 6. Data integrity - validation, sanitization, consistent state management
 
 ## Security Analysis

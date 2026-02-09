@@ -128,13 +128,13 @@ Write the accepted plan to disk:
 ### Task 1: <Title>
 
 **Files:**
-- Modify: `path/to/file.go`
-- Create: `path/to/new_file.go` (if any)
+- Modify: `path/to/file`
+- Create: `path/to/new_file` (if any)
 
 - [ ] first implementation step
 - [ ] second implementation step
 - [ ] write tests for this task
-- [ ] run `go test ./...` - must pass before task 2
+- [ ] run project test suite - must pass before task 2
 
 ### Task 2: <Title>
 ...
@@ -144,8 +144,8 @@ Write the accepted plan to disk:
 ### Task N: Verify acceptance criteria
 
 - [ ] manual test: <key user-facing test>
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run`
+- [ ] run full test suite (use project-specific command)
+- [ ] run linter (use project-specific command)
 - [ ] verify test coverage meets 80%+
 
 ### Task N+1: Update documentation
