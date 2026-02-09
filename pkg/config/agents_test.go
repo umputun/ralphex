@@ -459,6 +459,43 @@ func TestAgentLoader_Load_WarnsOnInvalidModel(t *testing.T) {
 	assert.Contains(t, output, `[WARN] agent bad: unknown model "gpt-5"`)
 }
 
+func TestAgentLoader_Load_FrontmatterOnlyFallsBackToEmbedded(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
+
+	// quality.txt with only frontmatter, no body — should fall back to embedded default
+	content := "---\nmodel: haiku\n---"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(content), 0o600))
+
+	loader := newAgentLoader(defaultsFS)
+	agents, err := loader.Load("", agentsDir)
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.Equal(t, "quality", agents[0].Name)
+	assert.Contains(t, agents[0].Prompt, "security", "should use embedded quality body")
+	assert.Empty(t, agents[0].Model, "frontmatter options should be dropped")
+	assert.Empty(t, agents[0].AgentType, "frontmatter options should be dropped")
+}
+
+func TestAgentLoader_Load_FrontmatterAndCommentsOnlyFallsBackToEmbedded(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
+
+	// quality.txt with frontmatter + commented body — should fall back to embedded default
+	content := "---\nmodel: haiku\n---\n# this is a comment\n# another comment"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(content), 0o600))
+
+	loader := newAgentLoader(defaultsFS)
+	agents, err := loader.Load("", agentsDir)
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.Equal(t, "quality", agents[0].Name)
+	assert.Contains(t, agents[0].Prompt, "security", "should use embedded quality body")
+	assert.Empty(t, agents[0].Model, "frontmatter options should be dropped")
+}
+
 func TestAgentLoader_Load_ParsesOptions(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, "agents")

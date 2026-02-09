@@ -104,8 +104,7 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 func buildAgent(name, prompt string) CustomAgent {
 	opts, body := parseOptions(prompt)
 	if body == "" {
-		body = prompt
-		opts = Options{}
+		return CustomAgent{Name: name, Prompt: prompt}
 	}
 	if warnings := opts.Validate(); len(warnings) > 0 {
 		for _, w := range warnings {
@@ -126,7 +125,9 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 	}
 	content := strings.TrimSpace(stripComments(string(data)))
 	if content != "" {
-		return content, nil
+		if _, body := parseOptions(content); body != "" {
+			return content, nil
+		}
 	}
 	// fall back to embedded default
 	fmt.Fprintf(os.Stderr, "[INFO] agent %s: file is all comments, falling back to embedded default\n", filename)
