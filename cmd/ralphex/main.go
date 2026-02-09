@@ -163,7 +163,7 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// open git repository via Service
-	gitSvc, err := git.NewService(".", colors.Info())
+	gitSvc, err := openGitService(cfg, colors)
 	if err != nil {
 		return fmt.Errorf("open git repo: %w", err)
 	}
@@ -388,6 +388,19 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	return nil
+}
+
+// openGitService creates a git.Service with the appropriate backend based on config.
+func openGitService(cfg *config.Config, colors *progress.Colors) (*git.Service, error) {
+	var opts []git.Option
+	if cfg.GitBackend == "external" {
+		opts = append(opts, git.WithExternalGit())
+	}
+	svc, err := git.NewService(".", colors.Info(), opts...)
+	if err != nil {
+		return nil, fmt.Errorf("new git service: %w", err)
+	}
+	return svc, nil
 }
 
 // checkClaudeDep checks that the claude command is available in PATH.
