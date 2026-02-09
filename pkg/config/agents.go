@@ -84,28 +84,12 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 		if err != nil {
 			return nil, err
 		}
-
 		if prompt == "" {
 			continue
 		}
 
 		name := strings.TrimSuffix(entry.Name(), ".txt")
-		opts, body := parseOptions(prompt)
-		if body == "" {
-			fmt.Fprintf(os.Stderr, "[WARN] agent %s: body is empty after stripping comments, using defaults\n", name)
-			body, err = al.loadFromEmbedFS(entry.Name())
-			if err != nil {
-				return nil, err
-			}
-			opts = Options{}
-		}
-		if warnings := opts.Validate(); len(warnings) > 0 {
-			for _, w := range warnings {
-				fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
-			}
-			opts = Options{} // drop invalid options, use defaults
-		}
-		agents = append(agents, CustomAgent{Name: name, Prompt: body, Options: opts})
+		agents = append(agents, buildAgent(name, prompt))
 	}
 
 	sort.Slice(agents, func(i, j int) bool {
@@ -113,6 +97,23 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 	})
 
 	return agents, nil
+}
+
+// buildAgent parses frontmatter options from prompt and builds a CustomAgent.
+// if parseOptions produces no body, the raw prompt is used with default options.
+func buildAgent(name, prompt string) CustomAgent {
+	opts, body := parseOptions(prompt)
+	if body == "" {
+		body = prompt
+		opts = Options{}
+	}
+	if warnings := opts.Validate(); len(warnings) > 0 {
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
+		}
+		opts = Options{}
+	}
+	return CustomAgent{Name: name, Prompt: body, Options: opts}
 }
 
 // loadFileWithFallback reads an agent file from disk with fallback to embedded.
@@ -164,19 +165,8 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 		if err != nil {
 			return nil, err
 		}
-		if prompt == "" {
-			continue
-		}
-
 		name := strings.TrimSuffix(entry.Name(), ".txt")
-		opts, body := parseOptions(prompt)
-		if warnings := opts.Validate(); len(warnings) > 0 {
-			for _, w := range warnings {
-				fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
-			}
-			opts = Options{} // drop invalid options, use defaults
-		}
-		agents = append(agents, CustomAgent{Name: name, Prompt: body, Options: opts})
+		agents = append(agents, buildAgent(name, prompt))
 	}
 
 	sort.Slice(agents, func(i, j int) bool {
