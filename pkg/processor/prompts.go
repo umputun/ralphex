@@ -25,8 +25,10 @@ func formatAgentExpansion(prompt string, opts config.Options) string {
 		modelClause = " with model=" + opts.Model
 	}
 
-	return fmt.Sprintf("Use the Task tool%s to launch a %s agent with this prompt:\n\"%s\"\n\nReport findings only - no positive observations.", //nolint:gocritic // literal quotes needed, %q would escape prompt content
-		modelClause, subagent, prompt)
+	return fmt.Sprintf(`Use the Task tool%s to launch a %s agent with this prompt:
+"%s"
+
+Report findings only - no positive observations.`, modelClause, subagent, prompt)
 }
 
 // getGoal returns the goal string based on whether a plan file is configured.
