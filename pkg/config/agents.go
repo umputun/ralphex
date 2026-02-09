@@ -92,13 +92,12 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 		name := strings.TrimSuffix(entry.Name(), ".txt")
 		opts, body := parseOptions(prompt)
 		if body == "" {
-			// frontmatter without body is a misconfiguration — fall back to full embedded default
 			fmt.Fprintf(os.Stderr, "[WARN] agent %s: body is empty after stripping comments, using defaults\n", name)
-			embedded, err := al.loadFromEmbedFS(entry.Name())
+			body, err = al.loadFromEmbedFS(entry.Name())
 			if err != nil {
 				return nil, err
 			}
-			opts, body = parseOptions(embedded)
+			opts = Options{}
 		}
 		if warnings := opts.Validate(); len(warnings) > 0 {
 			for _, w := range warnings {
