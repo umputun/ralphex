@@ -457,7 +457,7 @@ Review the code for quality issues...
 | `model` | `haiku`, `sonnet`, `opus` | Claude model for this agent |
 | `agent` | any string | Claude Code Task tool subagent type |
 
-Both options are optional. Without frontmatter, agents use default model and `general-purpose` subagent type. Invalid model values are dropped with a warning.
+Both options are optional. Without frontmatter, agents use default model and `general-purpose` subagent type. Full model IDs (e.g. `claude-sonnet-4-5-20250929`) are normalized to short keywords (`sonnet`) since Claude Code only accepts `haiku`, `sonnet`, `opus`. Invalid model values are dropped with a warning.
 
 ### Template Syntax
 

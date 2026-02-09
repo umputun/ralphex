@@ -225,6 +225,7 @@ Implementation:
 - `model: haiku|sonnet|opus` — Claude model for this agent
 - `agent: <type>` — Claude Code Task tool subagent type (default: `general-purpose`)
 - Parsed by `parseOptions()` in `pkg/config/frontmatter.go`, validated by `Options.Validate()`
+- Full model IDs (e.g. `claude-sonnet-4-5-20250929`) are normalized to short keywords (`sonnet`)
 - Invalid model values are dropped with a warning, falling back to defaults
 
 **Template variables:** Prompt files support variable expansion via `replacePromptVariables()` in `pkg/processor/prompts.go`:
