@@ -91,6 +91,15 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 
 		name := strings.TrimSuffix(entry.Name(), ".txt")
 		opts, body := parseOptions(prompt)
+		if body == "" {
+			// frontmatter without body is a misconfiguration — fall back to full embedded default
+			fmt.Fprintf(os.Stderr, "[WARN] agent %s: body is empty after stripping comments, using defaults\n", name)
+			embedded, err := al.loadFromEmbedFS(entry.Name())
+			if err != nil {
+				return nil, err
+			}
+			opts, body = parseOptions(embedded)
+		}
 		if warnings := opts.Validate(); len(warnings) > 0 {
 			for _, w := range warnings {
 				fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
@@ -120,7 +129,7 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 		return content, nil
 	}
 	// fall back to embedded default
-	fmt.Fprintf(os.Stderr, "[INFO] agent %s: using embedded default (file has no active content)\n", filename)
+	fmt.Fprintf(os.Stderr, "[INFO] agent %s: file is all comments, falling back to embedded default\n", filename)
 	return al.loadFromEmbedFS(filename)
 }
 
