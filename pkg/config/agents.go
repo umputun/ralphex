@@ -124,10 +124,8 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 		return "", fmt.Errorf("read agent file %s: %w", path, err)
 	}
 	content := strings.TrimSpace(stripComments(string(data)))
-	if content != "" {
-		if _, body := parseOptions(content); body != "" {
-			return content, nil
-		}
+	if _, body := parseOptions(content); body != "" {
+		return content, nil
 	}
 	// fall back to embedded default
 	fmt.Fprintf(os.Stderr, "[INFO] agent %s: file is all comments, falling back to embedded default\n", filename)
