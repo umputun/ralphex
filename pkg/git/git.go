@@ -2,10 +2,12 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -420,6 +422,9 @@ func loadXDGGlobalPatterns() []gitignore.Pattern {
 
 // IsDirty returns true if the worktree has uncommitted changes
 // (staged or modified tracked files).
+//
+// go-git's status computation can produce false positives compared to native git.
+// when go-git reports dirty, we verify against native git if available.
 func (r *repo) IsDirty() (bool, error) {
 	wt, err := r.gitRepo.Worktree()
 	if err != nil {
@@ -431,22 +436,60 @@ func (r *repo) IsDirty() (bool, error) {
 		return false, fmt.Errorf("get status: %w", err)
 	}
 
+	goGitDirty := false
 	for _, s := range status {
-		// check for staged changes
 		if s.Staging != git.Unmodified && s.Staging != git.Untracked {
-			return true, nil
+			goGitDirty = true
+			break
 		}
-		// check for unstaged changes to tracked files
 		if s.Worktree == git.Modified || s.Worktree == git.Deleted {
-			return true, nil
+			goGitDirty = true
+			break
 		}
 	}
 
+	if !goGitDirty {
+		return false, nil
+	}
+
+	nativeDirty, err := r.nativeIsDirty()
+	if err != nil {
+		return true, nil // native git unavailable, trust go-git
+	}
+	return nativeDirty, nil
+}
+
+// nativeIsDirty shells out to git status --porcelain to verify dirty state.
+// only considers tracked file changes (staged, modified, deleted), not untracked files.
+// returns error if native git is not available.
+func (r *repo) nativeIsDirty() (bool, error) {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		if len(line) < 3 {
+			continue
+		}
+		staging := line[0]
+		worktree := line[1]
+		if staging == '?' && worktree == '?' {
+			continue // skip untracked
+		}
+		return true, nil
+	}
 	return false, nil
 }
 
 // HasChangesOtherThan returns true if there are uncommitted changes to files other than the given file.
 // this includes modified/deleted tracked files, staged changes, and untracked files (excluding gitignored).
+//
+// go-git's status computation can produce false positives compared to native git
+// (e.g. due to stat cache differences, file mode handling, or .gitattributes normalization).
+// when go-git reports changes, we verify against native git if available.
 func (r *repo) HasChangesOtherThan(filePath string) (bool, error) {
 	wt, err := r.gitRepo.Worktree()
 	if err != nil {
@@ -463,6 +506,7 @@ func (r *repo) HasChangesOtherThan(filePath string) (bool, error) {
 		return false, err
 	}
 
+	goGitDirty := false
 	for path, s := range status {
 		if path == relPath {
 			continue // skip the target file
@@ -470,8 +514,6 @@ func (r *repo) HasChangesOtherThan(filePath string) (bool, error) {
 		if !r.fileHasChanges(s) {
 			continue
 		}
-		// for untracked files, check if they're gitignored
-		// note: go-git sets both Staging and Worktree to Untracked for untracked files
 		if s.Worktree == git.Untracked {
 			ignored, err := r.IsIgnored(path)
 			if err != nil {
@@ -481,9 +523,42 @@ func (r *repo) HasChangesOtherThan(filePath string) (bool, error) {
 				continue // skip gitignored untracked files
 			}
 		}
-		return true, nil
+		goGitDirty = true
+		break
 	}
 
+	if !goGitDirty {
+		return false, nil
+	}
+
+	nativeDirty, err := r.nativeHasChangesOtherThan(relPath)
+	if err != nil {
+		return true, nil // native git unavailable, trust go-git
+	}
+	return nativeDirty, nil
+}
+
+// nativeHasChangesOtherThan shells out to git status --porcelain to verify dirty state.
+// returns error if native git is not available.
+func (r *repo) nativeHasChangesOtherThan(excludeRelPath string) (bool, error) {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		if len(line) < 4 {
+			continue
+		}
+		path := string(bytes.TrimSpace(line[2:]))
+		path = strings.Trim(path, "\"")
+		if path == excludeRelPath {
+			continue
+		}
+		return true, nil
+	}
 	return false, nil
 }
 

@@ -986,6 +986,79 @@ func TestRepo_HasChangesOtherThan(t *testing.T) {
 	})
 }
 
+func TestRepo_nativeHasChangesOtherThan(t *testing.T) {
+	t.Run("returns false on clean worktree", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		dirty, err := r.nativeHasChangesOtherThan("nonexistent.md")
+		require.NoError(t, err)
+		assert.False(t, dirty)
+	})
+
+	t.Run("returns true with untracked files", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "new.txt"), []byte("content"), 0o600))
+
+		dirty, err := r.nativeHasChangesOtherThan("plan.md")
+		require.NoError(t, err)
+		assert.True(t, dirty)
+	})
+
+	t.Run("excludes specified file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		planFile := filepath.Join(dir, "plan.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		dirty, err := r.nativeHasChangesOtherThan("plan.md")
+		require.NoError(t, err)
+		assert.False(t, dirty, "should exclude plan.md from dirty check")
+	})
+}
+
+func TestRepo_nativeIsDirty(t *testing.T) {
+	t.Run("returns false on clean worktree", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		dirty, err := r.nativeIsDirty()
+		require.NoError(t, err)
+		assert.False(t, dirty)
+	})
+
+	t.Run("returns true with modified tracked file", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("modified"), 0o600))
+
+		dirty, err := r.nativeIsDirty()
+		require.NoError(t, err)
+		assert.True(t, dirty)
+	})
+
+	t.Run("returns false with only untracked files", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		r, err := openRepo(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "new.txt"), []byte("new"), 0o600))
+
+		dirty, err := r.nativeIsDirty()
+		require.NoError(t, err)
+		assert.False(t, dirty, "IsDirty should not count untracked files")
+	})
+}
+
 func TestRepo_FileHasChanges(t *testing.T) {
 	t.Run("returns false for committed file", func(t *testing.T) {
 		dir := setupTestRepo(t)
