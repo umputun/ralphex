@@ -13,7 +13,7 @@ type Options struct {
 	AgentType string `yaml:"agent"`
 }
 
-var validModelKeywords = []string{"haiku", "sonnet", "opus"}
+var validModels = map[string]bool{"haiku": true, "sonnet": true, "opus": true}
 
 // String returns a human-readable summary of the options for logging.
 func (o Options) String() string {
@@ -32,17 +32,8 @@ func (o Options) String() string {
 // called after parseOptions which normalizes model to keyword form.
 func (o Options) Validate() []string {
 	var warnings []string
-	if o.Model != "" {
-		valid := false
-		for _, kw := range validModelKeywords {
-			if o.Model == kw {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			warnings = append(warnings, fmt.Sprintf("unknown model %q, must be one of: haiku, sonnet, opus", o.Model))
-		}
+	if o.Model != "" && !validModels[o.Model] {
+		warnings = append(warnings, fmt.Sprintf("unknown model %q, must be one of: haiku, sonnet, opus", o.Model))
 	}
 	return warnings
 }
@@ -51,9 +42,9 @@ func (o Options) Validate() []string {
 // e.g. "claude-sonnet-4-5-20250929" → "sonnet", "opus" → "opus", "" → "".
 func normalizeModel(model string) string {
 	lower := strings.ToLower(model)
-	for _, kw := range validModelKeywords {
-		if strings.Contains(lower, kw) {
-			return kw
+	for model := range validModels {
+		if strings.Contains(lower, model) {
+			return model
 		}
 	}
 	return model // return as-is if no keyword found (Validate will catch it)
