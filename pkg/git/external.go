@@ -56,7 +56,11 @@ func (e *externalBackend) run(args ...string) (string, error) {
 	cmd.Dir = e.path
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(string(out)))
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return "", fmt.Errorf("git %s: %s", args[0], msg)
+		}
+		return "", fmt.Errorf("git %s: %w", args[0], err)
 	}
 	return strings.TrimRight(string(out), " \t\n\r"), nil
 }
@@ -259,7 +263,7 @@ func (e *externalBackend) HasChangesOtherThan(path string) (bool, error) {
 
 // IsIgnored checks if a path is ignored by gitignore rules.
 func (e *externalBackend) IsIgnored(path string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "check-ignore", "-q", path)
+	cmd := exec.CommandContext(context.Background(), "git", "check-ignore", "-q", "--", path)
 	cmd.Dir = e.path
 	err := cmd.Run()
 	if err == nil {
@@ -281,7 +285,7 @@ func (e *externalBackend) Add(path string) error {
 	if err != nil {
 		return err
 	}
-	_, err = e.run("add", rel)
+	_, err = e.run("add", "--", rel)
 	if err != nil {
 		return fmt.Errorf("add file: %w", err)
 	}
@@ -298,7 +302,7 @@ func (e *externalBackend) MoveFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("invalid destination path: %w", err)
 	}
-	_, err = e.run("mv", srcRel, dstRel)
+	_, err = e.run("mv", "--", srcRel, dstRel)
 	if err != nil {
 		return fmt.Errorf("move file: %w", err)
 	}

@@ -18,7 +18,7 @@ func setupExternalTestRepo(t *testing.T) string {
 	// init repo and rename default branch to "master" explicitly;
 	// avoids dependence on git config init.defaultBranch without requiring git >= 2.28 (-b flag)
 	runGit(t, dir, "init")
-	runGit(t, dir, "checkout", "-b", "master")
+	runGit(t, dir, "checkout", "-B", "master")
 	runGit(t, dir, "config", "user.email", "test@test.com")
 	runGit(t, dir, "config", "user.name", "test")
 
