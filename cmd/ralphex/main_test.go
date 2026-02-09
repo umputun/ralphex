@@ -17,6 +17,7 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
+	gitmocks "github.com/umputun/ralphex/pkg/git/mocks"
 	"github.com/umputun/ralphex/pkg/notify"
 	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/processor"
@@ -497,15 +498,17 @@ func TestPrintStartupInfo(t *testing.T) {
 	})
 }
 
-// noopLogger implements git.Logger for tests.
-type noopLogger struct{}
-
-func (noopLogger) Printf(string, ...any) (int, error) { return 0, nil }
+// noopLogger returns a no-op git.Logger for tests using moq-generated mock.
+func noopLogger() *gitmocks.LoggerMock {
+	return &gitmocks.LoggerMock{
+		PrintfFunc: func(string, ...any) (int, error) { return 0, nil },
+	}
+}
 
 func TestEnsureRepoHasCommits(t *testing.T) {
 	t.Run("returns nil for repo with commits", func(t *testing.T) {
 		dir := setupTestRepo(t)
-		gitSvc, err := git.NewService(dir, noopLogger{})
+		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
@@ -522,7 +525,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		err = os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600)
 		require.NoError(t, err)
 
-		gitSvc, err := git.NewService(dir, noopLogger{})
+		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
 
 		// verify no commits before
@@ -549,7 +552,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		gitSvc, err := git.NewService(dir, noopLogger{})
+		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
@@ -563,7 +566,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		gitSvc, err := git.NewService(dir, noopLogger{})
+		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
@@ -579,7 +582,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 
 		// no files created - empty repo
 
-		gitSvc, err := git.NewService(dir, noopLogger{})
+		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
@@ -593,7 +596,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		_, err := gogit.PlainInit(dir, false)
 		require.NoError(t, err)
 
-		gitSvc, err := git.NewService(dir, noopLogger{})
+		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())

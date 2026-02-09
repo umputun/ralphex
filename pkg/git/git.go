@@ -1,4 +1,5 @@
-// Package git provides git repository operations using go-git library.
+// Package git provides git repository operations via a pluggable backend.
+// the default backend uses go-git library; an alternative external backend shells out to the git CLI.
 package git
 
 import (
@@ -25,6 +26,9 @@ type repo struct {
 	gitRepo *git.Repository
 	path    string // absolute path to repository root
 }
+
+// compile-time check: repo must satisfy the backend interface
+var _ backend = (*repo)(nil)
 
 // headHash returns the current HEAD commit hash as a hex string.
 func (r *repo) headHash() (string, error) {
@@ -600,13 +604,6 @@ func (r *repo) getDefaultBranchFromOriginHead() string {
 	}
 	// local branch doesn't exist, use remote-tracking branch (e.g., "origin/main")
 	return target
-}
-
-// DiffStats holds statistics about changes between two commits.
-type DiffStats struct {
-	Files     int // number of files changed
-	Additions int // lines added
-	Deletions int // lines deleted
 }
 
 // diffStats returns change statistics between baseBranch and HEAD.

@@ -9,6 +9,8 @@ import (
 	"github.com/umputun/ralphex/pkg/plan"
 )
 
+//go:generate moq -out mocks/logger.go -pkg mocks -skip-ensure -fmt goimports . Logger
+
 // Logger provides logging for git operations output.
 // Compatible with *color.Color and standard log.Logger.
 // The return values from Printf are ignored by Service methods.
@@ -16,22 +18,80 @@ type Logger interface {
 	Printf(format string, args ...any) (int, error)
 }
 
+// backend defines the low-level git operations interface.
+// Both the internal go-git backend (repo) and the external git CLI backend implement this.
+type backend interface {
+	Root() string
+	headHash() (string, error)
+	HasCommits() (bool, error)
+	CurrentBranch() (string, error)
+	IsMainBranch() (bool, error)
+	GetDefaultBranch() string
+	BranchExists(name string) bool
+	CreateBranch(name string) error
+	CheckoutBranch(name string) error
+	IsDirty() (bool, error)
+	FileHasChanges(path string) (bool, error)
+	HasChangesOtherThan(path string) (bool, error)
+	IsIgnored(path string) (bool, error)
+	Add(path string) error
+	MoveFile(src, dst string) error
+	Commit(msg string) error
+	CreateInitialCommit(msg string) error
+	diffStats(baseBranch string) (DiffStats, error)
+}
+
+// DiffStats holds statistics about changes between two commits.
+type DiffStats struct {
+	Files     int // number of files changed
+	Additions int // lines added
+	Deletions int // lines deleted
+}
+
+// Option configures NewService behavior.
+type Option func(*serviceConfig)
+
+// serviceConfig holds internal configuration for NewService.
+type serviceConfig struct {
+	useExternal bool
+}
+
+// WithExternalGit configures the service to use the external git CLI backend
+// instead of the default go-git library.
+func WithExternalGit() Option {
+	return func(c *serviceConfig) {
+		c.useExternal = true
+	}
+}
+
 // Service provides git operations for ralphex workflows.
 // It is the single public API for the git package.
 type Service struct {
-	repo *repo
+	repo backend
 	log  Logger
 }
 
 // NewService opens a git repository and returns a Service.
 // path is the path to the repository (use "." for current directory).
 // log is used for progress output during operations.
-func NewService(path string, log Logger) (*Service, error) {
-	r, err := openRepo(path)
+// opts can include WithExternalGit() to use the git CLI instead of go-git.
+func NewService(path string, log Logger, opts ...Option) (*Service, error) {
+	var cfg serviceConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	var b backend
+	var err error
+	if cfg.useExternal {
+		b, err = newExternalBackend(path)
+	} else {
+		b, err = openRepo(path)
+	}
 	if err != nil {
 		return nil, err
 	}
-	return &Service{repo: r, log: log}, nil
+	return &Service{repo: b, log: log}, nil
 }
 
 // Root returns the absolute path to the repository root.
@@ -46,12 +106,20 @@ func (s *Service) HeadHash() (string, error) {
 
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD state.
 func (s *Service) CurrentBranch() (string, error) {
-	return s.repo.CurrentBranch()
+	branch, err := s.repo.CurrentBranch()
+	if err != nil {
+		return "", fmt.Errorf("current branch: %w", err)
+	}
+	return branch, nil
 }
 
 // IsMainBranch returns true if the current branch is "main" or "master".
 func (s *Service) IsMainBranch() (bool, error) {
-	return s.repo.IsMainBranch()
+	isMain, err := s.repo.IsMainBranch()
+	if err != nil {
+		return false, fmt.Errorf("is main branch: %w", err)
+	}
+	return isMain, nil
 }
 
 // GetDefaultBranch returns the default branch name.
@@ -62,12 +130,19 @@ func (s *Service) GetDefaultBranch() string {
 
 // HasCommits returns true if the repository has at least one commit.
 func (s *Service) HasCommits() (bool, error) {
-	return s.repo.HasCommits()
+	has, err := s.repo.HasCommits()
+	if err != nil {
+		return false, fmt.Errorf("has commits: %w", err)
+	}
+	return has, nil
 }
 
 // CreateBranch creates a new branch and switches to it.
 func (s *Service) CreateBranch(name string) error {
-	return s.repo.CreateBranch(name)
+	if err := s.repo.CreateBranch(name); err != nil {
+		return fmt.Errorf("create branch: %w", err)
+	}
+	return nil
 }
 
 // CreateBranchForPlan creates or switches to a feature branch for plan execution.
