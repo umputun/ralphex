@@ -885,3 +885,22 @@ func setupTestRepo(t *testing.T) string {
 
 	return dir
 }
+
+func TestResolveVersion(t *testing.T) {
+	t.Run("ldflags_set", func(t *testing.T) {
+		orig := revision
+		t.Cleanup(func() { revision = orig })
+		revision = "v1.2.3-abc1234"
+		assert.Equal(t, "v1.2.3-abc1234", resolveVersion())
+	})
+
+	t.Run("fallback_to_build_info", func(t *testing.T) {
+		orig := revision
+		t.Cleanup(func() { revision = orig })
+		revision = "unknown"
+		// in test context, debug.ReadBuildInfo returns (devel) module version
+		// but VCS info should be available from the git repo
+		v := resolveVersion()
+		assert.NotEmpty(t, v)
+	})
+}

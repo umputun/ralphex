@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -48,6 +49,29 @@ type opts struct {
 
 var revision = "unknown"
 
+// resolveVersion returns the best available version string.
+// priority: ldflags revision → module version from go install → VCS commit hash → "unknown".
+func resolveVersion() string {
+	if revision != "unknown" {
+		return revision
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return revision
+	}
+	// go install sets module version to the tag (e.g. v0.10.0)
+	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	// local build without ldflags — try VCS revision
+	for _, s := range bi.Settings {
+		if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+			return s.Value[:7]
+		}
+	}
+	return revision
+}
+
 // stderrLog is a simple logger that writes to stderr.
 // satisfies notify.logger interface for use before progress logger is available.
 type stderrLog struct{}
@@ -79,7 +103,7 @@ type executePlanRequest struct {
 }
 
 func main() {
-	fmt.Printf("ralphex %s\n", revision)
+	fmt.Printf("ralphex %s\n", resolveVersion())
 
 	var o opts
 	parser := flags.NewParser(&o, flags.Default)
