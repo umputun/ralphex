@@ -112,8 +112,8 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 	if _, body := parseOptions(content); body != "" {
 		return content, nil
 	}
-	// fall back to embedded default
-	log.Printf("[INFO] agent %s: file is all comments, falling back to embedded default", filename)
+	// fall back to embedded default, frontmatter options (if any) are dropped
+	log.Printf("[WARN] agent %s: no prompt body, falling back to embedded default (frontmatter options dropped)", filename)
 	return al.loadFromEmbedFS(filename)
 }
 
