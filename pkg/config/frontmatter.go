@@ -42,9 +42,9 @@ func (o Options) Validate() []string {
 // e.g. "claude-sonnet-4-5-20250929" → "sonnet", "opus" → "opus", "" → "".
 func normalizeModel(model string) string {
 	lower := strings.ToLower(model)
-	for model := range validModels {
-		if strings.Contains(lower, model) {
-			return model
+	for kw := range validModels {
+		if strings.Contains(lower, kw) {
+			return kw
 		}
 	}
 	return model // return as-is if no keyword found (Validate will catch it)
