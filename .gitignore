@@ -55,3 +55,6 @@ site/.venv/
 
 # plugin version sync backups
 .claude-plugin/*.bak
+
+# python
+__pycache__/

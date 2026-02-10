@@ -1,192 +1,651 @@
-#!/bin/bash
-# ralphex-dk.sh - run ralphex in a docker container
-#
-# usage: ralphex-dk.sh [ralphex-args]
-# example: ralphex-dk.sh docs/plans/feature.md
-# example: ralphex-dk.sh --serve docs/plans/feature.md
-# example: ralphex-dk.sh --review
-# example: ralphex-dk.sh --update         # pull latest docker image
-# example: ralphex-dk.sh --update-script  # update this wrapper script
+#!/usr/bin/env python3
+"""ralphex-dk.sh - run ralphex in a docker container
 
-set -e
+usage: ralphex-dk.sh [ralphex-args]
+example: ralphex-dk.sh docs/plans/feature.md
+example: ralphex-dk.sh --serve docs/plans/feature.md
+example: ralphex-dk.sh --review
+example: ralphex-dk.sh --update         # pull latest docker image
+example: ralphex-dk.sh --update-script  # update this wrapper script
+"""
 
-IMAGE="${RALPHEX_IMAGE:-ghcr.io/umputun/ralphex-go:latest}"
-PORT="${RALPHEX_PORT:-8080}"
+import difflib
+import os
+import platform
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from typing import Optional
+from urllib.request import urlopen
 
-# handle --update flag: pull latest image and exit
-if [[ "$1" == "--update" ]]; then
-    echo "pulling latest image: ${IMAGE}" >&2
-    docker pull "${IMAGE}"
-    exit 0
-fi
+DEFAULT_IMAGE = "ghcr.io/umputun/ralphex-go:latest"
+DEFAULT_PORT = "8080"
+SCRIPT_URL = "https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
 
-# handle --update-script flag: update this wrapper script and exit
-if [[ "$1" == "--update-script" ]]; then
-    SCRIPT_URL="https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
-    SCRIPT_PATH="$(realpath "$0")"
-    TEMP_SCRIPT=$(mktemp)
-    trap "rm -f '$TEMP_SCRIPT'" EXIT
 
-    echo "checking for ralphex docker wrapper updates..." >&2
-    if curl -sfL "$SCRIPT_URL" -o "$TEMP_SCRIPT"; then
-        if ! diff -q "$SCRIPT_PATH" "$TEMP_SCRIPT" >/dev/null 2>&1; then
-            echo "wrapper update available:" >&2
-            git diff --no-index "$SCRIPT_PATH" "$TEMP_SCRIPT" >&2 || true
-            printf "update wrapper? (y/N) " >&2
-            read -r answer
-            if [[ "$answer" =~ ^[Yy]$ ]]; then
-                cp "$TEMP_SCRIPT" "$SCRIPT_PATH"
-                chmod +x "$SCRIPT_PATH"
-                echo "wrapper updated" >&2
-            else
-                echo "wrapper update skipped" >&2
-            fi
-        else
-            echo "wrapper is up to date" >&2
-        fi
-    else
-        echo "warning: failed to check for wrapper updates" >&2
-    fi
-    rm -f "$TEMP_SCRIPT"
-    exit 0
-fi
+def resolve_path(path: Path) -> Path:
+    """if symlink, resolve; otherwise return as-is."""
+    if path.is_symlink():
+        try:
+            return path.resolve()
+        except (OSError, RuntimeError):
+            return path
+    return path
 
-# check required directories exist (avoid docker creating them as root)
-if [[ ! -d "${HOME}/.claude" ]]; then
-    echo "error: ~/.claude directory not found (run 'claude' first to authenticate)" >&2
-    exit 1
-fi
 
-# on macOS, extract credentials from keychain if not already in ~/.claude
-CREDS_TEMP=""
-if [[ "$(uname)" == "Darwin" && ! -f "${HOME}/.claude/.credentials.json" ]]; then
-    # try to read credentials first (works if keychain already unlocked)
-    CREDS_JSON=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
-    if [[ -z "$CREDS_JSON" ]]; then
+def symlink_target_dirs(src: Path, maxdepth: int = 2) -> list[Path]:
+    """collect unique parent directories of symlink targets inside a directory, limited to maxdepth."""
+    if not src.is_dir():
+        return []
+    dirs: set[Path] = set()
+    src_str = str(src)
+    for root, dirnames, filenames in os.walk(src):
+        depth = root[len(src_str):].count(os.sep)
+        if depth >= maxdepth:
+            dirnames.clear()  # don't descend further
+            continue  # skip entries at this level to match find -maxdepth behavior
+        if depth >= maxdepth - 1:
+            entries = list(dirnames) + filenames  # save dirnames before clearing
+            dirnames.clear()  # don't descend further, but still process entries at this level
+        else:
+            entries = list(dirnames) + filenames
+        root_path = Path(root)
+        for name in entries:
+            entry = root_path / name
+            if entry.is_symlink():
+                try:
+                    target = entry.resolve()
+                    dirs.add(target.parent)
+                except (OSError, RuntimeError):
+                    continue
+    return sorted(dirs)
+
+
+def should_bind_port(args: list[str]) -> bool:
+    """check for --serve or -s in arguments."""
+    return "--serve" in args or "-s" in args
+
+
+def detect_git_worktree(workspace: Path) -> Optional[Path]:
+    """check if .git is a file (worktree), return absolute path to git common dir."""
+    git_path = workspace / ".git"
+    if not git_path.is_file():
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(workspace), "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        common_dir = Path(result.stdout.strip())
+        if not common_dir.is_absolute():
+            common_dir = (workspace / common_dir).resolve()
+        if common_dir.is_dir():
+            return common_dir
+    except OSError:
+        pass
+    return None
+
+
+def get_global_gitignore() -> Optional[Path]:
+    """run git config --global core.excludesFile and return path if it exists."""
+    try:
+        result = subprocess.run(
+            ["git", "config", "--global", "core.excludesFile"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            p = Path(result.stdout.strip()).expanduser()
+            if p.exists():
+                return p
+    except OSError:
+        pass
+    return None
+
+
+def extract_macos_credentials() -> Optional[Path]:
+    """on macOS, extract claude credentials from keychain if not already on disk."""
+    if platform.system() != "Darwin":
+        return None
+    if (Path.home() / ".claude" / ".credentials.json").exists():
+        return None
+
+    # try to read credentials (works if keychain already unlocked)
+    creds_json = _security_find_credentials()
+    if not creds_json:
         # keychain locked - unlock and retry
-        echo "unlocking macOS keychain to extract Claude credentials (enter login password)..." >&2
-        security unlock-keychain 2>/dev/null || true
-        CREDS_JSON=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
-    fi
-    if [[ -n "$CREDS_JSON" ]]; then
-        CREDS_TEMP=$(mktemp)
-        chmod 600 "$CREDS_TEMP"
-        echo "$CREDS_JSON" > "$CREDS_TEMP"
-        trap "rm -f '$CREDS_TEMP'" EXIT  # safety net
-    fi
-fi
+        print("unlocking macOS keychain to extract Claude credentials (enter login password)...", file=sys.stderr)
+        subprocess.run(["security", "unlock-keychain"], capture_output=True, check=False)
+        creds_json = _security_find_credentials()
 
-# resolve path: if symlink, return real path; otherwise return original
-resolve() { [[ -L "$1" ]] && realpath "$1" || echo "$1"; }
+    if not creds_json:
+        return None
 
-# collect unique parent directories of symlink targets inside a directory
-# limit depth to avoid scanning tmp directories with many symlinks
-symlink_target_dirs() {
-    local src="$1"
-    [[ -d "$src" ]] || return
-    find "$src" -maxdepth 2 -type l 2>/dev/null | while read -r link; do
-        dirname "$(realpath "$link" 2>/dev/null)" 2>/dev/null
-    done | sort -u
-}
+    fd, tmp_path = tempfile.mkstemp()
+    fd_closed = False
+    try:
+        with os.fdopen(fd, "w") as f:
+            fd_closed = True
+            f.write(creds_json + "\n")
+    except OSError:
+        if not fd_closed:
+            os.close(fd)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return None
+    return Path(tmp_path)
 
-# build volume mounts - credentials mounted read-only to /mnt, copied at startup
-VOLUMES=(
-    -v "$(resolve "${HOME}/.claude"):/mnt/claude:ro"
-    -v "$(pwd):/workspace"
-)
 
-# detect git worktree and mount the main repo's .git directory
-if [[ -f "$(pwd)/.git" ]]; then
-    GIT_COMMON_DIR=$(git -C "$(pwd)" rev-parse --git-common-dir 2>/dev/null || true)
-    if [[ -n "$GIT_COMMON_DIR" && -d "$GIT_COMMON_DIR" ]]; then
-        GIT_COMMON_DIR=$(cd "$GIT_COMMON_DIR" && pwd)  # resolve to absolute
-        VOLUMES+=(-v "${GIT_COMMON_DIR}:${GIT_COMMON_DIR}")
-    fi
-fi
+def _security_find_credentials() -> Optional[str]:
+    """try to read Claude Code credentials from macOS keychain."""
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except OSError:
+        pass
+    return None
 
-# mount extracted credentials from macOS keychain (separate path, init.sh will copy)
-if [[ -n "$CREDS_TEMP" ]]; then
-    VOLUMES+=(-v "${CREDS_TEMP}:/mnt/claude-credentials.json:ro")
-fi
 
-# add mounts for symlink targets under $HOME (Docker Desktop shares $HOME by default)
-for target in $(symlink_target_dirs "${HOME}/.claude"); do
-    [[ -d "$target" && "$target" == "${HOME}"/* ]] && VOLUMES+=(-v "${target}:${target}:ro")
-done
+def build_volumes(creds_temp: Optional[Path]) -> list[str]:
+    """build docker volume mount arguments, returns flat list like ['-v', 'src:dst', ...]."""
+    home = Path.home()
+    cwd = Path.cwd()
+    vols: list[str] = []
 
-# codex: mount directory and symlink targets under $HOME (skip homebrew temp symlinks)
-if [[ -d "${HOME}/.codex" ]]; then
-    VOLUMES+=(-v "$(resolve "${HOME}/.codex"):/mnt/codex:ro")
-    for target in $(symlink_target_dirs "${HOME}/.codex"); do
-        [[ -d "$target" && "$target" == "${HOME}"/* ]] && VOLUMES+=(-v "${target}:${target}:ro")
-    done
-fi
+    def add(src: Path, dst: str, ro: bool = False) -> None:
+        suffix = ":ro" if ro else ""
+        vols.extend(["-v", f"{src}:{dst}{suffix}"])
 
-# ralphex config: mount directory and symlink targets under $HOME
-if [[ -d "${HOME}/.config/ralphex" ]]; then
-    VOLUMES+=(-v "$(resolve "${HOME}/.config/ralphex"):/home/app/.config/ralphex")
-    for target in $(symlink_target_dirs "${HOME}/.config/ralphex"); do
-        [[ -d "$target" && "$target" == "${HOME}"/* ]] && VOLUMES+=(-v "${target}:${target}:ro")
-    done
-fi
+    def add_symlink_targets(src: Path) -> None:
+        """add read-only mounts for symlink targets that live under $HOME."""
+        for target in symlink_target_dirs(src):
+            if target.is_dir() and target.is_relative_to(home):
+                add(target, str(target), ro=True)
 
-# project-level .ralphex: resolve symlink targets if present (included in workspace mount)
-if [[ -d "$(pwd)/.ralphex" ]]; then
-    for target in $(symlink_target_dirs "$(pwd)/.ralphex"); do
-        [[ -d "$target" && "$target" == "${HOME}"/* ]] && VOLUMES+=(-v "${target}:${target}:ro")
-    done
-fi
+    # 1. ~/.claude (resolved) -> /mnt/claude:ro
+    add(resolve_path(home / ".claude"), "/mnt/claude", ro=True)
 
-if [[ -e "${HOME}/.gitconfig" ]]; then
-    VOLUMES+=(-v "$(resolve "${HOME}/.gitconfig"):/home/app/.gitconfig:ro")
-fi
+    # 2. cwd -> /workspace
+    add(cwd, "/workspace")
 
-# mount global gitignore at same path as configured in gitconfig
-GLOBAL_GITIGNORE=$(git config --global core.excludesFile 2>/dev/null || true)
-if [[ -n "$GLOBAL_GITIGNORE" && -e "$GLOBAL_GITIGNORE" ]]; then
-    VOLUMES+=(-v "$(resolve "$GLOBAL_GITIGNORE"):${GLOBAL_GITIGNORE}:ro")
-fi
+    # 3. git worktree common dir
+    git_common = detect_git_worktree(cwd)
+    if git_common:
+        add(git_common, str(git_common))
 
-# show which image is being used
-echo "using image: ${IMAGE}" >&2
+    # 4. macOS credentials temp file
+    if creds_temp:
+        add(creds_temp, "/mnt/claude-credentials.json", ro=True)
 
-# schedule credential cleanup (runs in background, deletes after init.sh copies)
-if [[ -n "$CREDS_TEMP" ]]; then
-    (sleep 10; rm -f "$CREDS_TEMP") &
-fi
+    # 5. symlink targets under ~/.claude
+    add_symlink_targets(home / ".claude")
 
-# only bind port when --serve/-s is requested (avoids conflicts with concurrent instances)
-PORT_ARGS=()
-for arg in "$@"; do
-    if [[ "$arg" == "--serve" || "$arg" == "-s" ]]; then
-        PORT_ARGS=(-p "${PORT}:${PORT}")
-        break
-    fi
-done
+    # 6. ~/.codex -> /mnt/codex:ro + symlink targets
+    codex_dir = home / ".codex"
+    if codex_dir.is_dir():
+        add(resolve_path(codex_dir), "/mnt/codex", ro=True)
+        add_symlink_targets(codex_dir)
 
-# run docker - foreground for interactive (TTY needed), background for non-interactive
-if [[ -t 0 ]]; then
-    # interactive mode: run in foreground so TTY works
-    docker run -it --rm \
-        -e APP_UID="$(id -u)" \
-        -e SKIP_HOME_CHOWN=1 \
-        -e INIT_QUIET=1 \
-        -e CLAUDE_CONFIG_DIR=/home/app/.claude \
-        "${PORT_ARGS[@]}" \
-        "${VOLUMES[@]}" \
-        -w /workspace \
-        "${IMAGE}" /srv/ralphex "$@"
-else
-    # non-interactive: run in background to allow parallel credential cleanup
-    docker run --rm \
-        -e APP_UID="$(id -u)" \
-        -e SKIP_HOME_CHOWN=1 \
-        -e INIT_QUIET=1 \
-        -e CLAUDE_CONFIG_DIR=/home/app/.claude \
-        "${PORT_ARGS[@]}" \
-        "${VOLUMES[@]}" \
-        -w /workspace \
-        "${IMAGE}" /srv/ralphex "$@" &
-    DOCKER_PID=$!
-    wait $DOCKER_PID
-fi
+    # 7. ~/.config/ralphex -> /home/app/.config/ralphex + symlink targets
+    ralphex_config = home / ".config" / "ralphex"
+    if ralphex_config.is_dir():
+        add(resolve_path(ralphex_config), "/home/app/.config/ralphex")
+        add_symlink_targets(ralphex_config)
+
+    # 8. .ralphex/ symlink targets only (workspace mount already includes it)
+    local_ralphex = cwd / ".ralphex"
+    if local_ralphex.is_dir():
+        add_symlink_targets(local_ralphex)
+
+    # 9. ~/.gitconfig -> /home/app/.gitconfig:ro
+    gitconfig = home / ".gitconfig"
+    if gitconfig.exists():
+        add(resolve_path(gitconfig), "/home/app/.gitconfig", ro=True)
+
+    # 10. global gitignore -> same path in container:ro
+    global_gitignore = get_global_gitignore()
+    if global_gitignore:
+        add(resolve_path(global_gitignore), str(global_gitignore), ro=True)
+
+    return vols
+
+
+def handle_update(image: str) -> int:
+    """pull latest docker image."""
+    print(f"pulling latest image: {image}", file=sys.stderr)
+    return subprocess.run(["docker", "pull", image], check=False).returncode
+
+
+def handle_update_script(script_path: Path) -> int:
+    """download latest wrapper script, show diff, prompt user to update."""
+    print("checking for ralphex docker wrapper updates...", file=sys.stderr)
+    fd, tmp_path = tempfile.mkstemp()
+    try:
+        # download
+        fd_closed = False
+        try:
+            with urlopen(SCRIPT_URL) as resp:  # noqa: S310
+                data = resp.read()
+            with os.fdopen(fd, "wb") as f:
+                fd_closed = True
+                f.write(data)
+        except OSError:
+            if not fd_closed:
+                os.close(fd)
+            print("warning: failed to check for wrapper updates", file=sys.stderr)
+            return 0
+
+        # compare
+        try:
+            current = script_path.read_text()
+            new = Path(tmp_path).read_text()
+        except OSError:
+            print("warning: failed to read script files for comparison", file=sys.stderr)
+            return 0
+
+        if current == new:
+            print("wrapper is up to date", file=sys.stderr)
+            return 0
+
+        print("wrapper update available:", file=sys.stderr)
+        # try git diff first (output to stderr like bash original), fall back to difflib
+        try:
+            git_diff = subprocess.run(
+                ["git", "diff", "--no-index", str(script_path), tmp_path],
+                check=False, stdout=sys.stderr,
+            )
+            git_diff_failed = git_diff.returncode > 1
+        except OSError:
+            git_diff_failed = True
+        if git_diff_failed:
+            # git diff not available or error, use difflib
+            diff = difflib.unified_diff(
+                current.splitlines(keepends=True), new.splitlines(keepends=True),
+                fromfile=str(script_path), tofile="(new)",
+            )
+            sys.stderr.writelines(diff)
+
+        try:
+            sys.stderr.write("update wrapper? (y/N) ")
+            sys.stderr.flush()
+            answer = sys.stdin.readline()
+        except EOFError:
+            answer = ""
+
+        if answer.strip().lower() == "y":
+            shutil.copy2(tmp_path, str(script_path))
+            script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            print("wrapper updated", file=sys.stderr)
+        else:
+            print("wrapper update skipped", file=sys.stderr)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    return 0
+
+
+def schedule_cleanup(creds_temp: Optional[Path]) -> None:
+    """schedule credentials temp file deletion after a delay."""
+    if not creds_temp:
+        return
+
+    def _remove() -> None:
+        try:
+            creds_temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    t = threading.Timer(10.0, _remove)
+    t.daemon = True
+    t.start()
+
+
+def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args: list[str]) -> int:
+    """build and execute docker run command."""
+    cmd = ["docker", "run"]
+
+    interactive = sys.stdin.isatty()
+    if interactive:
+        cmd.append("-it")
+    cmd.append("--rm")
+
+    cmd.extend([
+        "-e", f"APP_UID={os.getuid()}",
+        "-e", "SKIP_HOME_CHOWN=1",
+        "-e", "INIT_QUIET=1",
+        "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
+    ])
+
+    if bind_port:
+        cmd.extend(["-p", f"{port}:{port}"])
+
+    cmd.extend(volumes)
+    cmd.extend(["-w", "/workspace"])
+    cmd.extend([image, "/srv/ralphex"])
+    cmd.extend(args)
+
+    # defer SIGTERM during Popen+assignment to prevent race where handler sees _active_proc unset.
+    # using a deferred handler instead of SIG_IGN so the signal is not lost.
+    _pending_sigterm: list[tuple[int, object]] = []
+
+    def _deferred_term(signum: int, frame: object) -> None:
+        _pending_sigterm.append((signum, frame))
+
+    old_handler = signal.signal(signal.SIGTERM, _deferred_term)
+    try:
+        proc = subprocess.Popen(cmd)  # noqa: S603
+        run_docker._active_proc = proc  # type: ignore[attr-defined]
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
+    # re-deliver deferred signal now that _active_proc is set and real handler is restored
+    if _pending_sigterm and callable(old_handler):
+        old_handler(*_pending_sigterm[0])
+
+    def _terminate_proc() -> None:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        _terminate_proc()
+        proc.wait()
+    finally:
+        run_docker._active_proc = None  # type: ignore[attr-defined]
+    return proc.returncode
+
+
+def main() -> int:
+    """entry point."""
+    # handle --test flag
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        run_tests()
+        return 0
+
+    image = os.environ.get("RALPHEX_IMAGE", DEFAULT_IMAGE)
+    port = os.environ.get("RALPHEX_PORT", DEFAULT_PORT)
+    args = sys.argv[1:]
+
+    # handle --update
+    if args and args[0] == "--update":
+        return handle_update(image)
+
+    # handle --update-script
+    if args and args[0] == "--update-script":
+        script_path = Path(os.path.realpath(sys.argv[0]))
+        return handle_update_script(script_path)
+
+    # check required directories
+    if not (Path.home() / ".claude").is_dir():
+        print("error: ~/.claude directory not found (run 'claude' first to authenticate)", file=sys.stderr)
+        return 1
+
+    # extract macOS credentials
+    creds_temp = extract_macos_credentials()
+
+    def _cleanup_creds() -> None:
+        if creds_temp:
+            try:
+                creds_temp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    # setup SIGTERM handler: terminate docker child process and clean up credentials
+    def _term_handler(signum: int, frame: object) -> None:
+        proc = getattr(run_docker, "_active_proc", None)
+        if proc is not None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+        _cleanup_creds()
+        sys.exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _term_handler)
+
+    try:
+        # build volumes
+        volumes = build_volumes(creds_temp)
+
+        print(f"using image: {image}", file=sys.stderr)
+
+        # schedule credential cleanup
+        schedule_cleanup(creds_temp)
+
+        # determine port binding
+        bind_port = should_bind_port(args)
+
+        return run_docker(image, port, volumes, bind_port, args)
+    finally:
+        _cleanup_creds()
+
+
+# --- embedded tests ---
+
+
+def run_tests() -> None:
+    """run embedded unit tests."""
+
+    class TestResolvePath(unittest.TestCase):
+        def test_regular_path(self) -> None:
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                regular = tmp / "regular"
+                regular.mkdir()
+                self.assertEqual(resolve_path(regular), regular)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_symlink(self) -> None:
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                target = tmp / "target"
+                target.mkdir()
+                link = tmp / "link"
+                link.symlink_to(target)
+                self.assertEqual(resolve_path(link), target.resolve())
+            finally:
+                shutil.rmtree(tmp)
+
+    class TestSymlinkTargetDirs(unittest.TestCase):
+        def test_collects_symlink_targets(self) -> None:
+            tmp = Path(tempfile.mkdtemp()).resolve()
+            try:
+                target_dir = tmp / "targets" / "sub"
+                target_dir.mkdir(parents=True)
+                target_file = target_dir / "file.txt"
+                target_file.write_text("content")
+
+                src = tmp / "src"
+                src.mkdir()
+                (src / "link").symlink_to(target_file)
+
+                dirs = symlink_target_dirs(src)
+                self.assertIn(target_dir, dirs)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_respects_depth_limit(self) -> None:
+            tmp = Path(tempfile.mkdtemp()).resolve()
+            try:
+                target = tmp / "far_target"
+                target.mkdir()
+                target_file = target / "file.txt"
+                target_file.write_text("content")
+
+                src = tmp / "src"
+                # create deep nesting: src/a/b/c/link (depth=3, exceeds maxdepth=2)
+                deep = src / "a" / "b" / "c"
+                deep.mkdir(parents=True)
+                (deep / "link").symlink_to(target_file)
+
+                dirs = symlink_target_dirs(src, maxdepth=2)
+                self.assertNotIn(target, dirs)
+
+                # link inside depth-2 dir (src/a/b/link) exceeds find -maxdepth 2
+                (src / "a" / "b" / "depth2_link").symlink_to(target_file)
+                dirs = symlink_target_dirs(src, maxdepth=2)
+                self.assertNotIn(target, dirs)
+
+                # depth=1 link should work: src/a/link (within find -maxdepth 2)
+                (src / "a" / "shallow_link").symlink_to(target_file)
+                dirs = symlink_target_dirs(src, maxdepth=2)
+                self.assertIn(target, dirs)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_dir_symlink_at_depth_boundary(self) -> None:
+            tmp = Path(tempfile.mkdtemp()).resolve()
+            try:
+                target_dir = tmp / "target_dir"
+                target_dir.mkdir()
+                src = tmp / "src"
+                subdir = src / "a"
+                subdir.mkdir(parents=True)
+                # directory symlink at depth 2 (find -maxdepth 2): src/a/link_dir
+                (subdir / "link_dir").symlink_to(target_dir)
+                dirs = symlink_target_dirs(src, maxdepth=2)
+                self.assertIn(target_dir.parent, dirs)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_nonexistent_dir(self) -> None:
+            self.assertEqual(symlink_target_dirs(Path("/nonexistent")), [])
+
+    class TestShouldBindPort(unittest.TestCase):
+        def test_with_serve(self) -> None:
+            self.assertTrue(should_bind_port(["--serve", "plan.md"]))
+
+        def test_with_s(self) -> None:
+            self.assertTrue(should_bind_port(["-s", "plan.md"]))
+
+        def test_without_serve(self) -> None:
+            self.assertFalse(should_bind_port(["--review", "plan.md"]))
+
+        def test_empty(self) -> None:
+            self.assertFalse(should_bind_port([]))
+
+    class TestBuildVolumes(unittest.TestCase):
+        def test_volume_pairs(self) -> None:
+            vols = build_volumes(None)
+            # volumes should come in -v pairs
+            for i in range(0, len(vols), 2):
+                self.assertEqual(vols[i], "-v")
+                self.assertIn(":", vols[i + 1])
+
+        def test_includes_workspace(self) -> None:
+            vols = build_volumes(None)
+            workspace_mount = f"{Path.cwd()}:/workspace"
+            self.assertIn(workspace_mount, vols)
+
+        def test_includes_claude_dir(self) -> None:
+            vols = build_volumes(None)
+            # find the claude mount
+            found = False
+            for v in vols:
+                if "/mnt/claude:ro" in v:
+                    found = True
+                    break
+            self.assertTrue(found, "should mount ~/.claude to /mnt/claude:ro")
+
+    class TestDetectGitWorktree(unittest.TestCase):
+        def test_regular_dir(self) -> None:
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                self.assertIsNone(detect_git_worktree(tmp))
+            finally:
+                shutil.rmtree(tmp)
+
+    class TestExtractCredentials(unittest.TestCase):
+        def test_write_pattern_adds_trailing_newline(self) -> None:
+            """credential write pattern appends newline (matching bash echo behavior)."""
+            fd, tmp_path = tempfile.mkstemp()
+            try:
+                with os.fdopen(fd, "w") as f:
+                    creds = '{"token": "test"}'
+                    f.write(creds + "\n")
+                content = Path(tmp_path).read_text()
+                self.assertTrue(content.endswith("\n"), "credentials should end with newline")
+                self.assertEqual(content, '{"token": "test"}\n')
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+        def test_skips_non_darwin(self) -> None:
+            """extract_macos_credentials returns None on non-Darwin platforms."""
+            if platform.system() == "Darwin":
+                return  # skip on actual macOS
+            self.assertIsNone(extract_macos_credentials())
+
+    class TestScheduleCleanup(unittest.TestCase):
+        def test_cleans_up_file(self) -> None:
+            """schedule_cleanup should delete the file after delay."""
+            import time
+            fd, tmp_path = tempfile.mkstemp()
+            os.close(fd)
+            p = Path(tmp_path)
+            self.assertTrue(p.exists())
+
+            # patch Timer to use a very short delay
+            orig_timer = threading.Timer
+            threading.Timer = lambda delay, fn: orig_timer(0.05, fn)
+            try:
+                schedule_cleanup(p)
+                time.sleep(0.2)
+            finally:
+                threading.Timer = orig_timer
+            self.assertFalse(p.exists())
+
+        def test_none_is_noop(self) -> None:
+            """schedule_cleanup with None should not raise."""
+            schedule_cleanup(None)
+
+    class TestBuildDockerCmd(unittest.TestCase):
+        def test_creds_volume_mount(self) -> None:
+            """build_volumes should include creds temp mount when provided."""
+            fd, tmp_path = tempfile.mkstemp()
+            os.close(fd)
+            try:
+                creds = Path(tmp_path)
+                vols = build_volumes(creds)
+                mount = f"{creds}:/mnt/claude-credentials.json:ro"
+                self.assertIn(mount, vols)
+            finally:
+                os.unlink(tmp_path)
+
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+    for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
+               TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
+               TestBuildDockerCmd]:
+        suite.addTests(loader.loadTestsFromTestCase(tc))
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    if not result.wasSuccessful():
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\r\033[K", end="")
+        sys.exit(130)

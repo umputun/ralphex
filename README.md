@@ -239,6 +239,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
 
 **Requirements:**
+- Python 3.9+ (for the wrapper script)
 - Docker installed and running
 - Claude Code credentials in `~/.claude/`
 - Codex credentials in `~/.codex/` (optional, for codex review phase)
