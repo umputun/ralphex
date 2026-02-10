@@ -239,14 +239,16 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
 
 **Requirements:**
+- Python 3.9+ (for the wrapper script)
 - Docker installed and running
 - Claude Code credentials in `~/.claude/`
 - Codex credentials in `~/.codex/` (optional, for codex review phase)
 - Git config in `~/.gitconfig` (for commits)
 
 **Environment variables:**
-- `RALPHEX_IMAGE` - Docker image to use (default: `ghcr.io/umputun/ralphex:latest`)
+- `RALPHEX_IMAGE` - Docker image to use (default: `ghcr.io/umputun/ralphex-go:latest`)
 - `RALPHEX_PORT` - Port for web dashboard when using `--serve` (default: `8080`)
+- `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works both with Docker wrapper (volume mounts and keychain derivation) and non-Docker usage (passed through to Claude Code directly). Keychain service name is derived automatically from the path.
 
 **Updating:**
 ```bash
@@ -754,6 +756,16 @@ claude_args = --force --output-format stream-json
 ```
 
 Key differences: `agent` command (not `claude`), `--force` flag (not `--dangerously-skip-permissions`). Stream format and signals are compatible. *Note: this is community-tested, not officially supported. Compatibility depends on Cursor maintaining Claude Code compatibility.*
+
+**How do I use multiple Claude accounts?**
+
+Set the `CLAUDE_CONFIG_DIR` environment variable to point to the alternate Claude config directory:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude2 ralphex docs/plans/feature.md
+```
+
+This is the same env var Claude Code itself uses. With Docker, the wrapper script mounts the specified directory and derives the correct macOS Keychain service name from the path. Without Docker, the env var passes through to the child Claude Code process directly. Each Claude installation stores credentials under a unique Keychain entry based on its config directory. No additional configuration is needed — just point `CLAUDE_CONFIG_DIR` to the right directory.
 
 **Can I run something after all phases complete (notifications, rebase commits, etc.)?**
 

@@ -29,7 +29,7 @@ RUN apk add --no-cache \
     nodejs npm \
     python3 py3-pip \
     libgcc libstdc++ ripgrep \
-    fzf git bash \
+    fzf git openssh-keygen bash \
     make gcc musl-dev && \
     sed -i 's|/home/app:/bin/sh|/home/app:/bin/bash|' /etc/passwd
 

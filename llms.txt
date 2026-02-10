@@ -83,7 +83,7 @@ ralphex provides Docker images for isolated execution:
 | `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, Node.js, Python, git, make, gcc, bash, fzf, ripgrep |
 | `ghcr.io/umputun/ralphex-go:latest` | Go development: base + Go 1.25, golangci-lint, moq, goimports |
 
-**Using Docker wrapper:**
+**Using Docker wrapper** (requires Python 3.9+):
 ```bash
 # install wrapper script (defaults to Go image)
 curl -sL https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh -o /usr/local/bin/ralphex
@@ -92,6 +92,11 @@ chmod +x /usr/local/bin/ralphex
 # for non-Go projects, use base image
 export RALPHEX_IMAGE=ghcr.io/umputun/ralphex:latest
 ```
+
+**Environment variables:**
+- `RALPHEX_IMAGE` - Docker image (default: `ghcr.io/umputun/ralphex-go:latest`)
+- `RALPHEX_PORT` - Web dashboard port with `--serve` (default: `8080`)
+- `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works with both Docker wrapper and non-Docker usage.
 
 **Creating custom images for other languages:**
 
