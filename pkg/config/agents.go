@@ -149,6 +149,9 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 		if err != nil {
 			return nil, err
 		}
+		if prompt == "" {
+			continue
+		}
 		name := strings.TrimSuffix(entry.Name(), ".txt")
 		agents = append(agents, al.buildAgent(name, prompt))
 	}
