@@ -10,6 +10,7 @@ example: ralphex-dk.sh --update-script  # update this wrapper script
 """
 
 import difflib
+import hashlib
 import os
 import platform
 import shutil
@@ -110,20 +111,36 @@ def get_global_gitignore() -> Optional[Path]:
     return None
 
 
-def extract_macos_credentials() -> Optional[Path]:
+def keychain_service_name(claude_home: Path) -> str:
+    """derive macOS Keychain service name from claude config directory.
+
+    default ~/.claude uses "Claude Code-credentials" (no suffix).
+    any other path uses "Claude Code-credentials-{sha256(absolute_path)[:8]}".
+    """
+    resolved = claude_home.expanduser().resolve()
+    default = Path.home() / ".claude"
+    if resolved == default or resolved == default.resolve():
+        return "Claude Code-credentials"
+    digest = hashlib.sha256(str(resolved).encode()).hexdigest()[:8]
+    return f"Claude Code-credentials-{digest}"
+
+
+def extract_macos_credentials(claude_home: Path) -> Optional[Path]:
     """on macOS, extract claude credentials from keychain if not already on disk."""
     if platform.system() != "Darwin":
         return None
-    if (Path.home() / ".claude" / ".credentials.json").exists():
+    if (claude_home / ".credentials.json").exists():
         return None
 
+    service = keychain_service_name(claude_home)
+
     # try to read credentials (works if keychain already unlocked)
-    creds_json = _security_find_credentials()
+    creds_json = _security_find_credentials(service)
     if not creds_json:
         # keychain locked - unlock and retry
         print("unlocking macOS keychain to extract Claude credentials (enter login password)...", file=sys.stderr)
         subprocess.run(["security", "unlock-keychain"], capture_output=True, check=False)
-        creds_json = _security_find_credentials()
+        creds_json = _security_find_credentials(service)
 
     if not creds_json:
         return None
@@ -145,11 +162,11 @@ def extract_macos_credentials() -> Optional[Path]:
     return Path(tmp_path)
 
 
-def _security_find_credentials() -> Optional[str]:
+def _security_find_credentials(service_name: str) -> Optional[str]:
     """try to read Claude Code credentials from macOS keychain."""
     try:
         result = subprocess.run(
-            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            ["security", "find-generic-password", "-s", service_name, "-w"],
             capture_output=True, text=True, check=False,
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -159,10 +176,12 @@ def _security_find_credentials() -> Optional[str]:
     return None
 
 
-def build_volumes(creds_temp: Optional[Path]) -> list[str]:
+def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None) -> list[str]:
     """build docker volume mount arguments, returns flat list like ['-v', 'src:dst', ...]."""
     home = Path.home()
     cwd = Path.cwd()
+    if claude_home is None:
+        claude_home = home / ".claude"
     vols: list[str] = []
 
     def add(src: Path, dst: str, ro: bool = False) -> None:
@@ -175,8 +194,8 @@ def build_volumes(creds_temp: Optional[Path]) -> list[str]:
             if target.is_dir() and target.is_relative_to(home):
                 add(target, str(target), ro=True)
 
-    # 1. ~/.claude (resolved) -> /mnt/claude:ro
-    add(resolve_path(home / ".claude"), "/mnt/claude", ro=True)
+    # 1. claude_home (resolved) -> /mnt/claude:ro
+    add(resolve_path(claude_home), "/mnt/claude", ro=True)
 
     # 2. cwd -> /workspace
     add(cwd, "/workspace")
@@ -190,8 +209,8 @@ def build_volumes(creds_temp: Optional[Path]) -> list[str]:
     if creds_temp:
         add(creds_temp, "/mnt/claude-credentials.json", ro=True)
 
-    # 5. symlink targets under ~/.claude
-    add_symlink_targets(home / ".claude")
+    # 5. symlink targets under claude_home
+    add_symlink_targets(claude_home)
 
     # 6. ~/.codex -> /mnt/codex:ro + symlink targets
     codex_dir = home / ".codex"
@@ -391,13 +410,20 @@ def main() -> int:
         script_path = Path(os.path.realpath(sys.argv[0]))
         return handle_update_script(script_path)
 
+    # resolve claude config directory
+    claude_config_dir_env = os.environ.get("CLAUDE_CONFIG_DIR", "")
+    if claude_config_dir_env:
+        claude_home = Path(claude_config_dir_env).expanduser().resolve()
+    else:
+        claude_home = Path.home() / ".claude"
+
     # check required directories
-    if not (Path.home() / ".claude").is_dir():
-        print("error: ~/.claude directory not found (run 'claude' first to authenticate)", file=sys.stderr)
+    if not claude_home.is_dir():
+        print(f"error: {claude_home} directory not found (run 'claude' first to authenticate)", file=sys.stderr)
         return 1
 
     # extract macOS credentials
-    creds_temp = extract_macos_credentials()
+    creds_temp = extract_macos_credentials(claude_home)
 
     def _cleanup_creds() -> None:
         if creds_temp:
@@ -421,8 +447,10 @@ def main() -> int:
 
     try:
         # build volumes
-        volumes = build_volumes(creds_temp)
+        volumes = build_volumes(creds_temp, claude_home)
 
+        if claude_config_dir_env:
+            print(f"using claude config dir: {claude_home}", file=sys.stderr)
         print(f"using image: {image}", file=sys.stderr)
 
         # schedule credential cleanup
@@ -593,7 +621,7 @@ def run_tests() -> None:
             """extract_macos_credentials returns None on non-Darwin platforms."""
             if platform.system() == "Darwin":
                 return  # skip on actual macOS
-            self.assertIsNone(extract_macos_credentials())
+            self.assertIsNone(extract_macos_credentials(Path.home() / ".claude"))
 
     class TestScheduleCleanup(unittest.TestCase):
         def test_cleans_up_file(self) -> None:
@@ -631,11 +659,86 @@ def run_tests() -> None:
             finally:
                 os.unlink(tmp_path)
 
+    class TestKeychainServiceName(unittest.TestCase):
+        def test_default_claude_dir(self) -> None:
+            """default ~/.claude returns base service name without suffix."""
+            self.assertEqual(keychain_service_name(Path.home() / ".claude"), "Claude Code-credentials")
+
+        def test_custom_dir_returns_suffixed_name(self) -> None:
+            """non-default path returns service name with sha256 suffix."""
+            name = keychain_service_name(Path.home() / ".claude2")
+            self.assertTrue(name.startswith("Claude Code-credentials-"))
+            suffix = name.removeprefix("Claude Code-credentials-")
+            self.assertEqual(len(suffix), 8)
+            # verify it's a valid hex string
+            int(suffix, 16)
+
+        def test_same_path_same_suffix(self) -> None:
+            """same path always produces the same suffix."""
+            p = Path("/tmp/test-claude-config")
+            self.assertEqual(keychain_service_name(p), keychain_service_name(p))
+
+        def test_different_paths_different_suffixes(self) -> None:
+            """different paths produce different suffixes."""
+            name1 = keychain_service_name(Path("/tmp/claude-a"))
+            name2 = keychain_service_name(Path("/tmp/claude-b"))
+            self.assertNotEqual(name1, name2)
+
+        def test_tilde_path_expansion(self) -> None:
+            """tilde path ~/.claude is expanded and recognized as default."""
+            self.assertEqual(keychain_service_name(Path("~/.claude")), "Claude Code-credentials")
+
+    class TestBuildVolumesClaudeHome(unittest.TestCase):
+        def test_custom_claude_home_mount(self) -> None:
+            """build_volumes with custom claude_home mounts that dir to /mnt/claude:ro."""
+            tmp = Path(tempfile.mkdtemp()).resolve()
+            try:
+                custom = tmp / "my-claude"
+                custom.mkdir()
+                vols = build_volumes(None, claude_home=custom)
+                mount = f"{custom}:/mnt/claude:ro"
+                self.assertIn(mount, vols)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_default_claude_home_when_none(self) -> None:
+            """build_volumes with claude_home=None defaults to ~/.claude."""
+            vols = build_volumes(None)
+            found = False
+            for v in vols:
+                if "/mnt/claude:ro" in v:
+                    found = True
+                    break
+            self.assertTrue(found, "should mount default claude dir to /mnt/claude:ro")
+
+    class TestExtractCredentialsClaudeHome(unittest.TestCase):
+        def test_skips_when_credentials_exist_on_darwin(self) -> None:
+            """extract_macos_credentials returns None when .credentials.json exists in claude_home."""
+            if platform.system() != "Darwin":
+                return  # only testable on macOS
+            tmp = Path(tempfile.mkdtemp()).resolve()
+            try:
+                (tmp / ".credentials.json").write_text('{"token": "test"}')
+                self.assertIsNone(extract_macos_credentials(tmp))
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_returns_none_on_non_darwin(self) -> None:
+            """extract_macos_credentials returns None on non-Darwin regardless of claude_home."""
+            if platform.system() == "Darwin":
+                return  # skip on macOS
+            tmp = Path(tempfile.mkdtemp()).resolve()
+            try:
+                self.assertIsNone(extract_macos_credentials(tmp))
+            finally:
+                shutil.rmtree(tmp)
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
                TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
-               TestBuildDockerCmd]:
+               TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
+               TestExtractCredentialsClaudeHome]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
