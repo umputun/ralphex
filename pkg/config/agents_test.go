@@ -441,8 +441,9 @@ func TestAgentLoader_Load_WarnsOnInvalidModel(t *testing.T) {
 
 	// capture log output
 	var buf bytes.Buffer
+	origOut := log.Writer()
 	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	t.Cleanup(func() { log.SetOutput(origOut) })
 
 	loader := newAgentLoader(defaultsFS)
 	agents, err := loader.Load("", agentsDir)
