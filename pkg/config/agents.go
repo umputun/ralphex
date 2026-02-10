@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -112,7 +113,7 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 		return content, nil
 	}
 	// fall back to embedded default
-	fmt.Fprintf(os.Stderr, "[INFO] agent %s: file is all comments, falling back to embedded default\n", filename)
+	log.Printf("[INFO] agent %s: file is all comments, falling back to embedded default", filename)
 	return al.loadFromEmbedFS(filename)
 }
 
@@ -168,7 +169,7 @@ func (al *agentLoader) buildAgent(name, prompt string) CustomAgent {
 	}
 	if warnings := opts.Validate(); len(warnings) > 0 {
 		for _, w := range warnings {
-			fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
+			log.Printf("[WARN] agent %s: %s", name, w)
 		}
 		opts = Options{}
 	}

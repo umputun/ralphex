@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -437,21 +439,16 @@ func TestAgentLoader_Load_WarnsOnInvalidModel(t *testing.T) {
 	content := "---\nmodel: gpt-5\n---\nReview code."
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "bad.txt"), []byte(content), 0o600))
 
-	// capture stderr
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
+	// capture log output
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
 	loader := newAgentLoader(defaultsFS)
 	agents, err := loader.Load("", agentsDir)
 	require.NoError(t, err)
 
-	w.Close()
-	os.Stderr = oldStderr
-
-	var buf [1024]byte
-	n, _ := r.Read(buf[:])
-	output := string(buf[:n])
+	output := buf.String()
 
 	require.Len(t, agents, 1)
 	assert.Empty(t, agents[0].Model, "invalid model should be dropped")
