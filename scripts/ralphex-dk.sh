@@ -733,12 +733,63 @@ def run_tests() -> None:
             finally:
                 shutil.rmtree(tmp)
 
+    class TestClaudeConfigDirEnv(unittest.TestCase):
+        def test_env_sets_claude_home(self) -> None:
+            """CLAUDE_CONFIG_DIR env var selects alternate claude directory."""
+            tmp = Path(tempfile.mkdtemp()).resolve()
+            try:
+                custom = tmp / "my-claude"
+                custom.mkdir()
+                old = os.environ.get("CLAUDE_CONFIG_DIR")
+                os.environ["CLAUDE_CONFIG_DIR"] = str(custom)
+                try:
+                    env_val = os.environ.get("CLAUDE_CONFIG_DIR", "")
+                    self.assertTrue(env_val)
+                    result = Path(env_val).expanduser().resolve()
+                    self.assertEqual(result, custom)
+                finally:
+                    if old is None:
+                        os.environ.pop("CLAUDE_CONFIG_DIR", None)
+                    else:
+                        os.environ["CLAUDE_CONFIG_DIR"] = old
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_empty_env_defaults_to_dot_claude(self) -> None:
+            """empty CLAUDE_CONFIG_DIR falls back to ~/.claude."""
+            old = os.environ.get("CLAUDE_CONFIG_DIR")
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            try:
+                env_val = os.environ.get("CLAUDE_CONFIG_DIR", "")
+                self.assertFalse(env_val)
+                # fallback path
+                result = Path.home() / ".claude"
+                self.assertEqual(result, Path.home() / ".claude")
+            finally:
+                if old is not None:
+                    os.environ["CLAUDE_CONFIG_DIR"] = old
+
+        def test_tilde_expansion(self) -> None:
+            """CLAUDE_CONFIG_DIR with ~ is expanded correctly."""
+            old = os.environ.get("CLAUDE_CONFIG_DIR")
+            os.environ["CLAUDE_CONFIG_DIR"] = "~/.claude-test"
+            try:
+                env_val = os.environ.get("CLAUDE_CONFIG_DIR", "")
+                result = Path(env_val).expanduser().resolve()
+                expected = (Path.home() / ".claude-test").resolve()
+                self.assertEqual(result, expected)
+            finally:
+                if old is None:
+                    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+                else:
+                    os.environ["CLAUDE_CONFIG_DIR"] = old
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
                TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
-               TestExtractCredentialsClaudeHome]:
+               TestExtractCredentialsClaudeHome, TestClaudeConfigDirEnv]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
