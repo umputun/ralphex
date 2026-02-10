@@ -89,7 +89,7 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 		}
 
 		name := strings.TrimSuffix(entry.Name(), ".txt")
-		agents = append(agents, buildAgent(name, prompt))
+		agents = append(agents, al.buildAgent(name, prompt))
 	}
 
 	sort.Slice(agents, func(i, j int) bool {
@@ -97,22 +97,6 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 	})
 
 	return agents, nil
-}
-
-// buildAgent parses frontmatter options from prompt and builds a CustomAgent.
-// if parseOptions produces no body, the raw prompt is used with default options.
-func buildAgent(name, prompt string) CustomAgent {
-	opts, body := parseOptions(prompt)
-	if body == "" {
-		return CustomAgent{Name: name, Prompt: prompt}
-	}
-	if warnings := opts.Validate(); len(warnings) > 0 {
-		for _, w := range warnings {
-			fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
-		}
-		opts = Options{}
-	}
-	return CustomAgent{Name: name, Prompt: body, Options: opts}
 }
 
 // loadFileWithFallback reads an agent file from disk with fallback to embedded.
@@ -165,7 +149,7 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 			return nil, err
 		}
 		name := strings.TrimSuffix(entry.Name(), ".txt")
-		agents = append(agents, buildAgent(name, prompt))
+		agents = append(agents, al.buildAgent(name, prompt))
 	}
 
 	sort.Slice(agents, func(i, j int) bool {
@@ -173,4 +157,20 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 	})
 
 	return agents, nil
+}
+
+// buildAgent parses frontmatter options from prompt and builds a CustomAgent.
+// if parseOptions produces no body, the raw prompt is used with default options.
+func (al *agentLoader) buildAgent(name, prompt string) CustomAgent {
+	opts, body := parseOptions(prompt)
+	if body == "" {
+		return CustomAgent{Name: name, Prompt: prompt}
+	}
+	if warnings := opts.Validate(); len(warnings) > 0 {
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[WARN] agent %s: %s\n", name, w)
+		}
+		opts = Options{}
+	}
+	return CustomAgent{Name: name, Prompt: body, Options: opts}
 }

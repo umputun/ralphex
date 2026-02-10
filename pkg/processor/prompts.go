@@ -13,24 +13,6 @@ import (
 // agentRefPattern matches {{agent:name}} template syntax
 var agentRefPattern = regexp.MustCompile(`\{\{agent:([a-zA-Z0-9_-]+)\}\}`)
 
-// formatAgentExpansion creates the Task tool instruction for an agent, respecting frontmatter overrides.
-func formatAgentExpansion(prompt string, opts config.Options) string {
-	subagent := "general-purpose"
-	if opts.AgentType != "" {
-		subagent = opts.AgentType
-	}
-
-	var modelClause string
-	if opts.Model != "" {
-		modelClause = " with model=" + opts.Model
-	}
-
-	return fmt.Sprintf(`Use the Task tool%s to launch a %s agent with this prompt:
-"%s"
-
-Report findings only - no positive observations.`, modelClause, subagent, prompt)
-}
-
 // getGoal returns the goal string based on whether a plan file is configured.
 func (r *Runner) getGoal() string {
 	if r.cfg.PlanFile == "" {
@@ -114,6 +96,24 @@ func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration b
 	return result
 }
 
+// formatAgentExpansion creates the Task tool instruction for an agent, respecting frontmatter overrides.
+func (r *Runner) formatAgentExpansion(prompt string, opts config.Options) string {
+	subagent := "general-purpose"
+	if opts.AgentType != "" {
+		subagent = opts.AgentType
+	}
+
+	var modelClause string
+	if opts.Model != "" {
+		modelClause = " with model=" + opts.Model
+	}
+
+	return fmt.Sprintf(`Use the Task tool%s to launch a %s agent with this prompt:
+"%s"
+
+Report findings only - no positive observations.`, modelClause, subagent, prompt)
+}
+
 // expandAgentReferences replaces {{agent:name}} patterns with Task tool instructions.
 // returns prompt unchanged if AppConfig is nil or no agents are configured.
 // missing agents log a warning and leave the reference as-is for visibility.
@@ -147,7 +147,7 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 		// expand variables in agent content (no agent expansion to avoid recursion)
 		agentPrompt := r.replaceBaseVariables(agent.Prompt)
 
-		return formatAgentExpansion(agentPrompt, agent.Options)
+		return r.formatAgentExpansion(agentPrompt, agent.Options)
 	})
 }
 
