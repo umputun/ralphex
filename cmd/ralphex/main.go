@@ -138,6 +138,9 @@ func main() {
 }
 
 func run(ctx context.Context, o opts) error {
+	// suppress ^C echo in terminal before setting up interrupt watcher
+	defer disableCtrlCEcho()()
+
 	// print immediate feedback when context is canceled (Ctrl+C).
 	// returned cleanup ensures goroutine exits when run() returns, avoiding leaks in tests.
 	defer startInterruptWatcher(ctx)()
@@ -679,13 +682,20 @@ func isResetOnly(o opts) bool {
 }
 
 // startInterruptWatcher prints immediate feedback when context is canceled.
+// if graceful shutdown doesn't complete within 5 seconds, force exits.
 // returns a cleanup function that must be called (via defer) to prevent goroutine leaks.
 func startInterruptWatcher(ctx context.Context) func() {
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintf(os.Stderr, "\ninterrupting...\n")
+			fmt.Fprintf(os.Stderr, "\ninterrupting... (force exit in 5s)\n")
+			select {
+			case <-time.After(5 * time.Second):
+				fmt.Fprintf(os.Stderr, "force exit\n")
+				os.Exit(1)
+			case <-done:
+			}
 		case <-done:
 		}
 	}()
