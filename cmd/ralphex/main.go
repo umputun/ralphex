@@ -138,6 +138,10 @@ func main() {
 }
 
 func run(ctx context.Context, o opts) error {
+	// print immediate feedback when context is canceled (Ctrl+C).
+	// returned cleanup ensures goroutine exits when run() returns, avoiding leaks in tests.
+	defer startInterruptWatcher(ctx)()
+
 	// validate conflicting flags
 	if err := validateFlags(o); err != nil {
 		return err
@@ -672,6 +676,20 @@ func runReset() error {
 // combined usage like "ralphex --reset docs/plans/feature.md".
 func isResetOnly(o opts) bool {
 	return o.PlanFile == "" && !o.Review && !o.ExternalOnly && !o.CodexOnly && !o.TasksOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
+}
+
+// startInterruptWatcher prints immediate feedback when context is canceled.
+// returns a cleanup function that must be called (via defer) to prevent goroutine leaks.
+func startInterruptWatcher(ctx context.Context) func() {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			fmt.Fprintf(os.Stderr, "\ninterrupting...\n")
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
 }
 
 // ensureRepoHasCommits checks that the repository has at least one commit.

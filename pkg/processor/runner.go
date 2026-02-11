@@ -366,7 +366,9 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 			if retryCount < r.taskRetryCount {
 				r.log.Print("task failed, retrying...")
 				retryCount++
-				time.Sleep(r.iterationDelay)
+				if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+					return fmt.Errorf("interrupted: %w", err)
+				}
 				continue
 			}
 			return errors.New("task execution failed after retry (FAILED signal received)")
@@ -374,7 +376,9 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 
 		retryCount = 0
 		// continue with same prompt - it reads from plan file each time
-		time.Sleep(r.iterationDelay)
+		if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+			return fmt.Errorf("interrupted: %w", err)
+		}
 	}
 
 	return fmt.Errorf("max iterations (%d) reached without completion", r.cfg.MaxIterations)
@@ -444,7 +448,9 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 		}
 
 		r.log.Print("issues fixed, running another review iteration...")
-		time.Sleep(r.iterationDelay)
+		if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+			return fmt.Errorf("interrupted: %w", err)
+		}
 	}
 
 	r.log.Print("max claude review iterations reached, continuing...")
@@ -584,7 +590,9 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 			return nil
 		}
 
-		time.Sleep(r.iterationDelay)
+		if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+			return fmt.Errorf("interrupted: %w", err)
+		}
 	}
 
 	r.log.Print("max %s iterations reached, continuing to next phase...", cfg.name)
@@ -834,7 +842,9 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		}
 		if draftResult.handled {
 			lastRevisionFeedback = draftResult.feedback
-			time.Sleep(r.iterationDelay)
+			if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+				return fmt.Errorf("interrupted: %w", err)
+			}
 			continue
 		}
 
@@ -844,12 +854,16 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 			return err
 		}
 		if handled {
-			time.Sleep(r.iterationDelay)
+			if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+				return fmt.Errorf("interrupted: %w", err)
+			}
 			continue
 		}
 
 		// no question, no draft, and no completion - continue
-		time.Sleep(r.iterationDelay)
+		if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+			return fmt.Errorf("interrupted: %w", err)
+		}
 	}
 
 	return fmt.Errorf("max plan iterations (%d) reached without completion", maxPlanIterations)
@@ -902,6 +916,19 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 
 	r.log.Print("finalize step completed")
 	return nil
+}
+
+// sleepWithContext pauses for the given duration but returns immediately if context is canceled.
+// returns ctx.Err() on cancellation, nil on normal completion.
+func (r *Runner) sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("sleep interrupted: %w", ctx.Err())
+	}
 }
 
 // needsCodexBinary returns true if the current configuration requires the codex binary.

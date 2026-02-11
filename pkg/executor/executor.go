@@ -206,7 +206,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		return Result{Error: err}
 	}
 
-	result := e.parseStream(stdout)
+	result := e.parseStream(ctx, stdout)
 
 	if err := wait(); err != nil {
 		// check if it was context cancellation
@@ -232,7 +232,8 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 }
 
 // parseStream reads and parses the JSON stream from claude CLI.
-func (e *ClaudeExecutor) parseStream(r io.Reader) Result {
+// checks ctx.Done() on each iteration so cancellation is not blocked by slow pipe reads.
+func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
 	var output strings.Builder
 	var signal string
 
@@ -242,6 +243,11 @@ func (e *ClaudeExecutor) parseStream(r io.Reader) Result {
 	scanner.Buffer(buf, MaxScannerBuffer)
 
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return Result{Output: output.String(), Signal: signal, Error: fmt.Errorf("stream read: %w", ctx.Err())}
+		default:
+		}
 		line := scanner.Text()
 		if line == "" {
 			continue
