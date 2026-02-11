@@ -533,8 +533,12 @@ func TestCodexExecutor_processStderr_lastLines(t *testing.T) {
 			[]string{"line3", "line4", "line5", "line6", "line7"}},
 		{"fewer than 5 lines keeps all", "line1\nline2\n", []string{"line1", "line2"}},
 		{"empty stderr", "", nil},
-		{"long lines truncated to 256 chars", strings.Repeat("x", 500) + "\n",
+		{"long lines truncated to 256 runes", strings.Repeat("x", 500) + "\n",
 			[]string{strings.Repeat("x", 256) + "..."}},
+		{"preserves leading whitespace", "  indented line\n\t\ttabbed line\n",
+			[]string{"  indented line", "\t\ttabbed line"}},
+		{"truncates by runes not bytes", strings.Repeat("ж", 300) + "\n",
+			[]string{strings.Repeat("ж", 256) + "..."}},
 	}
 
 	for _, tc := range tests {

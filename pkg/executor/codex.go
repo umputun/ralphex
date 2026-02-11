@@ -219,12 +219,13 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrRe
 
 		line := scanner.Text()
 
-		// capture unfiltered non-empty lines for error context
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			if len(trimmed) > maxLineLength {
-				trimmed = trimmed[:maxLineLength] + "..."
+		// capture non-empty lines for error context, preserving original formatting
+		if strings.TrimSpace(line) != "" {
+			stored := line
+			if runes := []rune(stored); len(runes) > maxLineLength {
+				stored = string(runes[:maxLineLength]) + "..."
 			}
-			tail = append(tail, trimmed)
+			tail = append(tail, stored)
 			if len(tail) > maxTailLines {
 				copy(tail, tail[1:])
 				tail = tail[:maxTailLines]
