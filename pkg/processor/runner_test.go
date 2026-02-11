@@ -1869,3 +1869,46 @@ func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
 	// first review + pre-codex loop (1 iteration) + post-codex loop (3 iterations, max reached)
 	assert.Len(t, claude.RunCalls(), 5)
 }
+
+// TestRunner_SleepWithContext_CancelDuringDelay verifies that context cancellation
+// during iteration delay causes prompt exit (not blocking for the full delay).
+func TestRunner_SleepWithContext_CancelDuringDelay(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("- [ ] task 1"), 0o600))
+
+	// use a long iteration delay to make the difference obvious
+	const longDelay = 5000 // 5 seconds
+
+	// executor returns no signal (no completion), so runner will loop and hit sleepWithContext
+	claude := newMockExecutor([]executor.Result{
+		{Output: "working on it"},
+	})
+	codex := newMockExecutor(nil)
+	log := newMockLogger("progress.txt")
+
+	cfg := processor.Config{
+		Mode:             processor.ModeFull,
+		PlanFile:         planFile,
+		MaxIterations:    50,
+		IterationDelayMs: longDelay,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	// cancel context after a short delay (50ms) — well before iteration delay (5s)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	err := r.Run(ctx)
+	elapsed := time.Since(start)
+
+	require.ErrorIs(t, err, context.Canceled)
+	// should exit well before the 5s iteration delay
+	assert.Less(t, elapsed, time.Duration(longDelay)*time.Millisecond,
+		"should exit promptly on cancellation, not wait for full iteration delay")
+}
