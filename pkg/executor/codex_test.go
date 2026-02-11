@@ -164,6 +164,25 @@ func TestCodexExecutor_Run_WaitError(t *testing.T) {
 	assert.Equal(t, "partial output", result.Output)
 }
 
+func TestCodexExecutor_Run_WaitErrorWithStderr(t *testing.T) {
+	// stderr content should appear in the error message when codex exits non-zero
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			stderr := "--------\nworkdir: /tmp/test\n--------\nError: authentication failed\nPlease check your API key"
+			return mockStreams(stderr, ""), mockWaitError(errors.New("exit status 1")), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	assert.Contains(t, result.Error.Error(), "codex exited with error")
+	assert.Contains(t, result.Error.Error(), "exit status 1")
+	assert.Contains(t, result.Error.Error(), "stderr:")
+	assert.Contains(t, result.Error.Error(), "authentication failed")
+}
+
 func TestCodexExecutor_Run_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -428,11 +447,11 @@ func TestCodexExecutor_processStderr_contextCancellation(t *testing.T) {
 	}()
 
 	e := &CodexExecutor{}
-	err := e.processStderr(ctx, pr)
+	res := e.processStderr(ctx, pr)
 
 	// should return context.Canceled or nil (depending on timing)
-	if err != nil {
-		assert.ErrorIs(t, err, context.Canceled)
+	if res.err != nil {
+		assert.ErrorIs(t, res.err, context.Canceled)
 	}
 }
 
@@ -498,10 +517,34 @@ func TestCodexExecutor_processStderr_readError(t *testing.T) {
 	e := &CodexExecutor{}
 	errReader := &failingReader{err: errors.New("read failed")}
 
-	err := e.processStderr(context.Background(), errReader)
+	res := e.processStderr(context.Background(), errReader)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read stderr")
+	require.Error(t, res.err)
+	assert.Contains(t, res.err.Error(), "read stderr")
+}
+
+func TestCodexExecutor_processStderr_lastLines(t *testing.T) {
+	tests := []struct {
+		name      string
+		stderr    string
+		wantLines []string
+	}{
+		{"more than 5 lines keeps last 5", "line1\nline2\nline3\nline4\nline5\nline6\nline7\n",
+			[]string{"line3", "line4", "line5", "line6", "line7"}},
+		{"fewer than 5 lines keeps all", "line1\nline2\n", []string{"line1", "line2"}},
+		{"empty stderr", "", nil},
+		{"long lines truncated to 256 chars", strings.Repeat("x", 500) + "\n",
+			[]string{strings.Repeat("x", 256) + "..."}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &CodexExecutor{}
+			res := e.processStderr(context.Background(), strings.NewReader(tc.stderr))
+			require.NoError(t, res.err)
+			assert.Equal(t, tc.wantLines, res.lastLines)
+		})
+	}
 }
 
 func TestCodexExecutor_readStdout_error(t *testing.T) {
@@ -641,9 +684,9 @@ func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 				},
 			}
 
-			err := e.processStderr(context.Background(), strings.NewReader(stderr))
+			res := e.processStderr(context.Background(), strings.NewReader(stderr))
 
-			require.NoError(t, err, "should handle %d byte line without error", tc.size)
+			require.NoError(t, res.err, "should handle %d byte line without error", tc.size)
 			assert.Contains(t, shown, largeContent, "large content should be captured")
 		})
 	}

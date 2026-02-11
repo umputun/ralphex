@@ -138,7 +138,7 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	}
 
 	// process stderr for progress display (header block + bold summaries)
-	stderrDone := make(chan error, 1)
+	stderrDone := make(chan stderrResult, 1)
 	go func() {
 		stderrDone <- e.processStderr(ctx, streams.Stderr)
 	}()
@@ -147,7 +147,7 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	stdoutContent, stdoutErr := e.readStdout(streams.Stdout)
 
 	// wait for stderr processing to complete
-	stderrErr := <-stderrDone
+	stderrRes := <-stderrDone
 
 	// wait for command completion
 	waitErr := wait()
@@ -155,15 +155,21 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// determine final error (prefer stderr/stdout errors over wait error)
 	var finalErr error
 	switch {
-	case stderrErr != nil && !errors.Is(stderrErr, context.Canceled):
-		finalErr = stderrErr
+	case stderrRes.err != nil && !errors.Is(stderrRes.err, context.Canceled):
+		finalErr = stderrRes.err
 	case stdoutErr != nil:
 		finalErr = stdoutErr
 	case waitErr != nil:
 		if ctx.Err() != nil {
 			finalErr = fmt.Errorf("context error: %w", ctx.Err())
 		} else {
-			finalErr = fmt.Errorf("codex exited with error: %w", waitErr)
+			// include stderr tail for error context when codex exits with non-zero status
+			if len(stderrRes.lastLines) > 0 {
+				finalErr = fmt.Errorf("codex exited with error: %w\nstderr: %s",
+					waitErr, strings.Join(stderrRes.lastLines, "\n"))
+			} else {
+				finalErr = fmt.Errorf("codex exited with error: %w", waitErr)
+			}
 		}
 	}
 
@@ -183,23 +189,48 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	return Result{Output: stdoutContent, Signal: signal, Error: finalErr}
 }
 
+// stderrResult holds processed stderr output and any error from reading.
+type stderrResult struct {
+	lastLines []string // last few lines of stderr for error context
+	err       error
+}
+
 // processStderr reads stderr line-by-line, filters for progress display.
 // shows header block (between first two "--------" separators) and bold summaries.
-func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) error {
+// also captures last lines of unfiltered output for error reporting.
+func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrResult {
+	const maxTailLines = 5    // keep last N lines for error context
+	const maxLineLength = 256 // truncate long lines to avoid oversized error strings
+
 	state := &codexFilterState{}
 	scanner := bufio.NewScanner(r)
 	// increase buffer size for large output lines
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, MaxScannerBuffer)
 
+	var tail []string
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("context done: %w", ctx.Err())
+			return stderrResult{lastLines: tail, err: fmt.Errorf("context done: %w", ctx.Err())}
 		default:
 		}
 
 		line := scanner.Text()
+
+		// capture unfiltered non-empty lines for error context
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			if len(trimmed) > maxLineLength {
+				trimmed = trimmed[:maxLineLength] + "..."
+			}
+			tail = append(tail, trimmed)
+			if len(tail) > maxTailLines {
+				copy(tail, tail[1:])
+				tail = tail[:maxTailLines]
+			}
+		}
+
 		if show, filtered := e.shouldDisplay(line, state); show {
 			if e.OutputHandler != nil {
 				e.OutputHandler(filtered + "\n")
@@ -208,9 +239,9 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) error {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read stderr: %w", err)
+		return stderrResult{lastLines: tail, err: fmt.Errorf("read stderr: %w", err)}
 	}
-	return nil
+	return stderrResult{lastLines: tail}
 }
 
 // readStdout reads the entire stdout content as the final response.
