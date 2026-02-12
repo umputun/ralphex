@@ -503,8 +503,8 @@ The entire system is designed for customization - both task execution and review
 - `review_second.txt` - final review, critical/major issues only (default: 2 agents - quality, implementation; customizable)
 - `finalize.txt` - optional finalize step prompt (disabled by default)
 
-**Comment syntax:**
-Lines starting with `#` (after optional whitespace) are treated as comments and stripped when loading prompt and agent files. Use comments to document your customizations:
+**Comment lines and markdown headers:**
+Lines starting with `#` are preserved in prompt and agent files. Use them freely for markdown headers, documentation comments, or any other purpose:
 
 ```txt
 # security agent - checks for vulnerabilities
@@ -512,6 +512,8 @@ Lines starting with `#` (after optional whitespace) are treated as comments and 
 check for SQL injection
 check for XSS
 ```
+
+Files containing *only* comment lines (every line starts with `#`) are treated as unmodified templates and fall back to embedded defaults. This is how commented-out default files work — once you add any non-comment content, the file is used as-is.
 
 Note: Inline comments are not supported (`text # comment` keeps the entire line).
 

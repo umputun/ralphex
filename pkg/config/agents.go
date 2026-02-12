@@ -101,15 +101,15 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 }
 
 // loadFileWithFallback reads an agent file from disk with fallback to embedded.
-// comment lines (starting with #) are stripped.
-// if file content is empty after stripping, falls back to embedded default.
+// if file content has no prompt body (only comments/whitespace), falls back to embedded default.
 func (al *agentLoader) loadFileWithFallback(path, filename string) (string, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed internally
 	if err != nil {
 		return "", fmt.Errorf("read agent file %s: %w", path, err)
 	}
-	content := strings.TrimSpace(stripComments(string(data)))
-	if _, body := parseOptions(content); body != "" {
+	content := strings.TrimSpace(normalizeCRLF(string(data)))
+	// check if file has actual prompt body (strip comments only for emptiness check)
+	if _, body := parseOptions(strings.TrimSpace(stripComments(content))); body != "" {
 		return content, nil
 	}
 	// fall back to embedded default, frontmatter options (if any) are dropped
@@ -119,7 +119,6 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 
 // loadFromEmbedFS reads an agent file from the embedded filesystem.
 // returns empty string (not error) if file doesn't exist.
-// comment lines (starting with #) are stripped.
 func (al *agentLoader) loadFromEmbedFS(filename string) (string, error) {
 	data, err := al.embedFS.ReadFile("defaults/agents/" + filename)
 	if err != nil {
@@ -128,7 +127,7 @@ func (al *agentLoader) loadFromEmbedFS(filename string) (string, error) {
 		}
 		return "", fmt.Errorf("read embedded agent %s: %w", filename, err)
 	}
-	return strings.TrimSpace(stripComments(string(data))), nil
+	return strings.TrimSpace(normalizeCRLF(string(data))), nil
 }
 
 // loadAllFromEmbedFS loads all agent files from the embedded filesystem.
@@ -165,8 +164,21 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 
 // buildAgent parses frontmatter options from prompt and builds a CustomAgent.
 // if parseOptions produces no body, the raw prompt is used with default options.
+// leading comment lines are stripped before frontmatter parsing so that
+// comments before "---" don't prevent frontmatter detection.
 func (al *agentLoader) buildAgent(name, prompt string) CustomAgent {
+	// try frontmatter on raw content first, then with leading comments stripped
 	opts, body := parseOptions(prompt)
+	if opts == (Options{}) && body == prompt {
+		// no frontmatter found in raw content, try after stripping leading comments
+		if stripped := stripLeadingComments(prompt); stripped != prompt {
+			opts, body = parseOptions(stripped)
+			if opts == (Options{}) {
+				// still no frontmatter, use original prompt
+				return CustomAgent{Name: name, Prompt: prompt}
+			}
+		}
+	}
 	if body == "" {
 		return CustomAgent{Name: name, Prompt: prompt}
 	}

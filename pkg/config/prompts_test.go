@@ -260,16 +260,35 @@ func TestPromptLoader_loadPromptFile_WhitespaceHandling(t *testing.T) {
 	assert.Equal(t, "content with spaces", content)
 }
 
-func TestPromptLoader_loadPromptFile_StripsComments(t *testing.T) {
+func TestPromptLoader_loadPromptFile_PreservesMarkdownHeaders(t *testing.T) {
 	tmpDir := t.TempDir()
-	promptFile := filepath.Join(tmpDir, "test.txt")
-	content := "# this is a comment\nkeep this line\n  # indented comment\nalso keep this"
-	require.NoError(t, os.WriteFile(promptFile, []byte(content), 0o600))
-
 	pl := &promptLoader{embedFS: defaultsFS}
-	result, err := pl.loadPromptFile(promptFile)
-	require.NoError(t, err)
-	assert.Equal(t, "keep this line\nalso keep this", result)
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "markdown headers preserved", input: "# comment\n\nDo this task\n\n## Step 1\n\nFirst step\n\n## Step 2\n\nSecond step",
+			expected: "# comment\n\nDo this task\n\n## Step 1\n\nFirst step\n\n## Step 2\n\nSecond step"},
+		{name: "h1 in body preserved", input: "# comment header\n\n# Title\n\nContent",
+			expected: "# comment header\n\n# Title\n\nContent"},
+		{name: "template with headers", input: "# prompt docs\n\n<<<MARKER>>>\n# Plan Title\n## Overview\n<<<END>>>",
+			expected: "# prompt docs\n\n<<<MARKER>>>\n# Plan Title\n## Overview\n<<<END>>>"},
+		{name: "no comments just content", input: "Do the task\n\n## Section\n\nDetails",
+			expected: "Do the task\n\n## Section\n\nDetails"},
+		{name: "only comments returns empty", input: "# comment one\n# comment two", expected: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			promptFile := filepath.Join(tmpDir, tc.name+".txt")
+			require.NoError(t, os.WriteFile(promptFile, []byte(tc.input), 0o600))
+			result, err := pl.loadPromptFile(promptFile)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }
 
 func TestPromptLoader_loadPromptFromEmbedFS(t *testing.T) {
@@ -277,6 +296,16 @@ func TestPromptLoader_loadPromptFromEmbedFS(t *testing.T) {
 	content, err := pl.loadPromptFromEmbedFS("defaults/config")
 	require.NoError(t, err)
 	assert.Contains(t, content, "claude_command")
+}
+
+func TestPromptLoader_loadPromptFromEmbedFS_PreservesMarkdownHeaders(t *testing.T) {
+	pl := &promptLoader{embedFS: defaultsFS}
+	content, err := pl.loadPromptFromEmbedFS("defaults/prompts/make_plan.txt")
+	require.NoError(t, err)
+	assert.Contains(t, content, "## Step 1: Read Progress File")
+	assert.Contains(t, content, "## Step 2: Explore the Codebase")
+	assert.Contains(t, content, "# <Title>")
+	assert.Contains(t, content, "## Overview")
 }
 
 func TestPromptLoader_loadPromptFromEmbedFS_NotFound(t *testing.T) {
@@ -352,6 +381,30 @@ func Test_stripComments(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := stripComments(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func Test_stripLeadingComments(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "no comments", input: "line one\nline two", expected: "line one\nline two"},
+		{name: "leading comments stripped", input: "# comment\n# another\ncontent", expected: "content"},
+		{name: "blank lines before content", input: "# comment\n\ncontent", expected: "content"},
+		{name: "mid-content comments kept", input: "# leading\ncontent\n# mid comment\nmore", expected: "content\n# mid comment\nmore"},
+		{name: "only comments", input: "# comment\n# another", expected: ""},
+		{name: "frontmatter after comments", input: "# desc\n---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+		{name: "no leading comments with frontmatter", input: "---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+		{name: "empty input", input: "", expected: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := stripLeadingComments(tc.input)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
@@ -490,9 +543,9 @@ func TestPromptLoader_Load_MixedCommentedAndCustomPrompts(t *testing.T) {
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "all-commented task should fall back")
 	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "all-commented codex should fall back")
 
-	// custom prompts are used (comment stripping applied)
+	// custom prompts are used as-is (markdown headers and comment lines preserved)
 	assert.Equal(t, "custom review first prompt", prompts.ReviewFirst)
-	assert.Equal(t, "custom review second", prompts.ReviewSecond)
+	assert.Equal(t, "# header comment\ncustom review second", prompts.ReviewSecond)
 	assert.Equal(t, "custom make plan", prompts.MakePlan)
 }
 

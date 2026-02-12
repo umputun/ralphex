@@ -146,7 +146,7 @@ func TestAgentLoader_Load_PreservesMultilinePrompt(t *testing.T) {
 	assert.Equal(t, prompt, agents[0].Prompt)
 }
 
-func TestAgentLoader_Load_StripsCommentsFromAgentFiles(t *testing.T) {
+func TestAgentLoader_Load_PreservesAllContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentsDir := filepath.Join(tmpDir, "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0o700))
@@ -160,7 +160,8 @@ func TestAgentLoader_Load_StripsCommentsFromAgentFiles(t *testing.T) {
 
 	require.Len(t, agents, 1)
 	assert.Equal(t, "security", agents[0].Name)
-	assert.Equal(t, "check for SQL injection\ncheck for XSS", agents[0].Prompt)
+	assert.Equal(t, "# security agent - checks for vulnerabilities\ncheck for SQL injection\ncheck for XSS\n# end of agent",
+		agents[0].Prompt)
 }
 
 func TestAgentLoader_Load_HandlesCRLFLineEndings(t *testing.T) {
@@ -168,7 +169,7 @@ func TestAgentLoader_Load_HandlesCRLFLineEndings(t *testing.T) {
 	agentsDir := filepath.Join(tmpDir, "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0o700))
 
-	// content with CRLF line endings (Windows-style)
+	// content with CRLF line endings (Windows-style), normalized to LF
 	content := "# comment line\r\ncheck for issues\r\n# another comment\r\nalso check this"
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "security.txt"), []byte(content), 0o600))
 
@@ -177,7 +178,7 @@ func TestAgentLoader_Load_HandlesCRLFLineEndings(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, agents, 1)
-	assert.Equal(t, "check for issues\nalso check this", agents[0].Prompt)
+	assert.Equal(t, "# comment line\ncheck for issues\n# another comment\nalso check this", agents[0].Prompt)
 }
 
 func TestAgentLoader_Load_LocalAgentsReplaceGlobal(t *testing.T) {
@@ -317,7 +318,7 @@ func TestAgentLoader_loadFromDir(t *testing.T) {
 	assert.Equal(t, "beta prompt", agents[1].Prompt)
 }
 
-func TestAgentLoader_loadFileWithFallback_StripsComments(t *testing.T) {
+func TestAgentLoader_loadFileWithFallback_PreservesAllContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentFile := filepath.Join(tmpDir, "agent.txt")
 	content := "# description of agent\ncheck for security issues\n# additional notes"
@@ -326,7 +327,7 @@ func TestAgentLoader_loadFileWithFallback_StripsComments(t *testing.T) {
 	al := newAgentLoader(defaultsFS)
 	result, err := al.loadFileWithFallback(agentFile, "agent.txt")
 	require.NoError(t, err)
-	assert.Equal(t, "check for security issues", result)
+	assert.Equal(t, "# description of agent\ncheck for security issues\n# additional notes", result)
 }
 
 func TestAgentLoader_loadFileWithFallback_FallsBackToEmbedded(t *testing.T) {
@@ -500,6 +501,25 @@ func TestAgentLoader_Load_ParsesOptions(t *testing.T) {
 	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
 
 	content := "---\nmodel: haiku\nagent: code-reviewer\n---\nReview code for issues."
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(content), 0o600))
+
+	loader := newAgentLoader(defaultsFS)
+	agents, err := loader.Load("", agentsDir)
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.Equal(t, "quality", agents[0].Name)
+	assert.Equal(t, "Review code for issues.", agents[0].Prompt)
+	assert.Equal(t, "haiku", agents[0].Model)
+	assert.Equal(t, "code-reviewer", agents[0].AgentType)
+}
+
+func TestAgentLoader_Load_ParsesOptionsWithLeadingComments(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
+
+	// comments before frontmatter should not prevent frontmatter detection
+	content := "# my custom agent\n# description of what it does\n---\nmodel: haiku\nagent: code-reviewer\n---\nReview code for issues."
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(content), 0o600))
 
 	loader := newAgentLoader(defaultsFS)

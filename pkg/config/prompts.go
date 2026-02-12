@@ -114,7 +114,8 @@ func (p *promptLoader) loadPromptWithFallback(userPath, embedPath string) (strin
 
 // loadPromptFile reads a prompt file from disk.
 // returns empty string (not error) if file doesn't exist.
-// comment lines (starting with #) are stripped.
+// returns empty string if file contains only comment lines (starting with #),
+// which triggers fallback to embedded defaults in the caller.
 func (p *promptLoader) loadPromptFile(path string) (string, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed internally
 	if err != nil {
@@ -123,12 +124,15 @@ func (p *promptLoader) loadPromptFile(path string) (string, error) {
 		}
 		return "", fmt.Errorf("read prompt file %s: %w", path, err)
 	}
-	return strings.TrimSpace(stripComments(string(data))), nil
+	content := normalizeCRLF(string(data))
+	if strings.TrimSpace(stripComments(content)) == "" {
+		return "", nil // all-commented file, trigger fallback to embedded
+	}
+	return strings.TrimSpace(content), nil
 }
 
 // loadPromptFromEmbedFS reads a prompt file from an embedded filesystem.
 // returns empty string (not error) if file doesn't exist.
-// comment lines (starting with #) are stripped.
 func (p *promptLoader) loadPromptFromEmbedFS(path string) (string, error) {
 	data, err := p.embedFS.ReadFile(path)
 	if err != nil {
@@ -137,7 +141,29 @@ func (p *promptLoader) loadPromptFromEmbedFS(path string) (string, error) {
 		}
 		return "", fmt.Errorf("read embedded prompt %s: %w", path, err)
 	}
-	return strings.TrimSpace(stripComments(string(data))), nil
+	return strings.TrimSpace(normalizeCRLF(string(data))), nil
+}
+
+// normalizeCRLF converts Windows line endings (CRLF) to Unix (LF).
+func normalizeCRLF(content string) string {
+	return strings.ReplaceAll(content, "\r\n", "\n")
+}
+
+// stripLeadingComments removes comment lines (starting with #) from the beginning of content.
+// stops at the first non-comment, non-empty line. used to allow frontmatter detection
+// in agent files that have comments before the "---" delimiter.
+func stripLeadingComments(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue // skip blank lines at the top
+		}
+		if !strings.HasPrefix(trimmed, "#") {
+			return strings.Join(lines[i:], "\n")
+		}
+	}
+	return "" // all lines are comments or empty
 }
 
 // stripComments removes lines starting with # (comment lines) from content.

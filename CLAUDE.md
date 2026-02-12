@@ -195,6 +195,7 @@ project/
 - **Auto-update**: files with only comments/whitespace are safe to overwrite on updates - users get new defaults automatically
 - **User customization**: uncommenting any line marks the file as customized - it will be preserved and never overwritten
 - **Fallback loading**: when loading config/prompts/agents, if file content is all-commented (no actual values), embedded defaults are used
+- **Comment preservation**: comment lines (`# ...`) in prompt and agent files are preserved in loaded content; stripping is only used for emptiness detection to trigger fallback
 - **scalars/colors**: per-field fallback to embedded defaults if missing
 - `*Set` flags (e.g., `CodexEnabledSet`) distinguish explicit `false`/`0` from "not set"
 
