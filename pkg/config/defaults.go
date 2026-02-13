@@ -527,9 +527,12 @@ func (d *defaultsInstaller) overwriteEmbeddedFiles(destDir, embedPath string) er
 	return nil
 }
 
-// Reset is a package-level function that creates a defaultsInstaller and calls Reset.
-// this is the public API for resetting configuration.
+// Reset interactively restores configuration files to embedded defaults.
+// if configDir is empty, uses DefaultConfigDir().
 func Reset(configDir string, stdin io.Reader, stdout io.Writer) (ResetResult, error) {
+	if configDir == "" {
+		configDir = DefaultConfigDir()
+	}
 	installer := newDefaultsInstaller(defaultsFS)
 	return installer.Reset(configDir, stdin, stdout)
 }
