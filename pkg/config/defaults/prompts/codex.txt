@@ -41,6 +41,12 @@ Do NOT reject issues just because they existed before this branch - fix them any
 - STOP here and DO NOT output any signal - the external loop will run codex again to verify fixes
 - NEVER output CODEX_REVIEW_DONE after fixing issues
 
+**If you dismissed ALL findings as invalid** (codex reported issues but none are actionable):
+- Explain why each finding is invalid
+- Do NOT commit anything
+- Do NOT output any signal
+- STOP here — the loop will re-run the external tool with your explanations for context
+
 **If Codex reports NO actionable issues** (empty output, "no issues found", "NO ISSUES FOUND"):
 - Run `git diff` to review ALL uncommitted changes (accumulated fixes from multiple iterations)
 - Commit all fixes with message: "fix: address codex review findings"
