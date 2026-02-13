@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,22 +27,8 @@ func noopServiceLogger() Logger {
 
 func TestNewService(t *testing.T) {
 	t.Run("opens valid repo", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
-		require.NoError(t, err)
-		assert.NotNil(t, svc)
-		assert.Equal(t, dir, svc.Root())
-	})
-
-	t.Run("fails on non-repo", func(t *testing.T) {
-		dir := t.TempDir()
-		_, err := NewService(dir, noopServiceLogger())
-		assert.Error(t, err)
-	})
-
-	t.Run("opens valid repo with external backend", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		svc, err := NewService(dir, noopServiceLogger(), WithExternalGit())
 		require.NoError(t, err)
 		assert.NotNil(t, svc)
 
@@ -54,16 +38,16 @@ func TestNewService(t *testing.T) {
 		assert.Equal(t, expected, svc.Root())
 	})
 
-	t.Run("external backend fails on non-repo", func(t *testing.T) {
+	t.Run("fails on non-repo", func(t *testing.T) {
 		dir := t.TempDir()
-		_, err := NewService(dir, noopServiceLogger(), WithExternalGit())
+		_, err := NewService(dir, noopServiceLogger())
 		assert.Error(t, err)
 	})
 }
 
 func TestService_IsMainBranch(t *testing.T) {
 	t.Run("returns true for master branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -73,7 +57,7 @@ func TestService_IsMainBranch(t *testing.T) {
 	})
 
 	t.Run("returns true for main branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -86,7 +70,7 @@ func TestService_IsMainBranch(t *testing.T) {
 	})
 
 	t.Run("returns false for feature branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -99,20 +83,15 @@ func TestService_IsMainBranch(t *testing.T) {
 	})
 
 	t.Run("returns false for detached HEAD", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
 		hash, err := svc.HeadHash()
 		require.NoError(t, err)
 
-		// checkout commit directly via go-git to create detached HEAD
-		r, err := openRepo(dir)
-		require.NoError(t, err)
-		wt, err := r.gitRepo.Worktree()
-		require.NoError(t, err)
-		err = wt.Checkout(&git.CheckoutOptions{Hash: plumbing.NewHash(hash)})
-		require.NoError(t, err)
+		// checkout commit directly via git CLI to create detached HEAD
+		runGit(t, dir, "checkout", hash)
 
 		// re-open service to pick up detached HEAD state
 		svc, err = NewService(dir, noopServiceLogger())
@@ -126,7 +105,7 @@ func TestService_IsMainBranch(t *testing.T) {
 
 func TestService_CreateBranchForPlan(t *testing.T) {
 	t.Run("returns nil on feature branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -150,7 +129,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 	})
 
 	t.Run("creates branch from plan file name", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		log := &mockLogger{}
 		svc, err := NewService(dir, log)
 		require.NoError(t, err)
@@ -174,7 +153,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 	})
 
 	t.Run("switches to existing branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -206,7 +185,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 	})
 
 	t.Run("fails with other uncommitted changes", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -226,7 +205,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 	})
 
 	t.Run("auto-commits plan file if only dirty file", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		log := &mockLogger{}
 		svc, err := NewService(dir, log)
 		require.NoError(t, err)
@@ -251,7 +230,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 	})
 
 	t.Run("does not commit if plan already committed", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -275,7 +254,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 	})
 
 	t.Run("strips date prefix from branch name", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -297,7 +276,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 
 func TestService_MovePlanToCompleted(t *testing.T) {
 	t.Run("moves tracked file", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -330,7 +309,7 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 	})
 
 	t.Run("moves untracked file", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -354,7 +333,7 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 	})
 
 	t.Run("creates completed directory", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -381,7 +360,7 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 	})
 
 	t.Run("returns nil if already moved to completed", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		log := &mockLogger{}
 		svc, err := NewService(dir, log)
 		require.NoError(t, err)
@@ -410,7 +389,7 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 
 func TestService_EnsureHasCommits(t *testing.T) {
 	t.Run("returns nil when repo has commits", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -430,8 +409,10 @@ func TestService_EnsureHasCommits(t *testing.T) {
 	t.Run("creates initial commit when user accepts", func(t *testing.T) {
 		// create empty repo (no commits)
 		dir := t.TempDir()
-		_, err := git.PlainInit(dir, false)
-		require.NoError(t, err)
+		runGit(t, dir, "init")
+		runGit(t, dir, "config", "user.email", "test@test.com")
+		runGit(t, dir, "config", "user.name", "test")
+		runGit(t, dir, "config", "commit.gpgsign", "false")
 
 		// create a file to commit
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test"), 0o600))
@@ -460,8 +441,10 @@ func TestService_EnsureHasCommits(t *testing.T) {
 	t.Run("returns error when user declines", func(t *testing.T) {
 		// create empty repo (no commits)
 		dir := t.TempDir()
-		_, err := git.PlainInit(dir, false)
-		require.NoError(t, err)
+		runGit(t, dir, "init")
+		runGit(t, dir, "config", "user.email", "test@test.com")
+		runGit(t, dir, "config", "user.name", "test")
+		runGit(t, dir, "config", "commit.gpgsign", "false")
 
 		// create a file so we're not completely empty
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test"), 0o600))
@@ -479,8 +462,10 @@ func TestService_EnsureHasCommits(t *testing.T) {
 	t.Run("returns error when no files to commit", func(t *testing.T) {
 		// create empty repo with no files
 		dir := t.TempDir()
-		_, err := git.PlainInit(dir, false)
-		require.NoError(t, err)
+		runGit(t, dir, "init")
+		runGit(t, dir, "config", "user.email", "test@test.com")
+		runGit(t, dir, "config", "user.name", "test")
+		runGit(t, dir, "config", "commit.gpgsign", "false")
 
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
@@ -495,7 +480,7 @@ func TestService_EnsureHasCommits(t *testing.T) {
 
 func TestService_EnsureIgnored(t *testing.T) {
 	t.Run("adds pattern to gitignore", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		log := &mockLogger{}
 		svc, err := NewService(dir, log)
 		require.NoError(t, err)
@@ -513,7 +498,7 @@ func TestService_EnsureIgnored(t *testing.T) {
 	})
 
 	t.Run("does nothing if already ignored", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 
 		// create gitignore with pattern
 		gitignorePath := filepath.Join(dir, ".gitignore")
@@ -535,7 +520,7 @@ func TestService_EnsureIgnored(t *testing.T) {
 	})
 
 	t.Run("creates gitignore if missing", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -554,7 +539,7 @@ func TestService_EnsureIgnored(t *testing.T) {
 	})
 
 	t.Run("appends to existing gitignore", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -576,7 +561,7 @@ func TestService_EnsureIgnored(t *testing.T) {
 
 func TestService_GetDefaultBranch(t *testing.T) {
 	t.Run("returns detected default branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -585,7 +570,7 @@ func TestService_GetDefaultBranch(t *testing.T) {
 	})
 
 	t.Run("returns main when main branch exists", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -600,7 +585,7 @@ func TestService_GetDefaultBranch(t *testing.T) {
 
 func TestService_DiffStats(t *testing.T) {
 	t.Run("returns zero stats when on same branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -612,7 +597,7 @@ func TestService_DiffStats(t *testing.T) {
 	})
 
 	t.Run("returns zero stats for nonexistent branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 
@@ -622,7 +607,7 @@ func TestService_DiffStats(t *testing.T) {
 	})
 
 	t.Run("returns stats for changes on feature branch", func(t *testing.T) {
-		dir := setupTestRepo(t)
+		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
 		require.NoError(t, err)
 

@@ -21,6 +21,7 @@ func setupExternalTestRepo(t *testing.T) string {
 	runGit(t, dir, "checkout", "-B", "master")
 	runGit(t, dir, "config", "user.email", "test@test.com")
 	runGit(t, dir, "config", "user.name", "test")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
 
 	// create a file and commit
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600))
@@ -53,6 +54,17 @@ func TestNewExternalBackend(t *testing.T) {
 		_, err := newExternalBackend(dir)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "open git repository")
+	})
+
+	t.Run("opens git worktree", func(t *testing.T) {
+		mainDir := setupExternalTestRepo(t)
+		wtDir := filepath.Join(t.TempDir(), "worktree")
+		runGit(t, mainDir, "worktree", "add", wtDir, "-b", "wt-branch")
+		eb, err := newExternalBackend(wtDir)
+		require.NoError(t, err)
+		branch, err := eb.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "wt-branch", branch)
 	})
 }
 
@@ -566,6 +578,14 @@ func TestExternalBackend_Add(t *testing.T) {
 		err = eb.Add(absPath)
 		require.NoError(t, err)
 	})
+
+	t.Run("fails on non-existent file", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir)
+		require.NoError(t, err)
+		err = eb.Add("nonexistent.txt")
+		assert.Error(t, err)
+	})
 }
 
 func TestExternalBackend_MoveFile(t *testing.T) {
@@ -629,6 +649,7 @@ func TestExternalBackend_CreateInitialCommit(t *testing.T) {
 		runGit(t, dir, "init")
 		runGit(t, dir, "config", "user.email", "test@test.com")
 		runGit(t, dir, "config", "user.name", "test")
+		runGit(t, dir, "config", "commit.gpgsign", "false")
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600))
@@ -649,6 +670,7 @@ func TestExternalBackend_CreateInitialCommit(t *testing.T) {
 		runGit(t, dir, "init")
 		runGit(t, dir, "config", "user.email", "test@test.com")
 		runGit(t, dir, "config", "user.name", "test")
+		runGit(t, dir, "config", "commit.gpgsign", "false")
 
 		eb, err := newExternalBackend(dir)
 		require.NoError(t, err)
@@ -663,6 +685,7 @@ func TestExternalBackend_CreateInitialCommit(t *testing.T) {
 		runGit(t, dir, "init")
 		runGit(t, dir, "config", "user.email", "test@test.com")
 		runGit(t, dir, "config", "user.name", "test")
+		runGit(t, dir, "config", "commit.gpgsign", "false")
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600))
@@ -807,303 +830,5 @@ func TestExternalBackend_extractPathFromPorcelain(t *testing.T) {
 
 	t.Run("returns empty for short line", func(t *testing.T) {
 		assert.Empty(t, eb.extractPathFromPorcelain("??"))
-	})
-}
-
-// openBothBackends creates both backends for the same repo directory.
-// uses git CLI to set up the repo so both backends can open it.
-func openBothBackends(t *testing.T, dir string) (internal, external backend) {
-	t.Helper()
-	internal, err := openRepo(dir)
-	require.NoError(t, err)
-	external, err = newExternalBackend(dir)
-	require.NoError(t, err)
-	return internal, external
-}
-
-func TestCrossBackend_CleanRepo(t *testing.T) {
-	dir := setupExternalTestRepo(t)
-	internal, external := openBothBackends(t, dir)
-	// use internal root for building absolute paths; avoids macOS /var vs /private/var mismatch
-	dir = internal.Root()
-
-	t.Run("Root", func(t *testing.T) {
-		// resolve symlinks for comparison (macOS /var -> /private/var)
-		intRoot, err := filepath.EvalSymlinks(internal.Root())
-		require.NoError(t, err)
-		extRoot, err := filepath.EvalSymlinks(external.Root())
-		require.NoError(t, err)
-		assert.Equal(t, intRoot, extRoot)
-	})
-
-	t.Run("headHash", func(t *testing.T) {
-		intHash, err := internal.headHash()
-		require.NoError(t, err)
-		extHash, err := external.headHash()
-		require.NoError(t, err)
-		assert.Equal(t, intHash, extHash)
-	})
-
-	t.Run("HasCommits", func(t *testing.T) {
-		intHas, err := internal.HasCommits()
-		require.NoError(t, err)
-		extHas, err := external.HasCommits()
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas)
-	})
-
-	t.Run("CurrentBranch", func(t *testing.T) {
-		intBranch, err := internal.CurrentBranch()
-		require.NoError(t, err)
-		extBranch, err := external.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, intBranch, extBranch)
-	})
-
-	t.Run("GetDefaultBranch", func(t *testing.T) {
-		assert.Equal(t, internal.GetDefaultBranch(), external.GetDefaultBranch())
-	})
-
-	t.Run("BranchExists", func(t *testing.T) {
-		branch, err := internal.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, internal.BranchExists(branch), external.BranchExists(branch))
-		assert.Equal(t, internal.BranchExists("nonexistent"), external.BranchExists("nonexistent"))
-	})
-
-	t.Run("IsDirty", func(t *testing.T) {
-		intDirty, err := internal.IsDirty()
-		require.NoError(t, err)
-		extDirty, err := external.IsDirty()
-		require.NoError(t, err)
-		assert.Equal(t, intDirty, extDirty)
-	})
-
-	t.Run("FileHasChanges", func(t *testing.T) {
-		// use absolute path so both backends resolve correctly regardless of CWD
-		readme := filepath.Join(dir, "README.md")
-		intHas, err := internal.FileHasChanges(readme)
-		require.NoError(t, err)
-		extHas, err := external.FileHasChanges(readme)
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas)
-	})
-
-	t.Run("HasChangesOtherThan", func(t *testing.T) {
-		readme := filepath.Join(dir, "README.md")
-		intHas, err := internal.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		extHas, err := external.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas)
-	})
-
-	t.Run("IsIgnored", func(t *testing.T) {
-		intIgnored, err := internal.IsIgnored("README.md")
-		require.NoError(t, err)
-		extIgnored, err := external.IsIgnored("README.md")
-		require.NoError(t, err)
-		assert.Equal(t, intIgnored, extIgnored)
-	})
-
-	t.Run("diffStats same branch", func(t *testing.T) {
-		branch, err := internal.CurrentBranch()
-		require.NoError(t, err)
-		intStats, err := internal.diffStats(branch)
-		require.NoError(t, err)
-		extStats, err := external.diffStats(branch)
-		require.NoError(t, err)
-		assert.Equal(t, intStats, extStats)
-	})
-}
-
-func TestCrossBackend_DirtyRepo(t *testing.T) {
-	dir := setupExternalTestRepo(t)
-
-	// modify tracked file (unstaged)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified\n"), 0o600))
-
-	internal, external := openBothBackends(t, dir)
-
-	// use the internal backend's root for building absolute paths
-	// so normalizeToRelative resolves correctly (macOS symlink: /var vs /private/var)
-	dir = internal.Root()
-
-	t.Run("IsDirty", func(t *testing.T) {
-		intDirty, err := internal.IsDirty()
-		require.NoError(t, err)
-		extDirty, err := external.IsDirty()
-		require.NoError(t, err)
-		assert.Equal(t, intDirty, extDirty)
-		assert.True(t, intDirty)
-	})
-
-	t.Run("FileHasChanges modified", func(t *testing.T) {
-		readme := filepath.Join(dir, "README.md")
-		intHas, err := internal.FileHasChanges(readme)
-		require.NoError(t, err)
-		extHas, err := external.FileHasChanges(readme)
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas)
-		assert.True(t, intHas)
-	})
-
-	t.Run("HasChangesOtherThan modified file", func(t *testing.T) {
-		readme := filepath.Join(dir, "README.md")
-		intHas, err := internal.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		extHas, err := external.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas, "backends must agree on HasChangesOtherThan")
-		assert.False(t, intHas) // only README.md changed
-	})
-}
-
-func TestCrossBackend_UntrackedFiles(t *testing.T) {
-	dir := setupExternalTestRepo(t)
-
-	// add an untracked file
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new content"), 0o600))
-
-	internal, external := openBothBackends(t, dir)
-	dir = internal.Root()
-
-	t.Run("IsDirty untracked only", func(t *testing.T) {
-		intDirty, err := internal.IsDirty()
-		require.NoError(t, err)
-		extDirty, err := external.IsDirty()
-		require.NoError(t, err)
-		assert.Equal(t, intDirty, extDirty)
-		assert.False(t, intDirty) // untracked files don't count as dirty
-	})
-
-	t.Run("FileHasChanges untracked", func(t *testing.T) {
-		untracked := filepath.Join(dir, "untracked.txt")
-		intHas, err := internal.FileHasChanges(untracked)
-		require.NoError(t, err)
-		extHas, err := external.FileHasChanges(untracked)
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas)
-		assert.True(t, intHas)
-	})
-
-	t.Run("HasChangesOtherThan committed file", func(t *testing.T) {
-		readme := filepath.Join(dir, "README.md")
-		intHas, err := internal.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		extHas, err := external.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas)
-		assert.True(t, intHas) // untracked.txt is "other than README.md"
-	})
-}
-
-func TestCrossBackend_GitignoredFiles(t *testing.T) {
-	dir := setupExternalTestRepo(t)
-
-	// add gitignore and commit it
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\nprogress-*.txt\n"), 0o600))
-	runGit(t, dir, "add", ".gitignore")
-	runGit(t, dir, "commit", "-m", "add gitignore")
-
-	// create ignored files
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "debug.log"), []byte("log content"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "progress-test.txt"), []byte("progress"), 0o600))
-
-	internal, external := openBothBackends(t, dir)
-	dir = internal.Root()
-
-	t.Run("IsIgnored log file", func(t *testing.T) {
-		intIgnored, err := internal.IsIgnored("debug.log")
-		require.NoError(t, err)
-		extIgnored, err := external.IsIgnored("debug.log")
-		require.NoError(t, err)
-		assert.Equal(t, intIgnored, extIgnored)
-		assert.True(t, intIgnored)
-	})
-
-	t.Run("IsIgnored progress file", func(t *testing.T) {
-		intIgnored, err := internal.IsIgnored("progress-test.txt")
-		require.NoError(t, err)
-		extIgnored, err := external.IsIgnored("progress-test.txt")
-		require.NoError(t, err)
-		assert.Equal(t, intIgnored, extIgnored)
-		assert.True(t, intIgnored)
-	})
-
-	t.Run("IsIgnored tracked file", func(t *testing.T) {
-		intIgnored, err := internal.IsIgnored("README.md")
-		require.NoError(t, err)
-		extIgnored, err := external.IsIgnored("README.md")
-		require.NoError(t, err)
-		assert.Equal(t, intIgnored, extIgnored)
-		assert.False(t, intIgnored)
-	})
-
-	t.Run("IsDirty with only ignored files", func(t *testing.T) {
-		intDirty, err := internal.IsDirty()
-		require.NoError(t, err)
-		extDirty, err := external.IsDirty()
-		require.NoError(t, err)
-		assert.Equal(t, intDirty, extDirty)
-		assert.False(t, intDirty)
-	})
-
-	t.Run("HasChangesOtherThan with ignored files", func(t *testing.T) {
-		readme := filepath.Join(dir, "README.md")
-		intHas, err := internal.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		extHas, err := external.HasChangesOtherThan(readme)
-		require.NoError(t, err)
-		assert.Equal(t, intHas, extHas)
-		assert.False(t, intHas) // ignored files shouldn't count
-	})
-}
-
-func TestCrossBackend_FeatureBranch(t *testing.T) {
-	dir := setupExternalTestRepo(t)
-
-	// get the default branch name before creating feature branch
-	runGit(t, dir, "checkout", "-b", "feature-test")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("line1\nline2\nline3\n"), 0o600))
-	runGit(t, dir, "add", "feature.txt")
-	runGit(t, dir, "commit", "-m", "add feature file")
-
-	internal, external := openBothBackends(t, dir)
-
-	t.Run("CurrentBranch on feature", func(t *testing.T) {
-		intBranch, err := internal.CurrentBranch()
-		require.NoError(t, err)
-		extBranch, err := external.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, intBranch, extBranch)
-		assert.Equal(t, "feature-test", intBranch)
-	})
-
-	t.Run("BranchExists feature", func(t *testing.T) {
-		assert.Equal(t, internal.BranchExists("feature-test"), external.BranchExists("feature-test"))
-		assert.True(t, internal.BranchExists("feature-test"))
-		assert.Equal(t, internal.BranchExists("master"), external.BranchExists("master"))
-		assert.True(t, internal.BranchExists("master"))
-	})
-
-	t.Run("diffStats feature vs master", func(t *testing.T) {
-		intStats, err := internal.diffStats("master")
-		require.NoError(t, err)
-		extStats, err := external.diffStats("master")
-		require.NoError(t, err)
-		assert.Equal(t, intStats, extStats)
-		assert.Equal(t, 1, intStats.Files)
-		assert.Equal(t, 3, intStats.Additions)
-		assert.Equal(t, 0, intStats.Deletions)
-	})
-
-	t.Run("diffStats nonexistent branch", func(t *testing.T) {
-		intStats, err := internal.diffStats("nonexistent")
-		require.NoError(t, err)
-		extStats, err := external.diffStats("nonexistent")
-		require.NoError(t, err)
-		assert.Equal(t, intStats, extStats)
-		assert.Equal(t, DiffStats{}, intStats)
 	})
 }

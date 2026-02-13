@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	gogit "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -517,12 +515,10 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 	})
 
 	t.Run("creates commit when user answers yes", func(t *testing.T) {
-		dir := t.TempDir()
-		_, err := gogit.PlainInit(dir, false)
-		require.NoError(t, err)
+		dir := initEmptyRepo(t)
 
 		// create a file so there's something to commit
-		err = os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600)
+		err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600)
 		require.NoError(t, err)
 
 		gitSvc, err := git.NewService(dir, noopLogger())
@@ -548,9 +544,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 	})
 
 	t.Run("returns error when user answers no", func(t *testing.T) {
-		dir := t.TempDir()
-		_, err := gogit.PlainInit(dir, false)
-		require.NoError(t, err)
+		dir := initEmptyRepo(t)
 
 		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
@@ -562,9 +556,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 	})
 
 	t.Run("returns error on EOF", func(t *testing.T) {
-		dir := t.TempDir()
-		_, err := gogit.PlainInit(dir, false)
-		require.NoError(t, err)
+		dir := initEmptyRepo(t)
 
 		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
@@ -576,9 +568,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 	})
 
 	t.Run("returns error when no files to commit", func(t *testing.T) {
-		dir := t.TempDir()
-		_, err := gogit.PlainInit(dir, false)
-		require.NoError(t, err)
+		dir := initEmptyRepo(t)
 
 		// no files created - empty repo
 
@@ -592,9 +582,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 	})
 
 	t.Run("returns error when context canceled", func(t *testing.T) {
-		dir := t.TempDir()
-		_, err := gogit.PlainInit(dir, false)
-		require.NoError(t, err)
+		dir := initEmptyRepo(t)
 
 		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
@@ -626,16 +614,8 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		require.NoError(t, os.WriteFile(planPath, []byte("# Test Plan\n\n## Tasks\n\n- [ ] task 1\n"), 0o600))
 
 		// commit the plan file so branch creation doesn't fail due to uncommitted changes
-		repo, err := gogit.PlainOpen(dir)
-		require.NoError(t, err)
-		wt, err := repo.Worktree()
-		require.NoError(t, err)
-		_, err = wt.Add("docs/plans/test-plan.md")
-		require.NoError(t, err)
-		_, err = wt.Commit("add test plan", &gogit.CommitOptions{
-			Author: &object.Signature{Name: "test", Email: "test@test.com"},
-		})
-		require.NoError(t, err)
+		runGit(t, dir, "add", "docs/plans/test-plan.md")
+		runGit(t, dir, "commit", "-m", "add test plan")
 
 		// run with tasks-only mode in background
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -672,16 +652,8 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		planPath := filepath.Join(dir, "docs", "plans", "review-plan.md")
 		require.NoError(t, os.WriteFile(planPath, []byte("# Review Plan\n"), 0o600))
 
-		repo, err := gogit.PlainOpen(dir)
-		require.NoError(t, err)
-		wt, err := repo.Worktree()
-		require.NoError(t, err)
-		_, err = wt.Add("docs/plans/review-plan.md")
-		require.NoError(t, err)
-		_, err = wt.Commit("add review plan", &gogit.CommitOptions{
-			Author: &object.Signature{Name: "test", Email: "test@test.com"},
-		})
-		require.NoError(t, err)
+		runGit(t, dir, "add", "docs/plans/review-plan.md")
+		runGit(t, dir, "commit", "-m", "add review plan")
 
 		// run with review mode in background
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -716,16 +688,8 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		planPath := filepath.Join(dir, "docs", "plans", "codex-plan.md")
 		require.NoError(t, os.WriteFile(planPath, []byte("# Codex Plan\n"), 0o600))
 
-		repo, err := gogit.PlainOpen(dir)
-		require.NoError(t, err)
-		wt, err := repo.Worktree()
-		require.NoError(t, err)
-		_, err = wt.Add("docs/plans/codex-plan.md")
-		require.NoError(t, err)
-		_, err = wt.Commit("add codex plan", &gogit.CommitOptions{
-			Author: &object.Signature{Name: "test", Email: "test@test.com"},
-		})
-		require.NoError(t, err)
+		runGit(t, dir, "add", "docs/plans/codex-plan.md")
+		runGit(t, dir, "commit", "-m", "add codex plan")
 
 		// run with codex-only mode in background
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -760,16 +724,8 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		planPath := filepath.Join(dir, "docs", "plans", "external-plan.md")
 		require.NoError(t, os.WriteFile(planPath, []byte("# External Plan\n"), 0o600))
 
-		repo, err := gogit.PlainOpen(dir)
-		require.NoError(t, err)
-		wt, err := repo.Worktree()
-		require.NoError(t, err)
-		_, err = wt.Add("docs/plans/external-plan.md")
-		require.NoError(t, err)
-		_, err = wt.Commit("add external plan", &gogit.CommitOptions{
-			Author: &object.Signature{Name: "test", Email: "test@test.com"},
-		})
-		require.NoError(t, err)
+		runGit(t, dir, "add", "docs/plans/external-plan.md")
+		runGit(t, dir, "commit", "-m", "add external plan")
 
 		// run with external-only mode in background
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -857,32 +813,45 @@ func TestExecutePlanRequestHasNotifySvc(t *testing.T) {
 	req.NotifySvc.Send(context.Background(), notify.Result{Status: "success"})
 }
 
+// runGit executes a git command in the given directory and fails the test on error.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v failed: %s", args, out)
+}
+
 // setupTestRepo creates a test git repository with an initial commit.
 func setupTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	// init repo
-	repo, err := gogit.PlainInit(dir, false)
-	require.NoError(t, err)
+	runGit(t, dir, "init")
+	runGit(t, dir, "checkout", "-B", "master")
+	runGit(t, dir, "config", "user.email", "test@test.com")
+	runGit(t, dir, "config", "user.name", "test")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
 
-	// create a file
 	readme := filepath.Join(dir, "README.md")
-	err = os.WriteFile(readme, []byte("# Test\n"), 0o600)
+	err := os.WriteFile(readme, []byte("# Test\n"), 0o600)
 	require.NoError(t, err)
 
-	// stage and commit
-	wt, err := repo.Worktree()
-	require.NoError(t, err)
+	runGit(t, dir, "add", "README.md")
+	runGit(t, dir, "commit", "-m", "initial commit")
 
-	_, err = wt.Add("README.md")
-	require.NoError(t, err)
+	return dir
+}
 
-	_, err = wt.Commit("initial commit", &gogit.CommitOptions{
-		Author: &object.Signature{Name: "test", Email: "test@test.com"},
-	})
-	require.NoError(t, err)
-
+// initEmptyRepo creates a git repo with no commits (for testing ensureRepoHasCommits).
+func initEmptyRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "checkout", "-B", "master")
+	runGit(t, dir, "config", "user.email", "test@test.com")
+	runGit(t, dir, "config", "user.name", "test")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
 	return dir
 }
 
