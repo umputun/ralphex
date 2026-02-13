@@ -21,7 +21,7 @@ make fmt        # format code
 cmd/ralphex/        # main entry point, CLI parsing
 pkg/config/         # configuration loading, defaults, prompts, agents
 pkg/executor/       # claude and codex CLI execution
-pkg/git/            # git operations (go-git library or external git CLI)
+pkg/git/            # git operations (external git CLI)
 pkg/input/          # terminal input collector (fzf/fallback, draft review)
 pkg/notify/         # notification delivery (telegram, email, slack, webhook, custom)
 pkg/plan/           # plan file selection and manipulation
@@ -95,18 +95,14 @@ Key files:
 
 ### Git Package API
 
-Single public entry point: `git.NewService(path, logger, opts...) (*Service, error)`
+Single public entry point: `git.NewService(path, logger) (*Service, error)`
 - All git operations are methods on `Service` (CreateBranchForPlan, MovePlanToCompleted, EnsureIgnored, etc.)
 - `Logger` interface for dependency injection, compatible with `*color.Color`
-- Uses `backend` interface internally — both go-git (`repo`) and external git CLI (`externalBackend`) implement it
-- Default backend is go-git (internal). Pass `git.WithExternalGit()` option to use git CLI
-- `externalBackend` shells out to `git` binary for all operations, avoiding go-git quirks with symlinks, gitignore, etc.
-- Config option: `git_backend = external` in `~/.config/ralphex/config` or `.ralphex/config`
+- Uses `backend` interface internally, implemented by `externalBackend` which shells out to the `git` binary
 
 Key files:
-- `pkg/git/service.go` - `Service` type, `backend` interface, `Option`/`WithExternalGit()`
-- `pkg/git/git.go` - internal go-git backend (`repo` type)
-- `pkg/git/external.go` - external git CLI backend (`externalBackend` type)
+- `pkg/git/service.go` - `Service` type, `backend` interface
+- `pkg/git/external.go` - git CLI backend (`externalBackend` type)
 
 ### Plan Creation Mode
 
