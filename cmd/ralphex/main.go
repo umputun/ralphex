@@ -43,6 +43,7 @@ type opts struct {
 	Port            int      `short:"p" long:"port" default:"8080" description:"web dashboard port"`
 	Watch           []string `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
 	Reset           bool     `long:"reset" description:"interactively reset global config to embedded defaults"`
+	ConfigDir       string   `long:"config-dir" env:"RALPHEX_CONFIG_DIR" description:"custom config directory"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
 }
@@ -154,7 +155,7 @@ func run(ctx context.Context, o opts) error {
 	// handle --reset flag early (before full config load)
 	// reset completes, then continues with normal execution if other args provided
 	if o.Reset {
-		if err := runReset(); err != nil {
+		if err := runReset(o.ConfigDir, os.Stdin, os.Stdout); err != nil {
 			return err
 		}
 		// if reset was the only operation, exit successfully
@@ -164,7 +165,7 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	// load config first to get custom command paths
-	cfg, err := config.Load("") // empty string uses default location
+	cfg, err := config.Load(o.ConfigDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -662,9 +663,8 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 }
 
 // runReset runs the interactive config reset flow.
-func runReset() error {
-	configDir := config.DefaultConfigDir()
-	_, err := config.Reset(configDir, os.Stdin, os.Stdout)
+func runReset(configDir string, stdin io.Reader, stdout io.Writer) error {
+	_, err := config.Reset(configDir, stdin, stdout)
 	if err != nil {
 		return fmt.Errorf("reset config: %w", err)
 	}

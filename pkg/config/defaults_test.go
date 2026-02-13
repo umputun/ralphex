@@ -691,6 +691,27 @@ func TestReset_HandlesEOFGracefully(t *testing.T) {
 	assert.False(t, result.ConfigReset) // EOF = decline
 }
 
+func TestReset_EmptyConfigDirFallback(t *testing.T) {
+	// set HOME to temp dir so DefaultConfigDir() doesn't touch real config
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, ".config"))
+
+	// install defaults so Reset has something to check
+	defDir := DefaultConfigDir()
+	installer := newDefaultsInstaller(defaultsFS)
+	require.NoError(t, installer.Install(defDir))
+
+	stdin := strings.NewReader("y\ny\ny\n")
+	stdout := &bytes.Buffer{}
+
+	// empty configDir should use DefaultConfigDir()
+	result, err := Reset("", stdin, stdout)
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), defDir)
+	assert.False(t, result.ConfigReset) // freshly installed defaults match, nothing to reset
+}
+
 func TestDefaultsInstaller_FindDifferentFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	promptsDir := filepath.Join(tmpDir, "prompts")

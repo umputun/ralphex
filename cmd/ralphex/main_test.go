@@ -855,6 +855,61 @@ func initEmptyRepo(t *testing.T) string {
 	return dir
 }
 
+func TestConfigDirCustomPath(t *testing.T) {
+	t.Run("custom_config_dir_installs_defaults", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgDir := filepath.Join(tmpDir, "custom-config")
+
+		cfg, err := config.Load(cfgDir)
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+
+		// verify defaults were installed to the custom directory
+		assert.FileExists(t, filepath.Join(cfgDir, "config"))
+		assert.DirExists(t, filepath.Join(cfgDir, "prompts"))
+		assert.DirExists(t, filepath.Join(cfgDir, "agents"))
+	})
+
+	t.Run("reset_with_custom_dir", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgDir := filepath.Join(tmpDir, "reset-config")
+
+		// first load to install defaults
+		_, err := config.Load(cfgDir)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(cfgDir, "config"))
+
+		// reset with "y" answers to all prompts
+		stdin := strings.NewReader("y\ny\ny\n")
+		var stdout bytes.Buffer
+		_, err = config.Reset(cfgDir, stdin, &stdout)
+		require.NoError(t, err)
+		// freshly installed defaults are skipped (already match), verify reset ran against custom dir
+		assert.Contains(t, stdout.String(), cfgDir)
+		assert.FileExists(t, filepath.Join(cfgDir, "config"))
+		assert.DirExists(t, filepath.Join(cfgDir, "prompts"))
+		assert.DirExists(t, filepath.Join(cfgDir, "agents"))
+	})
+
+	t.Run("run_reset_with_custom_dir", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgDir := filepath.Join(tmpDir, "run-reset-config")
+
+		// first load to install defaults
+		_, err := config.Load(cfgDir)
+		require.NoError(t, err)
+
+		// exercise runReset directly with mock stdin/stdout
+		stdin := strings.NewReader("y\ny\ny\n")
+		var stdout bytes.Buffer
+		err = runReset(cfgDir, stdin, &stdout)
+		require.NoError(t, err)
+		assert.FileExists(t, filepath.Join(cfgDir, "config"))
+		assert.DirExists(t, filepath.Join(cfgDir, "prompts"))
+		assert.DirExists(t, filepath.Join(cfgDir, "agents"))
+	})
+}
+
 func TestResolveVersion(t *testing.T) {
 	t.Run("ldflags_set", func(t *testing.T) {
 		orig := revision

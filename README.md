@@ -271,6 +271,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 **Environment variables:**
 - `RALPHEX_IMAGE` - Docker image to use (default: `ghcr.io/umputun/ralphex-go:latest`)
 - `RALPHEX_PORT` - Port for web dashboard when using `--serve` (default: `8080`)
+- `RALPHEX_CONFIG_DIR` - Custom config directory (default: `~/.config/ralphex`). Overrides global config location for prompts, agents, and settings
 - `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works both with Docker wrapper (volume mounts and keychain derivation) and non-Docker usage (passed through to Claude Code directly). Keychain service name is derived automatically from the path.
 
 **Updating:**
@@ -413,6 +414,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-d, --debug` | Enable debug logging | false |
 | `--no-color` | Disable color output | false |
 | `--reset` | Interactively reset global config to embedded defaults | - |
+| `--config-dir` | Custom config directory (env: `RALPHEX_CONFIG_DIR`) | `~/.config/ralphex` |
 
 ## Plan File Format
 
@@ -566,7 +568,7 @@ Agents to launch:
 
 ## Configuration
 
-ralphex uses a configuration directory at `~/.config/ralphex/` with the following structure:
+ralphex uses a configuration directory at `~/.config/ralphex/` (override with `--config-dir` or `RALPHEX_CONFIG_DIR`) with the following structure:
 
 ```
 ~/.config/ralphex/
@@ -600,6 +602,8 @@ project/
 ```
 
 **Priority:** CLI flags > local `.ralphex/` > global `~/.config/ralphex/` > embedded defaults
+
+Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config location. This is useful for maintaining separate agent/prompt sets for different workflows.
 
 **Merge behavior:**
 - **Config file**: per-field override (local values override global, missing fields fall back)

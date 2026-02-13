@@ -157,7 +157,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 
 ## Configuration
 
-- Global config location: `~/.config/ralphex/`
+- Global config location: `~/.config/ralphex/` (override with `--config-dir` or `RALPHEX_CONFIG_DIR`)
 - Local config location: `.ralphex/` (per-project, optional)
 - Config file format: INI (using gopkg.in/ini.v1)
 - Embedded defaults in `pkg/config/defaults/`
