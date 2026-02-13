@@ -19,7 +19,6 @@ type Logger interface {
 }
 
 // backend defines the low-level git operations interface.
-// Both the internal go-git backend (repo) and the external git CLI backend implement this.
 type backend interface {
 	Root() string
 	headHash() (string, error)
@@ -47,22 +46,6 @@ type DiffStats struct {
 	Deletions int // lines deleted
 }
 
-// Option configures NewService behavior.
-type Option func(*serviceConfig)
-
-// serviceConfig holds internal configuration for NewService.
-type serviceConfig struct {
-	useExternal bool
-}
-
-// WithExternalGit configures the service to use the external git CLI backend
-// instead of the default go-git library.
-func WithExternalGit() Option {
-	return func(c *serviceConfig) {
-		c.useExternal = true
-	}
-}
-
 // Service provides git operations for ralphex workflows.
 // It is the single public API for the git package.
 type Service struct {
@@ -73,20 +56,8 @@ type Service struct {
 // NewService opens a git repository and returns a Service.
 // path is the path to the repository (use "." for current directory).
 // log is used for progress output during operations.
-// opts can include WithExternalGit() to use the git CLI instead of go-git.
-func NewService(path string, log Logger, opts ...Option) (*Service, error) {
-	var cfg serviceConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
-	var b backend
-	var err error
-	if cfg.useExternal {
-		b, err = newExternalBackend(path)
-	} else {
-		b, err = openRepo(path)
-	}
+func NewService(path string, log Logger) (*Service, error) {
+	b, err := newExternalBackend(path)
 	if err != nil {
 		return nil, err
 	}

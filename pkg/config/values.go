@@ -28,7 +28,6 @@ type Values struct {
 	CodexErrorPatterns   []string // patterns to detect in codex output (e.g., rate limit messages)
 	ExternalReviewTool   string   // "codex", "custom", or "none"
 	CustomReviewScript   string   // path to custom review script (when ExternalReviewTool = "custom")
-	GitBackend           string   // "internal" (go-git) or "external" (git CLI)
 	IterationDelayMs     int
 	IterationDelayMsSet  bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount       int
@@ -204,11 +203,6 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.CustomReviewScript = expandTilde(key.String())
 	}
 
-	// git backend setting
-	if key, err := section.GetKey("git_backend"); err == nil {
-		values.GitBackend = key.String()
-	}
-
 	// timing settings
 	if key, err := section.GetKey("iteration_delay_ms"); err == nil {
 		val, intErr := key.Int()
@@ -323,9 +317,6 @@ func (dst *Values) mergeFrom(src *Values) {
 	}
 	if src.CustomReviewScript != "" {
 		dst.CustomReviewScript = src.CustomReviewScript
-	}
-	if src.GitBackend != "" {
-		dst.GitBackend = src.GitBackend
 	}
 	if src.IterationDelayMsSet {
 		dst.IterationDelayMs = src.IterationDelayMs

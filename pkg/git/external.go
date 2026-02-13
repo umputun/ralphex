@@ -12,7 +12,6 @@ import (
 )
 
 // externalBackend implements the backend interface by shelling out to the git CLI.
-// this provides native git behavior, avoiding go-git quirks with symlinks, gitignore, etc.
 type externalBackend struct {
 	path string // absolute path to repository root
 }

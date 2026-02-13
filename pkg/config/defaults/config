@@ -77,16 +77,6 @@ external_review_tool = codex
 # custom_review_script =
 
 # ------------------------------------------------------------------------------
-# git backend
-# ------------------------------------------------------------------------------
-
-# git_backend: which git implementation to use
-# internal: go-git library (default, pure Go, no git binary needed)
-# external: shell out to git CLI (handles symlinks, gitignore edge cases better)
-# default: internal
-# git_backend = internal
-
-# ------------------------------------------------------------------------------
 # finalize step
 # ------------------------------------------------------------------------------
 

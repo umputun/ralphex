@@ -52,8 +52,6 @@ type Config struct {
 	ExternalReviewTool string `json:"external_review_tool"` // "codex", "custom", or "none"
 	CustomReviewScript string `json:"custom_review_script"` // path to custom review script
 
-	GitBackend string `json:"git_backend"` // "internal" (go-git) or "external" (git CLI)
-
 	IterationDelayMs    int  `json:"iteration_delay_ms"`
 	IterationDelayMsSet bool `json:"-"` // tracks if iteration_delay_ms was explicitly set in config
 	TaskRetryCount      int  `json:"task_retry_count"`
@@ -235,7 +233,6 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CodexSandbox:         values.CodexSandbox,
 		ExternalReviewTool:   values.ExternalReviewTool,
 		CustomReviewScript:   values.CustomReviewScript,
-		GitBackend:           values.GitBackend,
 		IterationDelayMs:     values.IterationDelayMs,
 		IterationDelayMsSet:  values.IterationDelayMsSet,
 		TaskRetryCount:       values.TaskRetryCount,
