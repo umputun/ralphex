@@ -513,6 +513,43 @@ func TestAgentLoader_Load_ParsesOptions(t *testing.T) {
 	assert.Equal(t, "code-reviewer", agents[0].AgentType)
 }
 
+func TestAgentLoader_Load_ParsesOptionsWithSingleLeadingComment(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
+
+	// single comment before frontmatter should not prevent frontmatter detection
+	content := "# my custom agent\n---\nmodel: haiku\nagent: code-reviewer\n---\nReview code for issues."
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(content), 0o600))
+
+	loader := newAgentLoader(defaultsFS)
+	agents, err := loader.Load("", agentsDir)
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.Equal(t, "quality", agents[0].Name)
+	assert.Equal(t, "Review code for issues.", agents[0].Prompt)
+	assert.Equal(t, "haiku", agents[0].Model)
+	assert.Equal(t, "code-reviewer", agents[0].AgentType)
+}
+
+func TestAgentLoader_Load_ParsesOptionsWithWhitespaceSeparator(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o750))
+
+	// whitespace-only line between comments and frontmatter should still work
+	content := "# my agent\n# description\n   \n---\nmodel: sonnet\n---\nReview code."
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "quality.txt"), []byte(content), 0o600))
+
+	loader := newAgentLoader(defaultsFS)
+	agents, err := loader.Load("", agentsDir)
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.Equal(t, "quality", agents[0].Name)
+	assert.Equal(t, "Review code.", agents[0].Prompt)
+	assert.Equal(t, "sonnet", agents[0].Model)
+}
+
 func TestAgentLoader_Load_ParsesOptionsWithLeadingComments(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, "agents")

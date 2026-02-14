@@ -530,12 +530,12 @@ The entire system is designed for customization - both task execution and review
 - `finalize.txt` - optional finalize step prompt (disabled by default)
 
 **Comment lines and markdown headers:**
-Lines starting with `#` are preserved in prompt and agent files. Use them freely for markdown headers, documentation comments, or any other purpose:
+A leading block of 2+ contiguous comment lines (starting with `#`) at the top of a file is treated as a meta-comment and stripped when loading. A single `# Title` at the top is preserved (treated as a markdown header). Comment lines appearing later in the file body are always preserved:
 
 ```txt
-# security agent - checks for vulnerabilities
-# updated: 2024-01-15
+# This single title line is preserved as a markdown header
 check for SQL injection
+# this mid-body comment is also preserved
 check for XSS
 ```
 

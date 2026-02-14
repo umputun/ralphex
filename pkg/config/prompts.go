@@ -128,7 +128,7 @@ func (p *promptLoader) loadPromptFile(path string) (string, error) {
 	if strings.TrimSpace(stripComments(content)) == "" {
 		return "", nil // all-commented file, trigger fallback to embedded
 	}
-	return strings.TrimSpace(content), nil
+	return strings.TrimSpace(stripLeadingComments(content)), nil
 }
 
 // loadPromptFromEmbedFS reads a prompt file from an embedded filesystem.
@@ -141,7 +141,7 @@ func (p *promptLoader) loadPromptFromEmbedFS(path string) (string, error) {
 		}
 		return "", fmt.Errorf("read embedded prompt %s: %w", path, err)
 	}
-	return strings.TrimSpace(normalizeCRLF(string(data))), nil
+	return strings.TrimSpace(stripLeadingComments(normalizeCRLF(string(data)))), nil
 }
 
 // normalizeCRLF converts Windows line endings (CRLF) to Unix (LF).
@@ -149,21 +149,48 @@ func normalizeCRLF(content string) string {
 	return strings.ReplaceAll(content, "\r\n", "\n")
 }
 
-// stripLeadingComments removes comment lines (starting with #) from the beginning of content.
-// stops at the first non-comment, non-empty line. used to allow frontmatter detection
-// in agent files that have comments before the "---" delimiter.
+// stripLeadingComments removes the contiguous block of comment lines (starting with #)
+// from the beginning of content. only strips when there are 2+ contiguous comment lines,
+// so a single "# Title" (markdown header) at the top is preserved.
+// stops at the first non-comment line, including blank lines.
 func stripLeadingComments(content string) string {
 	lines := strings.Split(content, "\n")
-	for i, line := range lines {
+	commentCount := 0
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue // skip blank lines at the top
-		}
 		if !strings.HasPrefix(trimmed, "#") {
-			return strings.Join(lines[i:], "\n")
+			break
 		}
+		commentCount++
 	}
-	return "" // all lines are comments or empty
+	if commentCount < 2 {
+		return content // single or no leading comment, preserve as-is (likely markdown header)
+	}
+	// strip the contiguous comment block
+	return strings.TrimLeft(strings.Join(lines[commentCount:], "\n"), "\n")
+}
+
+// stripLeadingCommentLines removes all contiguous leading comment lines (starting with #),
+// regardless of count (even a single line). used by agent frontmatter detection where
+// any number of comment lines before "---" should be stripped to reveal frontmatter.
+// unlike stripLeadingComments which preserves a single "# Title" for prompt content,
+// this function strips all leading comments unconditionally.
+func stripLeadingCommentLines(content string) string {
+	lines := strings.Split(content, "\n")
+	commentCount := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || !strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		commentCount++
+	}
+	if commentCount == 0 {
+		return content
+	}
+	rest := strings.Join(lines[commentCount:], "\n")
+	// trim leading whitespace-only lines and newlines so frontmatter "---" is at position 0
+	return strings.TrimLeft(rest, " \t\n")
 }
 
 // stripComments removes lines starting with # (comment lines) from content.

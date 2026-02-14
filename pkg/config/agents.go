@@ -164,14 +164,14 @@ func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
 
 // buildAgent parses frontmatter options from prompt and builds a CustomAgent.
 // if parseOptions produces no body, the raw prompt is used with default options.
-// leading comment lines are stripped before frontmatter parsing so that
-// comments before "---" don't prevent frontmatter detection.
+// leading comment lines (any count, including single) are stripped before
+// frontmatter parsing so that comment lines before "---" don't prevent frontmatter detection.
 func (al *agentLoader) buildAgent(name, prompt string) CustomAgent {
 	// try frontmatter on raw content first, then with leading comments stripped
 	opts, body := parseOptions(prompt)
 	if opts == (Options{}) && body == prompt {
-		// no frontmatter found in raw content, try after stripping leading comments
-		if stripped := stripLeadingComments(prompt); stripped != prompt {
+		// no frontmatter found in raw content, try after stripping leading comment lines
+		if stripped := stripLeadingCommentLines(prompt); stripped != prompt {
 			opts, body = parseOptions(stripped)
 			if opts == (Options{}) {
 				// still no frontmatter, use original prompt
