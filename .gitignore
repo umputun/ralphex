@@ -41,8 +41,8 @@ __debug_bin*
 
 # ralphex progress logs
 .ralphex/progress/
-/progress.txt
-/progress-*.txt
+**/progress.txt
+**/progress-*.txt
 !e2e/testdata/progress-test.txt
 !e2e/testdata/progress-full-events.txt
 

@@ -633,7 +633,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		done := make(chan struct{})
 		go func() {
+			defer close(done)
 			o := opts{TasksOnly: true, PlanFile: planPath, MaxIterations: 1}
 			_ = run(ctx, o)
 		}()
@@ -647,6 +649,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 			branch, err := gitSvc.CurrentBranch()
 			return err == nil && branch == "test-plan"
 		}, 1*time.Second, 100*time.Millisecond, "tasks-only mode should create branch for plan")
+
+		cancel()
+		<-done
 	})
 
 	t.Run("review_mode_does_not_create_branch", func(t *testing.T) {
@@ -671,7 +676,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		done := make(chan struct{})
 		go func() {
+			defer close(done)
 			o := opts{Review: true, PlanFile: planPath, MaxIterations: 1}
 			_ = run(ctx, o)
 		}()
@@ -683,6 +690,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		branch, err := gitSvc.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch, "review mode should not create branch")
+
+		cancel()
+		<-done
 	})
 
 	t.Run("codex_only_mode_does_not_create_branch", func(t *testing.T) {
@@ -707,7 +717,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		done := make(chan struct{})
 		go func() {
+			defer close(done)
 			o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1}
 			_ = run(ctx, o)
 		}()
@@ -719,6 +731,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		branch, err := gitSvc.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch, "codex-only mode should not create branch")
+
+		cancel()
+		<-done
 	})
 
 	t.Run("external_only_mode_does_not_create_branch", func(t *testing.T) {
@@ -743,7 +758,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		done := make(chan struct{})
 		go func() {
+			defer close(done)
 			o := opts{ExternalOnly: true, PlanFile: planPath, MaxIterations: 1}
 			_ = run(ctx, o)
 		}()
@@ -755,6 +772,9 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		branch, err := gitSvc.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch, "external-only mode should not create branch")
+
+		cancel()
+		<-done
 	})
 }
 

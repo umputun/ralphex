@@ -42,13 +42,11 @@ func TestDashboard_Start_SingleSession(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	progressPath := filepath.Join(tmpDir, "progress.txt")
-
 	// create mock base logger
 	colors := testColors()
 	holder := &status.PhaseHolder{}
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanFile: progressPath,
+		PlanFile: "",
 		Mode:     "test",
 		Branch:   "main",
 		NoColor:  true,
@@ -86,13 +84,11 @@ func TestDashboard_Start_MultiSession(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	progressPath := filepath.Join(tmpDir, "progress.txt")
-
 	// create mock base logger
 	colors := testColors()
 	holder := &status.PhaseHolder{}
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanFile: progressPath,
+		PlanFile: "",
 		Mode:     "test",
 		Branch:   "main",
 		NoColor:  true,
