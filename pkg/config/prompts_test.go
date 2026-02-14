@@ -4,6 +4,7 @@ import (
 	"embed"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -269,15 +270,19 @@ func TestPromptLoader_loadPromptFile_PreservesMarkdownHeaders(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{name: "markdown headers preserved", input: "# comment\n\nDo this task\n\n## Step 1\n\nFirst step\n\n## Step 2\n\nSecond step",
-			expected: "# comment\n\nDo this task\n\n## Step 1\n\nFirst step\n\n## Step 2\n\nSecond step"},
-		{name: "h1 in body preserved", input: "# comment header\n\n# Title\n\nContent",
-			expected: "# comment header\n\n# Title\n\nContent"},
-		{name: "template with headers", input: "# prompt docs\n\n<<<MARKER>>>\n# Plan Title\n## Overview\n<<<END>>>",
-			expected: "# prompt docs\n\n<<<MARKER>>>\n# Plan Title\n## Overview\n<<<END>>>"},
+		{name: "single leading comment preserved", input: "# Title\n\nDo this task\n\n## Step 1\n\nFirst step",
+			expected: "# Title\n\nDo this task\n\n## Step 1\n\nFirst step"},
+		{name: "two leading comments stripped", input: "# comment\n# another\n\nDo this task\n\n## Step 1\n\nFirst step",
+			expected: "Do this task\n\n## Step 1\n\nFirst step"},
+		{name: "meta block stripped h1 in body preserved", input: "# comment 1\n# comment 2\n\n# Title\n\nContent",
+			expected: "# Title\n\nContent"},
+		{name: "meta block stripped template headers preserved", input: "# prompt docs\n# more docs\n\n<<<MARKER>>>\n# Plan Title\n## Overview\n<<<END>>>",
+			expected: "<<<MARKER>>>\n# Plan Title\n## Overview\n<<<END>>>"},
 		{name: "no comments just content", input: "Do the task\n\n## Section\n\nDetails",
 			expected: "Do the task\n\n## Section\n\nDetails"},
 		{name: "only comments returns empty", input: "# comment one\n# comment two", expected: ""},
+		{name: "multiple leading comments stripped", input: "# meta comment 1\n# meta comment 2\n# meta comment 3\n\nActual prompt content",
+			expected: "Actual prompt content"},
 	}
 
 	for _, tc := range tests {
@@ -298,14 +303,32 @@ func TestPromptLoader_loadPromptFromEmbedFS(t *testing.T) {
 	assert.Contains(t, content, "claude_command")
 }
 
-func TestPromptLoader_loadPromptFromEmbedFS_PreservesMarkdownHeaders(t *testing.T) {
+func TestPromptLoader_loadPromptFromEmbedFS_StripsLeadingCommentsPreservesBodyHeaders(t *testing.T) {
 	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptFromEmbedFS("defaults/prompts/make_plan.txt")
 	require.NoError(t, err)
+	// leading meta-comments should be stripped
+	assert.False(t, strings.HasPrefix(content, "# plan creation prompt"), "leading meta-comment should be stripped")
+	assert.NotContains(t, content, "# available variables:")
+	// markdown headers in body should be preserved
 	assert.Contains(t, content, "## Step 1: Read Progress File")
 	assert.Contains(t, content, "## Step 2: Explore the Codebase")
 	assert.Contains(t, content, "# <Title>")
 	assert.Contains(t, content, "## Overview")
+}
+
+func TestPromptLoader_loadPromptFromEmbedFS_FinalizeStripsMetaComments(t *testing.T) {
+	pl := &promptLoader{embedFS: defaultsFS}
+	content, err := pl.loadPromptFromEmbedFS("defaults/prompts/finalize.txt")
+	require.NoError(t, err)
+	// leading meta-comments should be stripped
+	assert.False(t, strings.HasPrefix(content, "# finalize prompt"), "leading meta-comment should be stripped")
+	assert.NotContains(t, content, "# available variables:")
+	// actual content should start with the prompt body
+	assert.True(t, strings.HasPrefix(content, "Post-completion finalize step."), "should start with actual prompt content")
+	// body content preserved
+	assert.Contains(t, content, "{{DEFAULT_BRANCH}}")
+	assert.Contains(t, content, "Rebase your commits")
 }
 
 func TestPromptLoader_loadPromptFromEmbedFS_NotFound(t *testing.T) {
@@ -393,18 +416,49 @@ func Test_stripLeadingComments(t *testing.T) {
 		expected string
 	}{
 		{name: "no comments", input: "line one\nline two", expected: "line one\nline two"},
-		{name: "leading comments stripped", input: "# comment\n# another\ncontent", expected: "content"},
-		{name: "blank lines before content", input: "# comment\n\ncontent", expected: "content"},
-		{name: "mid-content comments kept", input: "# leading\ncontent\n# mid comment\nmore", expected: "content\n# mid comment\nmore"},
+		{name: "single comment preserved", input: "# Title\ncontent", expected: "# Title\ncontent"},
+		{name: "two comments stripped", input: "# comment\n# another\ncontent", expected: "content"},
+		{name: "two comments with blank line", input: "# comment\n# another\n\ncontent", expected: "content"},
+		{name: "mid-content comments kept", input: "# meta1\n# meta2\ncontent\n# mid comment\nmore", expected: "content\n# mid comment\nmore"},
+		{name: "meta block then hash title", input: "# comment\n# another\n\n# Title\n\nContent", expected: "# Title\n\nContent"},
 		{name: "only comments", input: "# comment\n# another", expected: ""},
-		{name: "frontmatter after comments", input: "# desc\n---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+		{name: "two comments before frontmatter", input: "# desc\n# more\n---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+		{name: "single comment before frontmatter preserved", input: "# desc\n---\nmodel: haiku\n---\nbody", expected: "# desc\n---\nmodel: haiku\n---\nbody"},
 		{name: "no leading comments with frontmatter", input: "---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
 		{name: "empty input", input: "", expected: ""},
+		{name: "three comments stripped", input: "# meta 1\n# meta 2\n# meta 3\n\ncontent", expected: "content"},
+		{name: "single comment only", input: "# Title", expected: "# Title"},
+		{name: "blank line between comments preserves all", input: "# comment\n\n# another\ncontent", expected: "# comment\n\n# another\ncontent"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := stripLeadingComments(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func Test_stripLeadingCommentLines(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "no comments", input: "line one\nline two", expected: "line one\nline two"},
+		{name: "single comment stripped", input: "# desc\n---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+		{name: "two comments stripped", input: "# desc\n# more\n---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+		{name: "three comments stripped", input: "# a\n# b\n# c\ncontent", expected: "content"},
+		{name: "empty input", input: "", expected: ""},
+		{name: "only comments", input: "# one\n# two", expected: ""},
+		{name: "blank line stops stripping", input: "# comment\n\n# another\ncontent", expected: "# another\ncontent"},
+		{name: "whitespace line after comments trimmed", input: "# comment\n# more\n   \n---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+		{name: "no comments with frontmatter", input: "---\nmodel: haiku\n---\nbody", expected: "---\nmodel: haiku\n---\nbody"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := stripLeadingCommentLines(tc.input)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
@@ -543,7 +597,7 @@ func TestPromptLoader_Load_MixedCommentedAndCustomPrompts(t *testing.T) {
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "all-commented task should fall back")
 	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "all-commented codex should fall back")
 
-	// custom prompts are used as-is (markdown headers and comment lines preserved)
+	// custom prompts used as-is (single leading comment preserved, not a meta-block)
 	assert.Equal(t, "custom review first prompt", prompts.ReviewFirst)
 	assert.Equal(t, "# header comment\ncustom review second", prompts.ReviewSecond)
 	assert.Equal(t, "custom make plan", prompts.MakePlan)
