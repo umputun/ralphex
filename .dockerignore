@@ -29,8 +29,7 @@ Thumbs.db
 site/
 docs/
 
-# progress files
-progress*.txt
-
-# local config (should be mounted, not built into image)
+# local config and progress files (should be mounted, not built into image)
 .ralphex/
+progress.txt
+progress-*.txt

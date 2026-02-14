@@ -318,10 +318,10 @@ go run <ralphex-project-root>/cmd/ralphex --codex-only
 
 ```bash
 # live stream (use actual filename from ralphex output)
-tail -f progress-fix-issues.txt
+tail -f .ralphex/progress/progress-fix-issues.txt
 
 # recent activity
-tail -50 progress-*.txt
+tail -50 .ralphex/progress/progress-*.txt
 ```
 
 ## Development Workflow
@@ -331,7 +331,7 @@ tail -50 progress-*.txt
 1. Run unit tests: `make test`
 2. Run linter: `make lint`
 3. **MUST** run end-to-end test with toy project (see above)
-4. Monitor `tail -f progress-*.txt` to verify output streaming works
+4. Monitor `tail -f .ralphex/progress/progress-*.txt` to verify output streaming works
 
 Unit tests don't verify actual codex/claude integration or output formatting. The toy project test is the only way to verify streaming output works correctly.
 

@@ -90,12 +90,12 @@ ralphex \
 Run using Bash tool with `run_in_background: true`. **Save the task_id from the response** - needed for status checks later.
 
 **Determine progress filename** based on mode and plan selection:
-- Full mode + plan: `progress-{plan-stem}.txt`
-- Review mode + plan: `progress-{plan-stem}-review.txt`
-- Codex-only + plan: `progress-{plan-stem}-codex.txt`
-- Full mode + no plan: `progress.txt`
-- Review mode + no plan: `progress-review.txt`
-- Codex-only + no plan: `progress-codex.txt`
+- Full mode + plan: `.ralphex/progress/progress-{plan-stem}.txt`
+- Review mode + plan: `.ralphex/progress/progress-{plan-stem}-review.txt`
+- Codex-only + plan: `.ralphex/progress/progress-{plan-stem}-codex.txt`
+- Full mode + no plan: `.ralphex/progress/progress.txt`
+- Review mode + no plan: `.ralphex/progress/progress-review.txt`
+- Codex-only + no plan: `.ralphex/progress/progress-codex.txt`
 
 Where `{plan-stem}` is the plan filename without extension (e.g., `fix-bugs` from `fix-bugs.md`).
 

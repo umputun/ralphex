@@ -516,35 +516,38 @@ func (l *Logger) writeStdout(format string, args ...any) {
 	fmt.Fprintf(l.stdout, format, args...)
 }
 
-// getProgressFilename returns progress file path based on plan and mode.
+// progressDir is the directory for progress files within the project.
+const progressDir = ".ralphex/progress"
+
+// progressFilename returns progress file path based on plan and mode.
 func progressFilename(planFile, planDescription, mode string) string {
 	// plan mode uses sanitized plan description
 	if mode == "plan" && planDescription != "" {
 		sanitized := sanitizePlanName(planDescription)
-		return fmt.Sprintf("progress-plan-%s.txt", sanitized)
+		return filepath.Join(progressDir, fmt.Sprintf("progress-plan-%s.txt", sanitized))
 	}
 
 	if planFile != "" {
 		stem := strings.TrimSuffix(filepath.Base(planFile), ".md")
 		switch mode {
 		case "codex-only":
-			return fmt.Sprintf("progress-%s-codex.txt", stem)
+			return filepath.Join(progressDir, fmt.Sprintf("progress-%s-codex.txt", stem))
 		case "review":
-			return fmt.Sprintf("progress-%s-review.txt", stem)
+			return filepath.Join(progressDir, fmt.Sprintf("progress-%s-review.txt", stem))
 		default:
-			return fmt.Sprintf("progress-%s.txt", stem)
+			return filepath.Join(progressDir, fmt.Sprintf("progress-%s.txt", stem))
 		}
 	}
 
 	switch mode {
 	case "codex-only":
-		return "progress-codex.txt"
+		return filepath.Join(progressDir, "progress-codex.txt")
 	case "review":
-		return "progress-review.txt"
+		return filepath.Join(progressDir, "progress-review.txt")
 	case "plan":
-		return "progress-plan.txt"
+		return filepath.Join(progressDir, "progress-plan.txt")
 	default:
-		return "progress.txt"
+		return filepath.Join(progressDir, "progress.txt")
 	}
 }
 

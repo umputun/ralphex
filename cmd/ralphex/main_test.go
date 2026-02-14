@@ -386,6 +386,12 @@ func TestCheckClaudeDep(t *testing.T) {
 
 func TestCreateRunner(t *testing.T) {
 	t.Run("creates_runner_without_panic", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldWd, wdErr := os.Getwd()
+		require.NoError(t, wdErr)
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
 		cfg := &config.Config{IterationDelayMs: 5000, TaskRetryCount: 3, CodexEnabled: false}
 		o := opts{MaxIterations: 100, Debug: true, NoColor: true}
 
@@ -401,6 +407,12 @@ func TestCreateRunner(t *testing.T) {
 	})
 
 	t.Run("codex_only_mode_creates_runner_without_panic", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldWd, wdErr := os.Getwd()
+		require.NoError(t, wdErr)
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
 		cfg := &config.Config{CodexEnabled: false} // explicitly disabled in config
 		o := opts{MaxIterations: 50}
 

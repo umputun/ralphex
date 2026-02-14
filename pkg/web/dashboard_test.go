@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -36,6 +37,11 @@ func TestNewDashboard(t *testing.T) {
 
 func TestDashboard_Start_SingleSession(t *testing.T) {
 	tmpDir := t.TempDir()
+	oldWd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
 	progressPath := filepath.Join(tmpDir, "progress.txt")
 
 	// create mock base logger
@@ -75,6 +81,11 @@ func TestDashboard_Start_SingleSession(t *testing.T) {
 
 func TestDashboard_Start_MultiSession(t *testing.T) {
 	tmpDir := t.TempDir()
+	oldWd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
 	progressPath := filepath.Join(tmpDir, "progress.txt")
 
 	// create mock base logger

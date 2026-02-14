@@ -115,7 +115,7 @@ EOF
 
 echo "creating .gitignore..."
 cat > .gitignore << 'EOF'
-progress-*.txt
+.ralphex/progress/
 .bin/
 EOF
 

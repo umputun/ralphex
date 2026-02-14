@@ -193,7 +193,7 @@ Continue with plan implementation?
     No, exit
 ```
 
-After plan creation, you can choose to continue with immediate execution or exit to run ralphex later. Progress is logged to `progress-plan-<name>.txt`.
+After plan creation, you can choose to continue with immediate execution or exit to run ralphex later. Progress is logged to `.ralphex/progress/progress-plan-<name>.txt`.
 
 ## Installation
 
@@ -494,7 +494,7 @@ Custom prompt files support variable expansion. All variables use the `{{VARIABL
 | Variable | Description | Example value |
 |----------|-------------|---------------|
 | `{{PLAN_FILE}}` | Path to the plan file being executed | `docs/plans/feature.md` |
-| `{{PROGRESS_FILE}}` | Path to the progress log file | `progress-feature.txt` |
+| `{{PROGRESS_FILE}}` | Path to the progress log file | `.ralphex/progress/progress-feature.txt` |
 | `{{GOAL}}` | Human-readable goal description | `implementation of plan at docs/plans/feature.md` |
 | `{{DEFAULT_BRANCH}}` | Default branch name (detected from repo) | `main`, `master`, `origin/main` |
 | `{{agent:name}}` | Expands to Task tool instructions for the named agent | (see below) |
@@ -792,7 +792,7 @@ Yes, two approaches depending on the situation:
 
 **What's the difference between progress file and plan file?**
 
-Progress file (`progress-*.txt`) is a real-time execution log—tail it to monitor. Plan file tracks task state (`[ ]` vs `[x]`). To resume, re-run ralphex on the plan file; it finds incomplete tasks automatically.
+Progress file (`.ralphex/progress/progress-*.txt`) is a real-time execution log—tail it to monitor. Plan file tracks task state (`[ ]` vs `[x]`). To resume, re-run ralphex on the plan file; it finds incomplete tasks automatically.
 
 **Do I need to commit changes before running ralphex?**
 

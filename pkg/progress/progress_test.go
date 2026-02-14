@@ -38,14 +38,15 @@ func TestNewLogger(t *testing.T) {
 	tests := []struct {
 		name     string
 		cfg      Config
-		wantPath string
+		wantBase string
+		wantDir  string
 	}{
-		{name: "full mode with plan", cfg: Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}, wantPath: "progress-feature.txt"},
-		{name: "review mode with plan", cfg: Config{PlanFile: "docs/plans/feature.md", Mode: "review", Branch: "main"}, wantPath: "progress-feature-review.txt"},
-		{name: "codex-only mode with plan", cfg: Config{PlanFile: "docs/plans/feature.md", Mode: "codex-only", Branch: "main"}, wantPath: "progress-feature-codex.txt"},
-		{name: "full mode no plan", cfg: Config{Mode: "full", Branch: "main"}, wantPath: "progress.txt"},
-		{name: "review mode no plan", cfg: Config{Mode: "review", Branch: "main"}, wantPath: "progress-review.txt"},
-		{name: "codex-only mode no plan", cfg: Config{Mode: "codex-only", Branch: "main"}, wantPath: "progress-codex.txt"},
+		{name: "full mode with plan", cfg: Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}, wantBase: "progress-feature.txt", wantDir: ".ralphex/progress"},
+		{name: "review mode with plan", cfg: Config{PlanFile: "docs/plans/feature.md", Mode: "review", Branch: "main"}, wantBase: "progress-feature-review.txt", wantDir: ".ralphex/progress"},
+		{name: "codex-only mode with plan", cfg: Config{PlanFile: "docs/plans/feature.md", Mode: "codex-only", Branch: "main"}, wantBase: "progress-feature-codex.txt", wantDir: ".ralphex/progress"},
+		{name: "full mode no plan", cfg: Config{Mode: "full", Branch: "main"}, wantBase: "progress.txt", wantDir: ".ralphex/progress"},
+		{name: "review mode no plan", cfg: Config{Mode: "review", Branch: "main"}, wantBase: "progress-review.txt", wantDir: ".ralphex/progress"},
+		{name: "codex-only mode no plan", cfg: Config{Mode: "codex-only", Branch: "main"}, wantBase: "progress-codex.txt", wantDir: ".ralphex/progress"},
 	}
 
 	for _, tc := range tests {
@@ -60,7 +61,8 @@ func TestNewLogger(t *testing.T) {
 			require.NoError(t, err)
 			defer l.Close()
 
-			assert.Equal(t, tc.wantPath, filepath.Base(l.Path()))
+			assert.Equal(t, tc.wantBase, filepath.Base(l.Path()))
+			assert.Contains(t, l.Path(), tc.wantDir)
 
 			// verify header written
 			content, err := os.ReadFile(l.Path())
@@ -391,17 +393,17 @@ func TestGetProgressFilename(t *testing.T) {
 		mode            string
 		want            string
 	}{
-		{"full mode with plan", "docs/plans/feature.md", "", "full", "progress-feature.txt"},
-		{"review mode with plan", "docs/plans/feature.md", "", "review", "progress-feature-review.txt"},
-		{"codex-only mode with plan", "docs/plans/feature.md", "", "codex-only", "progress-feature-codex.txt"},
-		{"full mode no plan", "", "", "full", "progress.txt"},
-		{"review mode no plan", "", "", "review", "progress-review.txt"},
-		{"codex-only mode no plan", "", "", "codex-only", "progress-codex.txt"},
-		{"full with date prefix", "plans/2024-01-15-refactor.md", "", "full", "progress-2024-01-15-refactor.txt"},
-		{"plan mode with description", "", "implement caching", "plan", "progress-plan-implement-caching.txt"},
-		{"plan mode with complex description", "", "Add User Authentication!", "plan", "progress-plan-add-user-authentication.txt"},
-		{"plan mode no description", "", "", "plan", "progress-plan.txt"},
-		{"plan mode with special chars", "", "fix: bug #123", "plan", "progress-plan-fix-bug-123.txt"},
+		{"full mode with plan", "docs/plans/feature.md", "", "full", filepath.Join(progressDir, "progress-feature.txt")},
+		{"review mode with plan", "docs/plans/feature.md", "", "review", filepath.Join(progressDir, "progress-feature-review.txt")},
+		{"codex-only mode with plan", "docs/plans/feature.md", "", "codex-only", filepath.Join(progressDir, "progress-feature-codex.txt")},
+		{"full mode no plan", "", "", "full", filepath.Join(progressDir, "progress.txt")},
+		{"review mode no plan", "", "", "review", filepath.Join(progressDir, "progress-review.txt")},
+		{"codex-only mode no plan", "", "", "codex-only", filepath.Join(progressDir, "progress-codex.txt")},
+		{"full with date prefix", "plans/2024-01-15-refactor.md", "", "full", filepath.Join(progressDir, "progress-2024-01-15-refactor.txt")},
+		{"plan mode with description", "", "implement caching", "plan", filepath.Join(progressDir, "progress-plan-implement-caching.txt")},
+		{"plan mode with complex description", "", "Add User Authentication!", "plan", filepath.Join(progressDir, "progress-plan-add-user-authentication.txt")},
+		{"plan mode no description", "", "", "plan", filepath.Join(progressDir, "progress-plan.txt")},
+		{"plan mode with special chars", "", "fix: bug #123", "plan", filepath.Join(progressDir, "progress-plan-fix-bug-123.txt")},
 	}
 
 	for _, tc := range tests {
@@ -853,19 +855,19 @@ func TestLogger_PlanModeFilename(t *testing.T) {
 	tests := []struct {
 		name        string
 		cfg         Config
-		wantPath    string
+		wantBase    string
 		wantContent string
 	}{
 		{
 			name:        "plan mode with description",
 			cfg:         Config{Mode: "plan", PlanDescription: "implement caching", Branch: "main"},
-			wantPath:    "progress-plan-implement-caching.txt",
+			wantBase:    "progress-plan-implement-caching.txt",
 			wantContent: "Mode: plan",
 		},
 		{
 			name:        "plan mode without description",
 			cfg:         Config{Mode: "plan", Branch: "main"},
-			wantPath:    "progress-plan.txt",
+			wantBase:    "progress-plan.txt",
 			wantContent: "Mode: plan",
 		},
 	}
@@ -877,7 +879,8 @@ func TestLogger_PlanModeFilename(t *testing.T) {
 			require.NoError(t, err)
 			defer l.Close()
 
-			assert.Equal(t, tc.wantPath, filepath.Base(l.Path()))
+			assert.Equal(t, tc.wantBase, filepath.Base(l.Path()))
+			assert.Contains(t, l.Path(), ".ralphex/progress")
 
 			content, err := os.ReadFile(l.Path())
 			require.NoError(t, err)

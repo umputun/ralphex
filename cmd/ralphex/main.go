@@ -252,7 +252,7 @@ func run(ctx context.Context, o opts) error {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
 	}
-	if err := gitSvc.EnsureIgnored("progress*.txt", "progress-test.txt"); err != nil {
+	if err := gitSvc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
@@ -547,7 +547,7 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 // after plan creation, prompts user to continue with implementation or exit.
 func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	// ensure gitignore has progress files
-	if err := req.GitSvc.EnsureIgnored("progress*.txt", "progress-test.txt"); err != nil {
+	if err := req.GitSvc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 

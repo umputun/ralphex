@@ -485,16 +485,16 @@ func TestService_EnsureIgnored(t *testing.T) {
 		svc, err := NewService(dir, log)
 		require.NoError(t, err)
 
-		err = svc.EnsureIgnored("progress*.txt", "progress-test.txt")
+		err = svc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt")
 		require.NoError(t, err)
 		assert.Len(t, log.logs, 1)
-		assert.Contains(t, log.logs[0], "progress*.txt", "log message should contain pattern")
+		assert.Contains(t, log.logs[0], ".ralphex/progress/", "log message should contain pattern")
 
 		// verify pattern was added to .gitignore
 		gitignorePath := filepath.Join(dir, ".gitignore")
 		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
 		require.NoError(t, err)
-		assert.Contains(t, string(content), "progress*.txt")
+		assert.Contains(t, string(content), ".ralphex/progress/")
 	})
 
 	t.Run("does nothing if already ignored", func(t *testing.T) {
@@ -502,21 +502,25 @@ func TestService_EnsureIgnored(t *testing.T) {
 
 		// create gitignore with pattern
 		gitignorePath := filepath.Join(dir, ".gitignore")
-		err := os.WriteFile(gitignorePath, []byte("progress*.txt\n"), 0o600)
+		err := os.WriteFile(gitignorePath, []byte(".ralphex/progress/\n"), 0o600)
 		require.NoError(t, err)
 
 		log := &mockLogger{}
 		svc, err := NewService(dir, log)
 		require.NoError(t, err)
 
-		err = svc.EnsureIgnored("progress*.txt", "progress-test.txt")
+		// create probe path so git can check it
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".ralphex", "progress"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".ralphex", "progress", "progress-test.txt"), []byte("test"), 0o600))
+
+		err = svc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt")
 		require.NoError(t, err)
 		assert.Empty(t, log.logs, "log should not be called if already ignored")
 
 		// verify gitignore wasn't modified (no duplicate pattern)
 		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
 		require.NoError(t, err)
-		assert.Equal(t, "progress*.txt\n", string(content))
+		assert.Equal(t, ".ralphex/progress/\n", string(content))
 	})
 
 	t.Run("creates gitignore if missing", func(t *testing.T) {

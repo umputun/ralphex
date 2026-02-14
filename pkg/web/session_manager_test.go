@@ -853,6 +853,79 @@ Started: 2026-01-22 10:00:00
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 }
 
+func TestSessionManager_DiscoverRecursive_SubdirProgressFiles(t *testing.T) {
+	t.Run("discovers files in .ralphex/progress/ subdirectory", func(t *testing.T) {
+		root := t.TempDir()
+
+		// create .ralphex/progress/ subdirectory with progress files
+		progressDir := filepath.Join(root, ".ralphex", "progress")
+		require.NoError(t, os.MkdirAll(progressDir, 0o750))
+
+		path1 := filepath.Join(progressDir, "progress-feature-a.txt")
+		path2 := filepath.Join(progressDir, "progress-feature-b.txt")
+		createProgressFile(t, path1, "docs/plans/feature-a.md", "feature-a", "full")
+		createProgressFile(t, path2, "docs/plans/feature-b.md", "feature-b", "review")
+
+		m := NewSessionManager()
+		defer m.Close()
+
+		ids, err := m.DiscoverRecursive(root)
+		require.NoError(t, err)
+		assert.Len(t, ids, 2)
+
+		// verify sessions were created with correct metadata
+		id1 := sessionIDFromPath(path1)
+		id2 := sessionIDFromPath(path2)
+		assert.Contains(t, ids, id1)
+		assert.Contains(t, ids, id2)
+
+		s1 := m.Get(id1)
+		require.NotNil(t, s1)
+		assert.Equal(t, "docs/plans/feature-a.md", s1.GetMetadata().PlanPath)
+
+		s2 := m.Get(id2)
+		require.NotNil(t, s2)
+		assert.Equal(t, "docs/plans/feature-b.md", s2.GetMetadata().PlanPath)
+	})
+
+	t.Run("discovers files in both root and .ralphex/progress/ simultaneously", func(t *testing.T) {
+		root := t.TempDir()
+
+		// create progress file in root (old location)
+		oldPath := filepath.Join(root, "progress-old-plan.txt")
+		createProgressFile(t, oldPath, "docs/plans/old-plan.md", "old-branch", "full")
+
+		// create progress file in .ralphex/progress/ (new location)
+		progressDir := filepath.Join(root, ".ralphex", "progress")
+		require.NoError(t, os.MkdirAll(progressDir, 0o750))
+		newPath := filepath.Join(progressDir, "progress-new-plan.txt")
+		createProgressFile(t, newPath, "docs/plans/new-plan.md", "new-branch", "review")
+
+		m := NewSessionManager()
+		defer m.Close()
+
+		ids, err := m.DiscoverRecursive(root)
+		require.NoError(t, err)
+		assert.Len(t, ids, 2, "should find files in both old and new locations")
+
+		// verify old-location session
+		oldID := sessionIDFromPath(oldPath)
+		assert.Contains(t, ids, oldID)
+		oldSession := m.Get(oldID)
+		require.NotNil(t, oldSession)
+		assert.Equal(t, "docs/plans/old-plan.md", oldSession.GetMetadata().PlanPath)
+		assert.Equal(t, "old-branch", oldSession.GetMetadata().Branch)
+
+		// verify new-location session
+		newID := sessionIDFromPath(newPath)
+		assert.Contains(t, ids, newID)
+		newSession := m.Get(newID)
+		require.NotNil(t, newSession)
+		assert.Equal(t, "docs/plans/new-plan.md", newSession.GetMetadata().PlanPath)
+		assert.Equal(t, "new-branch", newSession.GetMetadata().Branch)
+	})
+}
+
 func TestParseProgressHeaderLargeBuffer(t *testing.T) {
 	// test that lines larger than 64KB (default bufio.Scanner limit) are handled
 	t.Run("handles lines larger than default scanner buffer", func(t *testing.T) {
