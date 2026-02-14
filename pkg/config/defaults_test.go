@@ -863,6 +863,93 @@ func TestDefaultsInstaller_AskYesNo(t *testing.T) {
 	}
 }
 
+func TestDumpDefaults(t *testing.T) {
+	t.Run("creates_all_files", func(t *testing.T) {
+		tmpDir := filepath.Join(t.TempDir(), "dump")
+
+		err := DumpDefaults(tmpDir)
+		require.NoError(t, err)
+
+		// verify config exists and is raw (not all-commented)
+		data, err := os.ReadFile(filepath.Join(tmpDir, "config")) //nolint:gosec // test
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "claude_command")
+		stripped := stripComments(string(data))
+		assert.NotEmpty(t, strings.TrimSpace(stripped), "config should have raw (uncommented) content")
+
+		// verify prompts directory has files
+		promptEntries, err := os.ReadDir(filepath.Join(tmpDir, "prompts"))
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(promptEntries), 4, "should have prompt files")
+
+		// verify agents directory has files
+		agentEntries, err := os.ReadDir(filepath.Join(tmpDir, "agents"))
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(agentEntries), 5, "should have agent files")
+	})
+
+	t.Run("prompt_content_is_raw", func(t *testing.T) {
+		tmpDir := filepath.Join(t.TempDir(), "dump")
+		require.NoError(t, DumpDefaults(tmpDir))
+
+		// check that at least one prompt file has raw content (not all-commented)
+		data, err := os.ReadFile(filepath.Join(tmpDir, "prompts", "task.txt")) //nolint:gosec // test
+		require.NoError(t, err)
+		stripped := stripComments(string(data))
+		assert.NotEmpty(t, strings.TrimSpace(stripped), "task.txt should have raw content")
+	})
+
+	t.Run("agent_content_is_raw", func(t *testing.T) {
+		tmpDir := filepath.Join(t.TempDir(), "dump")
+		require.NoError(t, DumpDefaults(tmpDir))
+
+		data, err := os.ReadFile(filepath.Join(tmpDir, "agents", "quality.txt")) //nolint:gosec // test
+		require.NoError(t, err)
+		stripped := stripComments(string(data))
+		assert.NotEmpty(t, strings.TrimSpace(stripped), "quality.txt should have raw content")
+	})
+
+	t.Run("error_on_invalid_path", func(t *testing.T) {
+		// use a file as parent to force MkdirAll failure
+		tmpDir := t.TempDir()
+		blockingFile := filepath.Join(tmpDir, "blocker")
+		require.NoError(t, os.WriteFile(blockingFile, []byte("file"), 0o600))
+
+		err := DumpDefaults(filepath.Join(blockingFile, "subdir"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "create dir")
+	})
+}
+
+func TestDefaultsInstaller_DumpEmbeddedDir(t *testing.T) {
+	installer := &defaultsInstaller{embedFS: defaultsFS}
+
+	t.Run("dumps_prompts", func(t *testing.T) {
+		destDir := filepath.Join(t.TempDir(), "prompts")
+		err := installer.dumpEmbeddedDir(destDir, "defaults/prompts")
+		require.NoError(t, err)
+
+		entries, err := os.ReadDir(destDir)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(entries), 4)
+
+		// verify files are raw (not commented out)
+		for _, entry := range entries {
+			data, err := os.ReadFile(filepath.Join(destDir, entry.Name())) //nolint:gosec // test
+			require.NoError(t, err)
+			stripped := stripComments(string(data))
+			assert.NotEmpty(t, strings.TrimSpace(stripped), "%s should have raw content", entry.Name())
+		}
+	})
+
+	t.Run("error_on_invalid_embed_path", func(t *testing.T) {
+		destDir := filepath.Join(t.TempDir(), "out")
+		err := installer.dumpEmbeddedDir(destDir, "nonexistent/path")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read embedded dir")
+	})
+}
+
 func Test_commentOutContent(t *testing.T) {
 	tests := []struct {
 		name     string

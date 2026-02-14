@@ -238,6 +238,8 @@ Variables are also expanded inside agent content, so custom agents can use `{{DE
 - Edit files in `~/.config/ralphex/agents/` to modify agent prompts
 - Add new `.txt` files to create custom agents
 - Run `ralphex --reset` to interactively restore defaults, or delete ALL `.txt` files manually
+- Run `ralphex --dump-defaults <dir>` to extract raw embedded defaults for comparison or merging
+- Use `/ralphex-update` skill for smart merging of updated defaults into customized configs
 - Alternatively, reference agents installed in your Claude Code directly in prompt files (like `qa-expert`, `go-smells-expert`)
 
 ## Testing

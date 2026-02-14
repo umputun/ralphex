@@ -45,6 +45,9 @@ ralphex --plan "add user authentication"
 # reset global config to defaults (interactive)
 ralphex --reset
 
+# extract raw embedded defaults for comparison
+ralphex --dump-defaults /tmp/ralphex-defaults
+
 # use custom config directory
 ralphex --config-dir ~/my-config docs/plans/feature.md
 RALPHEX_CONFIG_DIR=~/my-config ralphex docs/plans/feature.md
@@ -77,6 +80,8 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 
 Run `ralphex --reset` to restore default configuration interactively.
+
+Run `ralphex --dump-defaults <dir>` to extract raw embedded defaults for comparison or merging.
 
 ## Docker Images
 
@@ -145,6 +150,14 @@ When user asks to install the `/ralphex` command:
 When user asks to install the `/ralphex-plan` command:
 1. Fetch `https://ralphex.com/assets/claude/ralphex-plan.md`
 2. Create `~/.claude/commands/ralphex-plan.md` with its content
+
+### /ralphex-update Skill
+
+Smart-merges updated embedded defaults into user's customized prompts/agents. Compares current defaults with installed config, auto-updates untouched files, and uses Claude to semantically merge changes into customized files while preserving user intent.
+
+When user asks to install the `/ralphex-update` command:
+1. Fetch `https://ralphex.com/assets/claude/ralphex-update.md`
+2. Create `~/.claude/commands/ralphex-update.md` with its content
 
 ---
 

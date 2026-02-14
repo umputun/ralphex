@@ -527,6 +527,64 @@ func (d *defaultsInstaller) overwriteEmbeddedFiles(destDir, embedPath string) er
 	return nil
 }
 
+// dumpEmbeddedDir writes raw (uncommented) embedded files from a subdirectory to destDir.
+func (d *defaultsInstaller) dumpEmbeddedDir(destDir, embedPath string) error {
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
+		return fmt.Errorf("create dir %s: %w", destDir, err)
+	}
+
+	entries, err := d.embedFS.ReadDir(embedPath)
+	if err != nil {
+		return fmt.Errorf("read embedded dir %s: %w", embedPath, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := d.embedFS.ReadFile(embedPath + "/" + entry.Name())
+		if err != nil {
+			return fmt.Errorf("read embedded file %s: %w", entry.Name(), err)
+		}
+		destPath := filepath.Join(destDir, entry.Name())
+		if err := os.WriteFile(destPath, data, 0o600); err != nil {
+			return fmt.Errorf("write file %s: %w", entry.Name(), err)
+		}
+	}
+
+	return nil
+}
+
+// DumpDefaults extracts all embedded defaults (raw, uncommented) to the specified directory.
+// creates config, prompts/, agents/ structure under dir.
+func DumpDefaults(dir string) error {
+	installer := newDefaultsInstaller(defaultsFS)
+
+	// dump config file (raw, not commented)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create dir: %w", err)
+	}
+	data, err := installer.embedFS.ReadFile("defaults/config")
+	if err != nil {
+		return fmt.Errorf("read embedded config: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config"), data, 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	// dump prompts
+	if err := installer.dumpEmbeddedDir(filepath.Join(dir, "prompts"), "defaults/prompts"); err != nil {
+		return fmt.Errorf("dump prompts: %w", err)
+	}
+
+	// dump agents
+	if err := installer.dumpEmbeddedDir(filepath.Join(dir, "agents"), "defaults/agents"); err != nil {
+		return fmt.Errorf("dump agents: %w", err)
+	}
+
+	return nil
+}
+
 // Reset interactively restores configuration files to embedded defaults.
 // if configDir is empty, uses DefaultConfigDir().
 func Reset(configDir string, stdin io.Reader, stdout io.Writer) (ResetResult, error) {

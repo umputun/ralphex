@@ -42,6 +42,7 @@ type opts struct {
 	Port            int      `short:"p" long:"port" default:"8080" description:"web dashboard port"`
 	Watch           []string `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
 	Reset           bool     `long:"reset" description:"interactively reset global config to embedded defaults"`
+	DumpDefaults    string   `long:"dump-defaults" description:"extract raw embedded defaults to specified directory"`
 	ConfigDir       string   `long:"config-dir" env:"RALPHEX_CONFIG_DIR" description:"custom config directory"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
@@ -151,16 +152,9 @@ func run(ctx context.Context, o opts) error {
 		return err
 	}
 
-	// handle --reset flag early (before full config load)
-	// reset completes, then continues with normal execution if other args provided
-	if o.Reset {
-		if err := runReset(o.ConfigDir, os.Stdin, os.Stdout); err != nil {
-			return err
-		}
-		// if reset was the only operation, exit successfully
-		if isResetOnly(o) {
-			return nil
-		}
+	// handle early-exit flags (before full config load)
+	if done, err := handleEarlyFlags(o); err != nil || done {
+		return err
 	}
 
 	// load config first to get custom command paths
@@ -656,6 +650,34 @@ func runReset(configDir string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("reset config: %w", err)
 	}
+	return nil
+}
+
+// handleEarlyFlags processes flags that should run before full config load (--reset, --dump-defaults).
+// returns (true, nil) if an early exit occurred, (true, err) on error, or (false, nil) to continue.
+func handleEarlyFlags(o opts) (bool, error) {
+	if o.Reset {
+		if err := runReset(o.ConfigDir, os.Stdin, os.Stdout); err != nil {
+			return true, err
+		}
+		if isResetOnly(o) {
+			return true, nil
+		}
+	}
+
+	if o.DumpDefaults != "" {
+		return true, dumpDefaults(o.DumpDefaults)
+	}
+
+	return false, nil
+}
+
+// dumpDefaults extracts raw embedded defaults to the specified directory.
+func dumpDefaults(dir string) error {
+	if err := config.DumpDefaults(dir); err != nil {
+		return fmt.Errorf("dump defaults: %w", err)
+	}
+	fmt.Printf("defaults extracted to %s\n", dir)
 	return nil
 }
 
