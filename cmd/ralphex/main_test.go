@@ -987,6 +987,50 @@ func TestDumpDefaults(t *testing.T) {
 	})
 }
 
+func TestHandleEarlyFlags(t *testing.T) {
+	t.Run("no_flags_continues", func(t *testing.T) {
+		done, err := handleEarlyFlags(opts{})
+		require.NoError(t, err)
+		assert.False(t, done)
+	})
+
+	t.Run("dump_defaults_exits", func(t *testing.T) {
+		tmpDir := filepath.Join(t.TempDir(), "defaults")
+		done, err := handleEarlyFlags(opts{DumpDefaults: tmpDir})
+		require.NoError(t, err)
+		assert.True(t, done)
+		assert.FileExists(t, filepath.Join(tmpDir, "config"))
+	})
+
+	t.Run("dump_defaults_error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		blocker := filepath.Join(tmpDir, "blocker")
+		require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+
+		done, err := handleEarlyFlags(opts{DumpDefaults: filepath.Join(blocker, "sub")})
+		require.Error(t, err)
+		assert.True(t, done)
+	})
+}
+
+func TestIsResetOnly(t *testing.T) {
+	t.Run("reset_only", func(t *testing.T) {
+		assert.True(t, isResetOnly(opts{Reset: true}))
+	})
+
+	t.Run("reset_with_plan_file", func(t *testing.T) {
+		assert.False(t, isResetOnly(opts{Reset: true, PlanFile: "plan.md"}))
+	})
+
+	t.Run("reset_with_dump_defaults", func(t *testing.T) {
+		assert.False(t, isResetOnly(opts{Reset: true, DumpDefaults: "/tmp/dir"}))
+	})
+
+	t.Run("reset_with_review", func(t *testing.T) {
+		assert.False(t, isResetOnly(opts{Reset: true, Review: true}))
+	})
+}
+
 func TestResolveVersion(t *testing.T) {
 	t.Run("ldflags_set", func(t *testing.T) {
 		orig := revision

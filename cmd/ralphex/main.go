@@ -685,7 +685,7 @@ func dumpDefaults(dir string) error {
 // this allows reset to work standalone (exit after reset) while also supporting
 // combined usage like "ralphex --reset docs/plans/feature.md".
 func isResetOnly(o opts) bool {
-	return o.PlanFile == "" && !o.Review && !o.ExternalOnly && !o.CodexOnly && !o.TasksOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0
+	return o.PlanFile == "" && !o.Review && !o.ExternalOnly && !o.CodexOnly && !o.TasksOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0 && o.DumpDefaults == ""
 }
 
 // startInterruptWatcher prints immediate feedback when context is canceled.

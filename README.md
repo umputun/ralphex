@@ -879,10 +879,11 @@ ralphex works standalone from the terminal. Optionally, you can add slash comman
 |---------|-------------|
 | `/ralphex` | Launch and monitor ralphex execution with interactive mode/plan selection |
 | `/ralphex-plan` | Create structured implementation plans with guided context gathering |
+| `/ralphex-update` | Smart-merge updated embedded defaults into customized prompts/agents |
 
 ### Installation
 
-The ralphex CLI is the primary interface. Claude Code skills (`/ralphex` and `/ralphex-plan`) are optional convenience commands.
+The ralphex CLI is the primary interface. Claude Code skills (`/ralphex`, `/ralphex-plan`, and `/ralphex-update`) are optional convenience commands.
 
 **Via Plugin Marketplace (Recommended)**
 
@@ -901,6 +902,7 @@ Benefits: Auto-updates when marketplace refreshes (at Claude Code startup).
 The slash command definitions are hosted at:
 - [`/ralphex`](https://ralphex.com/assets/claude/ralphex.md)
 - [`/ralphex-plan`](https://ralphex.com/assets/claude/ralphex-plan.md)
+- [`/ralphex-update`](https://ralphex.com/assets/claude/ralphex-update.md)
 
 To install, ask Claude Code to "install ralphex slash commands" or manually copy the files to `~/.claude/commands/`.
 
