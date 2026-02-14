@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
-	"strings"
 	"syscall"
 	"time"
 
@@ -628,18 +627,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	// ask user if they want to continue with plan implementation
-	answer, askErr := collector.AskQuestion(ctx, "Continue with plan implementation?",
-		[]string{"Yes, execute plan", "No, exit"})
-	if askErr != nil {
-		// user canceled or error - treat as exit (context canceled is expected)
-		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "warning: input error: %v\n", askErr)
-		}
-		return nil
-	}
-
-	// check if user wants to continue
-	if !strings.HasPrefix(answer, "Yes") {
+	if !input.AskYesNo(ctx, "Continue with plan implementation?", os.Stdin, os.Stdout) {
 		return nil
 	}
 

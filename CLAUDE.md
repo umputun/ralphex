@@ -110,7 +110,7 @@ The `--plan "description"` flag enables interactive plan creation:
 
 - Claude explores codebase and asks clarifying questions
 - Questions use QUESTION signal with JSON: `{"question": "...", "options": [...]}`
-- User answers via fzf picker (or numbered fallback)
+- User answers via fzf picker (or numbered fallback); an "Other" option allows typing a custom answer
 - Q&A history stored in progress file for context
 - When ready, Claude emits PLAN_DRAFT signal with full plan content for user review
 - User can Accept, Revise (with feedback), or Reject the draft

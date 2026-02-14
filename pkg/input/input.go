@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -15,7 +16,7 @@ import (
 	"github.com/charmbracelet/glamour"
 )
 
-// ReadLineResult holds the result of reading a line
+// readLineResult holds the result of reading a line
 type readLineResult struct {
 	line string
 	err  error
@@ -49,7 +50,8 @@ func ReadLineWithContext(ctx context.Context, reader *bufio.Reader) (string, err
 // Collector provides interactive input collection for plan creation.
 type Collector interface {
 	// AskQuestion presents a question with options and returns the selected answer.
-	// Returns the selected option text or error if selection fails.
+	// An "Other" option is appended automatically; if chosen, the user types a free-text answer.
+	// Returns the selected or typed text, or error if selection fails.
 	AskQuestion(ctx context.Context, question string, options []string) (string, error)
 
 	// AskDraftReview presents a plan draft for review with Accept/Revise/Reject options.
@@ -62,6 +64,7 @@ type TerminalCollector struct {
 	stdin   io.Reader // for testing, nil uses os.Stdin
 	stdout  io.Writer // for testing, nil uses os.Stdout
 	noColor bool      // if true, skip glamour rendering
+	noFzf   bool      // if true, skip fzf even if available (for testing)
 }
 
 // NewTerminalCollector creates a new TerminalCollector with specified options.
@@ -83,23 +86,40 @@ func (c *TerminalCollector) getStdout() io.Writer {
 	return os.Stdout
 }
 
+// otherOption is the sentinel value appended to option lists for custom answers.
+const otherOption = "Other (type your own answer)"
+
 // AskQuestion presents options using fzf if available, otherwise falls back to numbered selection.
 func (c *TerminalCollector) AskQuestion(ctx context.Context, question string, options []string) (string, error) {
 	if len(options) == 0 {
 		return "", errors.New("no options provided")
 	}
 
+	// append "Other" option so the user can type a custom answer.
+	// filter out any incoming option matching the sentinel to avoid collision
+	// (options are model-generated and could theoretically contain it).
+	opts := make([]string, 0, len(options)+1)
+	for _, o := range options {
+		if o != otherOption {
+			opts = append(opts, o)
+		}
+	}
+	opts = append(opts, otherOption)
+
 	// try fzf first
-	if hasFzf() {
-		return c.selectWithFzf(ctx, question, options)
+	if c.hasFzf() {
+		return c.selectWithFzf(ctx, question, opts)
 	}
 
 	// fallback to numbered selection
-	return c.selectWithNumbers(ctx, question, options)
+	return c.selectWithNumbers(ctx, question, opts)
 }
 
 // hasFzf checks if fzf is available in PATH.
-func hasFzf() bool {
+func (c *TerminalCollector) hasFzf() bool {
+	if c.noFzf {
+		return false
+	}
 	_, err := exec.LookPath("fzf")
 	return err == nil
 }
@@ -114,10 +134,14 @@ func (c *TerminalCollector) selectWithFzf(ctx context.Context, question string, 
 
 	output, err := cmd.Output()
 	if err != nil {
-		// fzf returns exit code 130 when user presses Escape
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 130 {
-			return "", errors.New("selection canceled")
+		if errors.As(err, &exitErr) {
+			switch exitErr.ExitCode() {
+			case 130: // user pressed Escape
+				return "", errors.New("selection canceled")
+			case 1: // no match found — fall back to custom answer
+				return c.readCustomAnswer(ctx)
+			}
 		}
 		return "", fmt.Errorf("fzf selection failed: %w", err)
 	}
@@ -125,6 +149,10 @@ func (c *TerminalCollector) selectWithFzf(ctx context.Context, question string, 
 	selected := strings.TrimSpace(string(output))
 	if selected == "" {
 		return "", errors.New("no selection made")
+	}
+
+	if selected == otherOption {
+		return c.readCustomAnswer(ctx)
 	}
 
 	return selected, nil
@@ -161,7 +189,40 @@ func (c *TerminalCollector) selectWithNumbers(ctx context.Context, question stri
 		return "", fmt.Errorf("selection out of range: %d (must be 1-%d)", num, len(options))
 	}
 
-	return options[num-1], nil
+	selected := options[num-1]
+	if selected == otherOption {
+		return c.readCustomAnswer(ctx, reader)
+	}
+
+	return selected, nil
+}
+
+// readCustomAnswer prompts the user for free-text input and returns the answer.
+// when reader is provided, it reuses the existing bufio.Reader to avoid data loss
+// with piped input (creating a second bufio.NewReader on the same io.Reader would
+// lose data already buffered by the first reader).
+func (c *TerminalCollector) readCustomAnswer(ctx context.Context, reader ...*bufio.Reader) (string, error) {
+	stdout := c.getStdout()
+
+	_, _ = fmt.Fprint(stdout, "Enter your answer: ")
+
+	var r *bufio.Reader
+	if len(reader) > 0 && reader[0] != nil {
+		r = reader[0]
+	} else {
+		r = bufio.NewReader(c.getStdin())
+	}
+	line, err := ReadLineWithContext(ctx, r)
+	if err != nil {
+		return "", fmt.Errorf("read custom answer: %w", err)
+	}
+
+	answer := strings.TrimSpace(line)
+	if answer == "" {
+		return "", errors.New("custom answer cannot be empty")
+	}
+
+	return answer, nil
 }
 
 // AskYesNo prompts with [y/N] and returns true for yes.
@@ -171,9 +232,10 @@ func AskYesNo(ctx context.Context, prompt string, stdin io.Reader, stdout io.Wri
 	reader := bufio.NewReader(stdin)
 	line, err := ReadLineWithContext(ctx, reader)
 	if err != nil {
-		// EOF (Ctrl+D), context canceled (Ctrl+C), or read error
-		// print newline so subsequent output doesn't appear on the same line
-		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout) // newline so subsequent output doesn't appear on the same line
+		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("[WARN] input read error, defaulting to 'no': %v", err)
+		}
 		return false
 	}
 	answer := strings.TrimSpace(strings.ToLower(line))

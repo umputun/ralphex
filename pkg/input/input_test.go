@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,6 +58,173 @@ func TestTerminalCollector_selectWithNumbers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTerminalCollector_selectWithNumbers_otherOption(t *testing.T) {
+	// these tests use selectWithNumbers directly with the "Other" option
+	// already appended, which mirrors what AskQuestion does before dispatching
+	opts := []string{"A", "B", otherOption}
+
+	t.Run("other option displayed in list", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("1\n"), stdout: &stdout}
+
+		got, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+
+		require.NoError(t, err)
+		assert.Equal(t, "A", got)
+
+		output := stdout.String()
+		assert.Contains(t, output, "Other (type your own answer)")
+	})
+
+	t.Run("selecting other prompts for custom answer", func(t *testing.T) {
+		var stdout bytes.Buffer
+		reader := &sequentialLineReader{lines: []string{"3", "my custom answer"}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout}
+
+		got, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+
+		require.NoError(t, err)
+		assert.Equal(t, "my custom answer", got)
+
+		output := stdout.String()
+		assert.Contains(t, output, "Enter your answer:")
+	})
+
+	t.Run("selecting other with empty answer returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		reader := &sequentialLineReader{lines: []string{"3", ""}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout}
+
+		_, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "custom answer cannot be empty")
+	})
+
+	t.Run("selecting other with whitespace-only answer returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		reader := &sequentialLineReader{lines: []string{"3", "   "}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout}
+
+		_, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "custom answer cannot be empty")
+	})
+}
+
+func TestTerminalCollector_readCustomAnswer(t *testing.T) {
+	t.Run("reads valid answer", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("my answer\n"), stdout: &stdout}
+
+		got, err := c.readCustomAnswer(context.Background())
+
+		require.NoError(t, err)
+		assert.Equal(t, "my answer", got)
+		assert.Contains(t, stdout.String(), "Enter your answer:")
+	})
+
+	t.Run("trims whitespace", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("  trimmed  \n"), stdout: &stdout}
+
+		got, err := c.readCustomAnswer(context.Background())
+
+		require.NoError(t, err)
+		assert.Equal(t, "trimmed", got)
+	})
+
+	t.Run("empty answer returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("\n"), stdout: &stdout}
+
+		_, err := c.readCustomAnswer(context.Background())
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "custom answer cannot be empty")
+	})
+
+	t.Run("EOF returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader(""), stdout: &stdout}
+
+		_, err := c.readCustomAnswer(context.Background())
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read custom answer")
+	})
+
+	t.Run("context canceled returns error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("answer\n"), stdout: &stdout}
+
+		_, err := c.readCustomAnswer(ctx)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read custom answer")
+	})
+}
+
+func TestTerminalCollector_AskQuestion_appendsOther(t *testing.T) {
+	t.Run("select regular option", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("1\n"), stdout: &stdout, noFzf: true}
+
+		got, err := c.AskQuestion(context.Background(), "Pick one", []string{"A", "B"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "A", got)
+		assert.Contains(t, stdout.String(), "Other (type your own answer)")
+	})
+
+	t.Run("select other option and type answer", func(t *testing.T) {
+		var stdout bytes.Buffer
+		reader := &sequentialLineReader{lines: []string{"3", "custom value"}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noFzf: true}
+
+		got, err := c.AskQuestion(context.Background(), "Pick one", []string{"A", "B"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "custom value", got)
+		assert.Contains(t, stdout.String(), "Enter your answer:")
+	})
+}
+
+func TestTerminalCollector_AskQuestion_sentinelCollision(t *testing.T) {
+	// if an incoming option matches otherOption exactly, it should be filtered out
+	// so the user sees only one "Other" entry at the end
+	t.Run("collision filtered and regular option works", func(t *testing.T) {
+		var stdout bytes.Buffer
+		c := &TerminalCollector{stdin: strings.NewReader("2\n"), stdout: &stdout, noFzf: true}
+
+		got, err := c.AskQuestion(context.Background(), "Pick one",
+			[]string{"A", otherOption, "B"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "B", got) // "B" is option 2 after filtering
+
+		output := stdout.String()
+		assert.Contains(t, output, "1) A")
+		assert.Contains(t, output, "2) B")
+		assert.Contains(t, output, "3) Other (type your own answer)")
+	})
+
+	t.Run("collision filtered and other option triggers custom input", func(t *testing.T) {
+		var stdout bytes.Buffer
+		reader := &sequentialLineReader{lines: []string{"3", "typed answer"}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noFzf: true}
+
+		got, err := c.AskQuestion(context.Background(), "Pick one",
+			[]string{"A", otherOption, "B"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "typed answer", got)
+	})
 }
 
 func TestTerminalCollector_AskQuestion_emptyOptions(t *testing.T) {
@@ -154,6 +322,14 @@ func TestAskYesNo(t *testing.T) {
 		got := AskYesNo(ctx, prompt, strings.NewReader("y\n"), &stdout)
 		assert.False(t, got)
 	})
+
+	t.Run("context_deadline_exceeded_returns_false", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+		var stdout bytes.Buffer
+		got := AskYesNo(ctx, prompt, strings.NewReader("y\n"), &stdout)
+		assert.False(t, got)
+	})
 }
 
 func TestTerminalCollector_AskDraftReview(t *testing.T) {
@@ -181,8 +357,6 @@ func TestTerminalCollector_AskDraftReview(t *testing.T) {
 	t.Run("revise action with feedback", func(t *testing.T) {
 		var stdout bytes.Buffer
 		// select option 2 (Revise), then provide feedback
-		// use a larger buffer to ensure both reads work
-		input := "2\nPlease add more details to the implementation steps\n"
 		reader := &sequentialLineReader{lines: []string{"2", "Please add more details to the implementation steps"}}
 		c := &TerminalCollector{stdin: reader, stdout: &stdout, noColor: true}
 
@@ -194,7 +368,6 @@ func TestTerminalCollector_AskDraftReview(t *testing.T) {
 
 		output := stdout.String()
 		assert.Contains(t, output, "Enter revision feedback")
-		_ = input // used for documentation
 	})
 
 	t.Run("reject action", func(t *testing.T) {

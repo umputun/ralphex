@@ -182,6 +182,7 @@ QUESTION: Which cache backend?
   > Redis
     In-memory
     File-based
+    Other (type your own answer)
 
 [10:30:45] ANSWER: Redis
 [10:31:00] continuing plan creation...
