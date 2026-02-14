@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.11.1 - 2026-02-13
+
+### Improved
+
+- Add "Other" option for custom answers in plan creation questions (#103)
+
+### Fixed
+
+- Strip leading meta-comment blocks from loaded prompts (#104)
+- Add YYYY-MM-DD date prefix to plan filenames in ralphex-plan skill
+
 ## v0.11.0 - 2026-02-13
 
 ### Added
