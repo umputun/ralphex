@@ -19,7 +19,7 @@ type processGroupCleanup struct {
 
 // setupProcessGroup is a no-op on Windows since process groups work differently.
 func setupProcessGroup(_ *exec.Cmd) {
-	// windows doesn't support Setpgid, process groups are handled differently
+	// windows doesn't support unix session/process group APIs, handled differently
 }
 
 // newProcessGroupCleanup creates a cleanup handler for the given command.
