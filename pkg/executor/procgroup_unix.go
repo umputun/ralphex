@@ -24,11 +24,14 @@ type processGroupCleanup struct {
 	err  error
 }
 
-// setupProcessGroup configures command to run in its own process group.
-// This allows killing all descendant processes when cleanup is needed.
+// setupProcessGroup configures command to run in its own session and process group.
+// uses Setsid to create a new session, fully detaching the child from the parent's
+// controlling terminal. this prevents SIGTTIN/SIGTTOU signals that stop the child
+// process group when its descendants (e.g. shell, gopls) attempt terminal I/O.
+// the child becomes session leader of its own process group, so killing via -pid still works.
 // Must be called before cmd.Start().
 func setupProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 
 // newProcessGroupCleanup creates a cleanup handler for the given command.
