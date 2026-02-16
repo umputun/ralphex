@@ -3,7 +3,10 @@ package input
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +41,7 @@ func TestTerminalCollector_selectWithNumbers(t *testing.T) {
 			var stdout bytes.Buffer
 			c := &TerminalCollector{stdin: strings.NewReader(tc.input), stdout: &stdout}
 
-			got, err := c.selectWithNumbers(context.Background(), tc.question, tc.options)
+			got, err := c.selectWithNumbers(context.Background(), tc.question, tc.options, nil)
 
 			if tc.wantErr != "" {
 				require.Error(t, err)
@@ -69,7 +72,7 @@ func TestTerminalCollector_selectWithNumbers_otherOption(t *testing.T) {
 		var stdout bytes.Buffer
 		c := &TerminalCollector{stdin: strings.NewReader("1\n"), stdout: &stdout}
 
-		got, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+		got, err := c.selectWithNumbers(context.Background(), "Pick one", opts, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, "A", got)
@@ -83,7 +86,7 @@ func TestTerminalCollector_selectWithNumbers_otherOption(t *testing.T) {
 		reader := &sequentialLineReader{lines: []string{"3", "my custom answer"}}
 		c := &TerminalCollector{stdin: reader, stdout: &stdout}
 
-		got, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+		got, err := c.selectWithNumbers(context.Background(), "Pick one", opts, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, "my custom answer", got)
@@ -97,7 +100,7 @@ func TestTerminalCollector_selectWithNumbers_otherOption(t *testing.T) {
 		reader := &sequentialLineReader{lines: []string{"3", ""}}
 		c := &TerminalCollector{stdin: reader, stdout: &stdout}
 
-		_, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+		_, err := c.selectWithNumbers(context.Background(), "Pick one", opts, nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "custom answer cannot be empty")
@@ -108,7 +111,7 @@ func TestTerminalCollector_selectWithNumbers_otherOption(t *testing.T) {
 		reader := &sequentialLineReader{lines: []string{"3", "   "}}
 		c := &TerminalCollector{stdin: reader, stdout: &stdout}
 
-		_, err := c.selectWithNumbers(context.Background(), "Pick one", opts)
+		_, err := c.selectWithNumbers(context.Background(), "Pick one", opts, nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "custom answer cannot be empty")
@@ -120,7 +123,7 @@ func TestTerminalCollector_readCustomAnswer(t *testing.T) {
 		var stdout bytes.Buffer
 		c := &TerminalCollector{stdin: strings.NewReader("my answer\n"), stdout: &stdout}
 
-		got, err := c.readCustomAnswer(context.Background())
+		got, err := c.readCustomAnswer(context.Background(), nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, "my answer", got)
@@ -131,7 +134,7 @@ func TestTerminalCollector_readCustomAnswer(t *testing.T) {
 		var stdout bytes.Buffer
 		c := &TerminalCollector{stdin: strings.NewReader("  trimmed  \n"), stdout: &stdout}
 
-		got, err := c.readCustomAnswer(context.Background())
+		got, err := c.readCustomAnswer(context.Background(), nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, "trimmed", got)
@@ -141,7 +144,7 @@ func TestTerminalCollector_readCustomAnswer(t *testing.T) {
 		var stdout bytes.Buffer
 		c := &TerminalCollector{stdin: strings.NewReader("\n"), stdout: &stdout}
 
-		_, err := c.readCustomAnswer(context.Background())
+		_, err := c.readCustomAnswer(context.Background(), nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "custom answer cannot be empty")
@@ -151,7 +154,7 @@ func TestTerminalCollector_readCustomAnswer(t *testing.T) {
 		var stdout bytes.Buffer
 		c := &TerminalCollector{stdin: strings.NewReader(""), stdout: &stdout}
 
-		_, err := c.readCustomAnswer(context.Background())
+		_, err := c.readCustomAnswer(context.Background(), nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "read custom answer")
@@ -163,7 +166,7 @@ func TestTerminalCollector_readCustomAnswer(t *testing.T) {
 		var stdout bytes.Buffer
 		c := &TerminalCollector{stdin: strings.NewReader("answer\n"), stdout: &stdout}
 
-		_, err := c.readCustomAnswer(ctx)
+		_, err := c.readCustomAnswer(ctx, nil)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "read custom answer")
@@ -249,7 +252,7 @@ func TestTerminalCollector_selectWithNumbers_outputFormat(t *testing.T) {
 	var stdout bytes.Buffer
 	c := &TerminalCollector{stdin: strings.NewReader("2\n"), stdout: &stdout}
 
-	_, err := c.selectWithNumbers(context.Background(), "Which database?", []string{"PostgreSQL", "MySQL", "SQLite"})
+	_, err := c.selectWithNumbers(context.Background(), "Which database?", []string{"PostgreSQL", "MySQL", "SQLite"}, nil)
 	require.NoError(t, err)
 
 	output := stdout.String()
@@ -264,7 +267,7 @@ func TestTerminalCollector_selectWithNumbers_readError(t *testing.T) {
 	// use an empty reader that will return EOF immediately
 	c := &TerminalCollector{stdin: strings.NewReader(""), stdout: &bytes.Buffer{}}
 
-	_, err := c.selectWithNumbers(context.Background(), "Pick one", []string{"A", "B"})
+	_, err := c.selectWithNumbers(context.Background(), "Pick one", []string{"A", "B"}, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read input")
@@ -281,6 +284,18 @@ func TestNewTerminalCollector(t *testing.T) {
 		c := NewTerminalCollector(false)
 		assert.NotNil(t, c)
 		assert.False(t, c.noColor)
+	})
+}
+
+func TestTerminalCollector_getStdinStdout(t *testing.T) {
+	t.Run("getStdin returns os.Stdin when nil", func(t *testing.T) {
+		c := &TerminalCollector{}
+		assert.Equal(t, os.Stdin, c.getStdin())
+	})
+
+	t.Run("getStdout returns os.Stdout when nil", func(t *testing.T) {
+		c := &TerminalCollector{}
+		assert.Equal(t, os.Stdout, c.getStdout())
 	})
 }
 
@@ -351,6 +366,7 @@ func TestTerminalCollector_AskDraftReview(t *testing.T) {
 		assert.Contains(t, output, "Review the plan")
 		assert.Contains(t, output, "Accept")
 		assert.Contains(t, output, "Revise")
+		assert.Contains(t, output, "Interactive review")
 		assert.Contains(t, output, "Reject")
 	})
 
@@ -372,7 +388,7 @@ func TestTerminalCollector_AskDraftReview(t *testing.T) {
 
 	t.Run("reject action", func(t *testing.T) {
 		var stdout bytes.Buffer
-		c := &TerminalCollector{stdin: strings.NewReader("3\n"), stdout: &stdout, noColor: true}
+		c := &TerminalCollector{stdin: strings.NewReader("4\n"), stdout: &stdout, noColor: true}
 
 		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
 
@@ -458,6 +474,73 @@ func TestTerminalCollector_AskDraftReview(t *testing.T) {
 		output := stdout.String()
 		assert.Contains(t, output, "Plan Draft")
 	})
+
+	t.Run("interactive review with changes returns revise and diff", func(t *testing.T) {
+		var stdout bytes.Buffer
+		// select option 3 (Interactive review)
+		c := &TerminalCollector{
+			stdin:   strings.NewReader("3\n"),
+			stdout:  &stdout,
+			noColor: true,
+			editorFunc: func(_ context.Context, content string) (string, error) {
+				// simulate editing: add a line
+				return content + "\n## Added Section\n", nil
+			},
+		}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionRevise, action)
+		assert.Contains(t, feedback, "user reviewed the plan in an editor and made changes")
+		assert.Contains(t, feedback, "added lines (+)")
+		assert.Contains(t, feedback, "--- original")
+		assert.Contains(t, feedback, "+++ annotated")
+		assert.Contains(t, feedback, "+## Added Section")
+	})
+
+	t.Run("interactive review no changes re-prompts then accept", func(t *testing.T) {
+		var stdout bytes.Buffer
+		// first select option 3 (Interactive review) - editor returns same content
+		// then select option 1 (Accept) on re-prompt
+		reader := &sequentialLineReader{lines: []string{"3", "1"}}
+		c := &TerminalCollector{
+			stdin:   reader,
+			stdout:  &stdout,
+			noColor: true,
+			editorFunc: func(_ context.Context, content string) (string, error) {
+				return content, nil // no changes
+			},
+		}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionAccept, action)
+		assert.Empty(t, feedback)
+		assert.Contains(t, stdout.String(), "no changes detected")
+	})
+
+	t.Run("interactive review editor error re-prompts then accept", func(t *testing.T) {
+		var stdout bytes.Buffer
+		// first select option 3 (Interactive review) - editor returns error
+		// then select option 1 (Accept) on re-prompt
+		reader := &sequentialLineReader{lines: []string{"3", "1"}}
+		c := &TerminalCollector{
+			stdin:   reader,
+			stdout:  &stdout,
+			noColor: true,
+			editorFunc: func(_ context.Context, _ string) (string, error) {
+				return "", errors.New("editor crashed")
+			},
+		}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionAccept, action)
+		assert.Empty(t, feedback)
+	})
 }
 
 // eofAfterReader returns data on first read, then EOF on subsequent reads
@@ -488,6 +571,165 @@ func (r *sequentialLineReader) Read(p []byte) (n int, err error) {
 	line := r.lines[r.index] + "\n"
 	r.index++
 	return copy(p, line), nil
+}
+
+func TestTerminalCollector_computeDiff(t *testing.T) {
+	c := &TerminalCollector{}
+
+	t.Run("identical content returns empty string", func(t *testing.T) {
+		content := "line 1\nline 2\nline 3\n"
+		diff, err := c.computeDiff(content, content)
+		require.NoError(t, err)
+		assert.Empty(t, diff)
+	})
+
+	t.Run("changed content produces unified diff", func(t *testing.T) {
+		original := "line 1\nline 2\nline 3\n"
+		edited := "line 1\nline 2 modified\nline 3\n"
+		diff, err := c.computeDiff(original, edited)
+		require.NoError(t, err)
+		assert.NotEmpty(t, diff)
+		assert.Contains(t, diff, "--- original")
+		assert.Contains(t, diff, "+++ annotated")
+		assert.Contains(t, diff, "-line 2")
+		assert.Contains(t, diff, "+line 2 modified")
+	})
+
+	t.Run("added lines produce diff", func(t *testing.T) {
+		original := "line 1\nline 2\n"
+		edited := "line 1\nline 2\nline 3\n"
+		diff, err := c.computeDiff(original, edited)
+		require.NoError(t, err)
+		assert.NotEmpty(t, diff)
+		assert.Contains(t, diff, "+line 3")
+	})
+
+	t.Run("removed lines produce diff", func(t *testing.T) {
+		original := "line 1\nline 2\nline 3\n"
+		edited := "line 1\nline 3\n"
+		diff, err := c.computeDiff(original, edited)
+		require.NoError(t, err)
+		assert.NotEmpty(t, diff)
+		assert.Contains(t, diff, "-line 2")
+	})
+
+	t.Run("empty original and non-empty edited", func(t *testing.T) {
+		diff, err := c.computeDiff("", "new content\n")
+		require.NoError(t, err)
+		assert.NotEmpty(t, diff)
+		assert.Contains(t, diff, "+new content")
+	})
+
+	t.Run("both empty returns empty string", func(t *testing.T) {
+		diff, err := c.computeDiff("", "")
+		require.NoError(t, err)
+		assert.Empty(t, diff)
+	})
+}
+
+func TestTerminalCollector_openEditor(t *testing.T) {
+	t.Run("writes content and reads it back", func(t *testing.T) {
+		// use "true" as editor — it does nothing, file stays unchanged
+		t.Setenv("EDITOR", "true")
+		t.Setenv("VISUAL", "")
+
+		c := &TerminalCollector{}
+		content := "# Plan\n\nSome content here.\n"
+		result, err := c.openEditor(context.Background(), content)
+		require.NoError(t, err)
+		assert.Equal(t, content, result)
+	})
+
+	t.Run("VISUAL takes precedence over EDITOR", func(t *testing.T) {
+		t.Setenv("VISUAL", "true")
+		t.Setenv("EDITOR", "false") // would fail if used
+
+		c := &TerminalCollector{}
+		result, err := c.openEditor(context.Background(), "test content\n")
+		require.NoError(t, err)
+		assert.Equal(t, "test content\n", result)
+	})
+
+	t.Run("editor not found returns error", func(t *testing.T) {
+		t.Setenv("VISUAL", "")
+		t.Setenv("EDITOR", "nonexistent-editor-binary-xyz")
+
+		c := &TerminalCollector{}
+		_, err := c.openEditor(context.Background(), "content")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+		assert.Contains(t, err.Error(), "$EDITOR")
+		assert.Contains(t, err.Error(), "nonexistent-editor-binary-xyz")
+	})
+
+	t.Run("editorFunc propagates context error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+
+		c := &TerminalCollector{editorFunc: func(_ context.Context, _ string) (string, error) {
+			return "", ctx.Err()
+		}}
+		_, err := c.openEditor(ctx, "content")
+		require.Error(t, err)
+	})
+
+	t.Run("editor with arguments", func(t *testing.T) {
+		// use "env true" as a multi-word editor command to verify argument splitting
+		t.Setenv("VISUAL", "")
+		t.Setenv("EDITOR", "env true")
+
+		c := &TerminalCollector{}
+		_, err := c.openEditor(context.Background(), "content\n")
+		require.NoError(t, err)
+	})
+
+	t.Run("editor exits with error returns error", func(t *testing.T) {
+		// "false" exits with code 1
+		t.Setenv("VISUAL", "")
+		t.Setenv("EDITOR", "false")
+
+		c := &TerminalCollector{}
+		_, err := c.openEditor(context.Background(), "content")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "run editor")
+	})
+
+	t.Run("editorFunc bypasses real editor", func(t *testing.T) {
+		t.Setenv("VISUAL", "")
+		t.Setenv("EDITOR", "")
+
+		c := &TerminalCollector{editorFunc: func(_ context.Context, content string) (string, error) {
+			return content, nil
+		}}
+		result, err := c.openEditor(context.Background(), "content via editorFunc\n")
+		require.NoError(t, err)
+		assert.Equal(t, "content via editorFunc\n", result)
+	})
+
+	t.Run("whitespace-padded EDITOR is trimmed", func(t *testing.T) {
+		// exercises the real editor-launch path with whitespace-padded env vars.
+		// verifies strings.TrimSpace correctly handles padded editor values.
+		t.Setenv("VISUAL", "")
+		t.Setenv("EDITOR", "  true  ")
+
+		c := &TerminalCollector{}
+		result, err := c.openEditor(context.Background(), "whitespace env test")
+		require.NoError(t, err)
+		assert.Equal(t, "whitespace env test", result)
+	})
+
+	t.Run("temp file is cleaned up", func(t *testing.T) {
+		t.Setenv("VISUAL", "")
+		t.Setenv("EDITOR", "true")
+
+		c := &TerminalCollector{}
+		result, err := c.openEditor(context.Background(), "cleanup test content")
+		require.NoError(t, err)
+		assert.Equal(t, "cleanup test content", result)
+		// verify no ralphex-plan temp files remain after openEditor returns
+		matches, _ := filepath.Glob(os.TempDir() + "/ralphex-plan-*.md")
+		assert.Empty(t, matches, "temp file should be cleaned up, found: %v", matches)
+	})
 }
 
 func TestTerminalCollector_renderMarkdown(t *testing.T) {

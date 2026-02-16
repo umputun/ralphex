@@ -9,6 +9,7 @@ require (
 	github.com/go-pkgz/notify v1.3.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/playwright-community/playwright-go v0.5200.1
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tmaxmax/go-sse v0.11.0
 	golang.org/x/sys v0.41.0
@@ -47,7 +48,6 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/slack-go/slack v0.17.3 // indirect

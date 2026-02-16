@@ -77,7 +77,7 @@ CRITICAL: After emitting PLAN_DRAFT, STOP immediately. Do not continue. Do not w
 
 The loop will:
 1. Display the draft to the user with terminal rendering
-2. Ask the user to Accept, Revise, or Reject
+2. Ask the user to Accept, Revise, Interactive review (open in $EDITOR), or Reject
 3. Run another iteration with the user's decision
 
 **Handling user responses:**
@@ -88,6 +88,7 @@ If user ACCEPTS (progress file contains "DRAFT REVIEW: accept"):
 
 If user requests REVISION (progress file contains "DRAFT REVIEW: revise" and "FEEDBACK:"):
 - Read the feedback from the progress file
+- Feedback may be free-form text (from "Revise") or a unified diff with interpretation instructions (from "Interactive review" where the user edited the plan in $EDITOR). Both formats indicate what the user wants changed — apply the requested modifications
 - Modify the plan based on the feedback
 - Emit a new PLAN_DRAFT with the updated plan
 - STOP and wait for next review
