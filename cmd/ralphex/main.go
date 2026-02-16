@@ -523,15 +523,14 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 		return
 	}
 
-	planStr := info.PlanFile
-	if planStr == "" {
-		planStr = "(no plan - review only)"
-	}
 	modeStr := ""
 	if info.Mode != processor.ModeFull {
 		modeStr = fmt.Sprintf(" (%s mode)", info.Mode)
 	}
-	colors.Info().Printf("starting ralphex loop: %s (max %d iterations)%s\n", planStr, info.MaxIterations, modeStr)
+	colors.Info().Printf("starting ralphex loop (max %d iterations)%s\n", info.MaxIterations, modeStr)
+	if info.PlanFile != "" {
+		colors.Info().Printf("plan: %s\n", toRelPath(info.PlanFile))
+	}
 	colors.Info().Printf("branch: %s\n", info.Branch)
 	colors.Info().Printf("progress log: %s\n\n", info.ProgressPath)
 }
@@ -606,11 +605,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// print completion message with plan file path if found
 	if planFile != "" {
-		relPath, relErr := filepath.Rel(".", planFile)
-		if relErr != nil {
-			relPath = planFile
-		}
-		req.Colors.Info().Printf("\nplan creation completed in %s, created %s\n", elapsed, relPath)
+		req.Colors.Info().Printf("\nplan creation completed in %s, created %s\n", elapsed, toRelPath(planFile))
 	} else {
 		req.Colors.Info().Printf("\nplan creation completed in %s\n", elapsed)
 	}
@@ -679,6 +674,15 @@ func dumpDefaults(dir string) error {
 	}
 	fmt.Printf("defaults extracted to %s\n", dir)
 	return nil
+}
+
+// toRelPath converts an absolute path to relative (from cwd). returns original on error.
+func toRelPath(p string) string {
+	rel, err := filepath.Rel(".", p)
+	if err != nil {
+		return p
+	}
+	return rel
 }
 
 // isResetOnly returns true if --reset was the only meaningful flag/arg specified.

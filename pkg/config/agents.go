@@ -109,11 +109,15 @@ func (al *agentLoader) loadFileWithFallback(path, filename string) (string, erro
 	}
 	content := strings.TrimSpace(normalizeCRLF(string(data)))
 	// check if file has actual prompt body (strip comments only for emptiness check)
-	if _, body := parseOptions(strings.TrimSpace(stripComments(content))); body != "" {
+	stripped := strings.TrimSpace(stripComments(content))
+	opts, body := parseOptions(stripped)
+	if body != "" {
 		return content, nil
 	}
-	// fall back to embedded default, frontmatter options (if any) are dropped
-	log.Printf("[WARN] agent %s: no prompt body, falling back to embedded default (frontmatter options dropped)", filename)
+	// warn only when frontmatter options are being dropped; silent fallback for all-commented files
+	if opts.Model != "" || opts.AgentType != "" {
+		log.Printf("[WARN] agent %s: no prompt body, falling back to embedded default (frontmatter options dropped)", filename)
+	}
 	return al.loadFromEmbedFS(filename)
 }
 
