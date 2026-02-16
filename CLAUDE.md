@@ -113,8 +113,9 @@ The `--plan "description"` flag enables interactive plan creation:
 - User answers via fzf picker (or numbered fallback); an "Other" option allows typing a custom answer
 - Q&A history stored in progress file for context
 - When ready, Claude emits PLAN_DRAFT signal with full plan content for user review
-- User can Accept, Revise (with feedback), or Reject the draft
-- If revised, feedback is passed to Claude for plan modifications
+- User can Accept, Revise (with feedback), Interactive review, or Reject the draft
+- Interactive review opens `$EDITOR` with the plan content; on save, a unified diff is computed and fed back as revision feedback
+- If revised (manually or via interactive review), feedback is passed to Claude for plan modifications
 - Loop continues until user accepts and Claude emits PLAN_READY signal
 - Plan file written to docs/plans/
 - After completion, prompts user: "Continue with plan implementation?"

@@ -39,7 +39,8 @@ ralphex --codex-only
 # tasks-only mode (run only task phase, skip all reviews)
 ralphex --tasks-only docs/plans/feature.md
 
-# interactive plan creation
+# interactive plan creation — Claude asks questions, generates draft,
+# user reviews with accept/revise/interactive review ($EDITOR)/reject
 ralphex --plan "add user authentication"
 
 # reset global config to defaults (interactive)

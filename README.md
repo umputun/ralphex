@@ -190,7 +190,7 @@ The `--plan` flag provides a simpler integrated experience:
 ralphex --plan "add health check endpoint"
 ```
 
-Claude explores your codebase, asks clarifying questions via a terminal picker (fzf or numbered fallback), and generates a complete plan file in `docs/plans/`.
+Claude explores your codebase, asks clarifying questions via a terminal picker (fzf or numbered fallback), and generates a complete plan file in `docs/plans/`. When reviewing the draft, you can accept, revise with text feedback, open it in `$EDITOR` for interactive annotation, or reject it.
 
 **Example session:**
 ```
