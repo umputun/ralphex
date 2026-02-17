@@ -658,6 +658,21 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 		assert.Contains(t, prompt, "(no progress file available)")
 	})
 
+	t.Run("uses custom plans dir from config", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		appCfg.PlansDir = "custom/plans"
+		r := &Runner{cfg: Config{
+			PlanDescription: "test plan",
+			ProgressPath:    "progress.txt",
+			AppConfig:       appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildPlanPrompt()
+
+		assert.Contains(t, prompt, "custom/plans/")
+		assert.NotContains(t, prompt, "{{PLANS_DIR}}")
+	})
+
 	t.Run("preserves prompt structure", func(t *testing.T) {
 		appCfg := testAppConfig(t)
 		r := &Runner{cfg: Config{

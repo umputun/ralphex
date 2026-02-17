@@ -6,6 +6,7 @@
 #   {{PLAN_DESCRIPTION}} - user's original request for what to implement
 #   {{PROGRESS_FILE}} - path to progress file with Q&A history
 #   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
+#   {{PLANS_DIR}} - plans directory (default: docs/plans)
 
 You are helping create an implementation plan for: {{PLAN_DESCRIPTION}}
 
@@ -15,7 +16,7 @@ IMPORTANT: Read the progress file first to see any questions you already asked a
 
 ## Step 0: Check for Existing Plan
 
-FIRST, check if a plan file already exists in docs/plans/ matching this request.
+FIRST, check if a plan file already exists in {{PLANS_DIR}}/ matching this request.
 If a plan file for this feature already exists:
 - Output <<<RALPHEX:PLAN_READY>>> immediately
 - Do NOT modify the existing plan
@@ -103,7 +104,7 @@ This step executes ONLY after the user accepts your draft (progress file contain
 
 Write the accepted plan to disk:
 
-1. Create a plan file at docs/plans/YYYY-MM-DD-<slug>.md where <slug> is derived from the description
+1. Create a plan file at {{PLANS_DIR}}/YYYY-MM-DD-<slug>.md where <slug> is derived from the description
 2. Use this structure:
 
 ---

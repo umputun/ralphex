@@ -65,7 +65,7 @@ func (r *Runner) getProgressFileRef() string {
 }
 
 // replaceBaseVariables replaces common template variables in prompts.
-// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}
+// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}}
 // this is the core replacement function used by all prompt builders.
 func (r *Runner) replaceBaseVariables(prompt string) string {
 	result := prompt
@@ -73,6 +73,7 @@ func (r *Runner) replaceBaseVariables(prompt string) string {
 	result = strings.ReplaceAll(result, "{{PROGRESS_FILE}}", r.getProgressFileRef())
 	result = strings.ReplaceAll(result, "{{GOAL}}", r.getGoal())
 	result = strings.ReplaceAll(result, "{{DEFAULT_BRANCH}}", r.getDefaultBranch())
+	result = strings.ReplaceAll(result, "{{PLANS_DIR}}", r.getPlansDir())
 	return result
 }
 
@@ -166,6 +167,14 @@ func (r *Runner) getDefaultBranch() string {
 		return "master"
 	}
 	return r.cfg.DefaultBranch
+}
+
+// getPlansDir returns the plans directory or "docs/plans" as fallback.
+func (r *Runner) getPlansDir() string {
+	if r.cfg.AppConfig == nil || r.cfg.AppConfig.PlansDir == "" {
+		return "docs/plans"
+	}
+	return r.cfg.AppConfig.PlansDir
 }
 
 // buildCodexEvaluationPrompt creates the prompt for claude to evaluate codex review output.
