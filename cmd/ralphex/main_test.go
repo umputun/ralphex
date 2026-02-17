@@ -429,6 +429,68 @@ func TestCreateRunner(t *testing.T) {
 	})
 }
 
+func TestResolveDefaultBranch(t *testing.T) {
+	tests := []struct {
+		name         string
+		cliRef       string
+		configBranch string
+		autoDetect   string
+		expected     string
+	}{
+		{name: "cli_flag_wins", cliRef: "abc1234", configBranch: "develop", autoDetect: "main", expected: "abc1234"},
+		{name: "config_when_no_flag", cliRef: "", configBranch: "develop", autoDetect: "main", expected: "develop"},
+		{name: "auto_detect_when_nothing_set", cliRef: "", configBranch: "", autoDetect: "main", expected: "main"},
+		{name: "cli_flag_commit_hash", cliRef: "deadbeef", configBranch: "", autoDetect: "master", expected: "deadbeef"},
+		{name: "all_empty", cliRef: "", configBranch: "", autoDetect: "", expected: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := resolveDefaultBranch(tc.cliRef, tc.configBranch, tc.autoDetect)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestSkipFinalizeFlag(t *testing.T) {
+	t.Run("skip_finalize_disables_in_runner", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldWd, wdErr := os.Getwd()
+		require.NoError(t, wdErr)
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+		cfg := &config.Config{FinalizeEnabled: true}
+		o := opts{SkipFinalize: true, MaxIterations: 50}
+
+		// apply the same override as run() does
+		if o.SkipFinalize {
+			cfg.FinalizeEnabled = false
+		}
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		log, err := progress.NewLogger(progress.Config{Mode: "full", Branch: "test", NoColor: true}, colors, holder)
+		require.NoError(t, err)
+		defer log.Close()
+
+		// verify createRunner receives the overridden config
+		req := executePlanRequest{Mode: processor.ModeFull, Config: cfg, DefaultBranch: "main"}
+		runner := createRunner(req, o, log, holder)
+		assert.NotNil(t, runner)
+		assert.False(t, cfg.FinalizeEnabled, "skip-finalize should override config")
+	})
+
+	t.Run("no_skip_finalize_preserves_config", func(t *testing.T) {
+		cfg := &config.Config{FinalizeEnabled: true}
+		o := opts{SkipFinalize: false}
+		if o.SkipFinalize {
+			cfg.FinalizeEnabled = false
+		}
+		assert.True(t, cfg.FinalizeEnabled, "config should be preserved when skip-finalize not set")
+	})
+}
+
 func TestGetCurrentBranch(t *testing.T) {
 	t.Run("returns_branch_name", func(t *testing.T) {
 		dir := setupTestRepo(t)

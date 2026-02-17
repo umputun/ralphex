@@ -34,6 +34,8 @@ type opts struct {
 	ExternalOnly    bool     `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
 	CodexOnly       bool     `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
 	TasksOnly       bool     `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
+	BaseRef         string   `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
+	SkipFinalize    bool     `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
 	PlanDescription string   `long:"plan" description:"create plan interactively (enter plan description)"`
 	Debug           bool     `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor         bool     `long:"no-color" description:"disable color output"`
@@ -199,10 +201,9 @@ func run(ctx context.Context, o opts) error {
 		return ensureErr
 	}
 
-	// use configured default branch, or auto-detect from git
-	defaultBranch := cfg.DefaultBranch
-	if defaultBranch == "" {
-		defaultBranch = gitSvc.GetDefaultBranch()
+	defaultBranch := resolveDefaultBranch(o.BaseRef, cfg.DefaultBranch, gitSvc.GetDefaultBranch())
+	if o.SkipFinalize {
+		cfg.FinalizeEnabled = false
 	}
 
 	mode := determineMode(o)
@@ -718,6 +719,17 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// resolveDefaultBranch returns the default branch using precedence: CLI flag > config > auto-detect.
+func resolveDefaultBranch(cliRef, configBranch, autoDetected string) string {
+	if cliRef != "" {
+		return cliRef
+	}
+	if configBranch != "" {
+		return configBranch
+	}
+	return autoDetected
 }
 
 // ensureRepoHasCommits checks that the repository has at least one commit.

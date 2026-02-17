@@ -428,6 +428,8 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
 | `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
+| `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
+| `--skip-finalize` | Skip finalize step even if enabled in config | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
 | `-p, --port` | Web dashboard port (used with `--serve`) | 8080 |

@@ -39,6 +39,10 @@ ralphex --codex-only
 # tasks-only mode (run only task phase, skip all reviews)
 ralphex --tasks-only docs/plans/feature.md
 
+# override default branch for review diffs (useful for comparing against specific ref)
+ralphex --review --base-ref develop
+ralphex --review --base-ref abc1234 --skip-finalize
+
 # interactive plan creation — Claude asks questions, generates draft,
 # user reviews with accept/revise/interactive review ($EDITOR)/reject
 ralphex --plan "add user authentication"
@@ -72,7 +76,7 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 - `{{PLAN_FILE}}` - path to plan file
 - `{{PROGRESS_FILE}}` - path to progress log
 - `{{GOAL}}` - goal description
-- `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.), overridable via `default_branch` config option
+- `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.), overridable via `--base-ref` CLI flag or `default_branch` config option
 - `{{agent:name}}` - expands to Task tool instructions for named agent
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in custom_review.txt)
 
