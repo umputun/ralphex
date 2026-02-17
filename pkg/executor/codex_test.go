@@ -663,20 +663,22 @@ func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
 }
 
 func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
-	// test that stderr lines larger than 64KB (default bufio.Scanner limit) are handled
-	// this was the "token too long" bug fix
+	// test that stderr lines of arbitrary length are handled without limit
 
 	tests := []struct {
 		name string
 		size int
 	}{
 		{"100KB line", 100 * 1024},
-		{"500KB line", 500 * 1024},
 		{"1MB line", 1024 * 1024},
+		{"65MB line (exceeds old scanner limit)", 65 * 1024 * 1024},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.size >= 65*1024*1024 && testing.Short() {
+				t.Skip("skipping 65MB allocation in short mode")
+			}
 			// create a large line in header block (which gets displayed)
 			largeContent := strings.Repeat("x", tc.size)
 			stderr := "--------\n" + largeContent + "\n--------\n"

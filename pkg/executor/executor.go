@@ -2,7 +2,6 @@
 package executor
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,10 +14,6 @@ import (
 )
 
 //go:generate moq -out mocks/command_runner.go -pkg mocks -skip-ensure -fmt goimports . CommandRunner
-
-// MaxScannerBuffer is the maximum buffer size for bufio.Scanner.
-// set to 64MB to handle large outputs (e.g., diffs of large JSON files).
-const MaxScannerBuffer = 64 * 1024 * 1024
 
 // Result holds execution result with output and detected signal.
 type Result struct {
@@ -232,29 +227,19 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 }
 
 // parseStream reads and parses the JSON stream from claude CLI.
-// checks ctx.Done() on each iteration so cancellation is not blocked by slow pipe reads.
+// uses readLines internally, so there is no line length limit.
+// checks ctx.Done() between reads so cancellation is not blocked by slow pipe reads.
 func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
 	var output strings.Builder
 	var signal string
 
-	scanner := bufio.NewScanner(r)
-	// increase buffer size for large JSON lines (large diffs with parallel agents)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, MaxScannerBuffer)
-
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return Result{Output: output.String(), Signal: signal, Error: fmt.Errorf("stream read: %w", ctx.Err())}
-		default:
-		}
-		line := scanner.Text()
+	err := readLines(ctx, r, func(line string) {
 		if line == "" {
-			continue
+			return
 		}
 
 		var event streamEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if jsonErr := json.Unmarshal([]byte(line), &event); jsonErr != nil {
 			// print non-JSON lines as-is
 			if e.Debug {
 				fmt.Printf("[debug] non-JSON line: %s\n", line)
@@ -264,7 +249,7 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
 			if e.OutputHandler != nil {
 				e.OutputHandler(line + "\n")
 			}
-			continue
+			return
 		}
 
 		text := e.extractText(&event)
@@ -279,9 +264,9 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
 				signal = sig
 			}
 		}
-	}
+	})
 
-	if err := scanner.Err(); err != nil {
+	if err != nil {
 		return Result{Output: output.String(), Signal: signal, Error: fmt.Errorf("stream read: %w", err)}
 	}
 

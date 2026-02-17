@@ -234,26 +234,40 @@ func TestCustomExecutor_Run_ErrorPatterns(t *testing.T) {
 }
 
 func TestCustomExecutor_Run_LargeOutput(t *testing.T) {
-	// test that large output lines (>64KB default bufio.Scanner limit) are handled
-	largeContent := strings.Repeat("x", 200*1024) // 200KB
-
-	mock := &mockCustomRunner{
-		runFunc: func(_ context.Context, _, _ string) (io.Reader, func() error, error) {
-			return strings.NewReader(largeContent + "\n"), func() error { return nil }, nil
-		},
+	tests := []struct {
+		name string
+		size int
+	}{
+		{name: "200KB line", size: 200 * 1024},
+		{name: "65MB line exceeds old scanner limit", size: 65 * 1024 * 1024},
 	}
 
-	var captured []string
-	e := &CustomExecutor{
-		Script:        "/path/to/script.sh",
-		runner:        mock,
-		OutputHandler: func(text string) { captured = append(captured, text) },
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.size >= 65*1024*1024 && testing.Short() {
+				t.Skip("skipping 65MB allocation in short mode")
+			}
+			largeContent := strings.Repeat("x", tc.size)
+
+			mock := &mockCustomRunner{
+				runFunc: func(_ context.Context, _, _ string) (io.Reader, func() error, error) {
+					return strings.NewReader(largeContent + "\n"), func() error { return nil }, nil
+				},
+			}
+
+			var captured []string
+			e := &CustomExecutor{
+				Script:        "/path/to/script.sh",
+				runner:        mock,
+				OutputHandler: func(text string) { captured = append(captured, text) },
+			}
+
+			result := e.Run(context.Background(), "prompt")
+
+			require.NoError(t, result.Error)
+			assert.Equal(t, largeContent+"\n", result.Output, "large output should be fully captured")
+		})
 	}
-
-	result := e.Run(context.Background(), "prompt")
-
-	require.NoError(t, result.Error)
-	assert.Equal(t, largeContent+"\n", result.Output, "large output should be fully captured")
 }
 
 func TestCustomExecutor_processOutput_readError(t *testing.T) {

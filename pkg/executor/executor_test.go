@@ -481,8 +481,7 @@ func TestFilterEnv(t *testing.T) {
 }
 
 func TestClaudeExecutor_parseStream_largeLines(t *testing.T) {
-	// test that lines larger than 64KB (default bufio.Scanner limit) are handled
-	// this was the "token too long" bug fix
+	// test that lines of arbitrary length are handled without limit
 
 	tests := []struct {
 		name string
@@ -492,10 +491,14 @@ func TestClaudeExecutor_parseStream_largeLines(t *testing.T) {
 		{"500KB line", 500 * 1024},
 		{"1MB line", 1024 * 1024},
 		{"2MB line", 2 * 1024 * 1024},
+		{"65MB line", 65 * 1024 * 1024},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.size >= 65*1024*1024 && testing.Short() {
+				t.Skip("skipping 65MB allocation in short mode")
+			}
 			// create a large text payload
 			largeText := strings.Repeat("x", tc.size)
 			jsonLine := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + largeText + `"}}`

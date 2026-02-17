@@ -45,49 +45,49 @@
 - Create: `pkg/executor/linereader.go`
 - Create: `pkg/executor/linereader_test.go`
 
-- [ ] create `readLines(ctx context.Context, r io.Reader, handler func(string))` in `pkg/executor/linereader.go`
-- [ ] use `bufio.NewReader` with `ReadString('\n')` internally, no line length limit
-- [ ] handle `io.EOF` correctly (process final line without trailing newline)
-- [ ] return error on context cancellation or read errors (not EOF)
-- [ ] strip trailing `\n` and `\r\n` from lines before passing to handler, matching Scanner.ScanLines behavior
-- [ ] write tests in `linereader_test.go`: basic multi-line reading
-- [ ] write tests: context cancellation mid-read
-- [ ] write tests: line >64MB (verify no limit)
-- [ ] write tests: empty lines, final line without newline
-- [ ] run `go test ./pkg/executor/` — must pass before task 2
+- [x] create `readLines(ctx context.Context, r io.Reader, handler func(string))` in `pkg/executor/linereader.go`
+- [x] use `bufio.NewReader` with `ReadString('\n')` internally, no line length limit
+- [x] handle `io.EOF` correctly (process final line without trailing newline)
+- [x] return error on context cancellation or read errors (not EOF)
+- [x] strip trailing `\n` and `\r\n` from lines before passing to handler, matching Scanner.ScanLines behavior
+- [x] write tests in `linereader_test.go`: basic multi-line reading
+- [x] write tests: context cancellation mid-read
+- [x] write tests: line >64MB (verify no limit)
+- [x] write tests: empty lines, final line without newline
+- [x] run `go test ./pkg/executor/` — must pass before task 2
 
 ### Task 2: Migrate executor parseStream to use readLines
 
 **Files:**
 - Modify: `pkg/executor/executor.go`
 
-- [ ] replace `bufio.Scanner` in `ClaudeExecutor.parseStream()` with `readLines()` call
-- [ ] move per-line JSON parsing and signal detection into the handler callback
-- [ ] verify error propagation matches current behavior (wrapped as `"stream read: %w"`)
-- [ ] update existing large-line tests to include a 65MB+ line case
-- [ ] run `go test ./pkg/executor/` — must pass before task 3
+- [x] replace `bufio.Scanner` in `ClaudeExecutor.parseStream()` with `readLines()` call
+- [x] move per-line JSON parsing and signal detection into the handler callback
+- [x] verify error propagation matches current behavior (wrapped as `"stream read: %w"`)
+- [x] update existing large-line tests to include a 65MB+ line case
+- [x] run `go test ./pkg/executor/` — must pass before task 3
 
 ### Task 3: Migrate codex processStderr to use readLines
 
 **Files:**
 - Modify: `pkg/executor/codex.go`
 
-- [ ] replace `bufio.Scanner` in `CodexExecutor.processStderr()` with `readLines()` call
-- [ ] move `shouldDisplay()` filtering and tail buffer logic into the handler callback
-- [ ] verify error propagation matches current behavior (wrapped as `"read stderr: %w"`)
-- [ ] update existing large-line test to include a 65MB+ line case
-- [ ] run `go test ./pkg/executor/` — must pass before task 4
+- [x] replace `bufio.Scanner` in `CodexExecutor.processStderr()` with `readLines()` call
+- [x] move `shouldDisplay()` filtering and tail buffer logic into the handler callback
+- [x] verify error propagation matches current behavior (wrapped as `"read stderr: %w"`)
+- [x] update existing large-line test to include a 65MB+ line case
+- [x] run `go test ./pkg/executor/` — must pass before task 4
 
 ### Task 4: Migrate custom processOutput to use readLines
 
 **Files:**
 - Modify: `pkg/executor/custom.go`
 
-- [ ] replace `bufio.Scanner` in `CustomExecutor.processOutput()` with `readLines()` call
-- [ ] move output accumulation and signal detection into the handler callback
-- [ ] verify error propagation matches current behavior (wrapped as `"read output: %w"`)
-- [ ] update existing large-output test to include a 65MB+ line case
-- [ ] run `go test ./pkg/executor/` — must pass before task 5
+- [x] replace `bufio.Scanner` in `CustomExecutor.processOutput()` with `readLines()` call
+- [x] move output accumulation and signal detection into the handler callback
+- [x] verify error propagation matches current behavior (wrapped as `"read output: %w"`)
+- [x] update existing large-output test to include a 65MB+ line case
+- [x] run `go test ./pkg/executor/` — must pass before task 5
 
 ### Task 5: Migrate session_manager scanners to bufio.Reader
 
@@ -97,32 +97,32 @@
 Note: these functions don't have a context parameter and `ParseProgressHeader` needs early termination,
 so use `bufio.Reader` directly instead of the `readLines` helper.
 
-- [ ] replace `bufio.Scanner` in `ParseProgressHeader()` with `bufio.NewReader` + `ReadString('\n')` loop
-- [ ] handle early return at `"---"` separator with `break`
-- [ ] replace `bufio.Scanner` in `loadProgressFileIntoSession()` with `bufio.NewReader` + `ReadString('\n')` loop
-- [ ] strip trailing `\n`/`\r\n` from lines, matching previous Scanner.ScanLines behavior
-- [ ] update existing large-buffer tests to include a 65MB+ line case
-- [ ] run `go test ./pkg/web/` — must pass before task 6
+- [x] replace `bufio.Scanner` in `ParseProgressHeader()` with `bufio.NewReader` + `ReadString('\n')` loop
+- [x] handle early return at `"---"` separator with `break`
+- [x] replace `bufio.Scanner` in `loadProgressFileIntoSession()` with `bufio.NewReader` + `ReadString('\n')` loop
+- [x] strip trailing `\n`/`\r\n` from lines, matching previous Scanner.ScanLines behavior
+- [x] update existing large-buffer tests to include a 65MB+ line case
+- [x] run `go test ./pkg/web/` — must pass before task 6
 
 ### Task 6: Clean up MaxScannerBuffer constant
 
 **Files:**
 - Modify: `pkg/executor/executor.go`
 
-- [ ] remove `MaxScannerBuffer` constant (no longer needed)
-- [ ] verify no remaining references to `MaxScannerBuffer` across codebase
-- [ ] run `go test ./...` — must pass before task 7
+- [x] remove `MaxScannerBuffer` constant (no longer needed)
+- [x] verify no remaining references to `MaxScannerBuffer` across codebase
+- [x] run `go test ./...` — must pass before task 7
 
 ### Task 7: Verify acceptance criteria
-- [ ] verify lines >64MB are handled without error in all stream parsers
-- [ ] verify context cancellation still works in all parsers
-- [ ] run full unit test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
-- [ ] verify test coverage for new `linereader.go` is 80%+
+- [x] verify lines >64MB are handled without error in all stream parsers
+- [x] verify context cancellation still works in all parsers
+- [x] run full unit test suite: `go test ./...`
+- [x] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
+- [x] verify test coverage for new `linereader.go` is 80%+
 
 ### Task 8: [Final] Update documentation
-- [ ] verify no documentation references MaxScannerBuffer
-- [ ] move this plan to `docs/plans/completed/`
+- [x] verify no documentation references MaxScannerBuffer
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

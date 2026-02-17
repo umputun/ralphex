@@ -927,7 +927,6 @@ func TestSessionManager_DiscoverRecursive_SubdirProgressFiles(t *testing.T) {
 }
 
 func TestParseProgressHeaderLargeBuffer(t *testing.T) {
-	// test that lines larger than 64KB (default bufio.Scanner limit) are handled
 	t.Run("handles lines larger than default scanner buffer", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "progress-large.txt")
@@ -951,6 +950,28 @@ Started: 2026-01-22 10:30:00
 
 		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
 		assert.Equal(t, "feature-branch", meta.Branch)
+	})
+
+	t.Run("handles lines larger than 64MB (no limit)", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping 65MB allocation in short mode")
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-huge.txt")
+
+		// create a line larger than 64MB (old scanner hard limit)
+		hugeLine := strings.Repeat("A", 65*1024*1024) // 65MB
+
+		content := "# Ralphex Progress Log\nPlan: docs/plans/huge.md\nBranch: huge-branch\nMode: full\n" +
+			"Started: 2026-01-22 10:30:00\n------------------------------------------------------------\n\n" +
+			"[26-01-22 10:30:05] " + hugeLine + "\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+
+		assert.Equal(t, "docs/plans/huge.md", meta.PlanPath)
+		assert.Equal(t, "huge-branch", meta.Branch)
 	})
 }
 
@@ -980,7 +1001,6 @@ func TestPhaseFromSection(t *testing.T) {
 }
 
 func TestSessionManager_LoadProgressFileIntoSessionLargeBuffer(t *testing.T) {
-	// test that lines larger than 64KB (default bufio.Scanner limit) are handled
 	t.Run("handles lines larger than default scanner buffer", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "progress-large.txt")
@@ -1010,4 +1030,51 @@ Started: 2026-01-22 10:00:00
 		// should not panic or error with "token too long"
 		m.loadProgressFileIntoSession(path, session)
 	})
+
+	t.Run("handles lines larger than 64MB (no limit)", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping 65MB allocation in short mode")
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-huge.txt")
+
+		// create a line larger than 64MB (old scanner hard limit)
+		hugeLine := strings.Repeat("B", 65*1024*1024) // 65MB
+
+		content := "# Ralphex Progress Log\nPlan: docs/plan.md\nBranch: main\nMode: full\n" +
+			"Started: 2026-01-22 10:00:00\n------------------------------------------------------------\n\n" +
+			"--- Task 1 ---\n[26-01-22 10:00:01] starting task\n" +
+			"[26-01-22 10:00:02] " + hugeLine + "\n" +
+			"[26-01-22 10:00:03] task completed\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-huge", path)
+		defer session.Close()
+
+		// should not panic or error with "token too long"
+		m.loadProgressFileIntoSession(path, session)
+	})
+}
+
+func TestTrimLineEnding(t *testing.T) {
+	tests := []struct {
+		name, input, expected string
+	}{
+		{name: "unix newline", input: "hello\n", expected: "hello"},
+		{name: "windows newline", input: "hello\r\n", expected: "hello"},
+		{name: "no newline", input: "hello", expected: "hello"},
+		{name: "empty string", input: "", expected: ""},
+		{name: "just newline", input: "\n", expected: ""},
+		{name: "just crlf", input: "\r\n", expected: ""},
+		{name: "trailing cr in content", input: "data\r\r\n", expected: "data\r"},
+		{name: "bare cr no newline", input: "data\r", expected: "data"},
+		{name: "bare cr only", input: "\r", expected: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, trimLineEnding(tt.input))
+		})
+	}
 }

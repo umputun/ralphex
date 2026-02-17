@@ -2,8 +2,10 @@ package web
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -13,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/umputun/ralphex/pkg/executor"
 	"github.com/umputun/ralphex/pkg/progress"
 	"github.com/umputun/ralphex/pkg/status"
 )
@@ -400,16 +401,20 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 	defer f.Close()
 
 	var meta SessionMetadata
-	scanner := bufio.NewScanner(f)
-	// increase buffer size for large lines (matching executor)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, executor.MaxScannerBuffer)
+	reader := bufio.NewReader(f)
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, readErr := reader.ReadString('\n')
+		line = trimLineEnding(line)
+
+		// check for read errors before processing; ReadString may return
+		// partial data alongside an error, so we handle that first
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return SessionMetadata{}, fmt.Errorf("read file: %w", readErr)
+		}
 
 		// stop at separator line
-		if strings.HasPrefix(line, "---") {
+		if line != "" && strings.HasPrefix(line, "---") {
 			break
 		}
 
@@ -422,15 +427,14 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 			meta.Mode = val
 		} else if val, found := strings.CutPrefix(line, "Started: "); found {
 			// header timestamps are written in local time without a zone offset
-			t, err := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local)
-			if err == nil {
+			if t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local); parseErr == nil {
 				meta.StartTime = t
 			}
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		return SessionMetadata{}, fmt.Errorf("scan file: %w", err)
+		if readErr != nil { // EOF after processing final line
+			break
+		}
 	}
 
 	return meta, nil
@@ -446,65 +450,73 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	// increase buffer size for large lines (matching executor)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, executor.MaxScannerBuffer)
+	reader := bufio.NewReader(f)
 	inHeader := true
 	phase := status.PhaseTask
 	var pendingSection string // section header waiting for first timestamped event
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
+	for {
+		line, readErr := reader.ReadString('\n')
+		line = trimLineEnding(line)
+
+		if line != "" {
+			var parsed ParsedLine
+			parsed, inHeader = parseProgressLine(line, inHeader)
+			phase, pendingSection = m.processProgressLine(session, parsed, phase, pendingSection)
 		}
 
-		parsed, newInHeader := parseProgressLine(line, inHeader)
-		inHeader = newInHeader
-
-		switch parsed.Type {
-		case ParsedLineSkip:
-			continue
-		case ParsedLineSection:
-			if pendingSection != "" {
-				m.emitPendingSection(session, pendingSection, phase, time.Now())
-			}
-			phase = parsed.Phase
-			// defer emitting section until we see a timestamped event
-			pendingSection = parsed.Section
-		case ParsedLineTimestamp:
-			// emit pending section with this event's timestamp (for accurate durations)
-			if pendingSection != "" {
-				m.emitPendingSection(session, pendingSection, phase, parsed.Timestamp)
-				pendingSection = ""
-			}
-			event := Event{
-				Type:      parsed.EventType,
-				Phase:     phase,
-				Text:      parsed.Text,
-				Timestamp: parsed.Timestamp,
-				Signal:    parsed.Signal,
-			}
-			if event.Type == EventTypeOutput {
-				if stats, ok := parseDiffStats(event.Text); ok {
-					session.SetDiffStats(stats)
-				}
-			}
-			_ = session.Publish(event)
-		case ParsedLinePlain:
-			_ = session.Publish(Event{
-				Type:      EventTypeOutput,
-				Phase:     phase,
-				Text:      parsed.Text,
-				Timestamp: time.Now(),
-			})
+		if readErr != nil {
+			break // EOF or read error; best-effort loading, errors silently ignored
 		}
 	}
 
 	if pendingSection != "" {
 		m.emitPendingSection(session, pendingSection, phase, time.Now())
 	}
+}
+
+// processProgressLine handles a single parsed progress line,
+// updating phase and pendingSection state and publishing events as needed.
+func (m *SessionManager) processProgressLine(session *Session, parsed ParsedLine,
+	phase status.Phase, pendingSection string) (status.Phase, string) {
+	switch parsed.Type {
+	case ParsedLineSkip:
+		return phase, pendingSection
+	case ParsedLineSection:
+		if pendingSection != "" {
+			m.emitPendingSection(session, pendingSection, phase, time.Now())
+		}
+		phase = parsed.Phase
+		// defer emitting section until we see a timestamped event
+		return phase, parsed.Section
+	case ParsedLineTimestamp:
+		// emit pending section with this event's timestamp (for accurate durations)
+		if pendingSection != "" {
+			m.emitPendingSection(session, pendingSection, phase, parsed.Timestamp)
+			pendingSection = ""
+		}
+		event := Event{
+			Type:      parsed.EventType,
+			Phase:     phase,
+			Text:      parsed.Text,
+			Timestamp: parsed.Timestamp,
+			Signal:    parsed.Signal,
+		}
+		if event.Type == EventTypeOutput {
+			if stats, ok := parseDiffStats(event.Text); ok {
+				session.SetDiffStats(stats)
+			}
+		}
+		_ = session.Publish(event)
+	case ParsedLinePlain:
+		_ = session.Publish(Event{
+			Type:      EventTypeOutput,
+			Phase:     phase,
+			Text:      parsed.Text,
+			Timestamp: time.Now(),
+		})
+	}
+	return phase, pendingSection
 }
 
 // phaseFromSection determines the phase from a section name.
@@ -556,4 +568,18 @@ func (m *SessionManager) emitPendingSection(session *Session, sectionName string
 	}); err != nil {
 		log.Printf("[WARN] failed to publish section event: %v", err)
 	}
+}
+
+// trimLineEnding removes trailing line ending to match bufio.ScanLines semantics:
+// strips \n, \r\n, or a bare trailing \r (which ScanLines drops via dropCR at EOF).
+// unlike strings.TrimRight("\r\n"), this preserves embedded \r characters in content.
+func trimLineEnding(line string) string {
+	n := len(line)
+	if n > 0 && line[n-1] == '\n' {
+		n--
+	}
+	if n > 0 && line[n-1] == '\r' {
+		n--
+	}
+	return line[:n]
 }

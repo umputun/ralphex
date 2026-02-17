@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -203,22 +202,9 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrRe
 	const maxLineLength = 256 // truncate long lines to avoid oversized error strings
 
 	state := &codexFilterState{}
-	scanner := bufio.NewScanner(r)
-	// increase buffer size for large output lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, MaxScannerBuffer)
-
 	var tail []string
 
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return stderrResult{lastLines: tail, err: fmt.Errorf("context done: %w", ctx.Err())}
-		default:
-		}
-
-		line := scanner.Text()
-
+	err := readLines(ctx, r, func(line string) {
 		// capture non-empty lines for error context, preserving original formatting
 		if strings.TrimSpace(line) != "" {
 			stored := line
@@ -237,9 +223,9 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrRe
 				e.OutputHandler(filtered + "\n")
 			}
 		}
-	}
+	})
 
-	if err := scanner.Err(); err != nil {
+	if err != nil {
 		return stderrResult{lastLines: tail, err: fmt.Errorf("read stderr: %w", err)}
 	}
 	return stderrResult{lastLines: tail}

@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -130,19 +129,9 @@ func (e *CustomExecutor) Run(ctx context.Context, promptContent string) Result {
 // processOutput reads stdout line-by-line, streams to OutputHandler, and detects signals.
 func (e *CustomExecutor) processOutput(ctx context.Context, r io.Reader) (output, signal string, err error) {
 	var outputBuf []byte
-	scanner := bufio.NewScanner(r)
-	// increase buffer size for large output lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, MaxScannerBuffer)
+	var sig string
 
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return string(outputBuf), signal, fmt.Errorf("context done: %w", ctx.Err())
-		default:
-		}
-
-		line := scanner.Text()
+	readErr := readLines(ctx, r, func(line string) {
 		outputBuf = append(outputBuf, line...)
 		outputBuf = append(outputBuf, '\n')
 
@@ -151,13 +140,13 @@ func (e *CustomExecutor) processOutput(ctx context.Context, r io.Reader) (output
 		}
 
 		// check for signals in each line
-		if sig := detectSignal(line); sig != "" {
-			signal = sig
+		if s := detectSignal(line); s != "" {
+			sig = s
 		}
-	}
+	})
 
-	if err := scanner.Err(); err != nil {
-		return string(outputBuf), signal, fmt.Errorf("read output: %w", err)
+	if readErr != nil {
+		return string(outputBuf), sig, fmt.Errorf("read output: %w", readErr)
 	}
-	return string(outputBuf), signal, nil
+	return string(outputBuf), sig, nil
 }
