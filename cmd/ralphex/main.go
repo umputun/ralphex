@@ -106,7 +106,9 @@ type executePlanRequest struct {
 }
 
 func main() {
-	fmt.Printf("ralphex %s\n", resolveVersion())
+	if os.Getenv("GO_FLAGS_COMPLETION") == "" {
+		fmt.Printf("ralphex %s\n", resolveVersion())
+	}
 
 	var o opts
 	parser := flags.NewParser(&o, flags.Default)

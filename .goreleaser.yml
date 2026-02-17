@@ -25,6 +25,8 @@ archives:
       - ralphex
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - completions/*
 
 nfpms:
   - id: ralphex
@@ -39,6 +41,13 @@ nfpms:
     formats:
       - deb
       - rpm
+    contents:
+      - src: completions/ralphex.bash
+        dst: /usr/share/bash-completion/completions/ralphex
+      - src: completions/ralphex.zsh
+        dst: /usr/share/zsh/vendor-completions/_ralphex
+      - src: completions/ralphex.fish
+        dst: /usr/share/fish/vendor_completions.d/ralphex.fish
 
 brews:
   - repository:
@@ -48,3 +57,7 @@ brews:
     homepage: https://github.com/umputun/ralphex
     description: Autonomous plan execution with Claude Code
     license: MIT
+    extra_install: |
+      bash_completion.install "completions/ralphex.bash" => "ralphex"
+      zsh_completion.install "completions/ralphex.zsh" => "_ralphex"
+      fish_completion.install "completions/ralphex.fish" => "ralphex.fish"
