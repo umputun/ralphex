@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -629,6 +630,39 @@ func TestService_DiffStats(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, stats.Files)
 		assert.Equal(t, 2, stats.Additions)
+		assert.Equal(t, 0, stats.Deletions)
+	})
+
+	t.Run("returns stats using commit hash as base ref", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// get initial commit hash to use as base ref
+		baseHash := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+
+		// create feature branch with changes
+		err = svc.CreateBranch("feature")
+		require.NoError(t, err)
+
+		newFile := filepath.Join(dir, "feature.txt")
+		require.NoError(t, os.WriteFile(newFile, []byte("line1\nline2\nline3\n"), 0o600))
+		require.NoError(t, svc.repo.Add("feature.txt"))
+		require.NoError(t, svc.repo.Commit("add feature file"))
+
+		// use commit hash instead of branch name
+		stats, err := svc.DiffStats(baseHash)
+		require.NoError(t, err)
+		assert.Equal(t, 1, stats.Files)
+		assert.Equal(t, 3, stats.Additions)
+		assert.Equal(t, 0, stats.Deletions)
+
+		// also works with short hash (7 chars)
+		shortHash := baseHash[:7]
+		stats, err = svc.DiffStats(shortHash)
+		require.NoError(t, err)
+		assert.Equal(t, 1, stats.Files)
+		assert.Equal(t, 3, stats.Additions)
 		assert.Equal(t, 0, stats.Deletions)
 	})
 }

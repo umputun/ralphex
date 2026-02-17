@@ -391,7 +391,8 @@ func (e *externalBackend) diffStats(baseBranch string) (DiffStats, error) {
 }
 
 // resolveRef tries to resolve a branch name to a valid git ref.
-// checks local branch, remote tracking (origin/<name>), and as-is for "origin/" prefixed names.
+// checks local branch, remote tracking (origin/<name>), "origin/" prefixed names,
+// and finally arbitrary refs like commit hashes or tags via rev-parse.
 func (e *externalBackend) resolveRef(branchName string) string {
 	// try local branch
 	if e.refExists("refs/heads/" + branchName) {
@@ -409,6 +410,13 @@ func (e *externalBackend) resolveRef(branchName string) string {
 		if e.refExists("refs/remotes/origin/" + remoteName) {
 			return branchName
 		}
+	}
+
+	// try as arbitrary ref (commit hash, tag, etc.) via rev-parse
+	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "--verify", "--quiet", branchName)
+	cmd.Dir = e.path
+	if cmd.Run() == nil {
+		return branchName
 	}
 
 	return ""

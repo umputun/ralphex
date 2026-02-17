@@ -67,6 +67,7 @@ Optional post-completion step that runs after successful review phases:
 Default behavior (when enabled): rebases commits onto default branch, optionally squashes related commits, runs tests to verify.
 
 Config option: `finalize_enabled = true` in `~/.config/ralphex/config` or `.ralphex/config`
+CLI override: `--skip-finalize` disables finalize for a single run even if enabled in config
 Prompt file: `~/.config/ralphex/prompts/finalize.txt` or `.ralphex/prompts/finalize.txt`
 
 Key files:

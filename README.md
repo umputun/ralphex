@@ -406,6 +406,10 @@ ralphex --external-only
 # tasks-only mode (run only task phase, skip all reviews)
 ralphex --tasks-only docs/plans/feature.md
 
+# override default branch for review diffs
+ralphex --review --base-ref develop
+ralphex --review --base-ref abc1234 --skip-finalize
+
 # interactive plan creation
 ralphex --plan "add user authentication"
 
@@ -519,7 +523,7 @@ Custom prompt files support variable expansion. All variables use the `{{VARIABL
 | `{{PLAN_FILE}}` | Path to the plan file being executed | `docs/plans/feature.md` |
 | `{{PROGRESS_FILE}}` | Path to the progress log file | `.ralphex/progress/progress-feature.txt` |
 | `{{GOAL}}` | Human-readable goal description | `implementation of plan at docs/plans/feature.md` |
-| `{{DEFAULT_BRANCH}}` | Default branch name (detected from repo) | `main`, `master`, `origin/main` |
+| `{{DEFAULT_BRANCH}}` | Default branch name (overridable via `--base-ref` or `default_branch` config) | `main`, `master`, `origin/main` |
 | `{{agent:name}}` | Expands to Task tool instructions for the named agent | (see below) |
 
 **Agent references:**
