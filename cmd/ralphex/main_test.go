@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1148,5 +1151,75 @@ func TestResolveVersion(t *testing.T) {
 		// but VCS info should be available from the git repo
 		v := resolveVersion()
 		assert.NotEmpty(t, v)
+	})
+}
+
+func TestPrintExternalReviewHint(t *testing.T) {
+	// capture color output for assertions
+	captureOutput := func(fn func()) string {
+		var buf bytes.Buffer
+		orig := color.Output
+		color.Output = &buf
+		defer func() { color.Output = orig }()
+		fn()
+		return buf.String()
+	}
+
+	colors := testColors()
+
+	t.Run("codex_error_full_mode_no_review_hint", func(t *testing.T) {
+		err := errors.New("codex loop: codex execution: codex exited with error: exit status 1")
+		out := captureOutput(func() {
+			printExternalReviewHint(err, processor.ModeFull, "/tmp/project/docs/plans/feature.md", colors)
+		})
+		assert.Contains(t, out, "hint: external review failed")
+		assert.Contains(t, out, "https://ralphex.com/docs/#configuration-options")
+		assert.Contains(t, out, "codex exec \"hello\"")
+		assert.Contains(t, out, "ralphex --codex-only")
+		assert.NotContains(t, out, "ralphex --review")
+	})
+
+	t.Run("codex_error_review_mode_no_review_hint", func(t *testing.T) {
+		err := errors.New("codex loop: codex execution: codex exited with error: exit status 1")
+		out := captureOutput(func() {
+			printExternalReviewHint(err, processor.ModeReview, "", colors)
+		})
+		assert.Contains(t, out, "ralphex --codex-only\n")
+		assert.NotContains(t, out, "ralphex --review")
+	})
+
+	t.Run("codex_only_mode_shows_review_alternative", func(t *testing.T) {
+		err := errors.New("codex loop: codex execution: codex exited with error: exit status 1")
+		out := captureOutput(func() {
+			printExternalReviewHint(err, processor.ModeCodexOnly, "", colors)
+		})
+		assert.Contains(t, out, "ralphex --codex-only")
+		assert.Contains(t, out, "ralphex --review")
+	})
+
+	t.Run("custom_review_error", func(t *testing.T) {
+		err := errors.New("codex loop: custom execution: script exited with error")
+		out := captureOutput(func() {
+			printExternalReviewHint(err, processor.ModeFull, "", colors)
+		})
+		assert.Contains(t, out, "hint: external review failed")
+		assert.NotContains(t, out, "codex exec")
+		assert.Contains(t, out, "ralphex --codex-only")
+	})
+
+	t.Run("non_codex_error_no_output", func(t *testing.T) {
+		err := errors.New("task phase: claude execution: something broke")
+		out := captureOutput(func() {
+			printExternalReviewHint(err, processor.ModeFull, "", colors)
+		})
+		assert.Empty(t, out)
+	})
+
+	t.Run("context_canceled_no_output", func(t *testing.T) {
+		err := fmt.Errorf("codex loop: %w", context.Canceled)
+		out := captureOutput(func() {
+			printExternalReviewHint(err, processor.ModeCodexOnly, "", colors)
+		})
+		assert.Empty(t, out)
 	})
 }

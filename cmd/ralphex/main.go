@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -369,6 +370,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			Duration: baseLog.Elapsed(),
 			Error:    runErr.Error(),
 		})
+		printExternalReviewHint(runErr, req.Mode, req.PlanFile, req.Colors)
 		return fmt.Errorf("runner: %w", runErr)
 	}
 
@@ -764,4 +766,42 @@ func ensureRepoHasCommits(ctx context.Context, gitSvc *git.Service, stdin io.Rea
 		fmt.Fprintln(stdout, "created initial commit")
 	}
 	return nil
+}
+
+// printExternalReviewHint prints actionable recovery suggestions when external review (codex) fails.
+// detects codex/custom review failures by matching known error message substrings.
+func printExternalReviewHint(err error, mode processor.Mode, planFile string, colors *progress.Colors) {
+	// don't show hints for user cancellations or timeouts
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+
+	errStr := err.Error()
+
+	// only show hints for external review failures (codex or custom review).
+	// "codex execution" = actual codex tool failed, "custom execution" = custom review script failed,
+	// "codex loop" = outer wrapper present for both (used as fallback).
+	isCodexErr := strings.Contains(errStr, "codex execution")
+	isCustomErr := strings.Contains(errStr, "custom execution")
+	isExternalErr := isCodexErr || isCustomErr || strings.Contains(errStr, "codex loop")
+	if !isExternalErr {
+		return
+	}
+
+	planArg := ""
+	if planFile != "" {
+		planArg = " " + toRelPath(planFile)
+	}
+
+	w := colors.Warn()
+	w.Println()
+	w.Println("hint: external review failed. to recover:")
+	w.Println("  - check configuration: https://ralphex.com/docs/#configuration-options")
+	if isCodexErr {
+		w.Println("  - verify codex binary works: codex exec \"hello\"")
+	}
+	w.Printf("  - re-run from this step: ralphex --codex-only%s\n", planArg)
+	if mode == processor.ModeCodexOnly {
+		w.Printf("  - skip external review, run claude review only: ralphex --review%s\n", planArg)
+	}
 }
