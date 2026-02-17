@@ -407,18 +407,16 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 		line, readErr := reader.ReadString('\n')
 		line = trimLineEnding(line)
 
-		// check for read errors before processing; ReadString may return
-		// partial data alongside an error, so we handle that first
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return SessionMetadata{}, fmt.Errorf("read file: %w", readErr)
-		}
-
-		// stop at separator line
+		// stop at separator line; check readErr even when breaking
 		if line != "" && strings.HasPrefix(line, "---") {
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				return SessionMetadata{}, fmt.Errorf("read file: %w", readErr)
+			}
 			break
 		}
 
-		// parse key-value pairs
+		// parse key-value pairs (process line before checking error,
+		// as ReadString may return partial data alongside an error)
 		if val, found := strings.CutPrefix(line, "Plan: "); found {
 			meta.PlanPath = val
 		} else if val, found := strings.CutPrefix(line, "Branch: "); found {
@@ -432,8 +430,11 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 			}
 		}
 
-		if readErr != nil { // EOF after processing final line
-			break
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				return SessionMetadata{}, fmt.Errorf("read file: %w", readErr)
+			}
+			break // EOF after processing final line
 		}
 	}
 
