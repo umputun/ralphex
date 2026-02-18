@@ -157,21 +157,26 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		return nil, fmt.Errorf("open progress file: %w", err)
 	}
 
-	// check if file already has content (restart case)
+	// acquire exclusive lock on progress file to signal active session.
+	// the lock is held for the duration of execution and released on Close().
+	// lock MUST be acquired before stat to avoid TOCTOU race:
+	// without this ordering, a concurrent process could stat size==0, block on lock,
+	// then write a full header instead of restart separator after another process already wrote content.
+	if lockErr := lockFile(f); lockErr != nil {
+		f.Close()
+		return nil, fmt.Errorf("acquire file lock: %w", lockErr)
+	}
+	registerActiveLock(f.Name())
+
+	// check if file already has content (restart case) — safe after lock acquisition
 	fi, err := f.Stat()
 	if err != nil {
+		_ = unlockFile(f)
+		unregisterActiveLock(f.Name())
 		f.Close()
 		return nil, fmt.Errorf("stat progress file: %w", err)
 	}
 	restart := fi.Size() > 0
-
-	// acquire exclusive lock on progress file to signal active session
-	// the lock is held for the duration of execution and released on Close()
-	if err := lockFile(f); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("acquire file lock: %w", err)
-	}
-	registerActiveLock(f.Name())
 
 	l := &Logger{
 		file:      f,
