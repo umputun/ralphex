@@ -121,6 +121,29 @@ func TestNewLogger_AppendOnRestart(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(contentStr, "# Ralphex Progress Log"))
 }
 
+func TestNewLogger_EmptyFileWritesHeader(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	// pre-create an empty progress file (0 bytes)
+	require.NoError(t, os.MkdirAll(progressDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(progressDir, "progress-feature.txt"), nil, 0o600))
+
+	// create logger - should write full header, not restart separator
+	cfg := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}
+	l, err := NewLogger(cfg, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	contentStr := string(content)
+	assert.Contains(t, contentStr, "# Ralphex Progress Log")
+	assert.NotContains(t, contentStr, "--- restarted at")
+}
+
 func TestLogger_Print(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()

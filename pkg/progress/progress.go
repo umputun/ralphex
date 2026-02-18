@@ -133,6 +133,8 @@ type Config struct {
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
+// if the progress file already exists with content, existing log is preserved
+// and a restart separator is written instead of a full header.
 // colors must be provided (created via NewColors from config).
 // holder is the shared PhaseHolder for reading the current execution phase.
 func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger, error) {

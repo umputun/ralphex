@@ -51,6 +51,18 @@ func TestParseProgressLine(t *testing.T) {
 		assert.Equal(t, status.PhaseCodex, parsed.Phase)
 	})
 
+	t.Run("restart separator as section", func(t *testing.T) {
+		parsed, inHeader := parseProgressLine("--- restarted at 2026-02-18 15:30:00 ---", false)
+		assert.False(t, inHeader)
+		assert.Equal(t, ParsedLineSection, parsed.Type)
+		assert.Equal(t, "restarted at 2026-02-18 15:30:00", parsed.Section)
+		assert.Equal(t, status.PhaseTask, parsed.Phase) // defaults to task phase
+	})
+
+	t.Run("restart separator not a header separator", func(t *testing.T) {
+		assert.False(t, isHeaderSeparator("--- restarted at 2026-02-18 15:30:00 ---"))
+	})
+
 	t.Run("error line", func(t *testing.T) {
 		parsed, inHeader := parseProgressLine("[26-01-22 10:30:45] ERROR: something failed", false)
 		assert.False(t, inHeader)
