@@ -73,6 +73,54 @@ func TestNewLogger(t *testing.T) {
 	}
 }
 
+func TestNewLogger_AppendOnRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	colors := testColors()
+	cfg := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}
+
+	// create first logger, write some content, close it
+	holder := &status.PhaseHolder{}
+	l1, err := NewLogger(cfg, colors, holder)
+	require.NoError(t, err)
+	l1.Print("first session output")
+
+	// read content after first session
+	firstContent, err := os.ReadFile(l1.Path())
+	require.NoError(t, err)
+	assert.Contains(t, string(firstContent), "# Ralphex Progress Log")
+	assert.Contains(t, string(firstContent), "first session output")
+	require.NoError(t, l1.Close())
+
+	// create second logger with same config (simulates restart)
+	l2, err := NewLogger(cfg, colors, holder)
+	require.NoError(t, err)
+	l2.Print("second session output")
+	require.NoError(t, l2.Close())
+
+	// read content after restart - same file as l1, now accessed via l2
+	content, err := os.ReadFile(l2.Path())
+	require.NoError(t, err)
+	contentStr := string(content)
+
+	// original content preserved
+	assert.Contains(t, contentStr, "# Ralphex Progress Log")
+	assert.Contains(t, contentStr, "first session output")
+
+	// restart separator present (matches sectionRegex format)
+	assert.Contains(t, contentStr, "--- restarted at")
+	assert.Regexp(t, `--- restarted at \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ---`, contentStr)
+
+	// second session content present
+	assert.Contains(t, contentStr, "second session output")
+
+	// header written only once
+	assert.Equal(t, 1, strings.Count(contentStr, "# Ralphex Progress Log"))
+}
+
 func TestLogger_Print(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
