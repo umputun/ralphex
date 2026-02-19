@@ -96,6 +96,15 @@ Key files:
 - `pkg/processor/prompts.go` - `getDiffInstruction()` and `replaceVariablesWithIteration()`
 - `pkg/processor/runner.go` - dispatch logic in external review loop
 
+### Alternative Providers for Claude Phases
+
+`claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible `stream-json` output. A codex wrapper script is included at `scripts/codex-as-claude.sh`.
+
+Config: `claude_command = /path/to/codex-as-claude.sh` and optionally `claude_args =` (empty).
+Note: default Claude flags may still be passed due to config fallback; wrappers should ignore unknown flags gracefully (the included script does this via `*) shift ;;`).
+Env vars: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE` (set to 1 for command output).
+Documentation: `docs/custom-providers.md`
+
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger) (*Service, error)`

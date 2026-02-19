@@ -761,6 +761,27 @@ When running ralphex in Docker, your script must be accessible inside the contai
 - Ensure script dependencies are available (curl, jq, etc. are included in base image)
 - Environment variables (API keys) must be passed to container: `-e OPENROUTER_API_KEY`
 
+### Using Alternative Providers for Claude Phases
+
+The `claude_command` and `claude_args` config options let you replace Claude Code with any CLI that produces compatible `stream-json` output. This means codex, Gemini CLI, local LLMs, or any other tool can drive task execution and review phases — you just need a wrapper script that translates the tool's output format.
+
+A working example is included: [`scripts/codex-as-claude.sh`](scripts/codex-as-claude.sh) wraps codex to produce Claude-compatible events. To use it:
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /path/to/codex-as-claude.sh
+claude_args =
+```
+
+Setting `claude_args` to empty is optional. Note that default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`) may still be passed due to config fallback behavior. Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all.
+
+The wrapper supports environment variables:
+- `CODEX_MODEL` - codex model to use (default: codex default)
+- `CODEX_SANDBOX` - sandbox mode (default: `danger-full-access`)
+- `CODEX_VERBOSE` - set to `1` to include command execution output in the stream (default: `0`, only agent messages are shown)
+
+See [docs/custom-providers.md](docs/custom-providers.md) for a detailed guide on writing wrappers for other providers.
+
 <details markdown>
 <summary><b>FAQ</b></summary>
 
@@ -842,6 +863,17 @@ claude_args = --force --output-format stream-json
 ```
 
 Key differences: `agent` command (not `claude`), `--force` flag (not `--dangerously-skip-permissions`). Stream format and signals are compatible. *Note: this is community-tested, not officially supported. Compatibility depends on Cursor maintaining Claude Code compatibility.*
+
+**Can I use codex (or another model) for task execution instead of Claude?**
+
+Yes. Use the included wrapper script that translates codex output to Claude's stream-json format:
+
+```ini
+claude_command = /path/to/codex-as-claude.sh
+claude_args =
+```
+
+Set `CODEX_MODEL` env var to choose the model. See [Using Alternative Providers](#using-alternative-providers-for-claude-phases) and [docs/custom-providers.md](docs/custom-providers.md) for writing wrappers for other tools.
 
 **How do I use multiple Claude accounts?**
 
