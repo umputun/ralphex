@@ -76,7 +76,7 @@ codex "${codex_args[@]}" 2>/dev/null | while IFS= read -r line; do
         else empty
         end
     ' 2>/dev/null || true
-done
+done || true
 
 # emit fallback result event if codex exited without turn.completed
 echo '{"type":"result","result":""}'
