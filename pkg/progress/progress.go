@@ -176,7 +176,20 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		f.Close()
 		return nil, fmt.Errorf("stat progress file: %w", err)
 	}
+
 	restart := fi.Size() > 0
+
+	// if the file has a completion footer from a previous run, truncate and start fresh.
+	// this prevents mixing unrelated content when the same plan filename is reused.
+	if restart && isProgressCompleted(progressPath) {
+		if tErr := f.Truncate(0); tErr != nil {
+			_ = unlockFile(f)
+			unregisterActiveLock(f.Name())
+			f.Close()
+			return nil, fmt.Errorf("truncate completed progress file: %w", tErr)
+		}
+		restart = false
+	}
 
 	l := &Logger{
 		file:      f,
@@ -534,6 +547,34 @@ func (l *Logger) writeFile(format string, args ...any) {
 
 func (l *Logger) writeStdout(format string, args ...any) {
 	fmt.Fprintf(l.stdout, format, args...)
+}
+
+// isProgressCompleted checks if a progress file has a completion footer written by Close().
+// opens the file read-only, reads the last ~256 bytes, and checks for "Completed:" substring.
+// returns false for empty, nonexistent, or incomplete files.
+func isProgressCompleted(path string) bool {
+	f, err := os.Open(path) //nolint:gosec // path derived from plan filename, not user input
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return false
+	}
+
+	// read the last 256 bytes (or less if file is smaller)
+	const tailSize int64 = 256
+	offset := max(0, fi.Size()-tailSize)
+
+	buf := make([]byte, tailSize)
+	n, err := f.ReadAt(buf, offset)
+	if err != nil && n == 0 {
+		return false
+	}
+
+	return strings.Contains(string(buf[:n]), "Completed:")
 }
 
 // progressDir is the directory for progress files within the project.

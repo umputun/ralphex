@@ -30,20 +30,20 @@ When a progress file already has a "Completed:" footer (written by `Close()`), i
 - Modify: `pkg/progress/progress.go`
 - Modify: `pkg/progress/progress_test.go`
 
-- [ ] add `isProgressCompleted(path string) bool` method — opens file read-only, reads last ~256 bytes, checks for `"Completed:"` substring, closes
-- [ ] in `NewLogger`, after lock + stat with `fi.Size() > 0`: call `isProgressCompleted(progressPath)`
+- [x] add `isProgressCompleted(path string) bool` method — opens file read-only, reads last ~256 bytes, checks for `"Completed:"` substring, closes
+- [x] in `NewLogger`, after lock + stat with `fi.Size() > 0`: call `isProgressCompleted(progressPath)`
   - if true: `f.Truncate(0)` then fall through to "write full header" path (set `restart = false`)
   - if false: existing restart separator behavior (set `restart = true`)
-- [ ] write test `TestNewLogger_FreshStartAfterCompleted` — create logger, write content, close (writes footer), create second logger with same config, verify: old content gone, no restart separator, fresh header written
-- [ ] write test `TestNewLogger_AppendOnRestart` already exists — verify it still passes (interrupted run without footer → append behavior preserved)
-- [ ] write test `TestIsProgressCompleted` — file with footer returns true, file without footer returns false, empty file returns false, nonexistent file returns false
-- [ ] run `go test ./pkg/progress/` — must pass
+- [x] write test `TestNewLogger_FreshStartAfterCompleted` — create logger, write content, close (writes footer), create second logger with same config, verify: old content gone, no restart separator, fresh header written
+- [x] write test `TestNewLogger_AppendOnRestart` already exists — verify it still passes (interrupted run without footer → append behavior preserved)
+- [x] write test `TestIsProgressCompleted` — file with footer returns true, file without footer returns false, empty file returns false, nonexistent file returns false
+- [x] run `go test ./pkg/progress/` — must pass
 
 ### Task 2: Verify acceptance criteria
 
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run`
-- [ ] run formatter: `~/.claude/format.sh`
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `golangci-lint run`
+- [x] run formatter: `~/.claude/format.sh`
 
 ### Task 3: Update documentation
 
