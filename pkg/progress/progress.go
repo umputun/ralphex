@@ -133,8 +133,9 @@ type Config struct {
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
-// if the progress file already exists with content, existing log is preserved
-// and a restart separator is written instead of a full header.
+// if the progress file already exists with a completion footer, it is truncated
+// and a fresh header is written. if the file exists without a completion footer
+// (interrupted run), existing log is preserved and a restart separator is written.
 // colors must be provided (created via NewColors from config).
 // holder is the shared PhaseHolder for reading the current execution phase.
 func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger, error) {
@@ -152,7 +153,7 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		}
 	}
 
-	f, err := os.OpenFile(progressPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path derived from plan filename
+	f, err := os.OpenFile(progressPath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // path derived from plan filename
 	if err != nil {
 		return nil, fmt.Errorf("open progress file: %w", err)
 	}
@@ -181,7 +182,8 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 
 	// if the file has a completion footer from a previous run, truncate and start fresh.
 	// this prevents mixing unrelated content when the same plan filename is reused.
-	if restart && isProgressCompleted(progressPath) {
+	// reads from the locked fd directly to avoid TOCTOU path-vs-inode mismatch.
+	if restart && isProgressCompleted(f, fi.Size()) {
 		if tErr := f.Truncate(0); tErr != nil {
 			_ = unlockFile(f)
 			unregisterActiveLock(f.Name())
@@ -550,23 +552,18 @@ func (l *Logger) writeStdout(format string, args ...any) {
 }
 
 // isProgressCompleted checks if a progress file has a completion footer written by Close().
-// opens the file read-only, reads the last ~256 bytes, and checks for "Completed:" substring.
-// returns false for empty, nonexistent, or incomplete files.
-func isProgressCompleted(path string) bool {
-	f, err := os.Open(path) //nolint:gosec // path derived from plan filename, not user input
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-
-	fi, err := f.Stat()
-	if err != nil || fi.Size() == 0 {
+// reads the last ~256 bytes from the provided file descriptor and checks for the dash separator
+// followed by "Completed:" — the exact pattern Close() writes.
+// uses the already-locked fd to avoid TOCTOU path-vs-inode mismatch.
+// returns false for zero-size files or read errors.
+func isProgressCompleted(f *os.File, size int64) bool {
+	if size == 0 {
 		return false
 	}
 
 	// read the last 256 bytes (or less if file is smaller)
 	const tailSize int64 = 256
-	offset := max(0, fi.Size()-tailSize)
+	offset := max(0, size-tailSize)
 
 	buf := make([]byte, tailSize)
 	n, err := f.ReadAt(buf, offset)
@@ -574,7 +571,9 @@ func isProgressCompleted(path string) bool {
 		return false
 	}
 
-	return strings.Contains(string(buf[:n]), "Completed:")
+	// match the exact pattern written by Close(): 60-dash separator followed by "Completed:".
+	// a plain "Completed:" check would false-positive on Claude output containing that text.
+	return strings.Contains(string(buf[:n]), strings.Repeat("-", 60)+"\nCompleted:")
 }
 
 // progressDir is the directory for progress files within the project.

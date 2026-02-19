@@ -47,8 +47,8 @@ When a progress file already has a "Completed:" footer (written by `Close()`), i
 
 ### Task 3: Update documentation
 
-- [ ] update CLAUDE.md if needed (progress file behavior description)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md if needed (progress file behavior description)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

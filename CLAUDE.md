@@ -47,6 +47,7 @@ docs/plans/         # plan files location
 - Streaming output with timestamps
 - Progress logging to files
 - Progress file locking (flock) for active session detection
+- Progress file fresh start: completed files (with `Completed:` footer) are truncated on reuse instead of appending
 - Multiple execution modes: full, tasks-only, review-only, external-only/codex-only, plan creation
 - `--base-ref` flag overrides default branch for review diffs (branch name or commit hash)
 - `--skip-finalize` flag disables finalize step for a single run

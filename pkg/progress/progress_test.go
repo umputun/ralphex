@@ -465,29 +465,36 @@ func TestLogger_LogDiffStats_ZeroFiles(t *testing.T) {
 func TestIsProgressCompleted(t *testing.T) {
 	tmpDir := t.TempDir()
 
+	sep := strings.Repeat("-", 60)
 	tests := []struct {
 		name    string
 		content string
 		want    bool
 	}{
-		{"file with footer", "some content\n----\nCompleted: 2026-01-15 10:30:00 (5m30s)\n", true},
+		{"file with footer", "some content\n" + sep + "\nCompleted: 2026-01-15 10:30:00 (5m30s)\n", true},
 		{"file without footer", "some content\n--- restarted at 2026-01-15 10:30:00 ---\nmore content\n", false},
 		{"empty file", "", false},
-		{"footer in middle but also at end", "Completed: old\nmore content\n----\nCompleted: 2026-01-15 11:00:00 (2m)\n", true},
-		{"partial match", "some Completed text without colon format", false},
-		{"completed with colon", "log line\nCompleted: now\n", true},
+		{"footer in middle and end", "Completed: old\nmore\n" + sep + "\nCompleted: 2026-01-15 11:00:00 (2m)\n", true},
+		{"completed without dash separator", "log line\nCompleted: now\n", false},
+		{"completed in log output", "[ts] task said: Completed: the migration\nmore work\n", false},
+		{"no completed substring", "some text without the keyword", false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(tmpDir, tc.name+".txt")
 			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
-			assert.Equal(t, tc.want, isProgressCompleted(path))
+			f, err := os.Open(path) //nolint:gosec // test file path from t.TempDir
+			require.NoError(t, err)
+			defer f.Close()
+			fi, err := f.Stat()
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, isProgressCompleted(f, fi.Size()))
 		})
 	}
 
-	t.Run("nonexistent file", func(t *testing.T) {
-		assert.False(t, isProgressCompleted(filepath.Join(tmpDir, "nonexistent.txt")))
+	t.Run("zero size", func(t *testing.T) {
+		assert.False(t, isProgressCompleted(nil, 0))
 	})
 }
 
@@ -517,6 +524,7 @@ func TestNewLogger_FreshStartAfterCompleted(t *testing.T) {
 	// create second logger with same config — should truncate and start fresh
 	l2, err := NewLogger(cfg, colors, holder)
 	require.NoError(t, err)
+	assert.Equal(t, progressPath, l2.Path()) // verify both loggers use the same file
 	l2.Print("second session output")
 	require.NoError(t, l2.Close())
 
