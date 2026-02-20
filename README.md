@@ -281,6 +281,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 **Volume mounts:**
 - **Read-only**: `~/.claude` and `~/.codex` mounted to `/mnt/`, copied at startup to preserve isolation
 - **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
+- **Extra mounts**: user-defined volumes via `-v`/`--volume` flags or `RALPHEX_EXTRA_VOLUMES` env var
 
 **Requirements:**
 - Python 3.9+ (for the wrapper script)
@@ -294,6 +295,16 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - `RALPHEX_PORT` - Port for web dashboard when using `--serve` (default: `8080`)
 - `RALPHEX_CONFIG_DIR` - Custom config directory (default: `~/.config/ralphex`). Overrides global config location for prompts, agents, and settings
 - `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works both with Docker wrapper (volume mounts and keychain derivation) and non-Docker usage (passed through to Claude Code directly). Keychain service name is derived automatically from the path.
+- `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`). Entries without `:` are silently skipped
+
+**Extra volume mounts:**
+```bash
+# via CLI flags (can use multiple -v)
+ralphex -v /data:/mnt/data:ro -v /models:/mnt/models docs/plans/feature.md
+
+# via environment variable (comma-separated)
+RALPHEX_EXTRA_VOLUMES="/data:/mnt/data:ro,/models:/mnt/models" ralphex docs/plans/feature.md
+```
 
 **Updating:**
 ```bash
