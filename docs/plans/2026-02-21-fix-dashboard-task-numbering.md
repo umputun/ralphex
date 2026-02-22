@@ -50,12 +50,12 @@ Web dashboard shows wrong task numbers when plan is edited mid-run or tasks retr
 - Modify: `pkg/web/plan.go` (remove types/funcs, keep only web-specific helpers if any)
 - Modify: all `pkg/web/` files that reference `Plan`, `Task`, `TaskStatus`, `Checkbox` types
 
-- [ ] move `ParsePlan`, `ParsePlanFile`, `Plan`, `Task`, `Checkbox`, `TaskStatus`, constants, `determineTaskStatus`, `parseTaskNum` from `pkg/web/plan.go` to `pkg/plan/parse.go`
-- [ ] move `JSON()` method to `pkg/plan/parse.go`
-- [ ] update all `pkg/web/` imports to use `plan.Plan`, `plan.Task`, etc. (direct imports, no aliases)
-- [ ] check if `pkg/web/plan.go` still needed; if only `loadPlanWithFallback` remains, keep it as web-specific helper
-- [ ] move relevant tests from `pkg/web/plan_test.go` to `pkg/plan/parse_test.go`
-- [ ] run `go test ./pkg/plan/ ./pkg/web/...` - must pass
+- [x] move `ParsePlan`, `ParsePlanFile`, `Plan`, `Task`, `Checkbox`, `TaskStatus`, constants, `determineTaskStatus`, `parseTaskNum` from `pkg/web/plan.go` to `pkg/plan/parse.go`
+- [x] move `JSON()` method to `pkg/plan/parse.go`
+- [x] update all `pkg/web/` imports to use `plan.Plan`, `plan.Task`, etc. (direct imports, no aliases)
+- [x] check if `pkg/web/plan.go` still needed; if only `loadPlanWithFallback` remains, keep it as web-specific helper
+- [x] move relevant tests from `pkg/web/plan_test.go` to `pkg/plan/parse_test.go`
+- [x] run `go test ./pkg/plan/ ./pkg/web/...` - must pass
 
 ### Task 2: Widen regex to support non-integer task headers
 

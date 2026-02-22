@@ -14,6 +14,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/umputun/ralphex/pkg/plan"
 )
 
 //go:embed templates static
@@ -37,7 +39,7 @@ type Server struct {
 
 	// plan caching - set after first successful load (single-session mode)
 	planMu    sync.Mutex
-	planCache *Plan
+	planCache *plan.Plan
 }
 
 // NewServer creates a new web server for single-session mode (direct execution).
@@ -178,14 +180,14 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, err := s.loadPlan()
+	p, err := s.loadPlan()
 	if err != nil {
 		log.Printf("[WARN] failed to load plan file %s: %v", s.cfg.PlanFile, err)
 		http.Error(w, "unable to load plan", http.StatusInternalServerError)
 		return
 	}
 
-	data, err := plan.JSON()
+	data, err := p.JSON()
 	if err != nil {
 		log.Printf("[WARN] failed to encode plan: %v", err)
 		http.Error(w, "unable to encode plan", http.StatusInternalServerError)
@@ -219,14 +221,14 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 		planPath = filepath.Join(sessionDir, meta.PlanPath)
 	}
 
-	plan, err := loadPlanWithFallback(planPath)
+	p, err := loadPlanWithFallback(planPath)
 	if err != nil {
 		log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
 		http.Error(w, "unable to load plan", http.StatusInternalServerError)
 		return
 	}
 
-	data, err := plan.JSON()
+	data, err := p.JSON()
 	if err != nil {
 		log.Printf("[WARN] failed to encode plan: %v", err)
 		http.Error(w, "unable to encode plan", http.StatusInternalServerError)
@@ -238,7 +240,7 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 }
 
 // loadPlan returns a cached plan or loads it from disk (with completed/ fallback).
-func (s *Server) loadPlan() (*Plan, error) {
+func (s *Server) loadPlan() (*plan.Plan, error) {
 	s.planMu.Lock()
 	defer s.planMu.Unlock()
 
@@ -246,24 +248,13 @@ func (s *Server) loadPlan() (*Plan, error) {
 		return s.planCache, nil
 	}
 
-	plan, err := loadPlanWithFallback(s.cfg.PlanFile)
+	p, err := loadPlanWithFallback(s.cfg.PlanFile)
 	if err != nil {
 		return nil, err
 	}
 
-	s.planCache = plan
-	return plan, nil
-}
-
-// loadPlanWithFallback loads a plan from disk with completed/ directory fallback.
-// does not cache - each call reads from disk.
-func loadPlanWithFallback(path string) (*Plan, error) {
-	plan, err := ParsePlanFile(path)
-	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		completedPath := filepath.Join(filepath.Dir(path), "completed", filepath.Base(path))
-		plan, err = ParsePlanFile(completedPath)
-	}
-	return plan, err
+	s.planCache = p
+	return p, nil
 }
 
 // handleEvents serves the SSE stream.
