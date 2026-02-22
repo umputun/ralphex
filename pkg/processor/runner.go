@@ -684,7 +684,7 @@ func (r *Runner) nextPlanTaskPosition() int {
 		return 0
 	}
 	for i, t := range p.Tasks {
-		if t.Status != plan.TaskStatusDone {
+		if len(t.Checkboxes) > 0 && t.Status != plan.TaskStatusDone {
 			return i + 1 // 1-indexed
 		}
 	}

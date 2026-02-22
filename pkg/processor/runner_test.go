@@ -1924,6 +1924,7 @@ func TestRunner_NextPlanTaskPosition(t *testing.T) {
 		{name: "all done", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [x] built", expected: 0},
 		{name: "inserted task 2.5", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: api\n- [x] done\n### Task 2.5: middleware\n- [ ] add it\n### Task 3: tests\n- [ ] test", expected: 3},
 		{name: "retry same task", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [x] first\n- [ ] second\n### Task 3: test\n- [ ] test", expected: 2},
+		{name: "header-only task skipped", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: notes\n### Task 3: build\n- [ ] build it", expected: 3},
 		{name: "no tasks", content: "# Plan\nJust some text", expected: 0},
 	}
 
