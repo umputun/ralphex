@@ -549,6 +549,20 @@ func clickSessionByName(t *testing.T, page playwright.Page, name string) bool {
 	return clicked
 }
 
+// assertDurationsClose asserts two duration strings (e.g. "7m 0s", "6m 59s") are within tolerance.
+func assertDurationsClose(t *testing.T, s1, s2 string, tolerance time.Duration, msgAndArgs ...any) {
+	t.Helper()
+	d1, err1 := time.ParseDuration(strings.ReplaceAll(s1, " ", ""))
+	d2, err2 := time.ParseDuration(strings.ReplaceAll(s2, " ", ""))
+	require.NoError(t, err1, "failed to parse duration %q", s1)
+	require.NoError(t, err2, "failed to parse duration %q", s2)
+	diff := d1 - d2
+	if diff < 0 {
+		diff = -diff
+	}
+	require.LessOrEqual(t, diff, tolerance, msgAndArgs...)
+}
+
 // TestDashboardSmoke verifies the server is running and page loads.
 func TestDashboardSmoke(t *testing.T) {
 	page := newPage(t)

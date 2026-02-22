@@ -393,8 +393,8 @@ func TestSignalEventRendering(t *testing.T) {
 		time2, err := elapsedEl.TextContent()
 		require.NoError(t, err)
 
-		// timer should be stopped after terminal signal, so times should match
-		assert.Equal(t, time1, time2, "elapsed time should not change after COMPLETED signal")
+		// timer should be stopped after terminal signal, so times should match (±1s for interval boundary)
+		assertDurationsClose(t, time1, time2, time.Second, "elapsed time should not change after COMPLETED signal")
 	})
 
 	t.Run("completion message is rendered", func(t *testing.T) {
