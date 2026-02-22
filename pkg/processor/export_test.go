@@ -26,3 +26,8 @@ func (r *Runner) TestHasUncompletedTasks() bool {
 func (r *Runner) TestBuildCodexPrompt(isFirst bool, claudeResponse string) string {
 	return r.buildCodexPrompt(isFirst, claudeResponse)
 }
+
+// TestNextPlanTaskPosition exposes nextPlanTaskPosition for testing.
+func (r *Runner) TestNextPlanTaskPosition() int {
+	return r.nextPlanTaskPosition()
+}

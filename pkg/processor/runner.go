@@ -12,6 +12,7 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/executor"
+	"github.com/umputun/ralphex/pkg/plan"
 	"github.com/umputun/ralphex/pkg/status"
 )
 
@@ -342,7 +343,12 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 		default:
 		}
 
-		r.log.PrintSection(status.NewTaskIterationSection(i))
+		// use plan task position instead of loop counter for correct dashboard highlighting
+		taskNum := i
+		if pos := r.nextPlanTaskPosition(); pos > 0 {
+			taskNum = pos
+		}
+		r.log.PrintSection(status.NewTaskIterationSection(taskNum))
 
 		result := r.claude.Run(ctx, prompt)
 		if result.Error != nil {
@@ -667,6 +673,21 @@ func (r *Runner) hasUncompletedTasks() bool {
 		}
 	}
 	return false
+}
+
+// nextPlanTaskPosition returns the 1-indexed position of the first uncompleted task in the plan.
+// returns 0 if the plan file can't be read/parsed or no uncompleted tasks exist (caller falls back to loop counter).
+func (r *Runner) nextPlanTaskPosition() int {
+	p, err := plan.ParsePlanFile(r.resolvePlanFilePath())
+	if err != nil {
+		return 0
+	}
+	for i, t := range p.Tasks {
+		if t.Status != plan.TaskStatusDone {
+			return i + 1 // 1-indexed
+		}
+	}
+	return 0
 }
 
 // showCodexSummary displays a condensed summary of codex output before Claude evaluation.

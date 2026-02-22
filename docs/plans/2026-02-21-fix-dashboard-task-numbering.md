@@ -76,11 +76,11 @@ Web dashboard shows wrong task numbers when plan is edited mid-run or tasks retr
 - Modify: `pkg/processor/runner_test.go`
 - Modify: `pkg/processor/export_test.go` (expose new method if needed)
 
-- [ ] add `nextPlanTaskPosition() int` method to Runner: reads plan file via `plan.ParsePlanFile(r.resolvePlanFilePath())`, finds first task with status != `TaskStatusDone`, returns its 1-indexed position in the tasks array (0 on error = fallback to loop counter)
-- [ ] in `runTaskPhase`, before `PrintSection`: call `nextPlanTaskPosition()`; if > 0, use it instead of `i` for `NewTaskIterationSection(pos)`
-- [ ] keep `hasUncompletedTasks()` as-is (raw string scan works, refactoring changes semantics - deferred to separate task)
-- [ ] write tests for `nextPlanTaskPosition` with mock plan files: normal integer plan, plan with inserted "Task 2.5", missing file, no uncompleted tasks, plan with retried (same task still uncompleted)
-- [ ] run `go test ./pkg/processor/` - must pass
+- [x] add `nextPlanTaskPosition() int` method to Runner: reads plan file via `plan.ParsePlanFile(r.resolvePlanFilePath())`, finds first task with status != `TaskStatusDone`, returns its 1-indexed position in the tasks array (0 on error = fallback to loop counter)
+- [x] in `runTaskPhase`, before `PrintSection`: call `nextPlanTaskPosition()`; if > 0, use it instead of `i` for `NewTaskIterationSection(pos)`
+- [x] keep `hasUncompletedTasks()` as-is (raw string scan works, refactoring changes semantics - deferred to separate task)
+- [x] write tests for `nextPlanTaskPosition` with mock plan files: normal integer plan, plan with inserted "Task 2.5", missing file, no uncompleted tasks, plan with retried (same task still uncompleted)
+- [x] run `go test ./pkg/processor/` - must pass
 
 ### Task 4: Remove planCache and update frontend matching
 
@@ -89,13 +89,13 @@ Web dashboard shows wrong task numbers when plan is edited mid-run or tasks retr
 - Modify: `pkg/web/server_test.go` (if cache is tested)
 - Modify: `pkg/web/static/app.js`
 
-- [ ] remove `planMu sync.Mutex` and `planCache *Plan` fields from `Server`
-- [ ] simplify `loadPlan()` to call `loadPlanWithFallback()` directly (no caching)
-- [ ] update/remove any tests that assert cache behavior
-- [ ] in `renderPlan`: set `data-task-num` from array index (position `i+1`) instead of `task.number`
-- [ ] in `handleTaskStart`: if target task element not found by `data-task-num`, re-fetch plan via `fetch('/api/plan')`, rebuild plan panel, then retry highlight. this handles mid-run plan edits where the frontend has a stale task list
-- [ ] in `getTaskTitle`: match by position (iterate `planData.tasks` array, return task at `taskNum - 1` index)
-- [ ] run `go test ./pkg/web/...` - must pass
+- [x] remove `planMu sync.Mutex` and `planCache *Plan` fields from `Server`
+- [x] simplify `loadPlan()` to call `loadPlanWithFallback()` directly (no caching)
+- [x] update/remove any tests that assert cache behavior
+- [x] in `renderPlan`: set `data-task-num` from array index (position `i+1`) instead of `task.number`
+- [x] in `handleTaskStart`: if target task element not found by `data-task-num`, re-fetch plan via `fetch('/api/plan')`, rebuild plan panel, then retry highlight. this handles mid-run plan edits where the frontend has a stale task list
+- [x] in `getTaskTitle`: match by position (iterate `planData.tasks` array, return task at `taskNum - 1` index)
+- [x] run `go test ./pkg/web/...` - must pass
 
 ### Task 5: Verify acceptance criteria
 

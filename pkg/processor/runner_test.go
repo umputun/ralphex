@@ -1912,3 +1912,108 @@ func TestRunner_SleepWithContext_CancelDuringDelay(t *testing.T) {
 	assert.Less(t, elapsed, time.Duration(longDelay)*time.Millisecond,
 		"should exit promptly on cancellation, not wait for full iteration delay")
 }
+
+func TestRunner_NextPlanTaskPosition(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected int
+	}{
+		{name: "first task uncompleted", content: "# Plan\n### Task 1: setup\n- [ ] do thing\n### Task 2: build\n- [ ] build it", expected: 1},
+		{name: "second task uncompleted", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [ ] build it", expected: 2},
+		{name: "all done", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [x] built", expected: 0},
+		{name: "inserted task 2.5", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: api\n- [x] done\n### Task 2.5: middleware\n- [ ] add it\n### Task 3: tests\n- [ ] test", expected: 3},
+		{name: "retry same task", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [x] first\n- [ ] second\n### Task 3: test\n- [ ] test", expected: 2},
+		{name: "no tasks", content: "# Plan\nJust some text", expected: 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			planFile := filepath.Join(tmpDir, "plan.md")
+			require.NoError(t, os.WriteFile(planFile, []byte(tc.content), 0o600))
+
+			log := newMockLogger("")
+			claude := newMockExecutor(nil)
+			codex := newMockExecutor(nil)
+
+			cfg := processor.Config{PlanFile: planFile}
+			r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+			assert.Equal(t, tc.expected, r.TestNextPlanTaskPosition())
+		})
+	}
+}
+
+func TestRunner_NextPlanTaskPosition_MissingFile(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{PlanFile: "/nonexistent/plan.md"}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	assert.Equal(t, 0, r.TestNextPlanTaskPosition(), "missing file should return 0")
+}
+
+func TestRunner_NextPlanTaskPosition_EmptyPlanFile(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{PlanFile: ""}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	assert.Equal(t, 0, r.TestNextPlanTaskPosition(), "empty plan file path should return 0")
+}
+
+func TestRunner_TaskPhase_UsesPlanTaskPosition(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	// task 1 done, task 2 uncompleted - position should be 2
+	planContent := "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [ ] build it"
+	require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0o600))
+
+	log := newMockLogger("progress.txt")
+	// first call: task runs, signals completed; but plan still has [ ] items
+	// so runner continues, and on second iteration, plan is updated (simulate by updating file)
+	callCount := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			callCount++
+			if callCount == 1 {
+				// simulate task 2 completion: update plan file and signal completed
+				updated := strings.ReplaceAll(planContent, "- [ ] build it", "- [x] build it")
+				_ = os.WriteFile(planFile, []byte(updated), 0o600)
+				return executor.Result{Output: "task done", Signal: status.Completed}
+			}
+			return executor.Result{Error: errors.New("no more mock results")}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 50, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+
+	// verify section was printed with task position 2 (not loop counter 1)
+	require.NotEmpty(t, log.PrintSectionCalls())
+	var foundTaskSection bool
+	for _, call := range log.PrintSectionCalls() {
+		if call.Section.Iteration == 2 && strings.Contains(call.Section.Label, "task iteration 2") {
+			foundTaskSection = true
+			break
+		}
+	}
+	assert.True(t, foundTaskSection, "should print section with task position 2, got sections: %v",
+		func() []string {
+			calls := log.PrintSectionCalls()
+			labels := make([]string, 0, len(calls))
+			for _, c := range calls {
+				labels = append(labels, c.Section.Label)
+			}
+			return labels
+		}())
+}

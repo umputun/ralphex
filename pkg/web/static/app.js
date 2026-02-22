@@ -337,13 +337,12 @@
         };
     }
 
-    // look up task title by number from plan data
+    // look up task title by position (1-indexed) from plan data
     function getTaskTitle(taskNum) {
         if (!state.planData || !state.planData.tasks) return null;
-        for (var i = 0; i < state.planData.tasks.length; i++) {
-            if (state.planData.tasks[i].number === taskNum) {
-                return state.planData.tasks[i].title;
-            }
+        var index = taskNum - 1;
+        if (index >= 0 && index < state.planData.tasks.length) {
+            return state.planData.tasks[index].title;
         }
         return null;
     }
@@ -705,11 +704,36 @@
         state.elapsedTimerInterval = setInterval(updateTimers, 1000);
     }
 
-    // handle task boundary events
+    // handle task boundary events.
+    // if target task element not found (plan was edited mid-run), re-fetch plan and retry.
     function handleTaskStart(event) {
         state.currentTaskNum = event.task_num;
         clearActiveTasksExcept(event.task_num);
-        updatePlanTaskStatus(event.task_num, 'active');
+
+        var taskEl = planContent.querySelector('.plan-task[data-task-num="' + event.task_num + '"]');
+        if (taskEl) {
+            updatePlanTaskStatus(event.task_num, 'active');
+            return;
+        }
+
+        // task element not found - plan may have been edited mid-run, re-fetch
+        var url = '/api/plan';
+        if (state.currentSessionId) {
+            url += '?session=' + encodeURIComponent(state.currentSessionId);
+        }
+        fetch(url)
+            .then(function(response) {
+                if (!response.ok) throw new Error('plan not available');
+                return response.json();
+            })
+            .then(function(plan) {
+                state.planData = plan;
+                renderPlan(plan);
+                updatePlanTaskStatus(event.task_num, 'active');
+            })
+            .catch(function(err) {
+                console.log('plan re-fetch failed:', err.message);
+            });
     }
 
     function handleTaskEnd(event) {
@@ -1639,10 +1663,10 @@
             return;
         }
 
-        plan.tasks.forEach(function(task) {
+        plan.tasks.forEach(function(task, index) {
             const taskEl = document.createElement('div');
             taskEl.className = 'plan-task';
-            taskEl.dataset.taskNum = task.number;
+            taskEl.dataset.taskNum = index + 1;
 
             var displayStatus = task.status;
             if (displayStatus === 'active') {

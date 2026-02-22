@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/plan"
@@ -36,10 +35,6 @@ type Server struct {
 	sm      *SessionManager // used for multi-session mode (dashboard)
 	srv     *http.Server
 	tmpl    *template.Template
-
-	// plan caching - set after first successful load (single-session mode)
-	planMu    sync.Mutex
-	planCache *plan.Plan
 }
 
 // NewServer creates a new web server for single-session mode (direct execution).
@@ -157,7 +152,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePlan serves the parsed plan as JSON.
-// in single-session mode, uses the server's configured plan file with caching.
+// in single-session mode, uses the server's configured plan file.
 // in multi-session mode, accepts ?session=<id> to load plan from session metadata.
 func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -174,7 +169,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// single-session mode - use cached server plan
+	// single-session mode - load plan from disk
 	if s.cfg.PlanFile == "" {
 		http.Error(w, "no plan file configured", http.StatusNotFound)
 		return
@@ -239,22 +234,9 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 	_, _ = w.Write(data)
 }
 
-// loadPlan returns a cached plan or loads it from disk (with completed/ fallback).
+// loadPlan loads a plan from disk (with completed/ fallback).
 func (s *Server) loadPlan() (*plan.Plan, error) {
-	s.planMu.Lock()
-	defer s.planMu.Unlock()
-
-	if s.planCache != nil {
-		return s.planCache, nil
-	}
-
-	p, err := loadPlanWithFallback(s.cfg.PlanFile)
-	if err != nil {
-		return nil, err
-	}
-
-	s.planCache = p
-	return p, nil
+	return loadPlanWithFallback(s.cfg.PlanFile)
 }
 
 // handleEvents serves the SSE stream.
