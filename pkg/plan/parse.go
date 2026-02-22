@@ -48,7 +48,7 @@ var (
 	titlePattern      = regexp.MustCompile(`^#\s+(.*)$`)
 )
 
-// ParsePlan parses a plan markdown file into a structured Plan.
+// ParsePlan parses plan markdown content into a structured Plan.
 func ParsePlan(content string) (*Plan, error) {
 	p := &Plan{
 		Tasks: make([]Task, 0),
@@ -72,7 +72,7 @@ func ParsePlan(content string) (*Plan, error) {
 		if matches := taskHeaderPattern.FindStringSubmatch(line); matches != nil {
 			// save previous task if exists
 			if currentTask != nil {
-				currentTask.Status = determineTaskStatus(currentTask.Checkboxes)
+				currentTask.Status = DetermineTaskStatus(currentTask.Checkboxes)
 				p.Tasks = append(p.Tasks, *currentTask)
 			}
 
@@ -101,7 +101,7 @@ func ParsePlan(content string) (*Plan, error) {
 
 	// save last task
 	if currentTask != nil {
-		currentTask.Status = determineTaskStatus(currentTask.Checkboxes)
+		currentTask.Status = DetermineTaskStatus(currentTask.Checkboxes)
 		p.Tasks = append(p.Tasks, *currentTask)
 	}
 
@@ -114,7 +114,7 @@ func ParsePlan(content string) (*Plan, error) {
 
 // ParsePlanFile reads and parses a plan file from disk.
 func ParsePlanFile(path string) (*Plan, error) {
-	content, err := os.ReadFile(path) //nolint:gosec // path comes from server config
+	content, err := os.ReadFile(path) //nolint:gosec // path is internally resolved, not from user input
 	if err != nil {
 		return nil, fmt.Errorf("read plan file: %w", err)
 	}
@@ -141,8 +141,8 @@ func parseTaskNum(s string) int {
 	return n
 }
 
-// determineTaskStatus calculates task status based on checkbox states.
-func determineTaskStatus(checkboxes []Checkbox) TaskStatus {
+// DetermineTaskStatus calculates task status based on checkbox states.
+func DetermineTaskStatus(checkboxes []Checkbox) TaskStatus {
 	if len(checkboxes) == 0 {
 		return TaskStatusPending
 	}

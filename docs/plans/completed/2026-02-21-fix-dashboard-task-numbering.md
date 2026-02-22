@@ -99,18 +99,18 @@ Web dashboard shows wrong task numbers when plan is edited mid-run or tasks retr
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] verify: integer-only plans work identically to before (backward compat)
-- [ ] verify: old progress files with `"task iteration 3"` replay correctly
-- [ ] verify: task retries show correct task highlighting (same task stays highlighted)
-- [ ] verify: non-integer task headers ("Task 2.5") are parsed and appear in plan panel
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `make lint`
-- [ ] run e2e tests: `go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...`
+- [x] verify: integer-only plans work identically to before (backward compat)
+- [x] verify: old progress files with `"task iteration 3"` replay correctly
+- [x] verify: task retries show correct task highlighting (same task stays highlighted)
+- [x] verify: non-integer task headers ("Task 2.5") are parsed and appear in plan panel
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `make lint`
+- [x] run e2e tests: `go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...`
 
 ### Task 6: Update documentation and complete
 
-- [ ] update CLAUDE.md if new patterns changed
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md if new patterns changed
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

@@ -1,4 +1,4 @@
-// Package plan provides plan file selection and manipulation.
+// Package plan provides plan file selection, parsing, and manipulation.
 package plan
 
 import (

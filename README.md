@@ -483,7 +483,7 @@ Add JWT-based authentication to the API.
 ```
 
 **Requirements:**
-- Task headers must use `### Task N:` or `### Iteration N:` format
+- Task headers must use `### Task N:` or `### Iteration N:` format (N can be integer or non-integer like `2.5`, `2a`)
 - Checkboxes: `- [ ]` (incomplete) or `- [x]` (completed)
 - Include `## Validation Commands` section with test/lint commands
 - Place plans in `docs/plans/` directory (configurable via `plans_dir`)

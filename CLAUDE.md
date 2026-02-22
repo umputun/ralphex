@@ -24,7 +24,7 @@ pkg/executor/       # claude and codex CLI execution
 pkg/git/            # git operations (external git CLI)
 pkg/input/          # terminal input collector (fzf/fallback, draft review)
 pkg/notify/         # notification delivery (telegram, email, slack, webhook, custom)
-pkg/plan/           # plan file selection and manipulation
+pkg/plan/           # plan file selection, parsing, and manipulation
 pkg/processor/      # orchestration loop, prompts, signal helpers
 pkg/progress/       # timestamped logging with color
 pkg/status/         # shared execution model types: signals, phases, sections

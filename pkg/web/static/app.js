@@ -721,6 +721,7 @@
         if (state.currentSessionId) {
             url += '?session=' + encodeURIComponent(state.currentSessionId);
         }
+        var taskNum = event.task_num;
         fetch(url)
             .then(function(response) {
                 if (!response.ok) throw new Error('plan not available');
@@ -729,7 +730,10 @@
             .then(function(plan) {
                 state.planData = plan;
                 renderPlan(plan);
-                updatePlanTaskStatus(event.task_num, 'active');
+                // only set active if task_end hasn't arrived during fetch
+                if (state.currentTaskNum === taskNum) {
+                    updatePlanTaskStatus(taskNum, 'active');
+                }
             })
             .catch(function(err) {
                 console.log('plan re-fetch failed:', err.message);
@@ -1690,7 +1694,8 @@
 
             const title = document.createElement('span');
             title.className = 'plan-task-title';
-            title.textContent = 'Task ' + task.number + ': ' + task.title;
+            var displayNum = task.number > 0 ? task.number : (index + 1);
+            title.textContent = 'Task ' + displayNum + ': ' + task.title;
 
             header.appendChild(statusIcon);
             header.appendChild(title);

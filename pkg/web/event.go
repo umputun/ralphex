@@ -33,7 +33,7 @@ type Event struct {
 	Text         string       `json:"text"`
 	Timestamp    time.Time    `json:"timestamp"`
 	Signal       string       `json:"signal,omitempty"`
-	TaskNum      int          `json:"task_num,omitempty"`      // 1-based task index from plan (matches plan.tasks[].number)
+	TaskNum      int          `json:"task_num,omitempty"`      // 1-based task position in plan (array index + 1)
 	IterationNum int          `json:"iteration_num,omitempty"` // 1-based iteration index for review/codex phases
 }
 

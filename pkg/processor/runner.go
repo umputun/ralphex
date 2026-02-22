@@ -680,6 +680,7 @@ func (r *Runner) hasUncompletedTasks() bool {
 func (r *Runner) nextPlanTaskPosition() int {
 	p, err := plan.ParsePlanFile(r.resolvePlanFilePath())
 	if err != nil {
+		r.log.Print("[WARN] failed to parse plan file for task position: %v", err)
 		return 0
 	}
 	for i, t := range p.Tasks {
