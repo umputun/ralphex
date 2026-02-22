@@ -43,7 +43,7 @@ type Plan struct {
 
 // patterns for parsing plan markdown.
 var (
-	taskHeaderPattern = regexp.MustCompile(`^###\s+(?:Task|Iteration)\s+(\d+):\s*(.*)$`)
+	taskHeaderPattern = regexp.MustCompile(`^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$`)
 	checkboxPattern   = regexp.MustCompile(`^-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern      = regexp.MustCompile(`^#\s+(.*)$`)
 )
@@ -76,7 +76,7 @@ func ParsePlan(content string) (*Plan, error) {
 				p.Tasks = append(p.Tasks, *currentTask)
 			}
 
-			taskNum, _ := parseTaskNum(matches[1])
+			taskNum := parseTaskNum(matches[1])
 
 			currentTask = &Task{
 				Number:     taskNum,
@@ -131,12 +131,14 @@ func (p *Plan) JSON() ([]byte, error) {
 }
 
 // parseTaskNum extracts task number from string.
-func parseTaskNum(s string) (int, error) {
+// returns 0 for non-integer values (e.g. "2.5", "2a").
+func parseTaskNum(s string) int {
+	s = strings.TrimSpace(s)
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		return 0, fmt.Errorf("parse task number: %w", err)
+		return 0
 	}
-	return n, nil
+	return n
 }
 
 // determineTaskStatus calculates task status based on checkbox states.

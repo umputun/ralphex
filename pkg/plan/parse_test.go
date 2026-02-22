@@ -160,6 +160,80 @@ Just some text, no checkboxes.
 		require.Len(t, p.Tasks[0].Checkboxes, 1)
 		assert.Equal(t, "Inside task", p.Tasks[0].Checkboxes[0].Text)
 	})
+
+	t.Run("parses non-integer task headers", func(t *testing.T) {
+		content := `# Plan with inserted tasks
+
+### Task 1: First Task
+
+- [x] Done
+
+### Task 2: Second Task
+
+- [x] Done
+
+### Task 2.5: Inserted Task
+
+- [ ] New item
+
+### Task 3: Third Task
+
+- [ ] Item
+`
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 4)
+
+		assert.Equal(t, 1, p.Tasks[0].Number)
+		assert.Equal(t, "First Task", p.Tasks[0].Title)
+
+		assert.Equal(t, 2, p.Tasks[1].Number)
+		assert.Equal(t, "Second Task", p.Tasks[1].Title)
+
+		assert.Equal(t, 0, p.Tasks[2].Number) // non-integer gets Number=0
+		assert.Equal(t, "Inserted Task", p.Tasks[2].Title)
+		assert.Equal(t, plan.TaskStatusPending, p.Tasks[2].Status)
+
+		assert.Equal(t, 3, p.Tasks[3].Number)
+		assert.Equal(t, "Third Task", p.Tasks[3].Title)
+	})
+
+	t.Run("parses alphanumeric task headers", func(t *testing.T) {
+		content := `# Plan
+
+### Task 2a: Alpha Task
+
+- [ ] Item
+`
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		assert.Equal(t, 0, p.Tasks[0].Number) // non-integer gets Number=0
+		assert.Equal(t, "Alpha Task", p.Tasks[0].Title)
+	})
+
+	t.Run("backward compat with integer task headers", func(t *testing.T) {
+		content := `# Plan
+
+### Task 1: First
+- [ ] A
+
+### Task 2: Second
+- [x] B
+
+### Task 3: Third
+- [ ] C
+`
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 3)
+		assert.Equal(t, 1, p.Tasks[0].Number)
+		assert.Equal(t, 2, p.Tasks[1].Number)
+		assert.Equal(t, 3, p.Tasks[2].Number)
+	})
 }
 
 func TestParsePlanFile(t *testing.T) {

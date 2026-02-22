@@ -63,11 +63,11 @@ Web dashboard shows wrong task numbers when plan is edited mid-run or tasks retr
 - Modify: `pkg/plan/parse.go`
 - Modify: `pkg/plan/parse_test.go`
 
-- [ ] widen `taskHeaderPattern` regex from `(\d+)` to `([^:]+?)` with `strings.TrimSpace`
-- [ ] update `parseTaskNum` to: try `strconv.Atoi`, on success set `Number = parsed int`; on failure set `Number = 0`
-- [ ] add test cases for "Task 2.5:", "Task 2a:", "Task 3:" (backward compat)
-- [ ] verify non-integer tasks are parsed (not silently dropped) and appear in `Plan.Tasks` array
-- [ ] run `go test ./pkg/plan/` - must pass
+- [x] widen `taskHeaderPattern` regex from `(\d+)` to `([^:]+?)` with `strings.TrimSpace`
+- [x] update `parseTaskNum` to: try `strconv.Atoi`, on success set `Number = parsed int`; on failure set `Number = 0`
+- [x] add test cases for "Task 2.5:", "Task 2a:", "Task 3:" (backward compat)
+- [x] verify non-integer tasks are parsed (not silently dropped) and appear in `Plan.Tasks` array
+- [x] run `go test ./pkg/plan/` - must pass
 
 ### Task 3: Runner passes plan task position instead of loop counter
 
