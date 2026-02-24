@@ -19,6 +19,7 @@ const serverStartupTimeout = 100 * time.Millisecond
 type DashboardConfig struct {
 	BaseLog         Logger           // base progress logger
 	Port            int              // web server port
+	Host            string           // host/IP to bind to (default "127.0.0.1")
 	PlanFile        string           // path to plan file (empty for watch-only mode)
 	Branch          string           // current git branch
 	WatchDirs       []string         // CLI watch directories
@@ -29,6 +30,7 @@ type DashboardConfig struct {
 // Dashboard manages web server and file watching for progress monitoring.
 type Dashboard struct {
 	port            int
+	host            string
 	planFile        string
 	branch          string
 	baseLog         Logger
@@ -42,6 +44,7 @@ type Dashboard struct {
 func NewDashboard(cfg DashboardConfig, holder *status.PhaseHolder) *Dashboard {
 	return &Dashboard{
 		port:            cfg.Port,
+		host:            cfg.Host,
 		planFile:        cfg.PlanFile,
 		branch:          cfg.Branch,
 		baseLog:         cfg.BaseLog,
@@ -68,6 +71,7 @@ func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 
 	cfg := ServerConfig{
 		Port:     d.port,
+		Host:     d.host,
 		PlanName: planName,
 		Branch:   d.branch,
 		PlanFile: d.planFile,
@@ -147,7 +151,7 @@ func (d *Dashboard) RunWatchOnly(ctx context.Context, dirs []string) error {
 	}
 
 	// setup server and watcher
-	srvErrCh, watchErrCh, err := setupWatchMode(ctx, d.port, dirs)
+	srvErrCh, watchErrCh, err := setupWatchMode(ctx, d.port, d.host, dirs)
 	if err != nil {
 		return err
 	}
@@ -161,7 +165,7 @@ func (d *Dashboard) RunWatchOnly(ctx context.Context, dirs []string) error {
 
 // setupWatchMode creates and starts the web server and file watcher for watch-only mode.
 // returns error channels for monitoring both components.
-func setupWatchMode(ctx context.Context, port int, dirs []string) (chan error, chan error, error) {
+func setupWatchMode(ctx context.Context, port int, host string, dirs []string) (chan error, chan error, error) {
 	sm := NewSessionManager()
 	watcher, err := NewWatcher(dirs, sm)
 	if err != nil {
@@ -170,6 +174,7 @@ func setupWatchMode(ctx context.Context, port int, dirs []string) (chan error, c
 
 	serverCfg := ServerConfig{
 		Port:     port,
+		Host:     host,
 		PlanName: "(watch mode)",
 		Branch:   "",
 		PlanFile: "",

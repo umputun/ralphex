@@ -42,6 +42,7 @@ type opts struct {
 	Version         bool     `short:"v" long:"version" description:"print version and exit"`
 	Serve           bool     `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
 	Port            int      `short:"p" long:"port" default:"8080" description:"web dashboard port"`
+	Host            string   `long:"host" default:"127.0.0.1" env:"RALPHEX_WEB_HOST" description:"web dashboard listen address"`
 	Watch           []string `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
 	Reset           bool     `long:"reset" description:"interactively reset global config to embedded defaults"`
 	DumpDefaults    string   `long:"dump-defaults" description:"extract raw embedded defaults to specified directory"`
@@ -333,6 +334,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		dashboard := web.NewDashboard(web.DashboardConfig{
 			BaseLog:         baseLog,
 			Port:            o.Port,
+			Host:            o.Host,
 			PlanFile:        req.PlanFile,
 			Branch:          branch,
 			WatchDirs:       o.Watch,
@@ -455,6 +457,7 @@ func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progr
 	dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
 	dashboard := web.NewDashboard(web.DashboardConfig{
 		Port:   o.Port,
+		Host:   o.Host,
 		Colors: colors,
 	}, nil)
 	if watchErr := dashboard.RunWatchOnly(ctx, dirs); watchErr != nil {

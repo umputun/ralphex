@@ -389,6 +389,7 @@ def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args:
 
     if bind_port:
         cmd.extend(["-p", f"{port}:8080"])
+        cmd.extend(["-e", "RALPHEX_WEB_HOST=0.0.0.0"])
 
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])

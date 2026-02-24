@@ -23,9 +23,18 @@ var embeddedFS embed.FS
 // ServerConfig holds configuration for the web server.
 type ServerConfig struct {
 	Port     int    // port to listen on
+	Host     string // host/IP to bind to (default "127.0.0.1")
 	PlanName string // plan name to display in dashboard
 	Branch   string // git branch name
 	PlanFile string // path to plan file for /api/plan endpoint
+}
+
+// host returns the bind address, defaulting to "127.0.0.1" if not set.
+func (c ServerConfig) host() string {
+	if c.Host != "" {
+		return c.Host
+	}
+	return "127.0.0.1"
 }
 
 // Server provides HTTP server for the real-time dashboard.
@@ -86,7 +95,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	s.srv = &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", s.cfg.Port),
+		Addr:              fmt.Sprintf("%s:%d", s.cfg.host(), s.cfg.Port),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
