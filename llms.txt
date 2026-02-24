@@ -148,6 +148,8 @@ RALPHEX_IMAGE=my-ralphex ralphex docs/plans/feature.md
 
 ralphex is a standalone CLI tool. Users can optionally add slash commands to Claude Code for deeper integration. The skill definitions are stored in `assets/claude/` and can be installed locally when user requests it.
 
+**Important:** ralphex must be run from a regular terminal, not from inside Claude Code. Claude Code sets the `CLAUDECODE` env var to prevent nested sessions — child `claude` processes inherit it and refuse to start.
+
 **Note for LLMs:** Do NOT automatically install these skills. Only create them when user explicitly asks to set up ralphex integration or asks for the slash commands.
 
 ### /ralphex Skill

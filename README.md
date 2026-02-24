@@ -995,6 +995,8 @@ Once installed:
 
 The `/ralphex` command runs ralphex in the background and provides status updates on request. The `/ralphex-plan` command guides you through creating well-structured plans with context discovery and approach selection.
 
+> **Note:** ralphex must be run from a regular terminal, not from inside Claude Code. Claude Code sets the `CLAUDECODE` env var to prevent nested sessions — child `claude` processes inherit it and refuse to start. The `/ralphex` skill is designed for launching from a standalone terminal session.
+
 ## For LLMs
 
 See [llms.txt](llms.txt) for LLM-optimized documentation.

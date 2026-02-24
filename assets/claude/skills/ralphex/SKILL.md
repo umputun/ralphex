@@ -153,3 +153,11 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
 - Do NOT take any actions on the codebase
 - After launch confirmation: wait for user to explicitly request status check
 - After status check: report and stop
+
+## Known Limitation: Nested Claude Code Sessions
+
+**ralphex cannot run from inside Claude Code.** Claude Code sets the `CLAUDECODE` env var to prevent nested sessions. When ralphex tries to spawn child `claude` processes, they inherit this variable and refuse to start, causing repeated failures up to `max_iterations`.
+
+If the user invokes `/ralphex` from within a Claude Code session, inform them:
+
+> ralphex must be run from a regular terminal, not from inside Claude Code. Open a terminal and run `ralphex` directly from the command line.
