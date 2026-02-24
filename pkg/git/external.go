@@ -68,7 +68,7 @@ func (e *externalBackend) run(args ...string) (string, error) {
 var _ backend = (*externalBackend)(nil)
 
 // Root returns the absolute path to the repository root.
-func (e *externalBackend) Root() string {
+func (e *externalBackend) root() string {
 	return e.path
 }
 
@@ -82,7 +82,7 @@ func (e *externalBackend) headHash() (string, error) {
 }
 
 // HasCommits returns true if the repository has at least one commit.
-func (e *externalBackend) HasCommits() (bool, error) {
+func (e *externalBackend) hasCommits() (bool, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "HEAD")
 	cmd.Dir = e.path
 	cmd.Env = append(os.Environ(), "LC_ALL=C") // force English stderr for reliable parsing
@@ -104,7 +104,7 @@ func (e *externalBackend) HasCommits() (bool, error) {
 }
 
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD.
-func (e *externalBackend) CurrentBranch() (string, error) {
+func (e *externalBackend) currentBranch() (string, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "symbolic-ref", "--short", "HEAD")
 	cmd.Dir = e.path
 	cmd.Env = append(os.Environ(), "LC_ALL=C") // force English stderr for reliable parsing
@@ -127,7 +127,7 @@ func (e *externalBackend) CurrentBranch() (string, error) {
 
 // GetDefaultBranch returns the default branch name.
 // detects from origin/HEAD symbolic reference, falls back to checking common branch names.
-func (e *externalBackend) GetDefaultBranch() string {
+func (e *externalBackend) getDefaultBranch() string {
 	// try origin/HEAD first
 	cmd := exec.CommandContext(context.Background(), "git", "symbolic-ref", "refs/remotes/origin/HEAD")
 	cmd.Dir = e.path
@@ -158,12 +158,12 @@ func (e *externalBackend) GetDefaultBranch() string {
 }
 
 // BranchExists checks if a branch with the given name exists.
-func (e *externalBackend) BranchExists(name string) bool {
+func (e *externalBackend) branchExists(name string) bool {
 	return e.refExists("refs/heads/" + name)
 }
 
 // CreateBranch creates a new branch and switches to it.
-func (e *externalBackend) CreateBranch(name string) error {
+func (e *externalBackend) createBranch(name string) error {
 	_, err := e.run("checkout", "-b", name)
 	if err != nil {
 		return fmt.Errorf("create branch: %w", err)
@@ -172,7 +172,7 @@ func (e *externalBackend) CreateBranch(name string) error {
 }
 
 // CheckoutBranch switches to an existing branch.
-func (e *externalBackend) CheckoutBranch(name string) error {
+func (e *externalBackend) checkoutBranch(name string) error {
 	_, err := e.run("checkout", name)
 	if err != nil {
 		return fmt.Errorf("checkout branch: %w", err)
@@ -181,7 +181,7 @@ func (e *externalBackend) CheckoutBranch(name string) error {
 }
 
 // IsDirty returns true if the worktree has uncommitted changes (staged or modified tracked files).
-func (e *externalBackend) IsDirty() (bool, error) {
+func (e *externalBackend) isDirty() (bool, error) {
 	out, err := e.run("status", "--porcelain")
 	if err != nil {
 		return false, fmt.Errorf("get status: %w", err)
@@ -205,7 +205,7 @@ func (e *externalBackend) IsDirty() (bool, error) {
 }
 
 // FileHasChanges returns true if the given file has uncommitted changes.
-func (e *externalBackend) FileHasChanges(path string) (bool, error) {
+func (e *externalBackend) fileHasChanges(path string) (bool, error) {
 	rel, err := e.toRelative(path)
 	if err != nil {
 		return false, err
@@ -221,7 +221,7 @@ func (e *externalBackend) FileHasChanges(path string) (bool, error) {
 
 // HasChangesOtherThan returns true if there are uncommitted changes to files other than the given file.
 // this includes modified/deleted tracked files, staged changes, and untracked files (excluding gitignored).
-func (e *externalBackend) HasChangesOtherThan(path string) (bool, error) {
+func (e *externalBackend) hasChangesOtherThan(path string) (bool, error) {
 	rel, err := e.toRelative(path)
 	if err != nil {
 		return false, err
@@ -252,7 +252,7 @@ func (e *externalBackend) HasChangesOtherThan(path string) (bool, error) {
 }
 
 // IsIgnored checks if a path is ignored by gitignore rules.
-func (e *externalBackend) IsIgnored(path string) (bool, error) {
+func (e *externalBackend) isIgnored(path string) (bool, error) {
 	cmd := exec.CommandContext(context.Background(), "git", "check-ignore", "-q", "--", path)
 	cmd.Dir = e.path
 	err := cmd.Run()
@@ -270,7 +270,7 @@ func (e *externalBackend) IsIgnored(path string) (bool, error) {
 }
 
 // Add stages a file for commit.
-func (e *externalBackend) Add(path string) error {
+func (e *externalBackend) add(path string) error {
 	rel, err := e.toRelative(path)
 	if err != nil {
 		return err
@@ -283,7 +283,7 @@ func (e *externalBackend) Add(path string) error {
 }
 
 // MoveFile moves a file using git mv.
-func (e *externalBackend) MoveFile(src, dst string) error {
+func (e *externalBackend) moveFile(src, dst string) error {
 	srcRel, err := e.toRelative(src)
 	if err != nil {
 		return fmt.Errorf("invalid source path: %w", err)
@@ -300,7 +300,7 @@ func (e *externalBackend) MoveFile(src, dst string) error {
 }
 
 // Commit creates a commit with the given message.
-func (e *externalBackend) Commit(msg string) error {
+func (e *externalBackend) commit(msg string) error {
 	_, err := e.run("commit", "-m", msg)
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)
@@ -308,8 +308,28 @@ func (e *externalBackend) Commit(msg string) error {
 	return nil
 }
 
+// commitFiles creates a commit restricted to the given paths only.
+// other staged files remain staged but are excluded from this commit.
+func (e *externalBackend) commitFiles(msg string, paths ...string) error {
+	if len(paths) == 0 {
+		return errors.New("commit files: no paths provided")
+	}
+	args := []string{"commit", "-m", msg, "--"}
+	for _, p := range paths {
+		rel, err := e.toRelative(p)
+		if err != nil {
+			return err
+		}
+		args = append(args, rel)
+	}
+	if _, err := e.run(args...); err != nil {
+		return fmt.Errorf("commit files: %w", err)
+	}
+	return nil
+}
+
 // CreateInitialCommit stages all non-ignored files and creates an initial commit.
-func (e *externalBackend) CreateInitialCommit(msg string) error {
+func (e *externalBackend) createInitialCommit(msg string) error {
 	// git add -A respects .gitignore natively
 	_, err := e.run("add", "-A")
 	if err != nil {
@@ -455,6 +475,41 @@ func (e *externalBackend) toRelative(path string) (string, error) {
 		return "", fmt.Errorf("path %q is outside repository root %q", path, e.path)
 	}
 	return rel, nil
+}
+
+// AddWorktree creates a git worktree at the given path.
+// when createBranch is true, creates a new branch with `git worktree add <path> -b <branch>`.
+// when createBranch is false, uses existing branch with `git worktree add <path> <branch>`.
+func (e *externalBackend) addWorktree(path, branch string, createBranch bool) error {
+	var args []string
+	if createBranch {
+		args = []string{"worktree", "add", path, "-b", branch}
+	} else {
+		args = []string{"worktree", "add", path, branch}
+	}
+	_, err := e.run(args...)
+	if err != nil {
+		return fmt.Errorf("add worktree: %w", err)
+	}
+	return nil
+}
+
+// RemoveWorktree removes a git worktree at the given path.
+func (e *externalBackend) removeWorktree(path string) error {
+	_, err := e.run("worktree", "remove", "--force", path)
+	if err != nil {
+		return fmt.Errorf("remove worktree: %w", err)
+	}
+	return nil
+}
+
+// PruneWorktrees prunes stale worktree entries.
+func (e *externalBackend) pruneWorktrees() error {
+	_, err := e.run("worktree", "prune")
+	if err != nil {
+		return fmt.Errorf("prune worktrees: %w", err)
+	}
+	return nil
 }
 
 // extractPathFromPorcelain extracts file path from git status --porcelain output.

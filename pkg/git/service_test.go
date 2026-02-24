@@ -161,7 +161,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 		// create the branch first but stay on master
 		err = svc.CreateBranch("existing-feature")
 		require.NoError(t, err)
-		err = svc.repo.CheckoutBranch("master")
+		err = svc.repo.checkoutBranch("master")
 		require.NoError(t, err)
 
 		log := &mockLogger{}
@@ -225,7 +225,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 		assert.Contains(t, log.logs[1], "committing plan file")
 
 		// verify plan was committed
-		hasChanges, err := svc.repo.FileHasChanges(planFile)
+		hasChanges, err := svc.repo.fileHasChanges(planFile)
 		require.NoError(t, err)
 		assert.False(t, hasChanges, "plan file should be committed")
 	})
@@ -240,8 +240,8 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 		require.NoError(t, os.MkdirAll(plansDir, 0o750))
 		planFile := filepath.Join(plansDir, "committed-feature.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
-		require.NoError(t, svc.repo.Add(planFile))
-		require.NoError(t, svc.repo.Commit("add plan"))
+		require.NoError(t, svc.repo.add(planFile))
+		require.NoError(t, svc.repo.commit("add plan"))
 
 		log := &mockLogger{}
 		svc.log = log
@@ -286,8 +286,8 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 		require.NoError(t, os.MkdirAll(plansDir, 0o750))
 		planFile := filepath.Join(plansDir, "feature.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
-		require.NoError(t, svc.repo.Add(planFile))
-		require.NoError(t, svc.repo.Commit("add plan"))
+		require.NoError(t, svc.repo.add(planFile))
+		require.NoError(t, svc.repo.commit("add plan"))
 
 		log := &mockLogger{}
 		svc.log = log
@@ -343,8 +343,8 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 		require.NoError(t, os.MkdirAll(plansDir, 0o750))
 		planFile := filepath.Join(plansDir, "feature.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
-		require.NoError(t, svc.repo.Add(planFile))
-		require.NoError(t, svc.repo.Commit("add plan"))
+		require.NoError(t, svc.repo.add(planFile))
+		require.NoError(t, svc.repo.commit("add plan"))
 
 		// verify completed dir doesn't exist
 		completedDir := filepath.Join(plansDir, "completed")
@@ -623,8 +623,8 @@ func TestService_DiffStats(t *testing.T) {
 		// add a new file
 		newFile := filepath.Join(dir, "feature.txt")
 		require.NoError(t, os.WriteFile(newFile, []byte("line1\nline2\n"), 0o600))
-		require.NoError(t, svc.repo.Add("feature.txt"))
-		require.NoError(t, svc.repo.Commit("add feature file"))
+		require.NoError(t, svc.repo.add("feature.txt"))
+		require.NoError(t, svc.repo.commit("add feature file"))
 
 		stats, err := svc.DiffStats("master")
 		require.NoError(t, err)
@@ -647,8 +647,8 @@ func TestService_DiffStats(t *testing.T) {
 
 		newFile := filepath.Join(dir, "feature.txt")
 		require.NoError(t, os.WriteFile(newFile, []byte("line1\nline2\nline3\n"), 0o600))
-		require.NoError(t, svc.repo.Add("feature.txt"))
-		require.NoError(t, svc.repo.Commit("add feature file"))
+		require.NoError(t, svc.repo.add("feature.txt"))
+		require.NoError(t, svc.repo.commit("add feature file"))
 
 		// use commit hash instead of branch name
 		stats, err := svc.DiffStats(baseHash)
@@ -664,5 +664,430 @@ func TestService_DiffStats(t *testing.T) {
 		assert.Equal(t, 1, stats.Files)
 		assert.Equal(t, 3, stats.Additions)
 		assert.Equal(t, 0, stats.Deletions)
+	})
+}
+
+func TestService_CreateWorktreeForPlan(t *testing.T) {
+	t.Run("creates worktree with new branch", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// create plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "add-worktree.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit, "untracked plan file should need commit")
+		assert.Contains(t, wtPath, filepath.Join(".ralphex", "worktrees", "add-worktree"))
+
+		// verify worktree exists and is on the correct branch
+		wtSvc, err := NewService(wtPath, noopServiceLogger())
+		require.NoError(t, err)
+		branch, err := wtSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "add-worktree", branch)
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+
+	t.Run("creates worktree with existing branch", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create the branch first but stay on master
+		require.NoError(t, svc.CreateBranch("existing-feature"))
+		require.NoError(t, svc.repo.checkoutBranch("master"))
+
+		// create plan file with matching name
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "existing-feature.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		require.NoError(t, svc.repo.add(planFile))
+		require.NoError(t, svc.repo.commit("add plan"))
+
+		log := &mockLogger{}
+		svc.log = log
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.False(t, planNeedsCommit, "already-committed plan file should not need commit")
+
+		// verify worktree uses existing branch
+		wtSvc, err := NewService(wtPath, noopServiceLogger())
+		require.NoError(t, err)
+		branch, err := wtSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "existing-feature", branch)
+
+		assert.Contains(t, log.logs[0], "existing branch")
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+
+	t.Run("fails when not on main/master", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// switch to feature branch
+		require.NoError(t, svc.CreateBranch("feature"))
+
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		_, _, err = svc.CreateWorktreeForPlan(planFile)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires main/master branch")
+	})
+
+	t.Run("fails when worktree already exists", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "dup-worktree.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		// create first worktree
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit, "untracked plan file should need commit")
+
+		// switch back to master for second attempt
+		require.NoError(t, svc.repo.checkoutBranch("master"))
+
+		// second attempt should fail
+		_, _, err = svc.CreateWorktreeForPlan(planFile)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "worktree already exists")
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+
+	t.Run("auto-commits plan file", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// create untracked plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "new-feature.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# New Feature"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit, "untracked plan file should need commit")
+
+		// verify plan file was copied into worktree
+		wtPlanFile := filepath.Join(wtPath, "docs", "plans", "new-feature.md")
+		_, statErr := os.Stat(wtPlanFile)
+		assert.NoError(t, statErr, "plan file should exist in worktree")
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+
+	t.Run("does not commit plan on main", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// record HEAD before creating worktree
+		headBefore, err := svc.repo.headHash()
+		require.NoError(t, err)
+
+		// create untracked plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "no-commit-on-main.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Regression Test"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit)
+
+		// main repo HEAD must not have advanced (plan is NOT committed on main)
+		headAfter, err := svc.repo.headHash()
+		require.NoError(t, err)
+		assert.Equal(t, headBefore, headAfter, "HEAD on main must not change after CreateWorktreeForPlan")
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+
+	t.Run("fails when branch is checked out in another worktree", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create plan file and first worktree
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "branch-conflict.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit, "untracked plan file should need commit")
+		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // cleanup
+
+		// try to create second worktree at different path but same branch.
+		// use AddWorktree directly to bypass dir-exists check.
+		secondPath := filepath.Join(dir, ".ralphex", "worktrees", "branch-conflict-2")
+		err = svc.repo.addWorktree(secondPath, "branch-conflict", false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already used by worktree")
+	})
+
+	t.Run("strips date prefix from branch name", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "2024-01-15-add-auth.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit, "untracked plan file should need commit")
+		assert.Contains(t, wtPath, "add-auth")
+
+		// verify branch name
+		wtSvc, err := NewService(wtPath, noopServiceLogger())
+		require.NoError(t, err)
+		branch, err := wtSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "add-auth", branch)
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+}
+
+func TestService_CommitPlanFile(t *testing.T) {
+	t.Run("commits plan file in worktree", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// create plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "commit-test.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Commit Test Plan"), 0o600))
+
+		// create worktree (plan is copied in)
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit)
+
+		// open worktree git service and commit plan (pass main repo root for path resolution)
+		wtSvc, err := NewService(wtPath, log)
+		require.NoError(t, err)
+		err = wtSvc.CommitPlanFile(planFile, svc.Root())
+		require.NoError(t, err)
+
+		// verify plan was committed on the feature branch, not on main
+		wtBranch, err := wtSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "commit-test", wtBranch)
+
+		// main repo should still be clean (plan not committed there)
+		mainHasChanges, err := svc.repo.fileHasChanges(planFile)
+		require.NoError(t, err)
+		assert.True(t, mainHasChanges, "plan file should still be uncommitted in main repo")
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+}
+
+func TestService_RemoveWorktree(t *testing.T) {
+	t.Run("removes existing worktree", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// create plan and worktree
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "rm-test.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit)
+
+		log.logs = nil // reset logs
+		err = svc.RemoveWorktree(wtPath)
+		require.NoError(t, err)
+
+		// verify worktree removed
+		_, err = os.Stat(wtPath)
+		assert.True(t, os.IsNotExist(err))
+		assert.Contains(t, log.logs[0], "removed worktree")
+	})
+
+	t.Run("no-op when path does not exist", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		err = svc.RemoveWorktree("/nonexistent/path")
+		require.NoError(t, err)
+		assert.Empty(t, log.logs) // nothing should be logged
+	})
+
+	t.Run("preserves branch after removal", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create worktree
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "preserve-branch.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile)
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit)
+
+		// remove worktree
+		err = svc.RemoveWorktree(wtPath)
+		require.NoError(t, err)
+
+		// branch should still exist
+		assert.True(t, svc.repo.branchExists("preserve-branch"))
+	})
+}
+
+func TestService_CommitIgnoreChanges(t *testing.T) {
+	t.Run("commits dirty gitignore", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// add a pattern to .gitignore (makes it dirty)
+		err = svc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt")
+		require.NoError(t, err)
+
+		// verify .gitignore is dirty
+		changed, err := svc.repo.fileHasChanges(".gitignore")
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		// commit the changes
+		err = svc.CommitIgnoreChanges()
+		require.NoError(t, err)
+
+		// verify .gitignore is clean
+		changed, err = svc.repo.fileHasChanges(".gitignore")
+		require.NoError(t, err)
+		assert.False(t, changed)
+
+		assert.GreaterOrEqual(t, len(log.logs), 2, "should have log for EnsureIgnored and CommitIgnoreChanges")
+	})
+
+	t.Run("no-op when gitignore is clean", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		err = svc.CommitIgnoreChanges()
+		require.NoError(t, err)
+		assert.Empty(t, log.logs, "should not log when nothing to commit")
+	})
+
+	t.Run("no-op when gitignore does not exist", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		// ensure no .gitignore exists
+		_ = os.Remove(filepath.Join(dir, ".gitignore"))
+
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		err = svc.CommitIgnoreChanges()
+		require.NoError(t, err)
+		assert.Empty(t, log.logs)
+	})
+
+	t.Run("does not commit pre-staged files", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// create and stage an unrelated file
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("data"), 0o600))
+		require.NoError(t, svc.repo.add("other.txt"))
+
+		// make .gitignore dirty
+		err = svc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt")
+		require.NoError(t, err)
+
+		// commit should only commit .gitignore, not other.txt
+		err = svc.CommitIgnoreChanges()
+		require.NoError(t, err)
+
+		// other.txt should still have staged changes (not committed)
+		changed, err := svc.repo.fileHasChanges("other.txt")
+		require.NoError(t, err)
+		assert.True(t, changed, "other.txt should still be staged/dirty, not committed")
+	})
+}
+
+func TestService_FileHasChanges(t *testing.T) {
+	t.Run("returns true for dirty file", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, &mockLogger{})
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("data"), 0o600))
+		changed, err := svc.FileHasChanges("dirty.txt")
+		require.NoError(t, err)
+		assert.True(t, changed)
+	})
+
+	t.Run("returns false for clean file", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, &mockLogger{})
+		require.NoError(t, err)
+
+		// README.md was committed in setupExternalTestRepo
+		changed, err := svc.FileHasChanges("README.md")
+		require.NoError(t, err)
+		assert.False(t, changed)
+	})
+
+	t.Run("returns false for nonexistent file", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, &mockLogger{})
+		require.NoError(t, err)
+
+		changed, err := svc.FileHasChanges("nonexistent.txt")
+		require.NoError(t, err)
+		assert.False(t, changed)
 	})
 }
