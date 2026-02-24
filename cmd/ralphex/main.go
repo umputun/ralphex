@@ -418,7 +418,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", err)
 		}
 		baseLogClosed = true
-		req.Colors.Info().Printf("web dashboard still running at http://localhost:%d (press Ctrl+C to exit)\n", o.Port)
+		req.Colors.Info().Printf("web dashboard still running at http://%s:%d (press Ctrl+C to exit)\n", web.ConnectHost(o.Host), o.Port)
 		<-ctx.Done()
 	}
 

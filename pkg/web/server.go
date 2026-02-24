@@ -9,9 +9,11 @@ import (
 	"html/template"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/plan"
@@ -95,7 +97,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	s.srv = &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", s.cfg.host(), s.cfg.Port),
+		Addr:              net.JoinHostPort(s.cfg.host(), strconv.Itoa(s.cfg.Port)),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}

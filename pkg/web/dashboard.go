@@ -15,6 +15,15 @@ import (
 // serverStartupTimeout is the time to wait for server startup before assuming success.
 const serverStartupTimeout = 100 * time.Millisecond
 
+// ConnectHost returns the host to use in user-facing URLs.
+// maps wildcard addresses (0.0.0.0, ::) to localhost since those aren't connectable.
+func ConnectHost(host string) string {
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return "localhost"
+	}
+	return host
+}
+
 // DashboardConfig holds configuration for dashboard initialization.
 type DashboardConfig struct {
 	BaseLog         Logger           // base progress logger
@@ -138,7 +147,7 @@ func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 		}
 	}()
 
-	d.colors.Info().Printf("web dashboard: http://localhost:%d\n", d.port)
+	d.colors.Info().Printf("web dashboard: http://%s:%d\n", ConnectHost(d.host), d.port)
 	return broadcastLog, nil
 }
 
@@ -264,6 +273,6 @@ func printWatchInfo(dirs []string, port int, colors *progress.Colors) {
 	for _, dir := range dirs {
 		colors.Info().Printf("  %s\n", dir)
 	}
-	colors.Info().Printf("web dashboard: http://localhost:%d\n", port)
+	colors.Info().Printf("web dashboard: http://localhost:%d\n", port) // watch-only always binds loopback
 	colors.Info().Printf("press Ctrl+C to exit\n")
 }
