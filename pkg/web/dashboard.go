@@ -16,9 +16,9 @@ import (
 const serverStartupTimeout = 100 * time.Millisecond
 
 // ConnectHost returns the host to use in user-facing URLs.
-// maps wildcard addresses (0.0.0.0, ::) to localhost since those aren't connectable.
+// maps wildcard and loopback addresses to localhost since those aren't connectable.
 func ConnectHost(host string) string {
-	if host == "" || host == "0.0.0.0" || host == "::" {
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "::1" || host == "127.0.0.1" {
 		return "localhost"
 	}
 	return host

@@ -777,3 +777,15 @@ func TestExtractProjectDir(t *testing.T) {
 		})
 	}
 }
+
+func TestServerConfig_host(t *testing.T) {
+	t.Run("empty defaults to loopback", func(t *testing.T) {
+		cfg := ServerConfig{}
+		assert.Equal(t, "127.0.0.1", cfg.host())
+	})
+
+	t.Run("configured value returned", func(t *testing.T) {
+		cfg := ServerConfig{Host: "0.0.0.0"}
+		assert.Equal(t, "0.0.0.0", cfg.host())
+	})
+}
