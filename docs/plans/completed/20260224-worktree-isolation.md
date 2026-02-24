@@ -71,12 +71,12 @@ Add `git worktree add/remove/prune` support to the git backend interface and ext
 - Modify: `pkg/git/external_test.go`
 - Modify: `pkg/git/service_test.go`
 
-- [ ] Add `addWorktree(path, branch string) error` and `removeWorktree(path string) error` to `backend` interface
-- [ ] Add `pruneWorktrees() error` to `backend` interface
-- [ ] Implement `addWorktree` in `externalBackend` - runs `git worktree add <path> -b <branch>`
-- [ ] Implement `removeWorktree` in `externalBackend` - runs `git worktree remove --force <path>`
-- [ ] Implement `pruneWorktrees` in `externalBackend` - runs `git worktree prune`
-- [ ] Add public `CreateWorktreeForPlan(planFile string) (worktreePath string, err error)` to `Service`:
+- [x] Add `addWorktree(path, branch string, createBranch bool) error` and `removeWorktree(path string) error` to `backend` interface
+- [x] Add `pruneWorktrees() error` to `backend` interface
+- [x] Implement `addWorktree` in `externalBackend` - when `createBranch=true` runs `git worktree add <path> -b <branch>`, when `createBranch=false` runs `git worktree add <path> <branch>` (reuse existing branch)
+- [x] Implement `removeWorktree` in `externalBackend` - runs `git worktree remove --force <path>`
+- [x] Implement `pruneWorktrees` in `externalBackend` - runs `git worktree prune`
+- [x] Add public `CreateWorktreeForPlan(planFile string) (worktreePath string, err error)` to `Service`:
   - Guard: return error if not on main/master (same guard as `CreateBranchForPlan` line 128)
   - Derive branch name from plan file via `plan.ExtractBranchName` (no `ralphex/` prefix, consistent with existing convention)
   - Worktree path: `.ralphex/worktrees/<branch-name>` resolved as absolute from `s.repo.Root()`
@@ -86,10 +86,10 @@ Add `git worktree add/remove/prune` support to the git backend interface and ext
   - If branch exists but not checked out: use `git worktree add <path> <branch>` (without `-b`)
   - Auto-commit plan file if it has uncommitted changes (replicate `CreateBranchForPlan` lines 170-179 logic)
   - Return absolute worktree path
-- [ ] Add public `RemoveWorktree(path string) error` to `Service`
-- [ ] Write tests for `addWorktree`/`removeWorktree`/`pruneWorktrees` in `external_test.go` using real git repos in `t.TempDir()`
-- [ ] Write tests for `CreateWorktreeForPlan` and `RemoveWorktree` in `service_test.go` covering: happy path, already-exists error, not-on-main error, branch-exists-reuse
-- [ ] Run `make test` - must pass before task 2
+- [x] Add public `RemoveWorktree(path string) error` to `Service`
+- [x] Write tests for `addWorktree`/`removeWorktree`/`pruneWorktrees` in `external_test.go` using real git repos in `t.TempDir()`
+- [x] Write tests for `CreateWorktreeForPlan` and `RemoveWorktree` in `service_test.go` covering: happy path, already-exists error, not-on-main error, branch-exists-reuse
+- [x] Run `make test` - must pass before task 2
 
 ### Task 2: Add config option and CLI flag
 
@@ -102,16 +102,16 @@ Add `use_worktree` config option and `--worktree` CLI flag.
 - Modify: `pkg/config/values_test.go`
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] Add `WorktreeEnabled bool` and `WorktreeEnabledSet bool` to `Values` struct
-- [ ] Add parsing for `use_worktree` in `parseValuesFromBytes` (follow `finalize_enabled` pattern)
-- [ ] Add merge logic in `mergeFrom` for `WorktreeEnabled`/`WorktreeEnabledSet`
-- [ ] Add `WorktreeEnabled bool` and `WorktreeEnabledSet bool` to `Config` struct
-- [ ] Populate in config loading (follow existing pattern)
-- [ ] Add commented `# use_worktree = false` to `pkg/config/defaults/config`
-- [ ] Add `Worktree bool` field to `opts` struct with `long:"worktree" description:"run in isolated git worktree"`
-- [ ] Add override in `run()`: `if o.Worktree { cfg.WorktreeEnabled = true }`
-- [ ] Write tests for config parsing and merge of `use_worktree` option
-- [ ] Run `make test` - must pass before task 3
+- [x] Add `WorktreeEnabled bool` and `WorktreeEnabledSet bool` to `Values` struct
+- [x] Add parsing for `use_worktree` in `parseValuesFromBytes` (follow `finalize_enabled` pattern)
+- [x] Add merge logic in `mergeFrom` for `WorktreeEnabled`/`WorktreeEnabledSet`
+- [x] Add `WorktreeEnabled bool` and `WorktreeEnabledSet bool` to `Config` struct
+- [x] Populate in config loading (follow existing pattern)
+- [x] Add commented `# use_worktree = false` to `pkg/config/defaults/config`
+- [x] Add `Worktree bool` field to `opts` struct with `long:"worktree" description:"run in isolated git worktree"`
+- [x] Add override in `run()`: `if o.Worktree { cfg.WorktreeEnabled = true }`
+- [x] Write tests for config parsing and merge of `use_worktree` option
+- [x] Run `make test` - must pass before task 3
 
 ### Task 3: Integrate worktree lifecycle into main execution flow
 
@@ -120,10 +120,12 @@ Wire up worktree creation, chdir, execution, and cleanup in `cmd/ralphex/main.go
 **Files:**
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] Add worktree mode guard: only enable for `ModeFull` and `ModeTasksOnly` (review/plan/external modes skip worktree since they operate on existing branch changes or explore the main repo)
-- [ ] Resolve `planFile` to absolute path early (before any chdir) via `filepath.Abs`
-- [ ] Create progress logger **before** chdir so progress files land in main repo's `.ralphex/progress/` (currently `NewLogger` is inside `executePlan`; extract it or pass pre-created logger)
-- [ ] In `run()`, add worktree creation block (replaces `CreateBranchForPlan` when active):
+- [x] Add worktree mode guard: only enable for `ModeFull` and `ModeTasksOnly` (review/plan/external modes skip worktree since they operate on existing branch changes or explore the main repo)
+- [x] Handle `--plan` continuation: in `runPlanMode`, when worktree is enabled, the "continue with plan implementation" path (line 636) must use `CreateWorktreeForPlan` + chdir instead of `CreateBranchForPlan`
+- [x] Resolve `planFile` to absolute path early (before any chdir) via `filepath.Abs`
+- [x] Create progress logger **before** chdir so progress files land in main repo's `.ralphex/progress/` (currently `NewLogger` is inside `executePlan`; extract it or pass pre-created logger)
+- [x] Add `.ralphex/worktrees/` to `EnsureIgnored` call (alongside `.ralphex/progress/`) **after** worktree creation (moved from before to avoid HasChangesOtherThan conflict)
+- [x] In `run()`, add worktree creation block (replaces `CreateBranchForPlan` when active):
   - If `cfg.WorktreeEnabled && planFile != "" && modeRequiresBranch(mode)`:
     - Call `gitSvc.CreateWorktreeForPlan(planFile)` to get worktree path
     - Store original CWD via `os.Getwd()`
@@ -131,13 +133,12 @@ Wire up worktree creation, chdir, execution, and cleanup in `cmd/ralphex/main.go
     - Open `worktreeGitSvc` via `git.NewService(".", colors.Info())`
     - Register defer: `os.Chdir(origDir)` then `gitSvc.RemoveWorktree(wtPath)`
   - Else: use existing `CreateBranchForPlan` flow unchanged
-- [ ] Handle interrupt cleanup: use a mutable `var worktreeCleanup func()` closure variable initialized to no-op, populated after worktree creation. Pass combined cleanup to `startInterruptWatcher`: `func() { restoreTerminal(); worktreeCleanup() }`. Since `startInterruptWatcher` captures the closure variable by reference via the wrapping function, it will see the populated value.
-- [ ] Add `.ralphex/worktrees/` to `EnsureIgnored` call (alongside `.ralphex/progress/`)
-- [ ] Add `MainGitSvc *git.Service` field to `executePlanRequest` for cross-boundary operations. In worktree mode, `GitSvc` = worktree service, `MainGitSvc` = main repo service. In normal mode, both point to the same service.
-- [ ] In `executePlan`: use `MainGitSvc` for `MovePlanToCompleted` (plan file is in main repo)
-- [ ] In `executePlan`: run `DiffStats` from worktree `GitSvc` (has correct HEAD with committed changes) before cleanup defer runs
-- [ ] Write tests in `cmd/ralphex/main_test.go`: verify worktree created, chdir happens, cleanup removes worktree, non-worktree modes skip worktree
-- [ ] Run `make test` - must pass before task 4
+- [x] Handle interrupt cleanup: use a mutable `var worktreeCleanup func()` closure variable initialized to no-op, populated after worktree creation. Pass combined cleanup to `startInterruptWatcher`: `func() { restoreTerminal(); worktreeCleanup() }`. Since `startInterruptWatcher` captures the closure variable by reference via the wrapping function, it will see the populated value.
+- [x] Add `MainGitSvc *git.Service` field to `executePlanRequest` for cross-boundary operations. In worktree mode, `GitSvc` = worktree service, `MainGitSvc` = main repo service. In normal mode, both point to the same service.
+- [x] In `executePlan`: use `MainGitSvc` for `MovePlanToCompleted` (plan file is in main repo)
+- [x] In `executePlan`: run `DiffStats` from worktree `GitSvc` (has correct HEAD with committed changes) before cleanup defer runs
+- [x] Write tests in `cmd/ralphex/main_test.go`: verify worktree created, chdir happens, cleanup removes worktree, non-worktree modes skip worktree
+- [x] Run `make test` - must pass before task 4
 
 ### Task 4: Make progress logger path absolute
 
@@ -147,12 +148,12 @@ Ensure progress file paths are absolute so they work correctly when passed to Cl
 - Modify: `pkg/progress/progress.go`
 - Modify: `pkg/progress/progress_test.go`
 
-- [ ] In `NewLogger`, call `filepath.Abs` on the progress file path before opening
+- [x] In `NewLogger`, call `filepath.Abs` on the progress file path before opening
   - `Logger.Path()` will return absolute path usable from any CWD
   - Non-worktree mode unaffected (absolute paths work everywhere)
-- [ ] Write test: `Logger.Path()` returns absolute path
-- [ ] Write test: verify `filepath.Abs` on relative path produces expected absolute path
-- [ ] Run `make test` - must pass before task 5
+- [x] Write test: `Logger.Path()` returns absolute path
+- [x] Write test: verify `filepath.Abs` on relative path produces expected absolute path
+- [x] Run `make test` - must pass before task 5
 
 ### Task 5: Handle edge cases and error recovery
 
@@ -162,33 +163,33 @@ Ensure graceful handling of stale worktrees and concurrent access.
 - Modify: `pkg/git/service.go`
 - Modify: `pkg/git/service_test.go`
 
-- [ ] In `CreateWorktreeForPlan`: if worktree dir exists, return descriptive error (for v1, don't auto-cleanup; user can remove manually or wait for other run to complete)
-- [ ] In `CreateWorktreeForPlan`: if branch is checked out in another worktree, return descriptive error
-- [ ] In `RemoveWorktree`: handle case where worktree was already removed (no error)
-- [ ] In `RemoveWorktree`: handle case where worktree dir doesn't exist (no error)
-- [ ] Write tests for error cases: existing worktree, branch conflict, already-removed
-- [ ] Run `make test` - must pass before task 6
+- [x] In `CreateWorktreeForPlan`: if worktree dir exists, return descriptive error (for v1, don't auto-cleanup; user can remove manually or wait for other run to complete)
+- [x] In `CreateWorktreeForPlan`: if branch is checked out in another worktree, return descriptive error
+- [x] In `RemoveWorktree`: handle case where worktree was already removed (no error)
+- [x] In `RemoveWorktree`: handle case where worktree dir doesn't exist (no error)
+- [x] Write tests for error cases: existing worktree, branch conflict, already-removed
+- [x] Run `make test` - must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Verify: `--worktree` flag creates worktree and executes in it
-- [ ] Verify: `use_worktree = true` in config works
-- [ ] Verify: default behavior unchanged (worktree off by default)
-- [ ] Verify: worktree auto-removed on completion
-- [ ] Verify: branch preserved after worktree removal
-- [ ] Verify: `--review`, `--plan`, `--external-only` modes unaffected
-- [ ] Cross-compile verify: `GOOS=windows GOARCH=amd64 go build ./...`
-- [ ] Run full test suite: `make test`
-- [ ] Run linter: `make lint`
-- [ ] Verify test coverage meets 80%+
+- [x] Verify: `--worktree` flag creates worktree and executes in it
+- [x] Verify: `use_worktree = true` in config works
+- [x] Verify: default behavior unchanged (worktree off by default)
+- [x] Verify: worktree auto-removed on completion
+- [x] Verify: branch preserved after worktree removal
+- [x] Verify: `--review`, `--plan`, `--external-only` modes unaffected
+- [x] Cross-compile verify: `GOOS=windows GOARCH=amd64 go build ./...`
+- [x] Run full test suite: `make test`
+- [x] Run linter: `make lint`
+- [x] Verify test coverage meets 80%+ (85.4%)
 
 ### Task 7: [Final] Update documentation
 
-- [ ] Update README.md with `--worktree` flag and `use_worktree` config option
-- [ ] Update CLAUDE.md with worktree-related patterns and files
-- [ ] Update `llms.txt` with `--worktree` usage example
-- [ ] Document that `--serve --watch .ralphex/worktrees/*/` can monitor worktree progress files
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update README.md with `--worktree` flag and `use_worktree` config option
+- [x] Update CLAUDE.md with worktree-related patterns and files
+- [x] Update `llms.txt` with `--worktree` usage example
+- [x] N/A: progress files stay in main repo's `.ralphex/progress/`, no extra `--watch` config needed
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

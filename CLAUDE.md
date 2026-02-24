@@ -109,13 +109,29 @@ Documentation: `docs/custom-providers.md`
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger) (*Service, error)`
-- All git operations are methods on `Service` (CreateBranchForPlan, MovePlanToCompleted, EnsureIgnored, etc.)
+- All git operations are methods on `Service` (CreateBranchForPlan, CreateWorktreeForPlan, MovePlanToCompleted, EnsureIgnored, etc.)
 - `Logger` interface for dependency injection, compatible with `*color.Color`
 - Uses `backend` interface internally, implemented by `externalBackend` which shells out to the `git` binary
 
 Key files:
 - `pkg/git/service.go` - `Service` type, `backend` interface
 - `pkg/git/external.go` - git CLI backend (`externalBackend` type)
+
+### Worktree Isolation Mode
+
+`--worktree` flag or `use_worktree = true` config option runs each plan in an isolated git worktree, enabling parallel execution of multiple plans on the same repo.
+
+- Worktrees created at `.ralphex/worktrees/<branch-name>` inside main repo
+- Progress logger created before chdir so files land in main repo's `.ralphex/progress/`
+- `MainGitSvc` in `executePlanRequest` handles cross-boundary ops (plan file moves in main repo)
+- Worktree auto-removed on completion, failure, or SIGINT; branch preserved for PR
+- Only active for `ModeFull` and `ModeTasksOnly` (review/plan/external modes skip worktree)
+- `runWithWorktree()` in `cmd/ralphex/main.go` encapsulates the full lifecycle
+
+Key files:
+- `cmd/ralphex/main.go` - `runWithWorktree()`, `selectAndExecutePlan()`, interrupt cleanup
+- `pkg/git/service.go` - `CreateWorktreeForPlan()`, `CommitPlanFile()`, `RemoveWorktree()`
+- `pkg/git/external.go` - `addWorktree()`, `removeWorktree()`, `pruneWorktrees()` (unexported backend methods)
 
 ### Plan Creation Mode
 

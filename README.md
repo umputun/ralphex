@@ -51,6 +51,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 - **Web dashboard** - browser-based real-time view with `--serve` flag
 - **Docker support** - run in isolated container for safer autonomous execution
 - **Notifications** - optional alerts on completion/failure via Telegram, Email, Slack, Webhook, or custom script
+- **Worktree isolation** - run multiple plans in parallel via `--worktree` flag
 - **Multiple modes** - full execution, tasks-only, review-only, external-only, or plan creation
 
 ## Quick Start
@@ -417,6 +418,9 @@ ralphex --external-only
 # tasks-only mode (run only task phase, skip all reviews)
 ralphex --tasks-only docs/plans/feature.md
 
+# run in isolated git worktree (parallel-safe)
+ralphex --worktree docs/plans/feature.md
+
 # override default branch for review diffs
 ralphex --review --base-ref develop
 ralphex --review --base-ref abc1234 --skip-finalize
@@ -445,6 +449,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
+| `--worktree` | Run in isolated git worktree (enables parallel execution) | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
 | `-p, --port` | Web dashboard port (used with `--serve`) | 8080 |
@@ -668,6 +673,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `iteration_delay_ms` | Delay between iterations | `2000` |
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
+| `use_worktree` | Run each plan in an isolated git worktree | `false` |
 | `plans_dir` | Plans directory | `docs/plans` |
 | `default_branch` | Override auto-detected default branch for review diffs | auto-detect |
 | `color_task` | Task execution phase color (hex) | `#00ff00` |
