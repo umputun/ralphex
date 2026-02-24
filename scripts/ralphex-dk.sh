@@ -371,6 +371,35 @@ def schedule_cleanup(creds_temp: Optional[Path]) -> None:
     t.start()
 
 
+def _detect_host_timezone() -> str:
+    """detect the host IANA timezone from system files.
+
+    tries /etc/localtime symlink first (works on macOS and most Linux),
+    then falls back to reading /etc/timezone (Debian/Ubuntu).
+    returns empty string if detection fails.
+    """
+    # try /etc/localtime symlink (macOS and Linux)
+    try:
+        link = os.path.realpath("/etc/localtime")
+        # extract IANA name from path like /usr/share/zoneinfo/America/New_York
+        marker = "/zoneinfo/"
+        idx = link.find(marker)
+        if idx != -1:
+            return link[idx + len(marker):]
+    except OSError:
+        pass
+
+    # fallback: /etc/timezone (Debian/Ubuntu)
+    try:
+        tz = Path("/etc/timezone").read_text().strip()
+        if tz:
+            return tz
+    except OSError:
+        pass
+
+    return ""
+
+
 def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args: list[str]) -> int:
     """build and execute docker run command."""
     cmd = ["docker", "run"]
@@ -386,6 +415,14 @@ def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args:
         "-e", "INIT_QUIET=1",
         "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
     ])
+
+    # forward host timezone so container timestamps match the user's local time.
+    # checks $TZ first, then falls back to system detection (macOS and Linux).
+    tz = os.environ.get("TZ", "")
+    if not tz:
+        tz = _detect_host_timezone()
+    if tz:
+        cmd.extend(["-e", f"TZ={tz}"])
 
     if bind_port:
         cmd.extend(["-p", f"{port}:8080"])
@@ -989,13 +1026,41 @@ def run_tests() -> None:
             self.assertEqual(extra, ["-v", "/x:/y:ro"])
             self.assertEqual(remaining, ["--serve", "plan.md"])
 
+    class TestDetectHostTimezone(unittest.TestCase):
+        def test_tz_from_localtime_symlink(self) -> None:
+            """detects timezone from /etc/localtime symlink."""
+            with unittest.mock.patch("os.path.realpath", return_value="/usr/share/zoneinfo/Europe/Berlin"):
+                tz = _detect_host_timezone()
+            self.assertEqual(tz, "Europe/Berlin")
+
+        def test_tz_from_localtime_macos_path(self) -> None:
+            """detects timezone from macOS-style /var/db/timezone/zoneinfo path."""
+            with unittest.mock.patch("os.path.realpath", return_value="/var/db/timezone/zoneinfo/Asia/Tokyo"):
+                tz = _detect_host_timezone()
+            self.assertEqual(tz, "Asia/Tokyo")
+
+        def test_fallback_to_etc_timezone(self) -> None:
+            """falls back to /etc/timezone when /etc/localtime has no zoneinfo marker."""
+            with unittest.mock.patch("os.path.realpath", return_value="/etc/localtime"):
+                with unittest.mock.patch.object(Path, "read_text", return_value="America/New_York\n"):
+                    tz = _detect_host_timezone()
+            self.assertEqual(tz, "America/New_York")
+
+        def test_returns_empty_when_nothing_detected(self) -> None:
+            """returns empty string when no timezone can be detected."""
+            with unittest.mock.patch("os.path.realpath", return_value="/etc/localtime"):
+                with unittest.mock.patch.object(Path, "read_text", side_effect=OSError("not found")):
+                    tz = _detect_host_timezone()
+            self.assertEqual(tz, "")
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
                TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
-               TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes]:
+               TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
+               TestDetectHostTimezone]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
