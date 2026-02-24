@@ -146,6 +146,11 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 
 	progressPath := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode)
 
+	// resolve to absolute path so Logger.Path() works from any CWD (e.g. after worktree chdir)
+	if absPath, absErr := filepath.Abs(progressPath); absErr == nil {
+		progressPath = absPath
+	}
+
 	// ensure progress files are tracked by creating parent dir
 	if dir := filepath.Dir(progressPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o750); err != nil {

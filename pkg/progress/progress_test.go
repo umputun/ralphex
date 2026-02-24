@@ -1007,6 +1007,31 @@ func TestLogger_LogDraftReview_ReviseWithFeedback(t *testing.T) {
 	assert.Contains(t, output, "FEEDBACK: Please add more details to Task 3")
 }
 
+func TestNewLogger_AbsolutePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{PlanFile: "docs/plans/test-abs.md", Mode: "full", Branch: "main"}, testColors(), holder)
+	require.NoError(t, err)
+	defer l.Close()
+
+	// path must be absolute
+	assert.True(t, filepath.IsAbs(l.Path()), "expected absolute path, got %s", l.Path())
+
+	// must start with tmpDir (resolved)
+	resolvedTmp, _ := filepath.EvalSymlinks(tmpDir)
+	assert.True(t, strings.HasPrefix(l.Path(), resolvedTmp),
+		"expected path to start with %s, got %s", resolvedTmp, l.Path())
+
+	// file must exist and be readable from any CWD
+	require.NoError(t, os.Chdir(t.TempDir())) // change to different dir
+	_, err = os.ReadFile(l.Path())
+	assert.NoError(t, err, "file should be readable from different CWD via absolute path")
+}
+
 func TestLogger_PlanModeFilename(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
