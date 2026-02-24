@@ -1316,6 +1316,130 @@ func TestWorktreeMode_SkippedForNonBranchModes(t *testing.T) {
 	})
 }
 
+func TestRunWithWorktree_UntrackedPlan(t *testing.T) {
+	skipIfClaudeNotAvailable(t)
+
+	dir := setupTestRepo(t)
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	// create plan file but do NOT commit it (untracked)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o750))
+	planPath := filepath.Join(dir, "docs", "plans", "wt-untracked.md")
+	require.NoError(t, os.WriteFile(planPath, []byte("# WT Untracked\n\n- [ ] task 1\n"), 0o600))
+
+	gitSvc, err := git.NewService(dir, noopLogger())
+	require.NoError(t, err)
+
+	colors := testColors()
+	cfg := &config.Config{WorktreeEnabled: true}
+	wtCleanup := &worktreeCleanupFn{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+		PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: cfg,
+		Colors: colors, DefaultBranch: "master", WtCleanup: wtCleanup,
+	})
+	// should fail with context canceled from the runner, but plan should be committed on branch
+	require.Error(t, err)
+
+	// verify CWD restored
+	cwd, cwdErr := os.Getwd()
+	require.NoError(t, cwdErr)
+	assert.Equal(t, resolvedDir, cwd, "cwd should be restored after runWithWorktree")
+
+	// verify branch was created and plan was committed there
+	assert.True(t, branchExists(t, dir, "wt-untracked"), "branch should exist")
+
+	// verify worktree cleaned up
+	wtPath := filepath.Join(dir, ".ralphex", "worktrees", "wt-untracked")
+	assert.NoDirExists(t, wtPath, "worktree should be removed")
+}
+
+func TestRunWithWorktree_CreateWorktreeError(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	// create plan file and commit it
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o750))
+	planPath := filepath.Join(dir, "docs", "plans", "wt-fail.md")
+	require.NoError(t, os.WriteFile(planPath, []byte("# WT Fail\n"), 0o600))
+	runGit(t, dir, "add", "docs/plans/wt-fail.md")
+	runGit(t, dir, "commit", "-m", "add wt fail plan")
+
+	gitSvc, err := git.NewService(dir, noopLogger())
+	require.NoError(t, err)
+
+	// pre-create worktree dir to force "already exists" error
+	wtPath := filepath.Join(dir, ".ralphex", "worktrees", "wt-fail")
+	require.NoError(t, os.MkdirAll(wtPath, 0o750))
+
+	colors := testColors()
+	cfg := &config.Config{WorktreeEnabled: true}
+	wtCleanup := &worktreeCleanupFn{}
+
+	ctx := context.Background()
+	err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+		PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: cfg,
+		Colors: colors, DefaultBranch: "master", WtCleanup: wtCleanup,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create worktree")
+}
+
+func TestEnsureGitIgnored(t *testing.T) {
+	t.Run("odd_pairs_returns_error", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+		err = ensureGitIgnored(gitSvc, "pattern-only")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires pairs")
+	})
+
+	t.Run("commits_when_gitignore_clean", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+
+		err = ensureGitIgnored(gitSvc, ".ralphex/progress/", ".ralphex/progress/test-probe")
+		require.NoError(t, err)
+
+		// verify .gitignore was committed (no uncommitted changes)
+		hasChanges, chErr := gitSvc.FileHasChanges(".gitignore")
+		require.NoError(t, chErr)
+		assert.False(t, hasChanges, ".gitignore should be committed")
+	})
+
+	t.Run("skips_commit_when_gitignore_dirty", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+
+		// make .gitignore dirty first
+		igPath := filepath.Join(dir, ".gitignore")
+		require.NoError(t, os.WriteFile(igPath, []byte("some-user-pattern\n"), 0o600))
+
+		err = ensureGitIgnored(gitSvc, ".ralphex/progress/", ".ralphex/progress/test-probe")
+		require.NoError(t, err)
+
+		// .gitignore should still have uncommitted changes (not auto-committed)
+		hasChanges, chErr := gitSvc.FileHasChanges(".gitignore")
+		require.NoError(t, chErr)
+		assert.True(t, hasChanges, ".gitignore should remain dirty when it was dirty before")
+	})
+}
+
 // branchExists checks if a branch exists in the given git repository.
 func branchExists(t *testing.T, dir, branch string) bool {
 	t.Helper()
