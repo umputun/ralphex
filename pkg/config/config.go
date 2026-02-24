@@ -36,6 +36,7 @@ const (
 //   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
 //   - TaskRetryCountSet: tracks if task_retry_count was explicitly set
 //   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
+//   - WorktreeEnabledSet: tracks if use_worktree was explicitly set
 type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`
@@ -59,6 +60,9 @@ type Config struct {
 
 	FinalizeEnabled    bool `json:"finalize_enabled"`
 	FinalizeEnabledSet bool `json:"-"` // tracks if finalize_enabled was explicitly set in config
+
+	WorktreeEnabled    bool `json:"worktree_enabled"`
+	WorktreeEnabledSet bool `json:"-"` // tracks if use_worktree was explicitly set in config
 
 	PlansDir      string   `json:"plans_dir"`
 	WatchDirs     []string `json:"watch_dirs"`     // directories to watch for progress files
@@ -240,6 +244,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		TaskRetryCountSet:    values.TaskRetryCountSet,
 		FinalizeEnabled:      values.FinalizeEnabled,
 		FinalizeEnabledSet:   values.FinalizeEnabledSet,
+		WorktreeEnabled:      values.WorktreeEnabled,
+		WorktreeEnabledSet:   values.WorktreeEnabledSet,
 		PlansDir:             values.PlansDir,
 		DefaultBranch:        values.DefaultBranch,
 		WatchDirs:            values.WatchDirs,

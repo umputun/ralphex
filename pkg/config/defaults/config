@@ -86,6 +86,15 @@ external_review_tool = codex
 # finalize_enabled = false
 
 # ------------------------------------------------------------------------------
+# worktree isolation
+# ------------------------------------------------------------------------------
+
+# use_worktree: run each plan in an isolated git worktree
+# creates .ralphex/worktrees/<plan-name> for parallel execution
+# default: false
+# use_worktree = false
+
+# ------------------------------------------------------------------------------
 # timing
 # ------------------------------------------------------------------------------
 

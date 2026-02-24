@@ -34,6 +34,8 @@ type Values struct {
 	TaskRetryCountSet    bool // tracks if task_retry_count was explicitly set
 	FinalizeEnabled      bool
 	FinalizeEnabledSet   bool // tracks if finalize_enabled was explicitly set
+	WorktreeEnabled      bool
+	WorktreeEnabledSet   bool // tracks if use_worktree was explicitly set
 	PlansDir             string
 	DefaultBranch        string   // override auto-detected default branch
 	WatchDirs            []string // directories to watch for progress files
@@ -238,6 +240,16 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.FinalizeEnabledSet = true
 	}
 
+	// worktree settings
+	if key, err := section.GetKey("use_worktree"); err == nil {
+		val, boolErr := key.Bool()
+		if boolErr != nil {
+			return Values{}, fmt.Errorf("invalid use_worktree: %w", boolErr)
+		}
+		values.WorktreeEnabled = val
+		values.WorktreeEnabledSet = true
+	}
+
 	// paths
 	if key, err := section.GetKey("plans_dir"); err == nil {
 		values.PlansDir = key.String()
@@ -333,6 +345,10 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.FinalizeEnabledSet {
 		dst.FinalizeEnabled = src.FinalizeEnabled
 		dst.FinalizeEnabledSet = true
+	}
+	if src.WorktreeEnabledSet {
+		dst.WorktreeEnabled = src.WorktreeEnabled
+		dst.WorktreeEnabledSet = true
 	}
 	if src.PlansDir != "" {
 		dst.PlansDir = src.PlansDir
