@@ -166,7 +166,7 @@ func (d *Dashboard) RunWatchOnly(ctx context.Context, dirs []string) error {
 	}
 
 	// print startup info
-	printWatchInfo(dirs, d.port, d.colors)
+	printWatchInfo(dirs, d.port, d.host, d.colors)
 
 	// monitor for errors until shutdown
 	return monitorErrors(ctx, srvErrCh, watchErrCh, d.colors)
@@ -268,11 +268,11 @@ func monitorErrors(ctx context.Context, srvErrCh, watchErrCh chan error, colors 
 }
 
 // printWatchInfo prints startup information for watch-only mode.
-func printWatchInfo(dirs []string, port int, colors *progress.Colors) {
+func printWatchInfo(dirs []string, port int, host string, colors *progress.Colors) {
 	colors.Info().Printf("watch-only mode: monitoring %d directories\n", len(dirs))
 	for _, dir := range dirs {
 		colors.Info().Printf("  %s\n", dir)
 	}
-	colors.Info().Printf("web dashboard: http://localhost:%d\n", port) // watch-only always binds loopback
+	colors.Info().Printf("web dashboard: http://%s:%d\n", ConnectHost(host), port)
 	colors.Info().Printf("press Ctrl+C to exit\n")
 }

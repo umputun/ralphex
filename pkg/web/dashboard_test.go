@@ -286,5 +286,5 @@ func TestPrintWatchInfo(t *testing.T) {
 	colors := testColors()
 
 	// just verify it doesn't panic
-	printWatchInfo([]string{"/tmp", "/var"}, 8080, colors)
+	printWatchInfo([]string{"/tmp", "/var"}, 8080, "", colors)
 }
