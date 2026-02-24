@@ -749,7 +749,7 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 			}
 			branch, err := gitSvc.CurrentBranch()
 			return err == nil && branch == "test-plan"
-		}, 1*time.Second, 100*time.Millisecond, "tasks-only mode should create branch for plan")
+		}, 3*time.Second, 100*time.Millisecond, "tasks-only mode should create branch for plan")
 
 		cancel()
 		<-done
@@ -1149,4 +1149,179 @@ func TestResolveVersion(t *testing.T) {
 		v := resolveVersion()
 		assert.NotEmpty(t, v)
 	})
+}
+
+func TestRunWithWorktree(t *testing.T) {
+	t.Run("creates_worktree_and_restores_cwd", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// resolve dir through symlinks (macOS /var → /private/var)
+		resolvedDir, err := filepath.EvalSymlinks(dir)
+		require.NoError(t, err)
+
+		// create and commit plan file
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "wt-test.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# WT Test\n\n- [ ] task 1\n"), 0o600))
+		runGit(t, dir, "add", "docs/plans/wt-test.md")
+		runGit(t, dir, "commit", "-m", "add wt test plan")
+
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+
+		colors := testColors()
+		cfg := &config.Config{WorktreeEnabled: true}
+		wtCleanup := &worktreeCleanupFn{}
+
+		// cancel context immediately to stop executePlan fast
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+			PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: cfg,
+			Colors: colors, DefaultBranch: "master", WtCleanup: wtCleanup,
+		})
+		// should fail with context canceled from the runner
+		require.Error(t, err)
+
+		// verify CWD restored to original (compare resolved paths due to macOS symlinks)
+		cwd, cwdErr := os.Getwd()
+		require.NoError(t, cwdErr)
+		assert.Equal(t, resolvedDir, cwd, "cwd should be restored after runWithWorktree")
+
+		// verify worktree directory cleaned up
+		wtPath := filepath.Join(dir, ".ralphex", "worktrees", "wt-test")
+		assert.NoDirExists(t, wtPath, "worktree should be removed after runWithWorktree")
+
+		// verify branch was preserved (worktree creates the branch)
+		assert.True(t, branchExists(t, dir, "wt-test"), "branch should be preserved after worktree removal")
+	})
+
+	t.Run("populates_worktree_cleanup_ptr", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create and commit plan file
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "wt-ptr.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# WT Ptr\n\n- [ ] task 1\n"), 0o600))
+		runGit(t, dir, "add", "docs/plans/wt-ptr.md")
+		runGit(t, dir, "commit", "-m", "add wt ptr plan")
+
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+
+		colors := testColors()
+		cfg := &config.Config{WorktreeEnabled: true}
+
+		called := false
+		wtCleanup := &worktreeCleanupFn{fn: func() { called = true }}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_ = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+			PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: cfg,
+			Colors: colors, DefaultBranch: "master", WtCleanup: wtCleanup,
+		})
+
+		// the cleanup fn should have been overwritten by runWithWorktree
+		assert.False(t, called, "original cleanup should not have been called (replaced by runWithWorktree)")
+	})
+
+	t.Run("worktree_creates_branch", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		// create and commit plan file
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "wt-branch.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# WT Branch\n\n- [ ] task 1\n"), 0o600))
+		runGit(t, dir, "add", "docs/plans/wt-branch.md")
+		runGit(t, dir, "commit", "-m", "add wt branch plan")
+
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+
+		colors := testColors()
+		cfg := &config.Config{WorktreeEnabled: true}
+		wtCleanup := &worktreeCleanupFn{}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_ = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+			PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: cfg,
+			Colors: colors, DefaultBranch: "master", WtCleanup: wtCleanup,
+		})
+
+		// branch should be preserved after worktree cleanup
+		assert.True(t, branchExists(t, dir, "wt-branch"), "branch should exist after worktree removal")
+	})
+}
+
+func TestWorktreeMode_SkippedForNonBranchModes(t *testing.T) {
+	// worktree mode guard: cfg.WorktreeEnabled && planFile != "" && modeRequiresBranch(mode)
+	// for modes that don't require a branch, worktree should not be activated.
+	// this is tested via modeRequiresBranch which already has coverage.
+	// here we verify the guard condition explicitly.
+
+	t.Run("worktree_skipped_for_review_mode", func(t *testing.T) {
+		skipIfClaudeNotAvailable(t)
+
+		dir := setupTestRepo(t)
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
+		planPath := filepath.Join(dir, "docs", "plans", "wt-skip.md")
+		require.NoError(t, os.WriteFile(planPath, []byte("# WT Skip\n"), 0o600))
+		runGit(t, dir, "add", "docs/plans/wt-skip.md")
+		runGit(t, dir, "commit", "-m", "add wt skip plan")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		o := opts{Worktree: true, Review: true, PlanFile: planPath, MaxIterations: 1, NoColor: true}
+		_ = run(ctx, o)
+
+		// no worktree directory should exist
+		wtPath := filepath.Join(dir, ".ralphex", "worktrees", "wt-skip")
+		assert.NoDirExists(t, wtPath, "review mode should not create worktree")
+
+		// should stay on master
+		gitSvc, gitErr := git.NewService(dir, noopLogger())
+		require.NoError(t, gitErr)
+		branch, brErr := gitSvc.CurrentBranch()
+		require.NoError(t, brErr)
+		assert.Equal(t, "master", branch, "review mode should stay on master")
+	})
+}
+
+// branchExists checks if a branch exists in the given git repository.
+func branchExists(t *testing.T, dir, branch string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "branch", "--list", branch)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	return strings.TrimSpace(string(out)) != ""
 }

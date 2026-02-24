@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,6 +37,7 @@ type opts struct {
 	TasksOnly       bool     `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
 	BaseRef         string   `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
 	SkipFinalize    bool     `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
+	Worktree        bool     `long:"worktree" description:"run in isolated git worktree"`
 	PlanDescription string   `long:"plan" description:"create plan interactively (enter plan description)"`
 	Debug           bool     `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor         bool     `long:"no-color" description:"disable color output"`
@@ -97,13 +99,39 @@ type startupInfo struct {
 // executePlanRequest holds parameters for plan execution.
 type executePlanRequest struct {
 	PlanFile      string
+	MainPlanFile  string // original plan path in main repo (worktree mode); empty in normal mode
 	Mode          processor.Mode
 	GitSvc        *git.Service
+	MainGitSvc    *git.Service // main repo service for cross-boundary ops (worktree mode); nil in normal mode
 	Config        *config.Config
 	Colors        *progress.Colors
-	Selector      *plan.Selector
 	DefaultBranch string
 	NotifySvc     *notify.Service
+	WtCleanup     *worktreeCleanupFn  // worktree cleanup for interrupt handler; nil when not in worktree mode
+	ProgressLog   *progress.Logger    // pre-created logger (worktree mode); nil in normal mode
+	PhaseHolder   *status.PhaseHolder // pre-created holder (worktree mode); nil in normal mode
+}
+
+// worktreeCleanupFn holds a worktree cleanup function with mutex for safe cross-goroutine access.
+// the interrupt watcher goroutine calls cleanup on force-exit, while the main goroutine populates it.
+type worktreeCleanupFn struct {
+	mu sync.Mutex
+	fn func()
+}
+
+func (c *worktreeCleanupFn) set(fn func()) {
+	c.mu.Lock()
+	c.fn = fn
+	c.mu.Unlock()
+}
+
+func (c *worktreeCleanupFn) call() {
+	c.mu.Lock()
+	fn := c.fn
+	c.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func main() {
@@ -148,9 +176,16 @@ func run(ctx context.Context, o opts) error {
 	restoreTerminal := disableCtrlCEcho()
 	defer restoreTerminal()
 
+	// worktree cleanup function, populated after worktree creation.
+	// synchronized for safe access from the interrupt watcher goroutine.
+	wtCleanup := &worktreeCleanupFn{}
+
 	// print immediate feedback when context is canceled (Ctrl+C).
 	// returned cleanup ensures goroutine exits when run() returns, avoiding leaks in tests.
-	defer startInterruptWatcher(ctx, restoreTerminal)()
+	defer startInterruptWatcher(ctx, func() {
+		restoreTerminal()
+		wtCleanup.call()
+	})()
 
 	// validate conflicting flags
 	if err := validateFlags(o); err != nil {
@@ -205,9 +240,7 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	defaultBranch := resolveDefaultBranch(o.BaseRef, cfg.DefaultBranch, gitSvc.GetDefaultBranch())
-	if o.SkipFinalize {
-		cfg.FinalizeEnabled = false
-	}
+	applyCLIOverrides(o, cfg)
 
 	mode := determineMode(o)
 
@@ -221,52 +254,59 @@ func run(ctx context.Context, o opts) error {
 			GitSvc:        gitSvc,
 			Config:        cfg,
 			Colors:        colors,
-			Selector:      selector,
 			DefaultBranch: defaultBranch,
 			NotifySvc:     notifySvc,
-		})
+			WtCleanup:     wtCleanup,
+		}, selector)
 	}
 
-	// select and prepare plan file (not needed for plan mode)
+	return selectAndExecutePlan(ctx, o, executePlanRequest{
+		Mode:          mode,
+		GitSvc:        gitSvc,
+		Config:        cfg,
+		Colors:        colors,
+		DefaultBranch: defaultBranch,
+		NotifySvc:     notifySvc,
+		WtCleanup:     wtCleanup,
+	}, selector)
+}
+
+// selectAndExecutePlan selects a plan file, sets up branch or worktree, and runs execution.
+func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, selector *plan.Selector) error {
 	// plan is optional only for review modes (ModeReview, ModeCodexOnly)
-	planOptional := mode == processor.ModeReview || mode == processor.ModeCodexOnly
+	planOptional := req.Mode == processor.ModeReview || req.Mode == processor.ModeCodexOnly
 	planFile, err := selector.Select(ctx, o.PlanFile, planOptional)
 	if err != nil {
 		// check for auto-plan-mode: no plans found on main/master branch
-		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, executePlanRequest{
-			GitSvc:        gitSvc,
-			Config:        cfg,
-			Colors:        colors,
-			Selector:      selector,
-			DefaultBranch: defaultBranch,
-			NotifySvc:     notifySvc,
-		})
+		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, req, selector)
 		if handled {
 			return autoPlanErr
 		}
 		return fmt.Errorf("select plan: %w", err)
 	}
 
-	// setup git for execution (branch, gitignore)
-	if planFile != "" && modeRequiresBranch(mode) {
-		if err := gitSvc.CreateBranchForPlan(planFile); err != nil {
+	req.PlanFile = planFile
+
+	// worktree mode: create worktree, chdir into it, run execution from there.
+	// EnsureIgnored is called inside runWithWorktree after worktree creation
+	// to avoid HasChangesOtherThan conflict in CreateWorktreeForPlan.
+	if req.Config.WorktreeEnabled && planFile != "" && modeRequiresBranch(req.Mode) {
+		return runWithWorktree(ctx, o, req)
+	}
+
+	// normal mode: create branch first, then add gitignore patterns.
+	// EnsureIgnored must be called AFTER CreateBranchForPlan because it modifies
+	// .gitignore, and CreateBranchForPlan checks HasChangesOtherThan(planFile).
+	if planFile != "" && modeRequiresBranch(req.Mode) {
+		if err := req.GitSvc.CreateBranchForPlan(planFile); err != nil {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
 	}
-	if err := gitSvc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
+	if err := req.GitSvc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
-	return executePlan(ctx, o, executePlanRequest{
-		PlanFile:      planFile,
-		Mode:          mode,
-		GitSvc:        gitSvc,
-		Config:        cfg,
-		Colors:        colors,
-		Selector:      selector,
-		DefaultBranch: defaultBranch,
-		NotifySvc:     notifySvc,
-	})
+	return executePlan(ctx, o, req)
 }
 
 // getCurrentBranch returns the current git branch name or "unknown" if unavailable.
@@ -280,7 +320,8 @@ func getCurrentBranch(gitSvc *git.Service) string {
 
 // tryAutoPlanMode attempts to switch to plan mode when no plans are found on main/master.
 // returns (true, nil) if user canceled, (true, err) if plan mode was attempted, or (false, nil) if auto-plan-mode doesn't apply.
-func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequest) (bool, error) {
+func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequest,
+	selector *plan.Selector) (bool, error) {
 	if !errors.Is(err, plan.ErrNoPlansFound) || o.Review || o.ExternalOnly || o.CodexOnly || o.TasksOnly {
 		return false, nil
 	}
@@ -297,36 +338,47 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 
 	o.PlanDescription = description
 	req.Mode = processor.ModePlan
-	return true, runPlanMode(ctx, o, req)
+	return true, runPlanMode(ctx, o, req, selector)
 }
 
 // executePlan runs the main execution loop for a plan file.
 // handles progress logging, web dashboard, runner execution, and post-execution tasks.
+// when req.ProgressLog and req.PhaseHolder are pre-created (worktree mode), uses them directly.
+// when req.MainGitSvc is set, uses it for plan file operations (plan is in main repo).
 func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	branch := getCurrentBranch(req.GitSvc)
 
-	// create shared phase holder (single source of truth for current phase)
-	holder := &status.PhaseHolder{}
-
-	// create progress logger
-	baseLog, err := progress.NewLogger(progress.Config{
-		PlanFile: req.PlanFile,
-		Mode:     string(req.Mode),
-		Branch:   branch,
-		NoColor:  o.NoColor,
-	}, req.Colors, holder)
-	if err != nil {
-		return fmt.Errorf("create progress logger: %w", err)
+	// use pre-created holder/logger (worktree mode) or create new ones
+	holder := req.PhaseHolder
+	if holder == nil {
+		holder = &status.PhaseHolder{}
 	}
-	baseLogClosed := false
-	defer func() {
-		if baseLogClosed {
-			return
+
+	var baseLog *progress.Logger
+	var closeOnce sync.Once
+	closeLog := func() {} // no-op default for externally-owned logger
+	if req.ProgressLog != nil {
+		baseLog = req.ProgressLog
+	} else {
+		var err error
+		baseLog, err = progress.NewLogger(progress.Config{
+			PlanFile: req.PlanFile,
+			Mode:     string(req.Mode),
+			Branch:   branch,
+			NoColor:  o.NoColor,
+		}, req.Colors, holder)
+		if err != nil {
+			return fmt.Errorf("create progress logger: %w", err)
 		}
-		if closeErr := baseLog.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", closeErr)
+		closeLog = func() {
+			closeOnce.Do(func() {
+				if closeErr := baseLog.Close(); closeErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", closeErr)
+				}
+			})
 		}
-	}()
+	}
+	defer closeLog()
 
 	// wrap logger with broadcast logger if --serve is enabled
 	var runnerLog processor.Logger = baseLog
@@ -376,7 +428,8 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	elapsed := baseLog.Elapsed()
 
-	// get diff stats for completion message (optional - errors logged but don't block)
+	// get diff stats for completion message (optional - errors logged but don't block).
+	// use worktree GitSvc (has correct HEAD with committed changes).
 	stats, statsErr := req.GitSvc.DiffStats(req.DefaultBranch)
 	if statsErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
@@ -396,9 +449,18 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		Deletions: stats.Deletions,
 	})
 
-	// move completed plan to completed/ directory
+	// move completed plan to completed/ directory.
+	// use MainGitSvc+MainPlanFile when available (worktree mode) because the plan file is in the main repo.
 	if req.PlanFile != "" && modeRequiresBranch(req.Mode) {
-		if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
+		moveSvc := req.GitSvc
+		movePlanFile := req.PlanFile
+		if req.MainGitSvc != nil {
+			moveSvc = req.MainGitSvc
+		}
+		if req.MainPlanFile != "" {
+			movePlanFile = req.MainPlanFile
+		}
+		if moveErr := moveSvc.MovePlanToCompleted(movePlanFile); moveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
 	}
@@ -414,15 +476,139 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// keep web dashboard running after execution completes
 	if o.Serve {
-		if err := baseLog.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", err)
-		}
-		baseLogClosed = true
+		closeLog()
 		req.Colors.Info().Printf("web dashboard still running at http://%s:%d (press Ctrl+C to exit)\n", web.ConnectHost(o.Host), o.Port)
 		<-ctx.Done()
 	}
 
 	return nil
+}
+
+// runWithWorktree creates a worktree, creates the progress logger (before chdir so it lands
+// in the main repo), chdirs into the worktree, and runs executePlan. On return the worktree
+// is cleaned up and CWD is restored. req.WtCleanup is populated for interrupt handler use.
+func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error {
+	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile)
+	if err != nil {
+		return fmt.Errorf("create worktree: %w", err)
+	}
+
+	// register early cleanup so the interrupt handler's force-exit path (os.Exit after 5s)
+	// can remove the worktree even during setup. overwritten with full cleanup after chdir.
+	// RemoveWorktree is idempotent, so double-call from both early and safety-net defer is safe.
+	req.WtCleanup.set(func() {
+		if rmErr := req.GitSvc.RemoveWorktree(wtPath); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to remove worktree: %v\n", rmErr)
+		}
+	})
+
+	// safety net: remove worktree if setup fails before main cleanup is registered.
+	// once main cleanup takes over (setupDone=true), this defer becomes a no-op.
+	setupDone := false
+	defer func() {
+		if !setupDone {
+			if rmErr := req.GitSvc.RemoveWorktree(wtPath); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to remove worktree after setup error: %v\n", rmErr)
+			}
+		}
+	}()
+
+	// add gitignore patterns and commit if clean
+	if igErr := ensureGitIgnored(req.GitSvc, ".ralphex/progress/", ".ralphex/progress/progress-test.txt",
+		".ralphex/worktrees/", ".ralphex/worktrees/test"); igErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: gitignore setup: %v\n", igErr)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	// create progress logger BEFORE chdir so progress files land in main repo's .ralphex/progress/.
+	// use branch name derived from plan file since gitSvc still points at the main repo (on master).
+	holder := &status.PhaseHolder{}
+	branch := plan.ExtractBranchName(req.PlanFile)
+	baseLog, err := progress.NewLogger(progress.Config{
+		PlanFile: req.PlanFile,
+		Mode:     string(req.Mode),
+		Branch:   branch,
+		NoColor:  o.NoColor,
+	}, req.Colors, holder)
+	if err != nil {
+		return fmt.Errorf("create progress logger: %w", err)
+	}
+	defer func() {
+		if closeErr := baseLog.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", closeErr)
+		}
+	}()
+
+	// chdir into worktree
+	if err = os.Chdir(wtPath); err != nil {
+		return fmt.Errorf("chdir to worktree: %w", err)
+	}
+
+	// register cleanup: restore CWD and remove worktree.
+	// sync.Once prevents double-execution between defer and interrupt handler's force-exit path.
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			if chdirErr := os.Chdir(origDir); chdirErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to restore working directory: %v\n", chdirErr)
+			}
+			if rmErr := req.GitSvc.RemoveWorktree(wtPath); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to remove worktree: %v\n", rmErr)
+			}
+		})
+	}
+	setupDone = true // disable safety-net defer, main cleanup takes over
+	req.WtCleanup.set(cleanup)
+	defer cleanup()
+
+	// open git service inside worktree
+	wtGitSvc, err := git.NewService(".", req.Colors.Info())
+	if err != nil {
+		return fmt.Errorf("open worktree git service: %w", err)
+	}
+
+	// resolve plan file path inside the worktree so Claude operates on the local copy,
+	// not the original in the main repo. the plan was copied by CreateWorktreeForPlan.
+	wtPlanFile := req.PlanFile
+	if filepath.IsAbs(req.PlanFile) {
+		// resolve symlinks on plan path to match GitSvc.Root() which is also resolved
+		// (macOS: /tmp -> /private/tmp); without this, filepath.Rel produces wrong results
+		resolvedPlan := req.PlanFile
+		if resolved, evalErr := filepath.EvalSymlinks(resolvedPlan); evalErr == nil {
+			resolvedPlan = resolved
+		}
+		if rel, relErr := filepath.Rel(req.GitSvc.Root(), resolvedPlan); relErr == nil {
+			abs, absErr := filepath.Abs(rel) // resolve relative to CWD (now the worktree)
+			if absErr == nil {
+				wtPlanFile = abs
+			}
+		}
+	}
+
+	// commit plan file on the feature branch (inside worktree), not on main/master
+	if planNeedsCommit {
+		if commitErr := wtGitSvc.CommitPlanFile(req.PlanFile, req.GitSvc.Root()); commitErr != nil {
+			return fmt.Errorf("commit plan in worktree: %w", commitErr)
+		}
+	}
+
+	return executePlan(ctx, o, executePlanRequest{
+		PlanFile:      wtPlanFile,
+		MainPlanFile:  req.PlanFile, // original path in main repo for MovePlanToCompleted
+		Mode:          req.Mode,
+		GitSvc:        wtGitSvc,
+		MainGitSvc:    req.GitSvc,
+		Config:        req.Config,
+		Colors:        req.Colors,
+		DefaultBranch: req.DefaultBranch,
+		NotifySvc:     req.NotifySvc,
+		ProgressLog:   baseLog,
+		PhaseHolder:   holder,
+	})
 }
 
 // openGitService creates a git.Service for the current directory.
@@ -432,6 +618,39 @@ func openGitService(colors *progress.Colors) (*git.Service, error) {
 		return nil, fmt.Errorf("new git service: %w", err)
 	}
 	return svc, nil
+}
+
+// ensureGitIgnored adds patterns to .gitignore and commits if .gitignore was clean before.
+// patterns are pairs of (pattern, probePath) passed to EnsureIgnored.
+// returns error if arguments are invalid or pattern addition fails; commit errors are logged as warnings.
+func ensureGitIgnored(gitSvc *git.Service, patternPairs ...string) error {
+	if len(patternPairs)%2 != 0 {
+		return errors.New("ensureGitIgnored requires pairs of (pattern, probePath)")
+	}
+
+	// track if .gitignore was already dirty before we modify it.
+	// on error, assume dirty to avoid auto-committing unrelated user changes.
+	igDirtyBefore, igErr := gitSvc.FileHasChanges(".gitignore")
+	if igErr != nil {
+		igDirtyBefore = true
+		fmt.Fprintf(os.Stderr, "warning: failed to check .gitignore status: %v\n", igErr)
+	}
+
+	// iterate pairs (pattern, probePath); i+1 guard satisfies gosec G602 slice bounds check
+	for i := 0; i+1 < len(patternPairs); i += 2 {
+		if err := gitSvc.EnsureIgnored(patternPairs[i], patternPairs[i+1]); err != nil {
+			return fmt.Errorf("ensure gitignore %s: %w", patternPairs[i], err)
+		}
+	}
+
+	// commit .gitignore changes only if it was clean before to avoid
+	// auto-committing unrelated user changes under the ralphex commit message.
+	if !igDirtyBefore {
+		if err := gitSvc.CommitIgnoreChanges(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to commit .gitignore: %v\n", err)
+		}
+	}
+	return nil
 }
 
 // checkClaudeDep checks that the claude command is available in PATH.
@@ -547,9 +766,9 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 // runPlanMode executes interactive plan creation mode.
 // creates input collector, progress logger, and runs the plan creation loop.
 // after plan creation, prompts user to continue with implementation or exit.
-func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
-	// ensure gitignore has progress files
-	if err := req.GitSvc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
+func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *plan.Selector) error {
+	// ensure gitignore has progress files (check dirty, add, commit if was clean)
+	if err := ensureGitIgnored(req.GitSvc, ".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
@@ -609,7 +828,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	// find the newly created plan file
-	planFile := req.Selector.FindRecent(startTime)
+	planFile := selector.FindRecent(startTime)
 	elapsed := baseLog.Elapsed()
 
 	// print completion message with plan file path if found
@@ -629,10 +848,30 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest) error {
 		return nil
 	}
 
+	// resolve plan file to absolute path before potential chdir
+	planFile, err = filepath.Abs(planFile)
+	if err != nil {
+		return fmt.Errorf("resolve plan file: %w", err)
+	}
+
 	// continue with plan implementation
 	req.Colors.Info().Printf("\ncontinuing with plan implementation...\n")
 
-	// create branch if needed
+	// worktree mode: create worktree and run from there
+	if req.Config.WorktreeEnabled {
+		return runWithWorktree(ctx, o, executePlanRequest{
+			PlanFile:      planFile,
+			Mode:          processor.ModeFull,
+			GitSvc:        req.GitSvc,
+			Config:        req.Config,
+			Colors:        req.Colors,
+			DefaultBranch: req.DefaultBranch,
+			NotifySvc:     req.NotifySvc,
+			WtCleanup:     req.WtCleanup,
+		})
+	}
+
+	// normal mode: create branch and run in place
 	if err := req.GitSvc.CreateBranchForPlan(planFile); err != nil {
 		return fmt.Errorf("create branch for plan: %w", err)
 	}
@@ -695,6 +934,10 @@ func toRelPath(p string) string {
 	if err != nil {
 		return p
 	}
+	// if relative path escapes too far (e.g. worktree -> main repo), use absolute path instead
+	if len(rel) > 6 && rel[:6] == "../../" {
+		return p
+	}
 	return rel
 }
 
@@ -728,6 +971,16 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// applyCLIOverrides applies CLI flag overrides to config.
+func applyCLIOverrides(o opts, cfg *config.Config) {
+	if o.SkipFinalize {
+		cfg.FinalizeEnabled = false
+	}
+	if o.Worktree {
+		cfg.WorktreeEnabled = true
+	}
 }
 
 // resolveDefaultBranch returns the default branch using precedence: CLI flag > config > auto-detect.
