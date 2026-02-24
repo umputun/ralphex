@@ -378,16 +378,16 @@ def _detect_host_timezone() -> str:
     then falls back to reading /etc/timezone (Debian/Ubuntu).
     returns empty string if detection fails.
     """
-    # try /etc/localtime symlink (macOS and Linux)
-    try:
-        link = os.path.realpath("/etc/localtime")
-        # extract IANA name from path like /usr/share/zoneinfo/America/New_York
-        marker = "/zoneinfo/"
-        idx = link.find(marker)
-        if idx != -1:
-            return link[idx + len(marker):]
-    except OSError:
-        pass
+    # readlink first (macOS), then realpath (Linux)
+    marker = "/zoneinfo/"
+    for resolver in (os.readlink, os.path.realpath):
+        try:
+            link = resolver("/etc/localtime")
+            idx = link.find(marker)
+            if idx != -1:
+                return link[idx + len(marker):]
+        except OSError:
+            pass
 
     # fallback: /etc/timezone (Debian/Ubuntu)
     try:
@@ -416,8 +416,7 @@ def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args:
         "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
     ])
 
-    # forward host timezone so container timestamps match the user's local time.
-    # checks $TZ first, then falls back to system detection (macOS and Linux).
+    # forward host timezone to container
     tz = os.environ.get("TZ", "")
     if not tz:
         tz = _detect_host_timezone()
@@ -1027,30 +1026,40 @@ def run_tests() -> None:
             self.assertEqual(remaining, ["--serve", "plan.md"])
 
     class TestDetectHostTimezone(unittest.TestCase):
-        def test_tz_from_localtime_symlink(self) -> None:
-            """detects timezone from /etc/localtime symlink."""
-            with unittest.mock.patch("os.path.realpath", return_value="/usr/share/zoneinfo/Europe/Berlin"):
-                tz = _detect_host_timezone()
-            self.assertEqual(tz, "Europe/Berlin")
-
-        def test_tz_from_localtime_macos_path(self) -> None:
-            """detects timezone from macOS-style /var/db/timezone/zoneinfo path."""
-            with unittest.mock.patch("os.path.realpath", return_value="/var/db/timezone/zoneinfo/Asia/Tokyo"):
+        def test_tz_from_readlink(self) -> None:
+            """detects timezone from readlink (macOS-style /var/db/timezone/zoneinfo path)."""
+            with unittest.mock.patch("os.readlink", return_value="/var/db/timezone/zoneinfo/Asia/Tokyo"):
                 tz = _detect_host_timezone()
             self.assertEqual(tz, "Asia/Tokyo")
 
-        def test_fallback_to_etc_timezone(self) -> None:
-            """falls back to /etc/timezone when /etc/localtime has no zoneinfo marker."""
-            with unittest.mock.patch("os.path.realpath", return_value="/etc/localtime"):
-                with unittest.mock.patch.object(Path, "read_text", return_value="America/New_York\n"):
+        def test_tz_from_realpath_when_readlink_fails(self) -> None:
+            """falls back to realpath when readlink raises OSError."""
+            with unittest.mock.patch("os.readlink", side_effect=OSError("not a symlink")):
+                with unittest.mock.patch("os.path.realpath", return_value="/usr/share/zoneinfo/Europe/Berlin"):
                     tz = _detect_host_timezone()
+            self.assertEqual(tz, "Europe/Berlin")
+
+        def test_readlink_no_marker_falls_through_to_realpath(self) -> None:
+            """when readlink returns path without /zoneinfo/ marker, tries realpath next."""
+            with unittest.mock.patch("os.readlink", return_value="/usr/share/zoneinfo.default/America/Chicago"):
+                with unittest.mock.patch("os.path.realpath", return_value="/usr/share/zoneinfo/America/Chicago"):
+                    tz = _detect_host_timezone()
+            self.assertEqual(tz, "America/Chicago")
+
+        def test_fallback_to_etc_timezone(self) -> None:
+            """falls back to /etc/timezone when symlink has no zoneinfo marker."""
+            with unittest.mock.patch("os.readlink", return_value="/usr/share/zoneinfo.default/America/Chicago"):
+                with unittest.mock.patch("os.path.realpath", return_value="/usr/share/zoneinfo.default/America/Chicago"):
+                    with unittest.mock.patch.object(Path, "read_text", return_value="America/New_York\n"):
+                        tz = _detect_host_timezone()
             self.assertEqual(tz, "America/New_York")
 
         def test_returns_empty_when_nothing_detected(self) -> None:
             """returns empty string when no timezone can be detected."""
-            with unittest.mock.patch("os.path.realpath", return_value="/etc/localtime"):
-                with unittest.mock.patch.object(Path, "read_text", side_effect=OSError("not found")):
-                    tz = _detect_host_timezone()
+            with unittest.mock.patch("os.readlink", side_effect=OSError("no link")):
+                with unittest.mock.patch("os.path.realpath", return_value="/etc/localtime"):
+                    with unittest.mock.patch.object(Path, "read_text", side_effect=OSError("not found")):
+                        tz = _detect_host_timezone()
             self.assertEqual(tz, "")
 
     loader = unittest.TestLoader()
