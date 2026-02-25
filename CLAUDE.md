@@ -88,6 +88,7 @@ Allows using custom scripts instead of codex for external code review:
   - First iteration: `git diff main...HEAD` (all feature branch changes)
   - Subsequent iterations: `git diff` (uncommitted changes only)
 - `--external-only` (-e) flag runs only external review; `--codex-only` (-c) is deprecated alias
+- `max_external_iterations` config / `--max-external-iterations` CLI flag overrides external review loop limit (0 = auto, derived as `max(3, max_iterations/5)`)
 - `codex_enabled = false` backward compat: treated as `external_review_tool = none`
 
 Key files:

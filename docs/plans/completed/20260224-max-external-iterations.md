@@ -40,16 +40,16 @@ Related to: #159
 - Modify: `pkg/config/values_test.go`
 - Modify: `pkg/config/config_test.go`
 
-- [ ] add `MaxExternalIterations int` to `Values` struct
-- [ ] add INI parsing in `parseValuesFromSection()` (validate non-negative, follow `task_retry_count` pattern)
-- [ ] add merge logic in `mergeFrom()` (simple `> 0` override, no `*Set` needed)
-- [ ] add `MaxExternalIterations int` to `config.Config` struct with `json:"max_external_iterations"` tag
-- [ ] wire Values → Config in `Load()`
-- [ ] add commented default to `pkg/config/defaults/config` after `task_retry_count` block
-- [ ] write tests in `values_test.go`: parsing valid value, zero, negative → error
-- [ ] write tests in `values_test.go`: merge behavior (non-zero overrides, zero preserves, global=10 + local unset → preserves 10)
-- [ ] write test in `config_test.go`: config loads `max_external_iterations`
-- [ ] run `go test ./pkg/config/...` — must pass before task 2
+- [x] add `MaxExternalIterations int` to `Values` struct
+- [x] add INI parsing in `parseValuesFromSection()` (validate non-negative, follow `task_retry_count` pattern)
+- [x] add merge logic in `mergeFrom()` (simple `> 0` override, no `*Set` needed)
+- [x] add `MaxExternalIterations int` to `config.Config` struct with `json:"max_external_iterations"` tag
+- [x] wire Values → Config in `Load()`
+- [x] add commented default to `pkg/config/defaults/config` after `task_retry_count` block
+- [x] write tests in `values_test.go`: parsing valid value, zero, negative → error
+- [x] write tests in `values_test.go`: merge behavior (non-zero overrides, zero preserves, global=10 + local unset → preserves 10)
+- [x] write test in `config_test.go`: config loads `max_external_iterations`
+- [x] run `go test ./pkg/config/...` — must pass before task 2
 
 ### Task 2: Add CLI flag, wire to processor, fix constants
 
@@ -58,15 +58,15 @@ Related to: #159
 - Modify: `pkg/processor/runner.go`
 - Modify: `pkg/processor/runner_test.go`
 
-- [ ] add `MaxExternalIterations int` to `opts` struct (long: `max-external-iterations`, default: 0, description: "override external review iteration limit (0 = auto)")
-- [ ] add `MaxExternalIterations int` to `processor.Config`
-- [ ] wire in `createRunner()`: new dual-source pattern — use CLI value if > 0, else config value, else 0
-- [ ] fix `runExternalReviewLoop()`: replace literal `3` and `5` with `minCodexIterations` and `codexIterationDivisor`
-- [ ] update `runExternalReviewLoop()` to use `r.cfg.MaxExternalIterations` when > 0, fall back to derived formula
-- [ ] write test: explicit `MaxExternalIterations` is used when set
-- [ ] write test: derived formula used when `MaxExternalIterations` is 0
-- [ ] write test: CLI flag overrides config value (CLI=5, config=10 → uses 5)
-- [ ] run `go test ./pkg/processor/... ./cmd/ralphex/...` — must pass before task 3
+- [x] add `MaxExternalIterations int` to `opts` struct (long: `max-external-iterations`, default: 0, description: "override external review iteration limit (0 = auto)")
+- [x] add `MaxExternalIterations int` to `processor.Config`
+- [x] wire in `createRunner()`: new dual-source pattern — use CLI value if > 0, else config value, else 0
+- [x] fix `runExternalReviewLoop()`: replace literal `3` and `5` with `minCodexIterations` and `codexIterationDivisor`
+- [x] update `runExternalReviewLoop()` to use `r.cfg.MaxExternalIterations` when > 0, fall back to derived formula
+- [x] write test: explicit `MaxExternalIterations` is used when set
+- [x] write test: derived formula used when `MaxExternalIterations` is 0
+- [x] write test: CLI flag overrides config value (CLI=5, config=10 → uses 5)
+- [x] run `go test ./pkg/processor/... ./cmd/ralphex/...` — must pass before task 3
 
 ### Task 3: Verify and update documentation
 
@@ -75,13 +75,13 @@ Related to: #159
 - Modify: `README.md`
 - Modify: `llms.txt`
 
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
-- [ ] run formatters: `~/.claude/format.sh`
-- [ ] update README.md CLI usage / customization sections with new option
-- [ ] update llms.txt with new config option
-- [ ] update CLAUDE.md if needed
-- [ ] move this plan to `docs/plans/completed/`
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
+- [x] run formatters: `~/.claude/format.sh`
+- [x] update README.md CLI usage / customization sections with new option
+- [x] update llms.txt with new config option
+- [x] update CLAUDE.md if needed
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

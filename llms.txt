@@ -33,6 +33,9 @@ ralphex --review docs/plans/feature.md  # optional plan file for context
 # external-only mode (skip tasks and first claude review, run only external review)
 ralphex --external-only
 
+# limit external review iterations (0 = auto, derived from max-iterations)
+ralphex --max-external-iterations=5 docs/plans/feature.md
+
 # codex-only mode (alias for --external-only, deprecated)
 ralphex --codex-only
 
@@ -82,6 +85,8 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.), overridable via `--base-ref` CLI flag or `default_branch` config option
 - `{{agent:name}}` - expands to Task tool instructions for named agent
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in custom_review.txt)
+
+**External review iterations:** By default, external review runs up to `max(3, max_iterations/5)` iterations. Override with `max_external_iterations` config option or `--max-external-iterations` CLI flag (0 = auto).
 
 **Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing.
 

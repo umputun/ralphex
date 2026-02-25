@@ -432,6 +432,9 @@ ralphex --plan "add user authentication"
 # with custom max iterations
 ralphex --max-iterations=100 docs/plans/feature.md
 
+# limit external review iterations (0 = auto, derived from max-iterations)
+ralphex --max-external-iterations=5 docs/plans/feature.md
+
 # with web dashboard
 ralphex --serve docs/plans/feature.md
 
@@ -444,6 +447,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-m, --max-iterations` | Maximum task iterations | 50 |
+| `--max-external-iterations` | Override external review iteration limit (0 = auto) | 0 |
 | `-r, --review` | Skip task execution, run full review pipeline | false |
 | `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
 | `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
@@ -671,6 +675,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `codex_sandbox` | Sandbox mode | `read-only` |
 | `external_review_tool` | External review tool (`codex`, `custom`, `none`) | `codex` |
 | `custom_review_script` | Path to custom review script (when `external_review_tool = custom`) | - |
+| `max_external_iterations` | Override external review iteration limit (0 = auto, derived from `max_iterations`) | `0` |
 | `iteration_delay_ms` | Delay between iterations | `2000` |
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
@@ -739,6 +744,8 @@ curl -s https://openrouter.ai/api/v1/chat/completions \
 - Output `NO ISSUES FOUND` when there are no problems
 
 **Iteration behavior:**
+
+The external review loop runs up to `max(3, max_iterations/5)` iterations by default. Override with `max_external_iterations` config option or `--max-external-iterations` CLI flag (0 = auto).
 
 The prompt's `{{DIFF_INSTRUCTION}}` variable adapts per iteration:
 - **First iteration**: `git diff main...HEAD` (all changes in feature branch)
