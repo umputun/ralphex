@@ -359,6 +359,7 @@ func (dst *Values) mergeFrom(src *Values) {
 		dst.CustomReviewScript = src.CustomReviewScript
 	}
 	dst.mergeExecutionFrom(src)
+	dst.mergeExtraFrom(src)
 	dst.mergeNotifyFrom(src)
 }
 
@@ -380,9 +381,6 @@ func (dst *Values) mergeExecutionFrom(src *Values) {
 	if src.MaxExternalIterations > 0 {
 		dst.MaxExternalIterations = src.MaxExternalIterations
 	}
-
-	dst.mergeExtraFrom(src)
-	dst.mergeNotifyFrom(src)
 }
 
 // mergeExtraFrom merges feature flags, paths, and error patterns from src into dst.
