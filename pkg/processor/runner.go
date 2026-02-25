@@ -42,19 +42,20 @@ const (
 
 // Config holds runner configuration.
 type Config struct {
-	PlanFile         string         // path to plan file (required for full mode)
-	PlanDescription  string         // plan description for interactive plan creation mode
-	ProgressPath     string         // path to progress file
-	Mode             Mode           // execution mode
-	MaxIterations    int            // maximum iterations for task phase
-	Debug            bool           // enable debug output
-	NoColor          bool           // disable color output
-	IterationDelayMs int            // delay between iterations in milliseconds
-	TaskRetryCount   int            // number of times to retry failed tasks
-	CodexEnabled     bool           // whether codex review is enabled
-	FinalizeEnabled  bool           // whether finalize step is enabled
-	DefaultBranch    string         // default branch name (detected from repo)
-	AppConfig        *config.Config // full application config (for executors and prompts)
+	PlanFile              string         // path to plan file (required for full mode)
+	PlanDescription       string         // plan description for interactive plan creation mode
+	ProgressPath          string         // path to progress file
+	Mode                  Mode           // execution mode
+	MaxIterations         int            // maximum iterations for task phase
+	MaxExternalIterations int            // override external review iteration limit (0 = auto)
+	Debug                 bool           // enable debug output
+	NoColor               bool           // disable color output
+	IterationDelayMs      int            // delay between iterations in milliseconds
+	TaskRetryCount        int            // number of times to retry failed tasks
+	CodexEnabled          bool           // whether codex review is enabled
+	FinalizeEnabled       bool           // whether finalize step is enabled
+	DefaultBranch         string         // default branch name (detected from repo)
+	AppConfig             *config.Config // full application config (for executors and prompts)
 }
 
 //go:generate moq -out mocks/executor.go -pkg mocks -skip-ensure -fmt goimports . Executor
@@ -543,8 +544,10 @@ type externalReviewConfig struct {
 
 // runExternalReviewLoop runs a generic external review tool-claude loop until no findings.
 func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewConfig) error {
-	// iterations = 20% of max_iterations (min 3)
-	maxIterations := max(3, r.cfg.MaxIterations/5)
+	maxIterations := max(minCodexIterations, r.cfg.MaxIterations/codexIterationDivisor)
+	if r.cfg.MaxExternalIterations > 0 {
+		maxIterations = r.cfg.MaxExternalIterations
+	}
 
 	var claudeResponse string // first iteration has no prior response
 

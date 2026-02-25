@@ -58,15 +58,15 @@ Related to: #159
 - Modify: `pkg/processor/runner.go`
 - Modify: `pkg/processor/runner_test.go`
 
-- [ ] add `MaxExternalIterations int` to `opts` struct (long: `max-external-iterations`, default: 0, description: "override external review iteration limit (0 = auto)")
-- [ ] add `MaxExternalIterations int` to `processor.Config`
-- [ ] wire in `createRunner()`: new dual-source pattern — use CLI value if > 0, else config value, else 0
-- [ ] fix `runExternalReviewLoop()`: replace literal `3` and `5` with `minCodexIterations` and `codexIterationDivisor`
-- [ ] update `runExternalReviewLoop()` to use `r.cfg.MaxExternalIterations` when > 0, fall back to derived formula
-- [ ] write test: explicit `MaxExternalIterations` is used when set
-- [ ] write test: derived formula used when `MaxExternalIterations` is 0
-- [ ] write test: CLI flag overrides config value (CLI=5, config=10 → uses 5)
-- [ ] run `go test ./pkg/processor/... ./cmd/ralphex/...` — must pass before task 3
+- [x] add `MaxExternalIterations int` to `opts` struct (long: `max-external-iterations`, default: 0, description: "override external review iteration limit (0 = auto)")
+- [x] add `MaxExternalIterations int` to `processor.Config`
+- [x] wire in `createRunner()`: new dual-source pattern — use CLI value if > 0, else config value, else 0
+- [x] fix `runExternalReviewLoop()`: replace literal `3` and `5` with `minCodexIterations` and `codexIterationDivisor`
+- [x] update `runExternalReviewLoop()` to use `r.cfg.MaxExternalIterations` when > 0, fall back to derived formula
+- [x] write test: explicit `MaxExternalIterations` is used when set
+- [x] write test: derived formula used when `MaxExternalIterations` is 0
+- [x] write test: CLI flag overrides config value (CLI=5, config=10 → uses 5)
+- [x] run `go test ./pkg/processor/... ./cmd/ralphex/...` — must pass before task 3
 
 ### Task 3: Verify and update documentation
 

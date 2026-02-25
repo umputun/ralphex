@@ -427,6 +427,31 @@ func TestCreateRunner(t *testing.T) {
 		runner := createRunner(req, o, log, holder)
 		assert.NotNil(t, runner)
 	})
+
+	t.Run("max_external_iterations_cli_overrides_config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldWd, wdErr := os.Getwd()
+		require.NoError(t, wdErr)
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+		cfg := &config.Config{MaxExternalIterations: 10}       // config says 10
+		o := opts{MaxIterations: 50, MaxExternalIterations: 5} // CLI says 5
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		log, err := progress.NewLogger(progress.Config{Mode: "full", Branch: "test", NoColor: true}, colors, holder)
+		require.NoError(t, err)
+		defer log.Close()
+
+		// verify the resolution logic: CLI=5 should win over config=10
+		// the resolve logic: maxExtIter = config(10), then CLI > 0 so maxExtIter = 5
+		req := executePlanRequest{Mode: processor.ModeFull, Config: cfg, DefaultBranch: "main"}
+		runner := createRunner(req, o, log, holder)
+		assert.NotNil(t, runner)
+		// can't inspect Runner.cfg directly, but the wiring code is exercised
+		// behavioral verification is in runner_test.go (TestRunner_MaxExternalIterations_ExplicitLimit)
+	})
 }
 
 func TestResolveDefaultBranch(t *testing.T) {

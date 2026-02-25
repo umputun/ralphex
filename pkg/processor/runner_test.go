@@ -184,6 +184,56 @@ func TestRunner_RunCodexOnly_NoFindings(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRunner_MaxExternalIterations_ExplicitLimit(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	// codex loop: 2 iterations (each = codex + claude eval), then post-codex review
+	claude := newMockExecutor([]executor.Result{
+		{Output: "still issues"},                           // codex eval iter 1 (no CodexDone)
+		{Output: "still issues"},                           // codex eval iter 2 (no CodexDone)
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue 1"},
+		{Output: "found issue 2"},
+	})
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50,
+		MaxExternalIterations: 2, CodexEnabled: true, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 2, "codex should be called exactly MaxExternalIterations times")
+}
+
+func TestRunner_MaxExternalIterations_DerivedFormula(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	// with MaxIterations=15 and MaxExternalIterations=0 (auto): derived = max(3, 15/5) = 3
+	claude := newMockExecutor([]executor.Result{
+		{Output: "still issues"},                           // codex eval iter 1
+		{Output: "still issues"},                           // codex eval iter 2
+		{Output: "still issues"},                           // codex eval iter 3
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue 1"},
+		{Output: "found issue 2"},
+		{Output: "found issue 3"},
+	})
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 15,
+		MaxExternalIterations: 0, CodexEnabled: true, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 3, "codex should use derived formula: max(3, 15/5) = 3")
+}
+
 func TestRunner_CodexDisabled_SkipsCodexPhase(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
