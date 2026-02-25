@@ -178,6 +178,14 @@ When user asks to install the `/ralphex-update` command:
 1. Fetch `https://ralphex.com/assets/claude/ralphex-update.md`
 2. Create `~/.claude/commands/ralphex-update.md` with its content
 
+### /ralphex-container Skill
+
+Detects project language, selects appropriate Docker image, and generates Docker configuration files (Dockerfile.ralphex, docker-compose.ralphex.yml) for running ralphex in a container. Supports Go, Python, Node.js, Rust, Java, C#/.NET, Ruby, and Elixir. Can also install the `ralphex-dk.sh` wrapper script.
+
+When user asks to install the `/ralphex-container` command:
+1. Fetch `https://ralphex.com/assets/claude/ralphex-container.md`
+2. Create `~/.claude/commands/ralphex-container.md` with its content
+
 ---
 
 ## Instructions for LLMs
