@@ -136,6 +136,8 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 		{name: "invalid max_iterations", config: "max_iterations = abc", errPart: "max_iterations"},
 		{name: "zero max_iterations", config: "max_iterations = 0", errPart: "max_iterations"},
 		{name: "negative max_iterations", config: "max_iterations = -5", errPart: "max_iterations"},
+		{name: "negative max_external_iterations", config: "max_external_iterations = -1", errPart: "max_external_iterations"},
+		{name: "invalid max_external_iterations", config: "max_external_iterations = abc", errPart: "max_external_iterations"},
 	}
 
 	for _, tc := range tests {
@@ -1382,5 +1384,100 @@ func TestValues_mergeFrom_ExternalReviewFields(t *testing.T) {
 		src := Values{CustomReviewScript: ""}
 		dst.mergeFrom(&src)
 		assert.Equal(t, "/old/script.sh", dst.CustomReviewScript)
+	})
+}
+
+func TestValuesLoader_Load_MaxExternalIterations(t *testing.T) {
+	t.Run("parse valid value", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`max_external_iterations = 7`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, 7, values.MaxExternalIterations)
+	})
+
+	t.Run("parse zero means auto", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`max_external_iterations = 0`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, 0, values.MaxExternalIterations)
+	})
+
+	t.Run("negative returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`max_external_iterations = -1`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		_, err := loader.Load("", cfgPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max_external_iterations")
+	})
+
+	t.Run("invalid value returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`max_external_iterations = abc`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		_, err := loader.Load("", cfgPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max_external_iterations")
+	})
+
+	t.Run("not set defaults to zero", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Equal(t, 0, values.MaxExternalIterations)
+	})
+}
+
+func TestValues_mergeFrom_MaxExternalIterations(t *testing.T) {
+	t.Run("non-zero overrides", func(t *testing.T) {
+		dst := Values{MaxExternalIterations: 0}
+		src := Values{MaxExternalIterations: 10}
+		dst.mergeFrom(&src)
+		assert.Equal(t, 10, dst.MaxExternalIterations)
+	})
+
+	t.Run("zero preserves existing", func(t *testing.T) {
+		dst := Values{MaxExternalIterations: 10}
+		src := Values{MaxExternalIterations: 0}
+		dst.mergeFrom(&src)
+		assert.Equal(t, 10, dst.MaxExternalIterations)
+	})
+
+	t.Run("global=10 local unset preserves 10", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`max_external_iterations = 10`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(``), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, 10, values.MaxExternalIterations)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`max_external_iterations = 10`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`max_external_iterations = 5`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, 5, values.MaxExternalIterations)
 	})
 }

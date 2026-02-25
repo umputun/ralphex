@@ -14,33 +14,34 @@ import (
 // set in config. This allows distinguishing explicit false/0 from "not set", enabling
 // proper merge behavior where local config can override global config with zero values.
 type Values struct {
-	ClaudeCommand        string
-	ClaudeArgs           string
-	ClaudeErrorPatterns  []string // patterns to detect in claude output (e.g., rate limit messages)
-	CodexEnabled         bool
-	CodexEnabledSet      bool // tracks if codex_enabled was explicitly set
-	CodexCommand         string
-	CodexModel           string
-	CodexReasoningEffort string
-	CodexTimeoutMs       int
-	CodexTimeoutMsSet    bool // tracks if codex_timeout_ms was explicitly set
-	CodexSandbox         string
-	CodexErrorPatterns   []string // patterns to detect in codex output (e.g., rate limit messages)
-	ExternalReviewTool   string   // "codex", "custom", or "none"
-	CustomReviewScript   string   // path to custom review script (when ExternalReviewTool = "custom")
-	IterationDelayMs     int
-	IterationDelayMsSet  bool // tracks if iteration_delay_ms was explicitly set
-	TaskRetryCount       int
-	TaskRetryCountSet    bool // tracks if task_retry_count was explicitly set
-	MaxIterations        int
-	MaxIterationsSet     bool // tracks if max_iterations was explicitly set
-	FinalizeEnabled      bool
-	FinalizeEnabledSet   bool // tracks if finalize_enabled was explicitly set
-	WorktreeEnabled      bool
-	WorktreeEnabledSet   bool // tracks if use_worktree was explicitly set
-	PlansDir             string
-	DefaultBranch        string   // override auto-detected default branch
-	WatchDirs            []string // directories to watch for progress files
+	ClaudeCommand         string
+	ClaudeArgs            string
+	ClaudeErrorPatterns   []string // patterns to detect in claude output (e.g., rate limit messages)
+	CodexEnabled          bool
+	CodexEnabledSet       bool // tracks if codex_enabled was explicitly set
+	CodexCommand          string
+	CodexModel            string
+	CodexReasoningEffort  string
+	CodexTimeoutMs        int
+	CodexTimeoutMsSet     bool // tracks if codex_timeout_ms was explicitly set
+	CodexSandbox          string
+	CodexErrorPatterns    []string // patterns to detect in codex output (e.g., rate limit messages)
+	ExternalReviewTool    string   // "codex", "custom", or "none"
+	CustomReviewScript    string   // path to custom review script (when ExternalReviewTool = "custom")
+	IterationDelayMs      int
+	IterationDelayMsSet   bool // tracks if iteration_delay_ms was explicitly set
+	TaskRetryCount        int
+	TaskRetryCountSet     bool // tracks if task_retry_count was explicitly set
+	MaxIterations         int
+	MaxIterationsSet      bool // tracks if max_iterations was explicitly set
+	MaxExternalIterations int  // override external review iteration limit (0 = auto)
+	FinalizeEnabled       bool
+	FinalizeEnabledSet    bool // tracks if finalize_enabled was explicitly set
+	WorktreeEnabled       bool
+	WorktreeEnabledSet    bool // tracks if use_worktree was explicitly set
+	PlansDir              string
+	DefaultBranch         string   // override auto-detected default branch
+	WatchDirs             []string // directories to watch for progress files
 
 	// notification settings
 	NotifyChannels        []string // channels to use: telegram, email, webhook, slack, custom
@@ -242,6 +243,16 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.MaxIterations = val
 		values.MaxIterationsSet = true
 	}
+	if key, err := section.GetKey("max_external_iterations"); err == nil {
+		val, intErr := key.Int()
+		if intErr != nil {
+			return Values{}, fmt.Errorf("invalid max_external_iterations: %w", intErr)
+		}
+		if val < 0 {
+			return Values{}, fmt.Errorf("invalid max_external_iterations: must be non-negative, got %d", val)
+		}
+		values.MaxExternalIterations = val
+	}
 
 	// finalize settings
 	if key, err := section.GetKey("finalize_enabled"); err == nil {
@@ -347,6 +358,13 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.CustomReviewScript != "" {
 		dst.CustomReviewScript = src.CustomReviewScript
 	}
+	dst.mergeExecutionFrom(src)
+	dst.mergeNotifyFrom(src)
+}
+
+// mergeExecutionFrom merges execution-related fields from src into dst.
+// called from mergeFrom to manage cyclomatic complexity.
+func (dst *Values) mergeExecutionFrom(src *Values) {
 	if src.IterationDelayMsSet {
 		dst.IterationDelayMs = src.IterationDelayMs
 		dst.IterationDelayMsSet = true
@@ -358,6 +376,9 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.MaxIterationsSet {
 		dst.MaxIterations = src.MaxIterations
 		dst.MaxIterationsSet = true
+	}
+	if src.MaxExternalIterations > 0 {
+		dst.MaxExternalIterations = src.MaxExternalIterations
 	}
 
 	dst.mergeExtraFrom(src)

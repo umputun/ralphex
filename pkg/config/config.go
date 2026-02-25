@@ -54,12 +54,13 @@ type Config struct {
 	ExternalReviewTool string `json:"external_review_tool"` // "codex", "custom", or "none"
 	CustomReviewScript string `json:"custom_review_script"` // path to custom review script
 
-	IterationDelayMs    int  `json:"iteration_delay_ms"`
-	IterationDelayMsSet bool `json:"-"` // tracks if iteration_delay_ms was explicitly set in config
-	TaskRetryCount      int  `json:"task_retry_count"`
-	TaskRetryCountSet   bool `json:"-"` // tracks if task_retry_count was explicitly set in config
-	MaxIterations       int  `json:"max_iterations"`
-	MaxIterationsSet    bool `json:"-"` // tracks if max_iterations was explicitly set in config
+	IterationDelayMs      int  `json:"iteration_delay_ms"`
+	IterationDelayMsSet   bool `json:"-"` // tracks if iteration_delay_ms was explicitly set in config
+	TaskRetryCount        int  `json:"task_retry_count"`
+	TaskRetryCountSet     bool `json:"-"` // tracks if task_retry_count was explicitly set in config
+	MaxIterations         int  `json:"max_iterations"`
+	MaxIterationsSet      bool `json:"-"` // tracks if max_iterations was explicitly set in config
+	MaxExternalIterations int  `json:"max_external_iterations"`
 
 	FinalizeEnabled    bool `json:"finalize_enabled"`
 	FinalizeEnabledSet bool `json:"-"` // tracks if finalize_enabled was explicitly set in config
@@ -229,33 +230,34 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 
 	// assemble config
 	c := &Config{
-		ClaudeCommand:        values.ClaudeCommand,
-		ClaudeArgs:           values.ClaudeArgs,
-		CodexEnabled:         values.CodexEnabled,
-		CodexEnabledSet:      values.CodexEnabledSet,
-		CodexCommand:         values.CodexCommand,
-		CodexModel:           values.CodexModel,
-		CodexReasoningEffort: values.CodexReasoningEffort,
-		CodexTimeoutMs:       values.CodexTimeoutMs,
-		CodexTimeoutMsSet:    values.CodexTimeoutMsSet,
-		CodexSandbox:         values.CodexSandbox,
-		ExternalReviewTool:   values.ExternalReviewTool,
-		CustomReviewScript:   values.CustomReviewScript,
-		IterationDelayMs:     values.IterationDelayMs,
-		IterationDelayMsSet:  values.IterationDelayMsSet,
-		TaskRetryCount:       values.TaskRetryCount,
-		TaskRetryCountSet:    values.TaskRetryCountSet,
-		MaxIterations:        values.MaxIterations,
-		MaxIterationsSet:     values.MaxIterationsSet,
-		FinalizeEnabled:      values.FinalizeEnabled,
-		FinalizeEnabledSet:   values.FinalizeEnabledSet,
-		WorktreeEnabled:      values.WorktreeEnabled,
-		WorktreeEnabledSet:   values.WorktreeEnabledSet,
-		PlansDir:             values.PlansDir,
-		DefaultBranch:        values.DefaultBranch,
-		WatchDirs:            values.WatchDirs,
-		ClaudeErrorPatterns:  values.ClaudeErrorPatterns,
-		CodexErrorPatterns:   values.CodexErrorPatterns,
+		ClaudeCommand:         values.ClaudeCommand,
+		ClaudeArgs:            values.ClaudeArgs,
+		CodexEnabled:          values.CodexEnabled,
+		CodexEnabledSet:       values.CodexEnabledSet,
+		CodexCommand:          values.CodexCommand,
+		CodexModel:            values.CodexModel,
+		CodexReasoningEffort:  values.CodexReasoningEffort,
+		CodexTimeoutMs:        values.CodexTimeoutMs,
+		CodexTimeoutMsSet:     values.CodexTimeoutMsSet,
+		CodexSandbox:          values.CodexSandbox,
+		ExternalReviewTool:    values.ExternalReviewTool,
+		CustomReviewScript:    values.CustomReviewScript,
+		IterationDelayMs:      values.IterationDelayMs,
+		IterationDelayMsSet:   values.IterationDelayMsSet,
+		TaskRetryCount:        values.TaskRetryCount,
+		TaskRetryCountSet:     values.TaskRetryCountSet,
+		MaxIterations:         values.MaxIterations,
+		MaxIterationsSet:      values.MaxIterationsSet,
+		MaxExternalIterations: values.MaxExternalIterations,
+		FinalizeEnabled:       values.FinalizeEnabled,
+		FinalizeEnabledSet:    values.FinalizeEnabledSet,
+		WorktreeEnabled:       values.WorktreeEnabled,
+		WorktreeEnabledSet:    values.WorktreeEnabledSet,
+		PlansDir:              values.PlansDir,
+		DefaultBranch:         values.DefaultBranch,
+		WatchDirs:             values.WatchDirs,
+		ClaudeErrorPatterns:   values.ClaudeErrorPatterns,
+		CodexErrorPatterns:    values.CodexErrorPatterns,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,

@@ -40,16 +40,16 @@ Related to: #159
 - Modify: `pkg/config/values_test.go`
 - Modify: `pkg/config/config_test.go`
 
-- [ ] add `MaxExternalIterations int` to `Values` struct
-- [ ] add INI parsing in `parseValuesFromSection()` (validate non-negative, follow `task_retry_count` pattern)
-- [ ] add merge logic in `mergeFrom()` (simple `> 0` override, no `*Set` needed)
-- [ ] add `MaxExternalIterations int` to `config.Config` struct with `json:"max_external_iterations"` tag
-- [ ] wire Values → Config in `Load()`
-- [ ] add commented default to `pkg/config/defaults/config` after `task_retry_count` block
-- [ ] write tests in `values_test.go`: parsing valid value, zero, negative → error
-- [ ] write tests in `values_test.go`: merge behavior (non-zero overrides, zero preserves, global=10 + local unset → preserves 10)
-- [ ] write test in `config_test.go`: config loads `max_external_iterations`
-- [ ] run `go test ./pkg/config/...` — must pass before task 2
+- [x] add `MaxExternalIterations int` to `Values` struct
+- [x] add INI parsing in `parseValuesFromSection()` (validate non-negative, follow `task_retry_count` pattern)
+- [x] add merge logic in `mergeFrom()` (simple `> 0` override, no `*Set` needed)
+- [x] add `MaxExternalIterations int` to `config.Config` struct with `json:"max_external_iterations"` tag
+- [x] wire Values → Config in `Load()`
+- [x] add commented default to `pkg/config/defaults/config` after `task_retry_count` block
+- [x] write tests in `values_test.go`: parsing valid value, zero, negative → error
+- [x] write tests in `values_test.go`: merge behavior (non-zero overrides, zero preserves, global=10 + local unset → preserves 10)
+- [x] write test in `config_test.go`: config loads `max_external_iterations`
+- [x] run `go test ./pkg/config/...` — must pass before task 2
 
 ### Task 2: Add CLI flag, wire to processor, fix constants
 

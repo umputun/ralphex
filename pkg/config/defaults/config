@@ -113,6 +113,12 @@ task_retry_count = 1
 # default: 50
 # max_iterations = 50
 
+# max_external_iterations: override external review iteration limit
+# 0 = auto (derived from max_iterations as max(3, max_iterations/5))
+# set to a positive value to use a fixed iteration count
+# default: 0
+# max_external_iterations = 0
+
 # ------------------------------------------------------------------------------
 # paths
 # ------------------------------------------------------------------------------
