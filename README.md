@@ -314,6 +314,7 @@ ralphex --update         # pull latest docker image
 ralphex --update-script  # update the wrapper script itself
 ```
 
+<a id="available-images"></a>
 <details markdown>
 <summary>Available images</summary>
 
