@@ -30,6 +30,7 @@ pkg/progress/       # timestamped logging with color
 pkg/status/         # shared execution model types: signals, phases, sections
 pkg/web/            # web dashboard, SSE streaming, session management
 e2e/                # playwright e2e tests for web dashboard
+scripts/            # utility scripts (hg2git.sh, codex-as-claude.sh, prep-toy-test.sh)
 docs/plans/         # plan files location
 ```
 
@@ -109,14 +110,15 @@ Documentation: `docs/custom-providers.md`
 
 ### Git Package API
 
-Single public entry point: `git.NewService(path, logger) (*Service, error)`
+Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, error)`
 - All git operations are methods on `Service` (CreateBranchForPlan, CreateWorktreeForPlan, MovePlanToCompleted, EnsureIgnored, etc.)
 - `Logger` interface for dependency injection, compatible with `*color.Color`
-- Uses `backend` interface internally, implemented by `externalBackend` which shells out to the `git` binary
+- Uses `backend` interface internally, implemented by `externalBackend` which shells out to the configured VCS command
+- Optional `vcsCmd` parameter overrides the default `"git"` command (e.g., path to `hg2git.sh` translation script)
 
 Key files:
 - `pkg/git/service.go` - `Service` type, `backend` interface
-- `pkg/git/external.go` - git CLI backend (`externalBackend` type)
+- `pkg/git/external.go` - VCS CLI backend (`externalBackend` type)
 
 ### Worktree Isolation Mode
 
@@ -197,6 +199,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Custom agents: `~/.config/ralphex/agents/*.txt` or `.ralphex/agents/*.txt`
 - `default_branch` config option: override auto-detected default branch for review diffs
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
+- `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
 - Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
 
 ### Local Project Config (.ralphex/)

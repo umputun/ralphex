@@ -13,19 +13,20 @@ import (
 
 // externalBackend implements the backend interface by shelling out to the git CLI.
 type externalBackend struct {
-	path string // absolute path to repository root
+	path    string // absolute path to repository root
+	command string // vcs command to use (default: "git")
 }
 
-// newExternalBackend creates an externalBackend that shells out to the git CLI.
-// validates the path is inside a git repository using git rev-parse.
-func newExternalBackend(path string) (*externalBackend, error) {
+// newExternalBackend creates an externalBackend that shells out to the given vcs command.
+// validates the path is inside a repository using rev-parse.
+func newExternalBackend(path, command string) (*externalBackend, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolve path: %w", err)
 	}
 
-	// validate path is a git repo and get the toplevel
-	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "--show-toplevel")
+	// validate path is a repo and get the toplevel
+	cmd := exec.CommandContext(context.Background(), command, "rev-parse", "--show-toplevel")
 	cmd.Dir = absPath
 	out, err := cmd.Output()
 	if err != nil {
@@ -44,22 +45,22 @@ func newExternalBackend(path string) (*externalBackend, error) {
 		return nil, fmt.Errorf("eval symlinks: %w", err)
 	}
 
-	return &externalBackend{path: root}, nil
+	return &externalBackend{path: root, command: command}, nil
 }
 
 // run executes a git command and returns combined stdout+stderr with trailing whitespace removed.
 // leading whitespace is preserved (important for porcelain format parsing).
 // on failure, returns error with the combined output for diagnostics.
 func (e *externalBackend) run(args ...string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd := exec.CommandContext(context.Background(), e.command, args...)
 	cmd.Dir = e.path
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
-			return "", fmt.Errorf("git %s: %s", args[0], msg)
+			return "", fmt.Errorf("%s %s: %s", e.command, args[0], msg)
 		}
-		return "", fmt.Errorf("git %s: %w", args[0], err)
+		return "", fmt.Errorf("%s %s: %w", e.command, args[0], err)
 	}
 	return strings.TrimRight(string(out), " \t\n\r"), nil
 }
@@ -83,7 +84,7 @@ func (e *externalBackend) headHash() (string, error) {
 
 // HasCommits returns true if the repository has at least one commit.
 func (e *externalBackend) hasCommits() (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "HEAD")
+	cmd := exec.CommandContext(context.Background(), e.command, "rev-parse", "HEAD")
 	cmd.Dir = e.path
 	cmd.Env = append(os.Environ(), "LC_ALL=C") // force English stderr for reliable parsing
 	if _, err := cmd.Output(); err != nil {
@@ -105,7 +106,7 @@ func (e *externalBackend) hasCommits() (bool, error) {
 
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD.
 func (e *externalBackend) currentBranch() (string, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "symbolic-ref", "--short", "HEAD")
+	cmd := exec.CommandContext(context.Background(), e.command, "symbolic-ref", "--short", "HEAD")
 	cmd.Dir = e.path
 	cmd.Env = append(os.Environ(), "LC_ALL=C") // force English stderr for reliable parsing
 	out, err := cmd.Output()
@@ -129,7 +130,7 @@ func (e *externalBackend) currentBranch() (string, error) {
 // detects from origin/HEAD symbolic reference, falls back to checking common branch names.
 func (e *externalBackend) getDefaultBranch() string {
 	// try origin/HEAD first
-	cmd := exec.CommandContext(context.Background(), "git", "symbolic-ref", "refs/remotes/origin/HEAD")
+	cmd := exec.CommandContext(context.Background(), e.command, "symbolic-ref", "refs/remotes/origin/HEAD")
 	cmd.Dir = e.path
 	out, err := cmd.Output()
 	if err == nil {
@@ -253,7 +254,7 @@ func (e *externalBackend) hasChangesOtherThan(path string) (bool, error) {
 
 // IsIgnored checks if a path is ignored by gitignore rules.
 func (e *externalBackend) isIgnored(path string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), "git", "check-ignore", "-q", "--", path)
+	cmd := exec.CommandContext(context.Background(), e.command, "check-ignore", "-q", "--", path)
 	cmd.Dir = e.path
 	err := cmd.Run()
 	if err == nil {
@@ -367,7 +368,7 @@ func (e *externalBackend) diffStats(baseBranch string) (DiffStats, error) {
 		return DiffStats{}, nil //nolint:nilerr // no HEAD means no stats
 	}
 
-	baseCmd := exec.CommandContext(context.Background(), "git", "rev-parse", baseRef)
+	baseCmd := exec.CommandContext(context.Background(), e.command, "rev-parse", baseRef)
 	baseCmd.Dir = e.path
 	baseOut, err := baseCmd.Output()
 	if err != nil {
@@ -433,7 +434,7 @@ func (e *externalBackend) resolveRef(branchName string) string {
 	}
 
 	// try as arbitrary ref (commit hash, tag, etc.) via rev-parse
-	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "--verify", "--quiet", branchName)
+	cmd := exec.CommandContext(context.Background(), e.command, "rev-parse", "--verify", "--quiet", branchName)
 	cmd.Dir = e.path
 	if cmd.Run() == nil {
 		return branchName
@@ -444,7 +445,7 @@ func (e *externalBackend) resolveRef(branchName string) string {
 
 // refExists checks if a git reference exists.
 func (e *externalBackend) refExists(ref string) bool {
-	cmd := exec.CommandContext(context.Background(), "git", "show-ref", "--verify", "--quiet", ref)
+	cmd := exec.CommandContext(context.Background(), e.command, "show-ref", "--verify", "--quiet", ref)
 	cmd.Dir = e.path
 	return cmd.Run() == nil
 }

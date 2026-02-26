@@ -44,14 +44,14 @@ func runGit(t *testing.T, dir string, args ...string) string {
 func TestNewExternalBackend(t *testing.T) {
 	t.Run("opens valid repo", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 		assert.NotNil(t, eb)
 	})
 
 	t.Run("fails on non-repo", func(t *testing.T) {
 		dir := t.TempDir()
-		_, err := newExternalBackend(dir)
+		_, err := newExternalBackend(dir, "git")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "open git repository")
 	})
@@ -60,17 +60,24 @@ func TestNewExternalBackend(t *testing.T) {
 		mainDir := setupExternalTestRepo(t)
 		wtDir := filepath.Join(t.TempDir(), "worktree")
 		runGit(t, mainDir, "worktree", "add", wtDir, "-b", "wt-branch")
-		eb, err := newExternalBackend(wtDir)
+		eb, err := newExternalBackend(wtDir, "git")
 		require.NoError(t, err)
 		branch, err := eb.currentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "wt-branch", branch)
 	})
+
+	t.Run("stores custom command", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+		assert.Equal(t, "git", eb.command)
+	})
 }
 
 func TestExternalBackend_Root(t *testing.T) {
 	dir := setupExternalTestRepo(t)
-	eb, err := newExternalBackend(dir)
+	eb, err := newExternalBackend(dir, "git")
 	require.NoError(t, err)
 	assert.NotEmpty(t, eb.root())
 }
@@ -78,7 +85,7 @@ func TestExternalBackend_Root(t *testing.T) {
 func TestExternalBackend_headHash(t *testing.T) {
 	t.Run("returns valid 40-char hex string", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		hash, err := eb.headHash()
@@ -89,7 +96,7 @@ func TestExternalBackend_headHash(t *testing.T) {
 
 	t.Run("changes after new commit", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		hash1, err := eb.headHash()
@@ -108,7 +115,7 @@ func TestExternalBackend_headHash(t *testing.T) {
 		dir := t.TempDir()
 		runGit(t, dir, "init")
 
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		_, err = eb.headHash()
@@ -119,7 +126,7 @@ func TestExternalBackend_headHash(t *testing.T) {
 func TestExternalBackend_HasCommits(t *testing.T) {
 	t.Run("returns true for repo with commits", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		has, err := eb.hasCommits()
@@ -131,7 +138,7 @@ func TestExternalBackend_HasCommits(t *testing.T) {
 		dir := t.TempDir()
 		runGit(t, dir, "init")
 
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		has, err := eb.hasCommits()
@@ -143,7 +150,7 @@ func TestExternalBackend_HasCommits(t *testing.T) {
 		// construct externalBackend pointing to a non-repo directory;
 		// git rev-parse HEAD exits 128 with "not a git repository" which must propagate as error.
 		dir := t.TempDir()
-		eb := &externalBackend{path: dir}
+		eb := &externalBackend{path: dir, command: "git"}
 
 		has, err := eb.hasCommits()
 		require.Error(t, err, "non-repo exit-128 should return error, not silently report no commits")
@@ -155,7 +162,7 @@ func TestExternalBackend_HasCommits(t *testing.T) {
 func TestExternalBackend_CurrentBranch(t *testing.T) {
 	t.Run("returns default branch for new repo", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		branch, err := eb.currentBranch()
@@ -165,7 +172,7 @@ func TestExternalBackend_CurrentBranch(t *testing.T) {
 
 	t.Run("returns feature branch name", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("feature-test"))
@@ -176,7 +183,7 @@ func TestExternalBackend_CurrentBranch(t *testing.T) {
 
 	t.Run("returns empty string for detached HEAD", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		hash, err := eb.headHash()
@@ -192,7 +199,7 @@ func TestExternalBackend_CurrentBranch(t *testing.T) {
 		// construct externalBackend pointing to a non-repo directory;
 		// git symbolic-ref exits 128 with "not a git repository" which must propagate as error.
 		dir := t.TempDir()
-		eb := &externalBackend{path: dir}
+		eb := &externalBackend{path: dir, command: "git"}
 
 		branch, err := eb.currentBranch()
 		require.Error(t, err, "non-repo exit-128 should return error, not silently report detached HEAD")
@@ -204,7 +211,7 @@ func TestExternalBackend_CurrentBranch(t *testing.T) {
 func TestExternalBackend_GetDefaultBranch(t *testing.T) {
 	t.Run("returns existing default branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		branch := eb.getDefaultBranch()
@@ -214,7 +221,7 @@ func TestExternalBackend_GetDefaultBranch(t *testing.T) {
 
 	t.Run("returns main when main branch exists", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("main"))
@@ -224,7 +231,7 @@ func TestExternalBackend_GetDefaultBranch(t *testing.T) {
 
 	t.Run("falls back to master", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		// create a non-standard branch and delete the default one
@@ -239,7 +246,7 @@ func TestExternalBackend_GetDefaultBranch(t *testing.T) {
 func TestExternalBackend_BranchExists(t *testing.T) {
 	t.Run("returns true for existing branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		// get default branch name (could be master or main depending on git config)
@@ -250,7 +257,7 @@ func TestExternalBackend_BranchExists(t *testing.T) {
 
 	t.Run("returns false for non-existent branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		assert.False(t, eb.branchExists("nonexistent"))
@@ -258,7 +265,7 @@ func TestExternalBackend_BranchExists(t *testing.T) {
 
 	t.Run("returns true for created branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("new-branch"))
@@ -269,7 +276,7 @@ func TestExternalBackend_BranchExists(t *testing.T) {
 func TestExternalBackend_CreateBranch(t *testing.T) {
 	t.Run("creates and switches to branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.createBranch("new-feature")
@@ -282,7 +289,7 @@ func TestExternalBackend_CreateBranch(t *testing.T) {
 
 	t.Run("fails when branch already exists", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("existing"))
@@ -296,7 +303,7 @@ func TestExternalBackend_CreateBranch(t *testing.T) {
 func TestExternalBackend_CheckoutBranch(t *testing.T) {
 	t.Run("switches to existing branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("feature"))
@@ -309,7 +316,7 @@ func TestExternalBackend_CheckoutBranch(t *testing.T) {
 
 	t.Run("fails on non-existent branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.checkoutBranch("nonexistent")
@@ -320,7 +327,7 @@ func TestExternalBackend_CheckoutBranch(t *testing.T) {
 func TestExternalBackend_IsDirty(t *testing.T) {
 	t.Run("clean worktree returns false", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		dirty, err := eb.isDirty()
@@ -330,7 +337,7 @@ func TestExternalBackend_IsDirty(t *testing.T) {
 
 	t.Run("staged file returns true", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0o600))
@@ -343,7 +350,7 @@ func TestExternalBackend_IsDirty(t *testing.T) {
 
 	t.Run("modified tracked file returns true", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified\n"), 0o600))
@@ -355,7 +362,7 @@ func TestExternalBackend_IsDirty(t *testing.T) {
 
 	t.Run("deleted tracked file returns true", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.Remove(filepath.Join(dir, "README.md")))
@@ -367,7 +374,7 @@ func TestExternalBackend_IsDirty(t *testing.T) {
 
 	t.Run("untracked file only returns false", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("untracked"), 0o600))
@@ -379,7 +386,7 @@ func TestExternalBackend_IsDirty(t *testing.T) {
 
 	t.Run("gitignored file should not make repo dirty", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("ignored.txt\n"), 0o600))
@@ -397,7 +404,7 @@ func TestExternalBackend_IsDirty(t *testing.T) {
 func TestExternalBackend_FileHasChanges(t *testing.T) {
 	t.Run("returns false for committed file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		has, err := eb.fileHasChanges("README.md")
@@ -407,7 +414,7 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 
 	t.Run("returns true for untracked file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		plansDir := filepath.Join(dir, "docs", "plans")
@@ -422,7 +429,7 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 
 	t.Run("returns true for modified file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified"), 0o600))
@@ -434,7 +441,7 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 
 	t.Run("returns true for staged file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		plansDir := filepath.Join(dir, "docs", "plans")
@@ -449,7 +456,7 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 
 	t.Run("returns false for nonexistent file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		has, err := eb.fileHasChanges("nonexistent.md")
@@ -461,7 +468,7 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 	t.Run("returns false when no changes", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		has, err := eb.hasChangesOtherThan("nonexistent.md")
@@ -471,7 +478,7 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 
 	t.Run("returns false when only target file is untracked", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		plansDir := filepath.Join(dir, "docs", "plans")
@@ -486,7 +493,7 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 
 	t.Run("returns true when other file is untracked", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		plansDir := filepath.Join(dir, "docs", "plans")
@@ -502,7 +509,7 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 
 	t.Run("returns true when tracked file is modified", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		plansDir := filepath.Join(dir, "docs", "plans")
@@ -521,7 +528,7 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 func TestExternalBackend_IsIgnored(t *testing.T) {
 	t.Run("returns false for non-ignored file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		ignored, err := eb.isIgnored("README.md")
@@ -533,7 +540,7 @@ func TestExternalBackend_IsIgnored(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("progress-*.txt\n"), 0o600))
 
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		ignored, err := eb.isIgnored("progress-test.txt")
@@ -543,7 +550,7 @@ func TestExternalBackend_IsIgnored(t *testing.T) {
 
 	t.Run("returns false for no gitignore", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		ignored, err := eb.isIgnored("somefile.txt")
@@ -555,7 +562,7 @@ func TestExternalBackend_IsIgnored(t *testing.T) {
 func TestExternalBackend_Add(t *testing.T) {
 	t.Run("stages new file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("test content"), 0o600))
@@ -570,7 +577,7 @@ func TestExternalBackend_Add(t *testing.T) {
 
 	t.Run("stages with absolute path", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		absPath := filepath.Join(dir, "newfile.txt")
@@ -581,7 +588,7 @@ func TestExternalBackend_Add(t *testing.T) {
 
 	t.Run("fails on non-existent file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 		err = eb.add("nonexistent.txt")
 		assert.Error(t, err)
@@ -591,7 +598,7 @@ func TestExternalBackend_Add(t *testing.T) {
 func TestExternalBackend_MoveFile(t *testing.T) {
 	t.Run("moves file and stages changes", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "subdir"), 0o750))
@@ -609,7 +616,7 @@ func TestExternalBackend_MoveFile(t *testing.T) {
 
 	t.Run("fails on non-existent source", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.moveFile("nonexistent.txt", "dest.txt")
@@ -620,7 +627,7 @@ func TestExternalBackend_MoveFile(t *testing.T) {
 func TestExternalBackend_Commit(t *testing.T) {
 	t.Run("creates commit", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "commit-test.txt"), []byte("test"), 0o600))
@@ -635,7 +642,7 @@ func TestExternalBackend_Commit(t *testing.T) {
 
 	t.Run("fails with no staged changes", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.commit("empty commit")
@@ -646,7 +653,7 @@ func TestExternalBackend_Commit(t *testing.T) {
 func TestExternalBackend_CommitFiles(t *testing.T) {
 	t.Run("commits only specified file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		// stage two files
@@ -671,7 +678,7 @@ func TestExternalBackend_CommitFiles(t *testing.T) {
 
 	t.Run("fails with no paths even with staged files", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		// stage a file so the index is not empty
@@ -696,7 +703,7 @@ func TestExternalBackend_CreateInitialCommit(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600))
 
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.createInitialCommit("initial commit")
@@ -714,7 +721,7 @@ func TestExternalBackend_CreateInitialCommit(t *testing.T) {
 		runGit(t, dir, "config", "user.name", "test")
 		runGit(t, dir, "config", "commit.gpgsign", "false")
 
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.createInitialCommit("initial commit")
@@ -733,7 +740,7 @@ func TestExternalBackend_CreateInitialCommit(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "debug.log"), []byte("log content"), 0o600))
 
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.createInitialCommit("initial commit")
@@ -750,7 +757,7 @@ func TestExternalBackend_CreateInitialCommit(t *testing.T) {
 func TestExternalBackend_diffStats(t *testing.T) {
 	t.Run("returns zero stats when branches are equal", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		stats, err := eb.diffStats("master")
@@ -760,7 +767,7 @@ func TestExternalBackend_diffStats(t *testing.T) {
 
 	t.Run("returns zero stats for nonexistent branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		stats, err := eb.diffStats("nonexistent")
@@ -770,7 +777,7 @@ func TestExternalBackend_diffStats(t *testing.T) {
 
 	t.Run("returns stats for added file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("feature"))
@@ -787,7 +794,7 @@ func TestExternalBackend_diffStats(t *testing.T) {
 
 	t.Run("returns stats for modified file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("feature"))
@@ -804,7 +811,7 @@ func TestExternalBackend_diffStats(t *testing.T) {
 
 	t.Run("returns stats for multiple files", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		require.NoError(t, eb.createBranch("feature"))
@@ -826,7 +833,7 @@ func TestExternalBackend_diffStats(t *testing.T) {
 
 func TestExternalBackend_toRelative(t *testing.T) {
 	dir := setupExternalTestRepo(t)
-	eb, err := newExternalBackend(dir)
+	eb, err := newExternalBackend(dir, "git")
 	require.NoError(t, err)
 
 	t.Run("returns repo-relative path unchanged", func(t *testing.T) {
@@ -858,7 +865,7 @@ func TestExternalBackend_toRelative(t *testing.T) {
 func TestExternalBackend_AddWorktree(t *testing.T) {
 	t.Run("creates worktree with new branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		wtDir := filepath.Join(t.TempDir(), "wt")
@@ -866,7 +873,7 @@ func TestExternalBackend_AddWorktree(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify worktree exists and is on the correct branch
-		wtEB, err := newExternalBackend(wtDir)
+		wtEB, err := newExternalBackend(wtDir, "git")
 		require.NoError(t, err)
 		branch, err := wtEB.currentBranch()
 		require.NoError(t, err)
@@ -875,7 +882,7 @@ func TestExternalBackend_AddWorktree(t *testing.T) {
 
 	t.Run("creates worktree with existing branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		// create a branch first, then go back to master
@@ -887,7 +894,7 @@ func TestExternalBackend_AddWorktree(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify worktree is on the existing branch
-		wtEB, err := newExternalBackend(wtDir)
+		wtEB, err := newExternalBackend(wtDir, "git")
 		require.NoError(t, err)
 		branch, err := wtEB.currentBranch()
 		require.NoError(t, err)
@@ -896,7 +903,7 @@ func TestExternalBackend_AddWorktree(t *testing.T) {
 
 	t.Run("fails when branch already checked out", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		// master is currently checked out, trying to create worktree for it should fail
@@ -909,7 +916,7 @@ func TestExternalBackend_AddWorktree(t *testing.T) {
 func TestExternalBackend_RemoveWorktree(t *testing.T) {
 	t.Run("removes existing worktree", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		wtDir := filepath.Join(t.TempDir(), "wt")
@@ -925,7 +932,7 @@ func TestExternalBackend_RemoveWorktree(t *testing.T) {
 
 	t.Run("fails on nonexistent worktree", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.removeWorktree("/nonexistent/path")
@@ -936,7 +943,7 @@ func TestExternalBackend_RemoveWorktree(t *testing.T) {
 func TestExternalBackend_PruneWorktrees(t *testing.T) {
 	t.Run("prunes stale entries", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		// create and manually delete a worktree dir to leave a stale entry
@@ -951,7 +958,7 @@ func TestExternalBackend_PruneWorktrees(t *testing.T) {
 
 	t.Run("succeeds with no stale entries", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir)
+		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
 		err = eb.pruneWorktrees()
@@ -960,7 +967,7 @@ func TestExternalBackend_PruneWorktrees(t *testing.T) {
 }
 
 func TestExternalBackend_extractPathFromPorcelain(t *testing.T) {
-	eb := &externalBackend{path: "/tmp"}
+	eb := &externalBackend{path: "/tmp", command: "git"}
 
 	t.Run("extracts simple path", func(t *testing.T) {
 		assert.Equal(t, "file.txt", eb.extractPathFromPorcelain("?? file.txt"))
@@ -976,5 +983,44 @@ func TestExternalBackend_extractPathFromPorcelain(t *testing.T) {
 
 	t.Run("returns empty for short line", func(t *testing.T) {
 		assert.Empty(t, eb.extractPathFromPorcelain("??"))
+	})
+}
+
+func TestExternalBackend_CustomCommand(t *testing.T) {
+	t.Run("uses custom command in run", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+		assert.Equal(t, "git", eb.command)
+
+		// verify it works with the command
+		out, err := eb.run("status", "--porcelain")
+		require.NoError(t, err)
+		assert.Empty(t, out)
+	})
+
+	t.Run("fails with invalid command", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		_, err := newExternalBackend(dir, "nonexistent-vcs-command")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "open git repository")
+	})
+
+	t.Run("propagates command to all operations", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+
+		// verify command is used by checking basic operations work
+		_, err = eb.hasCommits()
+		require.NoError(t, err)
+
+		_, err = eb.currentBranch()
+		require.NoError(t, err)
+
+		_ = eb.getDefaultBranch()
+
+		_, err = eb.isIgnored("README.md")
+		require.NoError(t, err)
 	})
 }

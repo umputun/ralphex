@@ -71,6 +71,7 @@ type Config struct {
 	PlansDir      string   `json:"plans_dir"`
 	WatchDirs     []string `json:"watch_dirs"`     // directories to watch for progress files
 	DefaultBranch string   `json:"default_branch"` // override auto-detected default branch
+	VcsCommand    string   `json:"vcs_command"`    // custom VCS command (default: "git")
 
 	// error patterns to detect in executor output (e.g., rate limit messages)
 	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
@@ -255,6 +256,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		WorktreeEnabledSet:    values.WorktreeEnabledSet,
 		PlansDir:              values.PlansDir,
 		DefaultBranch:         values.DefaultBranch,
+		VcsCommand:            values.VcsCommand,
 		WatchDirs:             values.WatchDirs,
 		ClaudeErrorPatterns:   values.ClaudeErrorPatterns,
 		CodexErrorPatterns:    values.CodexErrorPatterns,

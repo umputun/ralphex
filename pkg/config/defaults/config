@@ -140,6 +140,16 @@ plans_dir = docs/plans
 # watch_dirs =
 
 # ------------------------------------------------------------------------------
+# version control
+# ------------------------------------------------------------------------------
+
+# vcs_command: the VCS command used by ralphex's git backend
+# set to a custom script (e.g., ~/scripts/hg2git.sh) to use Mercurial
+# the script receives the same arguments as git and must translate them
+# default: git
+vcs_command = git
+
+# ------------------------------------------------------------------------------
 # error pattern detection
 # ------------------------------------------------------------------------------
 

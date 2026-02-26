@@ -35,6 +35,7 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, 1, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
 	assert.Equal(t, "docs/plans", values.PlansDir)
+	assert.Equal(t, "git", values.VcsCommand)
 	assert.Equal(t, []string{"You've hit your limit", "API Error:", "cannot be launched inside another Claude Code session"}, values.ClaudeErrorPatterns)
 	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexErrorPatterns)
 }
@@ -1479,5 +1480,68 @@ func TestValues_mergeFrom_MaxExternalIterations(t *testing.T) {
 		values, err := loader.Load(localCfg, globalCfg)
 		require.NoError(t, err)
 		assert.Equal(t, 5, values.MaxExternalIterations)
+	})
+}
+
+func TestValuesLoader_Load_VcsCommand(t *testing.T) {
+	t.Run("parse vcs_command", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`vcs_command = /usr/local/bin/hg2git.sh`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "/usr/local/bin/hg2git.sh", values.VcsCommand)
+	})
+
+	t.Run("tilde expansion", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`vcs_command = ~/scripts/hg2git.sh`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, home+"/scripts/hg2git.sh", values.VcsCommand)
+	})
+
+	t.Run("default from embedded is git", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Equal(t, "git", values.VcsCommand)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`vcs_command = /global/vcs`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`vcs_command = /local/vcs`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, "/local/vcs", values.VcsCommand)
+	})
+}
+
+func TestValues_mergeFrom_VcsCommand(t *testing.T) {
+	t.Run("non-empty overrides", func(t *testing.T) {
+		dst := Values{VcsCommand: "git"}
+		src := Values{VcsCommand: "/path/to/hg2git.sh"}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "/path/to/hg2git.sh", dst.VcsCommand)
+	})
+
+	t.Run("empty does not overwrite", func(t *testing.T) {
+		dst := Values{VcsCommand: "/path/to/hg2git.sh"}
+		src := Values{VcsCommand: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "/path/to/hg2git.sh", dst.VcsCommand)
 	})
 }

@@ -61,8 +61,13 @@ type Service struct {
 // NewService opens a git repository and returns a Service.
 // path is the path to the repository (use "." for current directory).
 // log is used for progress output during operations.
-func NewService(path string, log Logger) (*Service, error) {
-	b, err := newExternalBackend(path)
+// vcsCmd optionally specifies the vcs command to use (default: "git").
+func NewService(path string, log Logger, vcsCmd ...string) (*Service, error) {
+	command := "git"
+	if len(vcsCmd) > 0 && vcsCmd[0] != "" {
+		command = vcsCmd[0]
+	}
+	b, err := newExternalBackend(path, command)
 	if err != nil {
 		return nil, err
 	}

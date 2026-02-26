@@ -224,13 +224,17 @@ func run(ctx context.Context, o opts) error {
 		return depErr
 	}
 
-	// require running from repo root
-	if _, statErr := os.Stat(".git"); statErr != nil {
-		return errors.New("must run from repository root (no .git directory found)")
+	// require running from repo root.
+	// when using a non-git vcs command, skip the .git check — rely on NewService's
+	// rev-parse --show-toplevel for repo validation instead (pure hg repos have no .git).
+	if cfg.VcsCommand == "" || cfg.VcsCommand == "git" {
+		if _, statErr := os.Stat(".git"); statErr != nil {
+			return errors.New("must run from repository root (no .git directory found)")
+		}
 	}
 
 	// open git repository via Service
-	gitSvc, err := openGitService(colors)
+	gitSvc, err := openGitService(colors, cfg.VcsCommand)
 	if err != nil {
 		return fmt.Errorf("open git repo: %w", err)
 	}
@@ -567,7 +571,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error 
 	defer cleanup()
 
 	// open git service inside worktree
-	wtGitSvc, err := git.NewService(".", req.Colors.Info())
+	wtGitSvc, err := git.NewService(".", req.Colors.Info(), req.Config.VcsCommand)
 	if err != nil {
 		return fmt.Errorf("open worktree git service: %w", err)
 	}
@@ -613,8 +617,9 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error 
 }
 
 // openGitService creates a git.Service for the current directory.
-func openGitService(colors *progress.Colors) (*git.Service, error) {
-	svc, err := git.NewService(".", colors.Info())
+// vcsCmd specifies the vcs command to use (e.g. "git" or path to a wrapper script).
+func openGitService(colors *progress.Colors, vcsCmd string) (*git.Service, error) {
+	svc, err := git.NewService(".", colors.Info(), vcsCmd)
 	if err != nil {
 		return nil, fmt.Errorf("new git service: %w", err)
 	}

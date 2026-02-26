@@ -38,7 +38,8 @@ type Values struct {
 	FinalizeEnabled       bool
 	FinalizeEnabledSet    bool // tracks if finalize_enabled was explicitly set
 	WorktreeEnabled       bool
-	WorktreeEnabledSet    bool // tracks if use_worktree was explicitly set
+	WorktreeEnabledSet    bool   // tracks if use_worktree was explicitly set
+	VcsCommand            string // custom VCS command (default: "git")
 	PlansDir              string
 	DefaultBranch         string   // override auto-detected default branch
 	WatchDirs             []string // directories to watch for progress files
@@ -281,6 +282,9 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	if key, err := section.GetKey("default_branch"); err == nil {
 		values.DefaultBranch = strings.TrimSpace(key.String())
 	}
+	if key, err := section.GetKey("vcs_command"); err == nil {
+		values.VcsCommand = expandTilde(key.String())
+	}
 
 	// watch directories (comma-separated)
 	if key, err := section.GetKey("watch_dirs"); err == nil {
@@ -399,6 +403,9 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	}
 	if src.DefaultBranch != "" {
 		dst.DefaultBranch = src.DefaultBranch
+	}
+	if src.VcsCommand != "" {
+		dst.VcsCommand = src.VcsCommand
 	}
 	if len(src.WatchDirs) > 0 {
 		dst.WatchDirs = src.WatchDirs

@@ -44,6 +44,38 @@ func TestNewService(t *testing.T) {
 		_, err := NewService(dir, noopServiceLogger())
 		assert.Error(t, err)
 	})
+
+	t.Run("accepts custom vcs command", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger(), "git")
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+
+		// verify it works normally with explicit "git"
+		branch, err := svc.CurrentBranch()
+		require.NoError(t, err)
+		assert.NotEmpty(t, branch)
+	})
+
+	t.Run("defaults to git when vcs command is empty", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger(), "")
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+	})
+
+	t.Run("defaults to git when no vcs command provided", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+	})
+
+	t.Run("fails with invalid vcs command", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		_, err := NewService(dir, noopServiceLogger(), "nonexistent-vcs")
+		require.Error(t, err)
+	})
 }
 
 func TestService_IsMainBranch(t *testing.T) {
