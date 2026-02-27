@@ -303,7 +303,7 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 	// EnsureIgnored must be called AFTER CreateBranchForPlan because it modifies
 	// .gitignore, and CreateBranchForPlan checks HasChangesOtherThan(planFile).
 	if planFile != "" && modeRequiresBranch(req.Mode) {
-		if err := req.GitSvc.CreateBranchForPlan(planFile); err != nil {
+		if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch); err != nil {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
 	}
@@ -331,8 +331,8 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 		return false, nil
 	}
 
-	isMain, branchErr := req.GitSvc.IsMainBranch()
-	if branchErr != nil || !isMain {
+	isDefault, branchErr := req.GitSvc.IsDefaultBranch(req.DefaultBranch)
+	if branchErr != nil || !isDefault {
 		return false, nil //nolint:nilerr // branchErr is intentionally ignored - if we can't get branch, skip auto-plan-mode
 	}
 
@@ -493,7 +493,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 // in the main repo), chdirs into the worktree, and runs executePlan. On return the worktree
 // is cleaned up and CWD is restored. req.WtCleanup is populated for interrupt handler use.
 func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error {
-	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile)
+	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile, req.DefaultBranch)
 	if err != nil {
 		return fmt.Errorf("create worktree: %w", err)
 	}
@@ -887,7 +887,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	}
 
 	// normal mode: create branch and run in place
-	if err := req.GitSvc.CreateBranchForPlan(planFile); err != nil {
+	if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch); err != nil {
 		return fmt.Errorf("create branch for plan: %w", err)
 	}
 

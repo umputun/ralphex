@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/umputun/ralphex/pkg/plan"
 )
@@ -93,13 +94,26 @@ func (s *Service) CurrentBranch() (string, error) {
 	return branch, nil
 }
 
-// IsMainBranch returns true if the current branch is "main" or "master".
-func (s *Service) IsMainBranch() (bool, error) {
+// IsDefaultBranch returns true if the current branch matches the given default branch.
+// strips "origin/" prefix from defaultBranch for comparison (auto-detect may return "origin/main").
+// when defaultBranch is empty, falls back to checking "main" and "master".
+func (s *Service) IsDefaultBranch(defaultBranch string) (bool, error) {
 	branch, err := s.repo.currentBranch()
 	if err != nil {
-		return false, fmt.Errorf("is main branch: %w", err)
+		return false, fmt.Errorf("is default branch: %w", err)
 	}
-	return branch == "main" || branch == "master", nil
+	return s.matchesDefaultBranch(branch, defaultBranch), nil
+}
+
+// matchesDefaultBranch checks if branch matches the given default branch.
+// strips "origin/" prefix from defaultBranch for comparison.
+// when defaultBranch is empty, falls back to checking "main" and "master".
+func (s *Service) matchesDefaultBranch(branch, defaultBranch string) bool {
+	if defaultBranch == "" {
+		return branch == "main" || branch == "master"
+	}
+	normalized := strings.TrimPrefix(defaultBranch, "origin/")
+	return branch == normalized
 }
 
 // GetDefaultBranch returns the default branch name.
@@ -127,17 +141,22 @@ func (s *Service) CreateBranch(name string) error {
 
 // preparePlanBranch validates state, extracts branch name, and checks plan file status.
 // returns branch name and whether the plan file has uncommitted changes.
-// when requireMain is true, returns error if not on main/master.
-// when requireMain is false, returns empty branch name if not on main/master (caller should skip).
-func (s *Service) preparePlanBranch(planFile string, requireMain bool) (string, bool, error) {
+// when requireMain is true, returns error if not on the default branch.
+// when requireMain is false, returns empty branch name if not on the default branch (caller should skip).
+// defaultBranch is the resolved default branch name (e.g. "main", "develop", "origin/main").
+func (s *Service) preparePlanBranch(planFile string, requireMain bool, defaultBranch string) (string, bool, error) {
 	currentBranch, err := s.repo.currentBranch()
 	if err != nil {
 		return "", false, fmt.Errorf("check current branch: %w", err)
 	}
 
-	if currentBranch != "main" && currentBranch != "master" {
+	if !s.matchesDefaultBranch(currentBranch, defaultBranch) {
 		if requireMain {
-			return "", false, fmt.Errorf("worktree creation requires main/master branch, currently on %q", currentBranch)
+			expected := strings.TrimPrefix(defaultBranch, "origin/")
+			if expected == "" {
+				expected = "main/master"
+			}
+			return "", false, fmt.Errorf("worktree creation requires %s branch, currently on %q", expected, currentBranch)
 		}
 		return "", false, nil // already on feature branch, caller should skip
 	}
@@ -172,11 +191,12 @@ func (s *Service) preparePlanBranch(planFile string, requireMain bool) (string, 
 }
 
 // CreateBranchForPlan creates or switches to a feature branch for plan execution.
-// If already on a feature branch (not main/master), returns nil immediately.
-// If on main/master, extracts branch name from plan file and creates/switches to it.
+// If already on a feature branch (not the default branch), returns nil immediately.
+// If on the default branch, extracts branch name from plan file and creates/switches to it.
 // If plan file has uncommitted changes and is the only dirty file, auto-commits it.
-func (s *Service) CreateBranchForPlan(planFile string) error {
-	branchName, planHasChanges, err := s.preparePlanBranch(planFile, false)
+// defaultBranch is the resolved default branch name (e.g. "main", "develop").
+func (s *Service) CreateBranchForPlan(planFile, defaultBranch string) error {
+	branchName, planHasChanges, err := s.preparePlanBranch(planFile, false, defaultBranch)
 	if err != nil {
 		return err
 	}
@@ -212,12 +232,13 @@ func (s *Service) CreateBranchForPlan(planFile string) error {
 }
 
 // CreateWorktreeForPlan creates an isolated git worktree for plan execution.
-// must be called from main/master branch (same guard as CreateBranchForPlan).
+// must be called from the default branch (same guard as CreateBranchForPlan).
 // derives branch name from plan file, creates worktree at .ralphex/worktrees/<branch>.
 // returns (worktree path, planNeedsCommit, error). when planNeedsCommit is true the caller
 // must commit the plan file in the worktree context (via CommitPlanFile on the worktree's
-// git service) so the commit lands on the feature branch rather than main/master.
-func (s *Service) CreateWorktreeForPlan(planFile string) (string, bool, error) {
+// git service) so the commit lands on the feature branch rather than the default branch.
+// defaultBranch is the resolved default branch name (e.g. "main", "develop").
+func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch string) (string, bool, error) {
 	// check worktree existence early, before preparePlanBranch runs hasChangesOtherThan
 	// (an existing worktree dir would show up as untracked and fail the dirty check)
 	earlyBranch := plan.ExtractBranchName(planFile)
@@ -233,7 +254,7 @@ func (s *Service) CreateWorktreeForPlan(planFile string) (string, bool, error) {
 		return "", false, fmt.Errorf("worktree already exists at %s, another instance may be running", wtPath)
 	}
 
-	branchName, planHasChanges, err := s.preparePlanBranch(planFile, true)
+	branchName, planHasChanges, err := s.preparePlanBranch(planFile, true, defaultBranch)
 	if err != nil {
 		return "", false, err
 	}
