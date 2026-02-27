@@ -868,6 +868,20 @@ func TestService_CreateWorktreeForPlan(t *testing.T) {
 		assert.Contains(t, err.Error(), "requires master branch")
 	})
 
+	t.Run("fails with fallback error when empty default branch on feature", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// switch to feature branch
+		require.NoError(t, svc.CreateBranch("feature"))
+
+		planFile := filepath.Join(dir, "docs", "plans", "feature.md")
+		_, _, err = svc.CreateWorktreeForPlan(planFile, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires main/master branch")
+	})
+
 	t.Run("fails when not on develop default branch", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
@@ -895,9 +909,10 @@ func TestService_CreateWorktreeForPlan(t *testing.T) {
 		planFile := filepath.Join(plansDir, "develop-feature.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
 
-		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "develop")
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile, "develop")
 		require.NoError(t, err)
 		assert.Contains(t, wtPath, "develop-feature")
+		assert.True(t, planNeedsCommit, "untracked plan file should need commit")
 
 		// cleanup
 		require.NoError(t, svc.RemoveWorktree(wtPath))
