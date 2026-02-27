@@ -141,17 +141,17 @@ func (s *Service) CreateBranch(name string) error {
 
 // preparePlanBranch validates state, extracts branch name, and checks plan file status.
 // returns branch name and whether the plan file has uncommitted changes.
-// when requireMain is true, returns error if not on the default branch.
-// when requireMain is false, returns empty branch name if not on the default branch (caller should skip).
+// when requireDefault is true, returns error if not on the default branch.
+// when requireDefault is false, returns empty branch name if not on the default branch (caller should skip).
 // defaultBranch is the resolved default branch name (e.g. "main", "develop", "origin/main").
-func (s *Service) preparePlanBranch(planFile string, requireMain bool, defaultBranch string) (string, bool, error) {
+func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaultBranch string) (string, bool, error) {
 	currentBranch, err := s.repo.currentBranch()
 	if err != nil {
 		return "", false, fmt.Errorf("check current branch: %w", err)
 	}
 
 	if !s.matchesDefaultBranch(currentBranch, defaultBranch) {
-		if requireMain {
+		if requireDefault {
 			expected := strings.TrimPrefix(defaultBranch, "origin/")
 			if expected == "" {
 				expected = "main/master"
@@ -169,7 +169,7 @@ func (s *Service) preparePlanBranch(planFile string, requireMain bool, defaultBr
 		return "", false, fmt.Errorf("check uncommitted files: %w", err)
 	}
 	if hasOtherChanges {
-		if requireMain {
+		if requireDefault {
 			return "", false, errors.New("cannot create worktree: worktree has uncommitted changes other than the plan file")
 		}
 		return "", false, fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+

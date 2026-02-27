@@ -245,10 +245,11 @@ func run(ctx context.Context, o opts) error {
 		return ensureErr
 	}
 
+	autoDetected := gitSvc.GetDefaultBranch()
 	// defaultBranch is for branch/worktree creation (no --base-ref, it can be a commit hash)
-	defaultBranch := resolveDefaultBranch("", cfg.DefaultBranch, gitSvc.GetDefaultBranch())
+	defaultBranch := resolveDefaultBranch("", cfg.DefaultBranch, autoDetected)
 	// baseRef is for review diffs and {{DEFAULT_BRANCH}} template variable (--base-ref override)
-	baseRef := resolveDefaultBranch(o.BaseRef, cfg.DefaultBranch, gitSvc.GetDefaultBranch())
+	baseRef := resolveDefaultBranch(o.BaseRef, cfg.DefaultBranch, autoDetected)
 	applyCLIOverrides(o, cfg)
 
 	mode := determineMode(o)
