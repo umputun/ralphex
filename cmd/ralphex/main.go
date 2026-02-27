@@ -106,7 +106,8 @@ type executePlanRequest struct {
 	MainGitSvc    *git.Service // main repo service for cross-boundary ops (worktree mode); nil in normal mode
 	Config        *config.Config
 	Colors        *progress.Colors
-	DefaultBranch string
+	DefaultBranch string // actual default branch for branch/worktree creation (config or auto-detect)
+	BaseRef       string // base reference for review diffs and templates (--base-ref override or DefaultBranch)
 	NotifySvc     *notify.Service
 	WtCleanup     *worktreeCleanupFn  // worktree cleanup for interrupt handler; nil when not in worktree mode
 	ProgressLog   *progress.Logger    // pre-created logger (worktree mode); nil in normal mode
@@ -244,7 +245,11 @@ func run(ctx context.Context, o opts) error {
 		return ensureErr
 	}
 
-	defaultBranch := resolveDefaultBranch(o.BaseRef, cfg.DefaultBranch, gitSvc.GetDefaultBranch())
+	autoDetected := gitSvc.GetDefaultBranch()
+	// defaultBranch is for branch/worktree creation (no --base-ref, it can be a commit hash)
+	defaultBranch := resolveDefaultBranch("", cfg.DefaultBranch, autoDetected)
+	// baseRef is for review diffs and {{DEFAULT_BRANCH}} template variable (--base-ref override)
+	baseRef := resolveDefaultBranch(o.BaseRef, cfg.DefaultBranch, autoDetected)
 	applyCLIOverrides(o, cfg)
 
 	mode := determineMode(o)
@@ -260,6 +265,7 @@ func run(ctx context.Context, o opts) error {
 			Config:        cfg,
 			Colors:        colors,
 			DefaultBranch: defaultBranch,
+			BaseRef:       baseRef,
 			NotifySvc:     notifySvc,
 			WtCleanup:     wtCleanup,
 		}, selector)
@@ -271,6 +277,7 @@ func run(ctx context.Context, o opts) error {
 		Config:        cfg,
 		Colors:        colors,
 		DefaultBranch: defaultBranch,
+		BaseRef:       baseRef,
 		NotifySvc:     notifySvc,
 		WtCleanup:     wtCleanup,
 	}, selector)
@@ -282,7 +289,7 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 	planOptional := req.Mode == processor.ModeReview || req.Mode == processor.ModeCodexOnly
 	planFile, err := selector.Select(ctx, o.PlanFile, planOptional)
 	if err != nil {
-		// check for auto-plan-mode: no plans found on main/master branch
+		// check for auto-plan-mode: no plans found on default branch
 		handled, autoPlanErr := tryAutoPlanMode(ctx, err, o, req, selector)
 		if handled {
 			return autoPlanErr
@@ -303,7 +310,7 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 	// EnsureIgnored must be called AFTER CreateBranchForPlan because it modifies
 	// .gitignore, and CreateBranchForPlan checks HasChangesOtherThan(planFile).
 	if planFile != "" && modeRequiresBranch(req.Mode) {
-		if err := req.GitSvc.CreateBranchForPlan(planFile); err != nil {
+		if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch); err != nil {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
 	}
@@ -323,7 +330,7 @@ func getCurrentBranch(gitSvc *git.Service) string {
 	return branch
 }
 
-// tryAutoPlanMode attempts to switch to plan mode when no plans are found on main/master.
+// tryAutoPlanMode attempts to switch to plan mode when no plans are found on the default branch.
 // returns (true, nil) if user canceled, (true, err) if plan mode was attempted, or (false, nil) if auto-plan-mode doesn't apply.
 func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequest,
 	selector *plan.Selector) (bool, error) {
@@ -331,8 +338,8 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 		return false, nil
 	}
 
-	isMain, branchErr := req.GitSvc.IsMainBranch()
-	if branchErr != nil || !isMain {
+	isDefault, branchErr := req.GitSvc.IsDefaultBranch(req.DefaultBranch)
+	if branchErr != nil || !isDefault {
 		return false, nil //nolint:nilerr // branchErr is intentionally ignored - if we can't get branch, skip auto-plan-mode
 	}
 
@@ -435,7 +442,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// get diff stats for completion message (optional - errors logged but don't block).
 	// use worktree GitSvc (has correct HEAD with committed changes).
-	stats, statsErr := req.GitSvc.DiffStats(req.DefaultBranch)
+	stats, statsErr := req.GitSvc.DiffStats(req.BaseRef)
 	if statsErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
 	}
@@ -493,7 +500,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 // in the main repo), chdirs into the worktree, and runs executePlan. On return the worktree
 // is cleaned up and CWD is restored. req.WtCleanup is populated for interrupt handler use.
 func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error {
-	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile)
+	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile, req.DefaultBranch)
 	if err != nil {
 		return fmt.Errorf("create worktree: %w", err)
 	}
@@ -594,7 +601,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error 
 		}
 	}
 
-	// commit plan file on the feature branch (inside worktree), not on main/master
+	// commit plan file on the feature branch (inside worktree), not on the default branch
 	if planNeedsCommit {
 		if commitErr := wtGitSvc.CommitPlanFile(req.PlanFile, req.GitSvc.Root()); commitErr != nil {
 			return fmt.Errorf("commit plan in worktree: %w", commitErr)
@@ -610,6 +617,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error 
 		Config:        req.Config,
 		Colors:        req.Colors,
 		DefaultBranch: req.DefaultBranch,
+		BaseRef:       req.BaseRef,
 		NotifySvc:     req.NotifySvc,
 		ProgressLog:   baseLog,
 		PhaseHolder:   holder,
@@ -746,7 +754,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		TaskRetryCount:        req.Config.TaskRetryCount,
 		CodexEnabled:          codexEnabled,
 		FinalizeEnabled:       req.Config.FinalizeEnabled,
-		DefaultBranch:         req.DefaultBranch,
+		DefaultBranch:         req.BaseRef,
 		AppConfig:             req.Config,
 	}, log, holder)
 	if req.GitSvc != nil {
@@ -832,7 +840,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		Debug:            o.Debug,
 		NoColor:          o.NoColor,
 		IterationDelayMs: req.Config.IterationDelayMs,
-		DefaultBranch:    req.DefaultBranch,
+		DefaultBranch:    req.BaseRef,
 		AppConfig:        req.Config,
 	}, baseLog, holder)
 	r.SetInputCollector(collector)
@@ -881,13 +889,14 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 			Config:        req.Config,
 			Colors:        req.Colors,
 			DefaultBranch: req.DefaultBranch,
+			BaseRef:       req.BaseRef,
 			NotifySvc:     req.NotifySvc,
 			WtCleanup:     req.WtCleanup,
 		})
 	}
 
 	// normal mode: create branch and run in place
-	if err := req.GitSvc.CreateBranchForPlan(planFile); err != nil {
+	if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch); err != nil {
 		return fmt.Errorf("create branch for plan: %w", err)
 	}
 
@@ -898,6 +907,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		Config:        req.Config,
 		Colors:        req.Colors,
 		DefaultBranch: req.DefaultBranch,
+		BaseRef:       req.BaseRef,
 		NotifySvc:     req.NotifySvc,
 	})
 }
