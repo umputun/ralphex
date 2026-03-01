@@ -902,6 +902,16 @@ It depends. If the plan file is the only uncommitted change, ralphex auto-commit
 
 Agents define *what* to check (review instructions). Prompts define *how* the workflow runs (execution steps, signal handling).
 
+**Can I use ralphex with Claude Pro plan?**
+
+Yes. Pro plans hit rate limits more frequently. Use `--wait` to pause and retry automatically instead of exiting:
+
+```bash
+ralphex --wait 1h docs/plans/feature.md
+```
+
+When a rate limit is detected, ralphex waits the specified duration and retries. Execution takes longer but completes unattended. You can also set `wait_on_limit = 1h` in config to make it the default.
+
 **Can I use Cursor CLI instead of Claude Code?**
 
 Yes. [Cursor CLI](https://cursor.com/cli) is community-tested as a drop-in alternative. Configure in `~/.config/ralphex/config`:
