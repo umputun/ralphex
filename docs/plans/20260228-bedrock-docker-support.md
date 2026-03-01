@@ -3,7 +3,8 @@
 ## Overview
 - Add AWS Bedrock authentication support to the `ralphex-dk.sh` Docker wrapper
 - Enable users to run ralphex in Docker with AWS Bedrock-hosted Claude models
-- Support both profile-based (`~/.aws`) and explicit credential authentication
+- Support profile-based auth (via `aws configure export-credentials`) and explicit credentials
+- **Security:** Never mount `~/.aws` - only export specific credentials needed
 - Add generic `RALPHEX_EXTRA_ENV` for passing any additional env vars to container
 
 ## Context (from discovery)
@@ -64,20 +65,27 @@
   - `test_bedrock_env_list_complete` - verify BEDROCK_ENV_VARS contains expected vars
 - [ ] run tests - must pass before next task
 
-### Task 3: Add ~/.aws volume mount for Bedrock
+### Task 3: Add AWS profile credential export for Bedrock
 
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] modify `build_volumes()` to accept `use_bedrock` parameter
-- [ ] when bedrock enabled and `~/.aws` exists, mount to `/home/app/.aws:ro`
-- [ ] handle SELinux `:z` suffix like other mounts
-- [ ] update `build_volumes()` calls in `main()` to pass `use_bedrock`
-- [ ] write `TestBedrockVolumes` test class with cases:
-  - `test_mounts_aws_dir_when_bedrock_enabled` - ~/.aws mounted to /home/app/.aws:ro
-  - `test_no_aws_mount_when_bedrock_disabled` - ~/.aws not mounted
-  - `test_aws_mount_with_selinux` - mount has :ro,z suffix
-  - `test_skips_if_aws_dir_missing` - no error if ~/.aws doesn't exist
+**Security note:** Never mount `~/.aws` directory - it may contain sensitive data beyond credentials.
+Instead, use `aws configure export-credentials` to export only the needed credentials.
+
+- [ ] add `export_aws_profile_credentials()` function:
+  - check if `AWS_PROFILE` is set and explicit creds (`AWS_ACCESS_KEY_ID`) are NOT set
+  - run `aws configure export-credentials --profile $AWS_PROFILE --format env`
+  - parse output to extract `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+  - return dict of exported credentials (may be empty if command fails)
+  - handle command failure gracefully (return empty dict, log warning)
+- [ ] integrate into `run_docker()` - add exported creds to env args when bedrock enabled
+- [ ] write `TestAwsCredentialExport` test class with cases:
+  - `test_exports_credentials_with_profile` - AWS_PROFILE set → runs aws cli, parses output
+  - `test_skips_export_when_explicit_creds` - AWS_ACCESS_KEY_ID set → no aws cli call
+  - `test_skips_export_when_no_profile` - AWS_PROFILE not set → no aws cli call
+  - `test_handles_export_failure` - aws cli fails → empty dict, no crash
+  - `test_parses_env_format_output` - correctly extracts key/secret/token from env format
 - [ ] run tests - must pass before next task
 
 ### Task 4: Skip keychain and claude_home checks for Bedrock
@@ -102,20 +110,21 @@
 - [ ] add `validate_bedrock_config()` function returning list of warnings
 - [ ] check: CLAUDE_CODE_USE_BEDROCK set (warn if not)
 - [ ] check: AWS_REGION set (warn if not)
-- [ ] check: ~/.aws exists OR AWS_ACCESS_KEY_ID set (warn if neither)
+- [ ] check: AWS_PROFILE set OR AWS_ACCESS_KEY_ID set (warn if neither)
 - [ ] print bedrock status and passed env vars on startup
 - [ ] write `TestBedrockValidation` test class with cases:
   - `test_warns_missing_claude_code_use_bedrock`
   - `test_warns_missing_aws_region`
   - `test_warns_no_credentials_found`
-  - `test_no_warning_with_aws_dir`
+  - `test_no_warning_with_profile`
   - `test_no_warning_with_explicit_creds`
 - [ ] run tests - must pass before next task
 
 ### Task 6: Verify acceptance criteria
 
 - [ ] verify RALPHEX_USE_BEDROCK=1 enables bedrock mode
-- [ ] verify ~/.aws mounted read-only when bedrock enabled
+- [ ] verify credentials exported via `aws configure export-credentials` when profile set
+- [ ] verify explicit creds (AWS_ACCESS_KEY_ID) skip credential export
 - [ ] verify RALPHEX_EXTRA_ENV passes arbitrary env vars
 - [ ] verify keychain skipped in bedrock mode
 - [ ] verify backwards compatibility (normal mode unchanged)
@@ -123,11 +132,104 @@
 
 ### Task 7: [Final] Update documentation
 
+- [ ] create `docs/bedrock-setup.md` with:
+  - security best practices (separate profile, minimal permissions)
+  - example IAM policy for Bedrock access (see Technical Details)
+  - step-by-step setup instructions for SSO and IAM user scenarios
+  - troubleshooting common auth errors
 - [ ] update llms.txt with new env vars (RALPHEX_USE_BEDROCK, RALPHEX_EXTRA_ENV)
 - [ ] add example usage for Bedrock mode
 - [ ] move this plan to `docs/plans/completed/`
 
 ## Technical Details
+
+### Security: Minimal IAM Policy for Bedrock
+
+Create a dedicated AWS profile with only the permissions needed for Claude via Bedrock.
+This follows the principle of least privilege.
+
+**Minimal IAM policy (foundation models + inference profiles):**
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "BedrockInvokeFoundationModels",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+            ]
+        },
+        {
+            "Sid": "BedrockInvokeInferenceProfiles",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:*:*:inference-profile/*anthropic.claude*"
+            ]
+        }
+    ]
+}
+```
+
+**More restrictive (specific region, models, and inference profiles):**
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "BedrockInvokeClaudeFoundationModels",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
+                "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-20250514-v1:0"
+            ]
+        },
+        {
+            "Sid": "BedrockInvokeClaudeInferenceProfiles",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:us-east-1:*:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0",
+                "arn:aws:bedrock:us-east-1:*:inference-profile/us.anthropic.claude-haiku-4-20250514-v1:0"
+            ]
+        }
+    ]
+}
+```
+
+**Note:** Inference profiles use cross-region prefixes (e.g., `us.anthropic.claude-*` for US regions).
+Check your Bedrock console for exact inference profile IDs available in your account.
+
+**Setup options:**
+
+1. **SSO with dedicated permission set:**
+   ```bash
+   # create permission set in AWS IAM Identity Center with above policy
+   # assign to user/group for specific account
+   aws configure sso --profile ralphex-bedrock
+   ```
+
+2. **IAM user with dedicated policy:**
+   ```bash
+   # create IAM user with above policy attached
+   aws configure --profile ralphex-bedrock
+   # enter access key ID and secret from IAM user
+   ```
 
 **BEDROCK_ENV_VARS list:**
 ```python
@@ -157,33 +259,58 @@ BEDROCK_ENV_VARS = [
 ]
 ```
 
-**Example usage:**
+**Example usage (recommended - dedicated profile with minimal permissions):**
 ```bash
+# use dedicated profile with minimal Bedrock-only permissions
 export RALPHEX_USE_BEDROCK=1
 export CLAUDE_CODE_USE_BEDROCK=1
-export AWS_PROFILE=my-sso-profile
+export AWS_PROFILE=ralphex-bedrock
 export AWS_REGION=us-east-1
+
+# optional: extra env vars
 export RALPHEX_EXTRA_ENV="CLAUDE_CODE_MAX_OUTPUT_TOKENS,MAX_THINKING_TOKENS"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000
 export MAX_THINKING_TOKENS=10000
 
-aws sso login --profile=my-sso-profile  # on host before starting
+# login if using SSO profile
+aws sso login --profile=ralphex-bedrock
+
 ralphex docs/plans/feature.md
 ```
 
-**Startup output (bedrock mode):**
+**Example usage (explicit credentials):**
+```bash
+export RALPHEX_USE_BEDROCK=1
+export CLAUDE_CODE_USE_BEDROCK=1
+export AWS_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=...
+
+ralphex docs/plans/feature.md
+```
+
+**Startup output (bedrock mode with profile):**
 ```
 using image: ghcr.io/umputun/ralphex-go:latest
 bedrock mode: enabled (keychain skipped)
-  mounting: ~/.aws → /home/app/.aws (read-only)
-  passing: AWS_REGION, AWS_PROFILE, CLAUDE_CODE_USE_BEDROCK
+  exporting credentials from profile: my-sso-profile
+  passing: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, CLAUDE_CODE_USE_BEDROCK
   extras: CLAUDE_CODE_MAX_OUTPUT_TOKENS, MAX_THINKING_TOKENS
+```
+
+**Startup output (bedrock mode with explicit creds):**
+```
+using image: ghcr.io/umputun/ralphex-go:latest
+bedrock mode: enabled (keychain skipped)
+  using explicit credentials
+  passing: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, CLAUDE_CODE_USE_BEDROCK
 ```
 
 ## Post-Completion
 
 **Manual verification:**
-- test with actual AWS SSO profile on macOS
-- test with explicit AWS credentials
+- test with AWS SSO profile (verify `aws configure export-credentials` works)
+- test with explicit AWS credentials (verify credential export is skipped)
 - test on Linux without ~/.claude directory
 - verify Claude Code connects to Bedrock inside container
+- verify ~/.aws is NOT mounted (security requirement)
