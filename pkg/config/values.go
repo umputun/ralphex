@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/ini.v1"
 )
@@ -26,8 +27,12 @@ type Values struct {
 	CodexTimeoutMsSet     bool // tracks if codex_timeout_ms was explicitly set
 	CodexSandbox          string
 	CodexErrorPatterns    []string // patterns to detect in codex output (e.g., rate limit messages)
-	ExternalReviewTool    string   // "codex", "custom", or "none"
-	CustomReviewScript    string   // path to custom review script (when ExternalReviewTool = "custom")
+	ClaudeLimitPatterns   []string // patterns to detect rate limits in claude output (for wait+retry)
+	CodexLimitPatterns    []string // patterns to detect rate limits in codex output (for wait+retry)
+	WaitOnLimit           time.Duration
+	WaitOnLimitSet        bool   // tracks if wait_on_limit was explicitly set
+	ExternalReviewTool    string // "codex", "custom", or "none"
+	CustomReviewScript    string // path to custom review script (when ExternalReviewTool = "custom")
 	IterationDelayMs      int
 	IterationDelayMsSet   bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount        int
@@ -325,7 +330,55 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		}
 	}
 
+	// limit patterns (comma-separated, same format as error patterns)
+	if key, err := section.GetKey("claude_limit_patterns"); err == nil {
+		val := strings.TrimSpace(key.String())
+		if val != "" {
+			for p := range strings.SplitSeq(val, ",") {
+				if t := strings.TrimSpace(p); t != "" {
+					values.ClaudeLimitPatterns = append(values.ClaudeLimitPatterns, t)
+				}
+			}
+		}
+	}
+	if key, err := section.GetKey("codex_limit_patterns"); err == nil {
+		val := strings.TrimSpace(key.String())
+		if val != "" {
+			for p := range strings.SplitSeq(val, ",") {
+				if t := strings.TrimSpace(p); t != "" {
+					values.CodexLimitPatterns = append(values.CodexLimitPatterns, t)
+				}
+			}
+		}
+	}
+
+	// wait_on_limit duration
+	if err := parseWaitOnLimit(section, &values); err != nil {
+		return Values{}, err
+	}
+
 	return values, nil
+}
+
+// parseWaitOnLimit parses wait_on_limit duration from an INI section.
+func parseWaitOnLimit(section *ini.Section, values *Values) error {
+	if !section.HasKey("wait_on_limit") {
+		return nil
+	}
+	val := strings.TrimSpace(section.Key("wait_on_limit").String())
+	if val == "" {
+		return nil
+	}
+	d, parseErr := time.ParseDuration(val)
+	if parseErr != nil {
+		return fmt.Errorf("invalid wait_on_limit: %w", parseErr)
+	}
+	if d < 0 {
+		return fmt.Errorf("invalid wait_on_limit: must be non-negative, got %s", val)
+	}
+	values.WaitOnLimit = d
+	values.WaitOnLimitSet = true
+	return nil
 }
 
 // mergeFrom merges non-empty values from src into dst.
@@ -387,7 +440,7 @@ func (dst *Values) mergeExecutionFrom(src *Values) {
 	}
 }
 
-// mergeExtraFrom merges feature flags, paths, and error patterns from src into dst.
+// mergeExtraFrom merges feature flags, paths, error/limit patterns, and wait settings from src into dst.
 // called from mergeFrom to manage cyclomatic complexity.
 func (dst *Values) mergeExtraFrom(src *Values) {
 	if src.FinalizeEnabledSet {
@@ -415,6 +468,16 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	}
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
+	}
+	if len(src.ClaudeLimitPatterns) > 0 {
+		dst.ClaudeLimitPatterns = src.ClaudeLimitPatterns
+	}
+	if len(src.CodexLimitPatterns) > 0 {
+		dst.CodexLimitPatterns = src.CodexLimitPatterns
+	}
+	if src.WaitOnLimitSet {
+		dst.WaitOnLimit = src.WaitOnLimit
+		dst.WaitOnLimitSet = true
 	}
 }
 

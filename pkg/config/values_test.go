@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,10 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, "git", values.VcsCommand)
 	assert.Equal(t, []string{"You've hit your limit", "API Error:", "cannot be launched inside another Claude Code session"}, values.ClaudeErrorPatterns)
 	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexErrorPatterns)
+	assert.Equal(t, []string{"You've hit your limit"}, values.ClaudeLimitPatterns)
+	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexLimitPatterns)
+	assert.Zero(t, values.WaitOnLimit)
+	assert.False(t, values.WaitOnLimitSet)
 }
 
 func TestValuesLoader_Load_GlobalOnly(t *testing.T) {
@@ -139,6 +144,8 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 		{name: "negative max_iterations", config: "max_iterations = -5", errPart: "max_iterations"},
 		{name: "negative max_external_iterations", config: "max_external_iterations = -1", errPart: "max_external_iterations"},
 		{name: "invalid max_external_iterations", config: "max_external_iterations = abc", errPart: "max_external_iterations"},
+		{name: "invalid wait_on_limit", config: "wait_on_limit = not-a-duration", errPart: "wait_on_limit"},
+		{name: "negative wait_on_limit", config: "wait_on_limit = -30m", errPart: "wait_on_limit"},
 	}
 
 	for _, tc := range tests {
@@ -1544,4 +1551,206 @@ func TestValues_mergeFrom_VcsCommand(t *testing.T) {
 		dst.mergeFrom(&src)
 		assert.Equal(t, "/path/to/hg2git.sh", dst.VcsCommand)
 	})
+}
+
+func TestValuesLoader_parseValuesFromBytes_LimitPatterns(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name           string
+		input          string
+		expectedClaude []string
+		expectedCodex  []string
+	}{
+		{
+			name:           "single claude limit pattern",
+			input:          "claude_limit_patterns = rate limit hit",
+			expectedClaude: []string{"rate limit hit"},
+			expectedCodex:  nil,
+		},
+		{
+			name:           "multiple codex limit patterns",
+			input:          "codex_limit_patterns = Rate limit,quota exceeded,too many requests",
+			expectedClaude: nil,
+			expectedCodex:  []string{"Rate limit", "quota exceeded", "too many requests"},
+		},
+		{
+			name:           "whitespace trimming around commas",
+			input:          "claude_limit_patterns =  pattern1 ,  pattern2  , pattern3 ",
+			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
+			expectedCodex:  nil,
+		},
+		{
+			name:           "empty patterns filtered out",
+			input:          "claude_limit_patterns = pattern1,,pattern2,  ,pattern3",
+			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
+			expectedCodex:  nil,
+		},
+		{
+			name:           "both claude and codex limit patterns",
+			input:          "claude_limit_patterns = hit limit\ncodex_limit_patterns = rate exceeded",
+			expectedClaude: []string{"hit limit"},
+			expectedCodex:  []string{"rate exceeded"},
+		},
+		{
+			name:           "empty value",
+			input:          "claude_limit_patterns = ",
+			expectedClaude: nil,
+			expectedCodex:  nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedClaude, values.ClaudeLimitPatterns)
+			assert.Equal(t, tc.expectedCodex, values.CodexLimitPatterns)
+		})
+	}
+}
+
+func TestValuesLoader_parseValuesFromBytes_WaitOnLimit(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name        string
+		input       string
+		expected    time.Duration
+		expectedSet bool
+	}{
+		{name: "1 hour", input: "wait_on_limit = 1h", expected: time.Hour, expectedSet: true},
+		{name: "30 minutes", input: "wait_on_limit = 30m", expected: 30 * time.Minute, expectedSet: true},
+		{name: "1h30m compound", input: "wait_on_limit = 1h30m", expected: 90 * time.Minute, expectedSet: true},
+		{name: "90 seconds", input: "wait_on_limit = 90s", expected: 90 * time.Second, expectedSet: true},
+		{name: "zero", input: "wait_on_limit = 0s", expected: 0, expectedSet: true},
+		{name: "empty value", input: "wait_on_limit = ", expected: 0, expectedSet: false},
+		{name: "not set", input: "", expected: 0, expectedSet: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, values.WaitOnLimit)
+			assert.Equal(t, tc.expectedSet, values.WaitOnLimitSet)
+		})
+	}
+}
+
+func TestValuesLoader_Load_WaitOnLimit(t *testing.T) {
+	t.Run("parse from config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`wait_on_limit = 1h`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, time.Hour, values.WaitOnLimit)
+		assert.True(t, values.WaitOnLimitSet)
+	})
+
+	t.Run("not set uses default zero", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Zero(t, values.WaitOnLimit)
+		assert.False(t, values.WaitOnLimitSet)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`wait_on_limit = 2h`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`wait_on_limit = 30m`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, 30*time.Minute, values.WaitOnLimit)
+		assert.True(t, values.WaitOnLimitSet)
+	})
+
+	t.Run("explicit zero overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`wait_on_limit = 1h`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`wait_on_limit = 0s`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Zero(t, values.WaitOnLimit)
+		assert.True(t, values.WaitOnLimitSet)
+	})
+}
+
+func TestValues_mergeFrom_WaitOnLimit(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{WaitOnLimit: 0, WaitOnLimitSet: false}
+		src := Values{WaitOnLimit: time.Hour, WaitOnLimitSet: true}
+		dst.mergeFrom(&src)
+		assert.Equal(t, time.Hour, dst.WaitOnLimit)
+		assert.True(t, dst.WaitOnLimitSet)
+	})
+
+	t.Run("unset flag does not merge", func(t *testing.T) {
+		dst := Values{WaitOnLimit: time.Hour, WaitOnLimitSet: true}
+		src := Values{WaitOnLimit: 0, WaitOnLimitSet: false}
+		dst.mergeFrom(&src)
+		assert.Equal(t, time.Hour, dst.WaitOnLimit)
+		assert.True(t, dst.WaitOnLimitSet)
+	})
+
+	t.Run("set flag can set to zero", func(t *testing.T) {
+		dst := Values{WaitOnLimit: time.Hour, WaitOnLimitSet: true}
+		src := Values{WaitOnLimit: 0, WaitOnLimitSet: true}
+		dst.mergeFrom(&src)
+		assert.Zero(t, dst.WaitOnLimit)
+		assert.True(t, dst.WaitOnLimitSet)
+	})
+}
+
+func TestValues_mergeFrom_LimitPatterns(t *testing.T) {
+	t.Run("merge limit patterns when src has values", func(t *testing.T) {
+		dst := Values{ClaudeLimitPatterns: []string{"dst pattern"}, CodexLimitPatterns: []string{"dst codex"}}
+		src := Values{ClaudeLimitPatterns: []string{"src pattern 1", "src pattern 2"}, CodexLimitPatterns: []string{"src codex"}}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.ClaudeLimitPatterns)
+		assert.Equal(t, []string{"src codex"}, dst.CodexLimitPatterns)
+	})
+
+	t.Run("preserve dst when src is empty", func(t *testing.T) {
+		dst := Values{ClaudeLimitPatterns: []string{"dst pattern"}, CodexLimitPatterns: []string{"dst codex"}}
+		src := Values{ClaudeLimitPatterns: nil, CodexLimitPatterns: nil}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"dst pattern"}, dst.ClaudeLimitPatterns)
+		assert.Equal(t, []string{"dst codex"}, dst.CodexLimitPatterns)
+	})
+}
+
+func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global")
+	localConfig := filepath.Join(tmpDir, "local")
+
+	// global has one set of patterns
+	globalContent := `claude_limit_patterns = global pattern 1, global pattern 2`
+	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
+
+	// local overrides with different patterns
+	localContent := `claude_limit_patterns = local pattern`
+	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	// local should override global completely (not merge)
+	assert.Equal(t, []string{"local pattern"}, values.ClaudeLimitPatterns)
 }

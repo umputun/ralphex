@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/umputun/ralphex/pkg/notify"
 )
@@ -38,6 +39,7 @@ const (
 //   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
 //   - WorktreeEnabledSet: tracks if use_worktree was explicitly set
 //   - MaxIterationsSet: tracks if max_iterations was explicitly set
+//   - WaitOnLimitSet: tracks if wait_on_limit was explicitly set
 type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`
@@ -76,6 +78,12 @@ type Config struct {
 	// error patterns to detect in executor output (e.g., rate limit messages)
 	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
 	CodexErrorPatterns  []string `json:"codex_error_patterns"`
+
+	// limit patterns for wait+retry behavior (overlap with error patterns is intentional)
+	ClaudeLimitPatterns []string      `json:"claude_limit_patterns"`
+	CodexLimitPatterns  []string      `json:"codex_limit_patterns"`
+	WaitOnLimit         time.Duration `json:"wait_on_limit"`
+	WaitOnLimitSet      bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
 
 	// notification parameters
 	NotifyParams notify.Params `json:"-"`
@@ -260,6 +268,10 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		WatchDirs:             values.WatchDirs,
 		ClaudeErrorPatterns:   values.ClaudeErrorPatterns,
 		CodexErrorPatterns:    values.CodexErrorPatterns,
+		ClaudeLimitPatterns:   values.ClaudeLimitPatterns,
+		CodexLimitPatterns:    values.CodexLimitPatterns,
+		WaitOnLimit:           values.WaitOnLimit,
+		WaitOnLimitSet:        values.WaitOnLimitSet,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,
