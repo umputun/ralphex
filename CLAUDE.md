@@ -52,6 +52,7 @@ docs/plans/         # plan files location
 - Multiple execution modes: full, tasks-only, review-only, external-only/codex-only, plan creation
 - `--base-ref` flag overrides default branch for review diffs (branch name or commit hash)
 - `--skip-finalize` flag disables finalize step for a single run
+- `--wait` flag enables rate limit retry with specified duration (e.g., `--wait 1h`)
 - Custom external review support via scripts (wraps any AI tool)
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
@@ -201,6 +202,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
 - `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
 - Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
+- `wait_on_limit` config option: duration to wait before retrying on rate limit (e.g., "1h", "30m"). CLI flag `--wait` takes precedence. Disabled by default
 
 ### Local Project Config (.ralphex/)
 
@@ -240,10 +242,20 @@ Configurable patterns detect rate limit and quota errors in claude/codex output:
 - Whitespace is trimmed from each pattern
 - On match, ralphex exits gracefully with pattern info and help command suggestion
 
+Limit patterns for wait+retry behavior:
+- `claude_limit_patterns`: comma-separated (default: "You've hit your limit")
+- `codex_limit_patterns`: comma-separated (default: "Rate limit,quota exceeded")
+- `wait_on_limit`: duration string (e.g., "1h", "30m"), disabled by default
+- `--wait` CLI flag overrides `wait_on_limit` config
+- Priority: limit patterns checked first; if match AND wait > 0, wait and retry; if match AND wait == 0, fall through to error pattern behavior
+- Limit patterns intentionally overlap with error patterns — `wait_on_limit` acts as the toggle
+
 Implementation:
 - `PatternMatchError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
-- `checkErrorPatterns()` helper for case-insensitive matching
-- Patterns passed via `ClaudeExecutor.ErrorPatterns` and `CodexExecutor.ErrorPatterns`
+- `LimitPatternError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
+- `matchPattern()` helper for case-insensitive matching (used by both error and limit pattern checks)
+- Patterns passed via `ClaudeExecutor.ErrorPatterns`/`LimitPatterns` and `CodexExecutor.ErrorPatterns`/`LimitPatterns`
+- `runWithLimitRetry()` in `pkg/processor/runner.go` wraps executor calls with retry logic
 
 ### Agent System
 

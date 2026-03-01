@@ -36,6 +36,9 @@ ralphex --external-only
 # limit external review iterations (0 = auto, derived from max-iterations)
 ralphex --max-external-iterations=5 docs/plans/feature.md
 
+# wait and retry on rate limit (instead of exiting)
+ralphex --wait 1h docs/plans/feature.md
+
 # codex-only mode (alias for --external-only, deprecated)
 ralphex --codex-only
 
@@ -93,6 +96,8 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 **Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. A codex wrapper is included at `scripts/codex-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config. Wrappers should ignore unknown flags gracefully. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
 
 **Configurable VCS backend:** `vcs_command` config option overrides the default `git` binary for all backend operations. Set to a translation script (e.g., `scripts/hg2git.sh`) to use ralphex with Mercurial repos. The included `hg2git.sh` maps git subcommands to hg equivalents with phase-based commit logic (amend on draft, commit on public). See `docs/hg-support.md` for setup.
+
+**Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit` (claude), `Rate limit,quota exceeded` (codex).
 
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 

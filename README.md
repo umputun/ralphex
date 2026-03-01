@@ -436,6 +436,9 @@ ralphex --max-iterations=100 docs/plans/feature.md
 # limit external review iterations (0 = auto, derived from max-iterations)
 ralphex --max-external-iterations=5 docs/plans/feature.md
 
+# wait and retry on rate limit (instead of exiting)
+ralphex --wait 1h docs/plans/feature.md
+
 # with web dashboard
 ralphex --serve docs/plans/feature.md
 
@@ -455,6 +458,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
+| `--wait` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `--worktree` | Run in isolated git worktree (enables parallel execution) | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
@@ -695,10 +699,15 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `color_info` | Informational messages color (hex) | `#b4b4b4` |
 | `claude_error_patterns` | Patterns to detect in claude output (comma-separated) | `You've hit your limit,API Error:,cannot be launched inside another Claude Code session` |
 | `codex_error_patterns` | Patterns to detect in codex output (comma-separated) | `Rate limit,quota exceeded` |
+| `claude_limit_patterns` | Limit patterns for claude triggering wait+retry (comma-separated) | `You've hit your limit` |
+| `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit,quota exceeded` |
+| `wait_on_limit` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 
 Colors use 24-bit RGB (true color), supported natively by all modern terminals (iTerm2, Kitty, Terminal.app, Windows Terminal, GNOME Terminal, Alacritty, Zed, VS Code, etc). Older terminals will degrade gracefully. Use `--no-color` to disable colors entirely.
 
 Error patterns use case-insensitive substring matching. When a pattern is detected in claude or codex output, ralphex exits gracefully with an informative message suggesting how to check usage/status. Multiple patterns are separated by commas, with whitespace trimmed from each pattern.
+
+**Rate limit retry:** Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) work similarly but support optional wait+retry behavior. When `--wait` is set (or `wait_on_limit` in config), a limit pattern match triggers a wait followed by automatic retry instead of exiting. Without `--wait`, limit patterns fall through to error pattern behavior. Limit patterns are checked before error patterns — if the same string matches both, the limit pattern takes priority when wait is enabled.
 
 ### Custom prompts
 
