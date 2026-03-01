@@ -561,7 +561,7 @@ func TestPatternMatchError_Error(t *testing.T) {
 	assert.Equal(t, `detected error pattern: "rate limit exceeded"`, err.Error())
 }
 
-func TestCheckErrorPatterns(t *testing.T) {
+func TestMatchPattern(t *testing.T) {
 	tests := []struct {
 		name     string
 		output   string
@@ -585,7 +585,7 @@ func TestCheckErrorPatterns(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := checkErrorPatterns(tc.output, tc.patterns)
+			got := matchPattern(tc.output, tc.patterns)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -746,4 +746,90 @@ func TestClaudeExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
 	// should preserve output and signal
 	assert.Contains(t, result.Output, "You've hit your limit")
 	assert.Equal(t, "<<<RALPHEX:ALL_TASKS_DONE>>>", result.Signal)
+}
+
+func TestLimitPatternError_Error(t *testing.T) {
+	err := &LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}
+	assert.Equal(t, `detected limit pattern: "You've hit your limit"`, err.Error())
+}
+
+func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		limitPat    []string
+		errorPat    []string
+		wantLimit   bool
+		wantError   bool
+		wantPattern string
+	}{
+		{
+			name:      "no limit patterns",
+			output:    `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}`,
+			limitPat:  nil,
+			errorPat:  []string{"hit your limit"},
+			wantLimit: false, wantError: true, wantPattern: "hit your limit",
+		},
+		{
+			name:      "limit pattern matched",
+			output:    `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}`,
+			limitPat:  []string{"hit your limit"},
+			errorPat:  nil,
+			wantLimit: true, wantError: false, wantPattern: "hit your limit",
+		},
+		{
+			name:      "limit takes precedence over error when both match",
+			output:    `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}`,
+			limitPat:  []string{"hit your limit"},
+			errorPat:  []string{"hit your limit"},
+			wantLimit: true, wantError: false, wantPattern: "hit your limit",
+		},
+		{
+			name:      "error pattern when limit does not match",
+			output:    `{"type":"content_block_delta","delta":{"type":"text_delta","text":"API Error: 500 internal"}}`,
+			limitPat:  []string{"hit your limit"},
+			errorPat:  []string{"API Error:"},
+			wantLimit: false, wantError: true, wantPattern: "API Error:",
+		},
+		{
+			name:      "no match at all",
+			output:    `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Task completed"}}`,
+			limitPat:  []string{"hit your limit"},
+			errorPat:  []string{"API Error:"},
+			wantLimit: false, wantError: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := &mocks.CommandRunnerMock{
+				RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+					return strings.NewReader(tc.output), func() error { return nil }, nil
+				},
+			}
+			e := &ClaudeExecutor{
+				cmdRunner:     mock,
+				LimitPatterns: tc.limitPat,
+				ErrorPatterns: tc.errorPat,
+			}
+
+			result := e.Run(context.Background(), "test prompt")
+
+			switch {
+			case tc.wantLimit:
+				require.Error(t, result.Error)
+				var limitErr *LimitPatternError
+				require.ErrorAs(t, result.Error, &limitErr)
+				assert.Equal(t, tc.wantPattern, limitErr.Pattern)
+				assert.Equal(t, "claude /usage", limitErr.HelpCmd)
+			case tc.wantError:
+				require.Error(t, result.Error)
+				var patternErr *PatternMatchError
+				require.ErrorAs(t, result.Error, &patternErr)
+				assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+			default:
+				require.NoError(t, result.Error)
+			}
+		})
+	}
 }

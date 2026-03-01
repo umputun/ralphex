@@ -32,6 +32,17 @@ func (e *PatternMatchError) Error() string {
 	return fmt.Sprintf("detected error pattern: %q", e.Pattern)
 }
 
+// LimitPatternError is returned when a configured rate limit pattern is detected in output.
+// when wait-on-limit is configured, the caller retries instead of exiting.
+type LimitPatternError struct {
+	Pattern string // the pattern that matched
+	HelpCmd string // command to run for more information
+}
+
+func (e *LimitPatternError) Error() string {
+	return fmt.Sprintf("detected limit pattern: %q", e.Pattern)
+}
+
 // CommandRunner abstracts command execution for testing.
 // Returns an io.Reader for streaming output and a wait function for completion.
 type CommandRunner interface {
@@ -168,6 +179,7 @@ type ClaudeExecutor struct {
 	OutputHandler func(text string) // called for each text chunk, can be nil
 	Debug         bool              // enable debug output
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
+	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
 	cmdRunner     CommandRunner     // for testing, nil uses default
 }
 
@@ -218,8 +230,17 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		}
 	}
 
+	// check limit patterns first (higher priority)
+	if pattern := matchPattern(result.Output, e.LimitPatterns); pattern != "" {
+		return Result{
+			Output: result.Output,
+			Signal: result.Signal,
+			Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"},
+		}
+	}
+
 	// check for error patterns in output
-	if pattern := checkErrorPatterns(result.Output, e.ErrorPatterns); pattern != "" {
+	if pattern := matchPattern(result.Output, e.ErrorPatterns); pattern != "" {
 		return Result{
 			Output: result.Output,
 			Signal: result.Signal,
@@ -339,10 +360,10 @@ func detectSignal(text string) string {
 	return ""
 }
 
-// checkErrorPatterns checks output for configured error patterns.
+// matchPattern checks output for configured patterns.
 // Returns the first matching pattern or empty string if none match.
 // Matching is case-insensitive substring search.
-func checkErrorPatterns(output string, patterns []string) string {
+func matchPattern(output string, patterns []string) string {
 	if len(patterns) == 0 {
 		return ""
 	}

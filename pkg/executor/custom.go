@@ -53,6 +53,7 @@ type CustomExecutor struct {
 	Script        string            // path to the custom review script
 	OutputHandler func(text string) // called for each output line, can be nil
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
+	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
 	runner        CustomRunner      // for testing, nil uses default
 }
 
@@ -114,8 +115,17 @@ func (e *CustomExecutor) Run(ctx context.Context, promptContent string) Result {
 		}
 	}
 
+	// check limit patterns first (higher priority)
+	if pattern := matchPattern(output, e.LimitPatterns); pattern != "" {
+		return Result{
+			Output: output,
+			Signal: signal,
+			Error:  &LimitPatternError{Pattern: pattern, HelpCmd: e.Script + " --help"},
+		}
+	}
+
 	// check for error patterns in output
-	if pattern := checkErrorPatterns(output, e.ErrorPatterns); pattern != "" {
+	if pattern := matchPattern(output, e.ErrorPatterns); pattern != "" {
 		return Result{
 			Output: output,
 			Signal: signal,

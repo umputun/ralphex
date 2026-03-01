@@ -839,3 +839,68 @@ func TestCodexExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
 	assert.Contains(t, result.Output, "Rate limit exceeded")
 	assert.Equal(t, "<<<RALPHEX:CODEX_REVIEW_DONE>>>", result.Signal)
 }
+
+func TestCodexExecutor_Run_LimitPattern(t *testing.T) {
+	tests := []struct {
+		name        string
+		stdout      string
+		limitPat    []string
+		errorPat    []string
+		wantLimit   bool
+		wantError   bool
+		wantPattern string
+	}{
+		{
+			name: "limit pattern matched", stdout: "Rate limit exceeded",
+			limitPat: []string{"rate limit"}, errorPat: nil,
+			wantLimit: true, wantPattern: "rate limit",
+		},
+		{
+			name: "limit takes precedence over error", stdout: "Rate limit exceeded",
+			limitPat: []string{"rate limit"}, errorPat: []string{"rate limit"},
+			wantLimit: true, wantPattern: "rate limit",
+		},
+		{
+			name: "error pattern when limit does not match", stdout: "quota exceeded for account",
+			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"},
+			wantError: true, wantPattern: "quota exceeded",
+		},
+		{
+			name: "no match", stdout: "Analysis complete",
+			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := &mockCodexRunner{
+				runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+					return mockStreams("", tc.stdout), mockWait(), nil
+				},
+			}
+			e := &CodexExecutor{
+				runner:        mock,
+				LimitPatterns: tc.limitPat,
+				ErrorPatterns: tc.errorPat,
+			}
+
+			result := e.Run(context.Background(), "analyze code")
+
+			switch {
+			case tc.wantLimit:
+				require.Error(t, result.Error)
+				var limitErr *LimitPatternError
+				require.ErrorAs(t, result.Error, &limitErr)
+				assert.Equal(t, tc.wantPattern, limitErr.Pattern)
+				assert.Equal(t, "codex /status", limitErr.HelpCmd)
+			case tc.wantError:
+				require.Error(t, result.Error)
+				var patternErr *PatternMatchError
+				require.ErrorAs(t, result.Error, &patternErr)
+				assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+			default:
+				require.NoError(t, result.Error)
+			}
+		})
+	}
+}

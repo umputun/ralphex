@@ -70,6 +70,7 @@ type CodexExecutor struct {
 	OutputHandler   func(text string) // called for each filtered output line in real-time
 	Debug           bool              // enable debug output
 	ErrorPatterns   []string          // patterns to detect in output (e.g., rate limit messages)
+	LimitPatterns   []string          // patterns to detect rate limits (checked before error patterns)
 	runner          CodexRunner       // for testing, nil uses default
 }
 
@@ -175,8 +176,17 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// detect signal in stdout (the actual response)
 	signal := detectSignal(stdoutContent)
 
+	// check limit patterns first (higher priority)
+	if pattern := matchPattern(stdoutContent, e.LimitPatterns); pattern != "" {
+		return Result{
+			Output: stdoutContent,
+			Signal: signal,
+			Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "codex /status"},
+		}
+	}
+
 	// check for error patterns in output
-	if pattern := checkErrorPatterns(stdoutContent, e.ErrorPatterns); pattern != "" {
+	if pattern := matchPattern(stdoutContent, e.ErrorPatterns); pattern != "" {
 		return Result{
 			Output: stdoutContent,
 			Signal: signal,

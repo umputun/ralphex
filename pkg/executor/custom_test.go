@@ -369,3 +369,69 @@ func TestExecCustomRunner_Run_ContextAlreadyCanceled(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context already canceled")
 }
+
+func TestCustomExecutor_Run_LimitPattern(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		limitPat    []string
+		errorPat    []string
+		wantLimit   bool
+		wantError   bool
+		wantPattern string
+	}{
+		{
+			name: "limit pattern matched", output: "Rate limit exceeded",
+			limitPat: []string{"rate limit"}, errorPat: nil,
+			wantLimit: true, wantPattern: "rate limit",
+		},
+		{
+			name: "limit takes precedence over error", output: "Rate limit exceeded",
+			limitPat: []string{"rate limit"}, errorPat: []string{"rate limit"},
+			wantLimit: true, wantPattern: "rate limit",
+		},
+		{
+			name: "error pattern when limit does not match", output: "quota exceeded for account",
+			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"},
+			wantError: true, wantPattern: "quota exceeded",
+		},
+		{
+			name: "no match", output: "Review complete",
+			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := &mockCustomRunner{
+				runFunc: func(_ context.Context, _, _ string) (io.Reader, func() error, error) {
+					return strings.NewReader(tc.output), func() error { return nil }, nil
+				},
+			}
+			e := &CustomExecutor{
+				Script:        "/path/to/script.sh",
+				runner:        mock,
+				LimitPatterns: tc.limitPat,
+				ErrorPatterns: tc.errorPat,
+			}
+
+			result := e.Run(context.Background(), "prompt")
+
+			switch {
+			case tc.wantLimit:
+				require.Error(t, result.Error)
+				var limitErr *LimitPatternError
+				require.ErrorAs(t, result.Error, &limitErr)
+				assert.Equal(t, tc.wantPattern, limitErr.Pattern)
+				assert.Contains(t, limitErr.HelpCmd, "/path/to/script.sh")
+			case tc.wantError:
+				require.Error(t, result.Error)
+				var patternErr *PatternMatchError
+				require.ErrorAs(t, result.Error, &patternErr)
+				assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+			default:
+				require.NoError(t, result.Error)
+			}
+		})
+	}
+}
