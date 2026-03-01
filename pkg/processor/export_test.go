@@ -1,12 +1,18 @@
 package processor
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/umputun/ralphex/pkg/executor"
+)
 
 // TestRunnerConfig provides test access to runner's internal configuration.
 // this file is only compiled during test builds (`go test`).
 type TestRunnerConfig struct {
 	IterationDelay time.Duration
 	TaskRetryCount int
+	WaitOnLimit    time.Duration
 }
 
 // TestConfig returns internal configuration values for testing.
@@ -14,7 +20,14 @@ func (r *Runner) TestConfig() TestRunnerConfig {
 	return TestRunnerConfig{
 		IterationDelay: r.iterationDelay,
 		TaskRetryCount: r.taskRetryCount,
+		WaitOnLimit:    r.waitOnLimit,
 	}
+}
+
+// TestRunWithLimitRetry exposes runWithLimitRetry for testing.
+func (r *Runner) TestRunWithLimitRetry(ctx context.Context, run func(context.Context, string) executor.Result,
+	prompt, toolName string) executor.Result {
+	return r.runWithLimitRetry(ctx, run, prompt, toolName)
 }
 
 // TestHasUncompletedTasks exposes hasUncompletedTasks for testing.

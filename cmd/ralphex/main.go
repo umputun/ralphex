@@ -30,26 +30,27 @@ import (
 
 // opts holds all command-line options.
 type opts struct {
-	MaxIterations         int      `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
-	MaxExternalIterations int      `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
-	Review                bool     `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
-	ExternalOnly          bool     `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
-	CodexOnly             bool     `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
-	TasksOnly             bool     `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
-	BaseRef               string   `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
-	SkipFinalize          bool     `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
-	Worktree              bool     `long:"worktree" description:"run in isolated git worktree"`
-	PlanDescription       string   `long:"plan" description:"create plan interactively (enter plan description)"`
-	Debug                 bool     `short:"d" long:"debug" description:"enable debug logging"`
-	NoColor               bool     `long:"no-color" description:"disable color output"`
-	Version               bool     `short:"v" long:"version" description:"print version and exit"`
-	Serve                 bool     `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
-	Port                  int      `short:"p" long:"port" default:"8080" description:"web dashboard port"`
-	Host                  string   `long:"host" default:"127.0.0.1" env:"RALPHEX_WEB_HOST" description:"web dashboard listen address"`
-	Watch                 []string `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
-	Reset                 bool     `long:"reset" description:"interactively reset global config to embedded defaults"`
-	DumpDefaults          string   `long:"dump-defaults" description:"extract raw embedded defaults to specified directory"`
-	ConfigDir             string   `long:"config-dir" env:"RALPHEX_CONFIG_DIR" description:"custom config directory"`
+	MaxIterations         int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
+	MaxExternalIterations int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
+	Review                bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
+	ExternalOnly          bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
+	CodexOnly             bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
+	TasksOnly             bool          `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
+	BaseRef               string        `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
+	Wait                  time.Duration `long:"wait" description:"wait duration on rate limit before retry (e.g. 1h, 30m)"`
+	SkipFinalize          bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
+	Worktree              bool          `long:"worktree" description:"run in isolated git worktree"`
+	PlanDescription       string        `long:"plan" description:"create plan interactively (enter plan description)"`
+	Debug                 bool          `short:"d" long:"debug" description:"enable debug logging"`
+	NoColor               bool          `long:"no-color" description:"disable color output"`
+	Version               bool          `short:"v" long:"version" description:"print version and exit"`
+	Serve                 bool          `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
+	Port                  int           `short:"p" long:"port" default:"8080" description:"web dashboard port"`
+	Host                  string        `long:"host" default:"127.0.0.1" env:"RALPHEX_WEB_HOST" description:"web dashboard listen address"`
+	Watch                 []string      `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
+	Reset                 bool          `long:"reset" description:"interactively reset global config to embedded defaults"`
+	DumpDefaults          string        `long:"dump-defaults" description:"extract raw embedded defaults to specified directory"`
+	ConfigDir             string        `long:"config-dir" env:"RALPHEX_CONFIG_DIR" description:"custom config directory"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
 }
@@ -726,6 +727,9 @@ func validateFlags(o opts) error {
 	if o.PlanDescription != "" && o.PlanFile != "" {
 		return errors.New("--plan flag conflicts with plan file argument; use one or the other")
 	}
+	if o.Wait < 0 {
+		return fmt.Errorf("--wait must be non-negative, got %s", o.Wait)
+	}
 	return nil
 }
 
@@ -1005,6 +1009,10 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	}
 	if o.Worktree {
 		cfg.WorktreeEnabled = true
+	}
+	if o.Wait > 0 {
+		cfg.WaitOnLimit = o.Wait
+		cfg.WaitOnLimitSet = true
 	}
 }
 

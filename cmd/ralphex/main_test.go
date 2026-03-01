@@ -538,6 +538,32 @@ func TestSkipFinalizeFlag(t *testing.T) {
 	})
 }
 
+func TestWaitFlag(t *testing.T) {
+	t.Run("wait_cli_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{WaitOnLimit: 10 * time.Minute, WaitOnLimitSet: true}
+		o := opts{Wait: 2 * time.Hour}
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, 2*time.Hour, cfg.WaitOnLimit)
+		assert.True(t, cfg.WaitOnLimitSet)
+	})
+
+	t.Run("wait_zero_preserves_config", func(t *testing.T) {
+		cfg := &config.Config{WaitOnLimit: 30 * time.Minute, WaitOnLimitSet: true}
+		o := opts{Wait: 0} // not set
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, 30*time.Minute, cfg.WaitOnLimit, "config value should be preserved when CLI not set")
+		assert.True(t, cfg.WaitOnLimitSet)
+	})
+
+	t.Run("wait_cli_sets_unset_config", func(t *testing.T) {
+		cfg := &config.Config{} // wait_on_limit not set
+		o := opts{Wait: 1 * time.Hour}
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, 1*time.Hour, cfg.WaitOnLimit)
+		assert.True(t, cfg.WaitOnLimitSet)
+	})
+}
+
 func TestGetCurrentBranch(t *testing.T) {
 	t.Run("returns_branch_name", func(t *testing.T) {
 		dir := setupTestRepo(t)
@@ -574,6 +600,9 @@ func TestValidateFlags(t *testing.T) {
 		{name: "plan_flag_only_is_valid", opts: opts{PlanDescription: "add feature"}, wantErr: false},
 		{name: "plan_file_only_is_valid", opts: opts{PlanFile: "docs/plans/test.md"}, wantErr: false},
 		{name: "both_plan_and_planfile_conflicts", opts: opts{PlanDescription: "add feature", PlanFile: "docs/plans/test.md"}, wantErr: true, errMsg: "conflicts"},
+		{name: "negative_wait_is_invalid", opts: opts{Wait: -30 * time.Minute}, wantErr: true, errMsg: "non-negative"},
+		{name: "positive_wait_is_valid", opts: opts{Wait: time.Hour}, wantErr: false},
+		{name: "zero_wait_is_valid", opts: opts{Wait: 0}, wantErr: false},
 	}
 
 	for _, tc := range tests {

@@ -103,6 +103,7 @@ type Runner struct {
 	phaseHolder    *status.PhaseHolder
 	iterationDelay time.Duration
 	taskRetryCount int
+	waitOnLimit    time.Duration
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
@@ -119,6 +120,7 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		claudeExec.Command = cfg.AppConfig.ClaudeCommand
 		claudeExec.Args = cfg.AppConfig.ClaudeArgs
 		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
+		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
 	}
 
 	// build codex executor with config values
@@ -135,6 +137,7 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		codexExec.TimeoutMs = cfg.AppConfig.CodexTimeoutMs
 		codexExec.Sandbox = cfg.AppConfig.CodexSandbox
 		codexExec.ErrorPatterns = cfg.AppConfig.CodexErrorPatterns
+		codexExec.LimitPatterns = cfg.AppConfig.CodexLimitPatterns
 	}
 
 	// build custom executor if custom review script is configured
@@ -146,6 +149,7 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 				log.PrintAligned(text)
 			},
 			ErrorPatterns: cfg.AppConfig.CodexErrorPatterns, // reuse codex error patterns
+			LimitPatterns: cfg.AppConfig.CodexLimitPatterns, // reuse codex limit patterns
 		}
 	}
 
@@ -182,6 +186,12 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *ex
 		retryCount = cfg.TaskRetryCount
 	}
 
+	// determine wait-on-limit duration from config
+	var waitOnLimit time.Duration
+	if cfg.AppConfig != nil {
+		waitOnLimit = cfg.AppConfig.WaitOnLimit
+	}
+
 	return &Runner{
 		cfg:            cfg,
 		log:            log,
@@ -191,6 +201,7 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *ex
 		phaseHolder:    holder,
 		iterationDelay: iterDelay,
 		taskRetryCount: retryCount,
+		waitOnLimit:    waitOnLimit,
 	}
 }
 
@@ -351,7 +362,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 		}
 		r.log.PrintSection(status.NewTaskIterationSection(taskNum))
 
-		result := r.claude.Run(ctx, prompt)
+		result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
@@ -393,7 +404,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 
 // runClaudeReview runs Claude review with the given prompt until REVIEW_DONE.
 func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
-	result := r.claude.Run(ctx, prompt)
+	result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
 	if result.Error != nil {
 		if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 			return err
@@ -429,7 +440,8 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 		// capture HEAD hash before running claude for no-commit detection
 		headBefore := r.headHash()
 
-		result := r.claude.Run(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt))
+		result := r.runWithLimitRetry(ctx, r.claude.Run,
+			r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt), "claude")
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
@@ -561,7 +573,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		r.log.PrintSection(cfg.makeSection(i))
 
 		// run external review tool
-		reviewResult := cfg.runReview(ctx, cfg.buildPrompt(i == 1, claudeResponse))
+		reviewResult := r.runWithLimitRetry(ctx, cfg.runReview, cfg.buildPrompt(i == 1, claudeResponse), cfg.name)
 		if reviewResult.Error != nil {
 			if err := r.handlePatternMatchError(reviewResult.Error, cfg.name); err != nil {
 				return err
@@ -580,7 +592,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// pass output to claude for evaluation and fixing
 		r.phaseHolder.Set(status.PhaseClaudeEval)
 		r.log.PrintSection(status.NewClaudeEvalSection())
-		claudeResult := r.claude.Run(ctx, cfg.buildEvalPrompt(reviewResult.Output))
+		claudeResult := r.runWithLimitRetry(ctx, r.claude.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
 
 		// restore codex phase for next iteration
 		r.phaseHolder.Set(status.PhaseCodex)
@@ -842,7 +854,7 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 			lastRevisionFeedback = "" // clear after use
 		}
 
-		result := r.claude.Run(ctx, prompt)
+		result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
@@ -894,7 +906,7 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 	return fmt.Errorf("max plan iterations (%d) reached without completion", maxPlanIterations)
 }
 
-// handlePatternMatchError checks if err is a PatternMatchError and logs appropriate messages.
+// handlePatternMatchError checks if err is a PatternMatchError or LimitPatternError and logs appropriate messages.
 // Returns the error if it's a pattern match (to trigger graceful exit), nil otherwise.
 func (r *Runner) handlePatternMatchError(err error, tool string) error {
 	var patternErr *executor.PatternMatchError
@@ -903,7 +915,44 @@ func (r *Runner) handlePatternMatchError(err error, tool string) error {
 		r.log.Print("run '%s' for more information", patternErr.HelpCmd)
 		return err
 	}
+	var limitErr *executor.LimitPatternError
+	if errors.As(err, &limitErr) {
+		r.log.Print("error: detected %q in %s output", limitErr.Pattern, tool)
+		r.log.Print("run '%s' for more information", limitErr.HelpCmd)
+		return err
+	}
 	return nil
+}
+
+// runWithLimitRetry wraps an executor Run() call with rate limit retry logic.
+// if the result contains a LimitPatternError and waitOnLimit > 0, it logs a message, waits, and retries.
+// if waitOnLimit == 0, the LimitPatternError is returned as-is (existing exit behavior).
+// other errors (including PatternMatchError) are returned without retry.
+// retries indefinitely until success or context cancellation.
+func (r *Runner) runWithLimitRetry(ctx context.Context, run func(context.Context, string) executor.Result,
+	prompt, toolName string) executor.Result {
+	for {
+		result := run(ctx, prompt)
+		if result.Error == nil {
+			return result
+		}
+
+		var limitErr *executor.LimitPatternError
+		if !errors.As(result.Error, &limitErr) {
+			return result // not a limit error, return as-is
+		}
+
+		if r.waitOnLimit <= 0 {
+			return result // no wait configured, return limit error as-is
+		}
+
+		r.log.Print("rate limit detected: %q in %s output, waiting %s before retry...",
+			limitErr.Pattern, toolName, r.waitOnLimit)
+
+		if err := r.sleepWithContext(ctx, r.waitOnLimit); err != nil {
+			return executor.Result{Error: fmt.Errorf("interrupted during limit wait: %w", ctx.Err())}
+		}
+	}
 }
 
 // runFinalize executes the optional finalize step after successful reviews.
@@ -918,14 +967,14 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 	r.log.PrintSection(status.NewGenericSection("finalize step"))
 
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.FinalizePrompt)
-	result := r.claude.Run(ctx, prompt)
+	result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
 
 	if result.Error != nil {
 		// propagate context cancellation - user wants to abort
 		if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
 			return fmt.Errorf("finalize step: %w", result.Error)
 		}
-		// pattern match (rate limit) - log via shared helper, but don't fail (best-effort)
+		// pattern match (rate limit or error) - log via shared helper, but don't fail (best-effort)
 		if r.handlePatternMatchError(result.Error, "claude") != nil {
 			return nil //nolint:nilerr // intentional: best-effort semantics, log but don't propagate
 		}

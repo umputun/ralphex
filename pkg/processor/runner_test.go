@@ -975,6 +975,43 @@ func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
 	assert.True(t, foundHelpLog, "should log help command")
 }
 
+func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
+	// verifies that LimitPatternError is handled gracefully via handlePatternMatchError
+	// when waitOnLimit == 0, same as PatternMatchError (logs error + help, returns error)
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "You've hit your limit", Error: &executor.LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}},
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	err := r.Run(context.Background())
+
+	require.Error(t, err)
+	var limitErr *executor.LimitPatternError
+	require.ErrorAs(t, err, &limitErr)
+	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
+	assert.Equal(t, "claude /usage", limitErr.HelpCmd)
+
+	// verify logging via handlePatternMatchError
+	var foundErrorLog, foundHelpLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "error: detected") && strings.Contains(call.Format, "%s output") {
+			foundErrorLog = true
+		}
+		if strings.Contains(call.Format, "for more information") {
+			foundHelpLog = true
+		}
+	}
+	assert.True(t, foundErrorLog, "should log error message with detected pattern")
+	assert.True(t, foundHelpLog, "should log help command")
+}
+
 func TestRunner_ErrorPatternMatch_CodexInReviewPhase(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -2067,4 +2104,285 @@ func TestRunner_TaskPhase_UsesPlanTaskPosition(t *testing.T) {
 			}
 			return labels
 		}())
+}
+
+func TestRunner_RunWithLimitRetry_RetryOnLimitError(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil) // not used directly
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.WaitOnLimit = 10 * time.Millisecond
+	appCfg.WaitOnLimitSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	// mock run function: returns LimitPatternError on first call, success on second
+	callCount := 0
+	mockRun := func(_ context.Context, _ string) executor.Result {
+		callCount++
+		if callCount == 1 {
+			return executor.Result{Error: &executor.LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}}
+		}
+		return executor.Result{Output: "success", Signal: status.Completed}
+	}
+
+	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "success", result.Output)
+	assert.Equal(t, 2, callCount, "should retry after limit error")
+
+	// verify rate limit message was logged
+	var foundLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "rate limit detected") {
+			foundLog = true
+			break
+		}
+	}
+	assert.True(t, foundLog, "should log rate limit detection message")
+}
+
+func TestRunner_RunWithLimitRetry_NoRetryWhenWaitZero(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	// waitOnLimit is zero (default) - no retry
+	cfg := processor.Config{AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	// verify wait is zero
+	assert.Zero(t, r.TestConfig().WaitOnLimit)
+
+	callCount := 0
+	mockRun := func(_ context.Context, _ string) executor.Result {
+		callCount++
+		return executor.Result{Error: &executor.LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}}
+	}
+
+	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+
+	require.Error(t, result.Error)
+	var limitErr *executor.LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr)
+	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
+	assert.Equal(t, 1, callCount, "should not retry when wait is zero")
+}
+
+func TestRunner_RunWithLimitRetry_ContextCancelledDuringWait(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.WaitOnLimit = 10 * time.Second // long wait
+	appCfg.WaitOnLimitSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	callCount := 0
+	mockRun := func(_ context.Context, _ string) executor.Result {
+		callCount++
+		// cancel context right after first call to simulate interruption during wait
+		cancel()
+		return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
+	}
+
+	result := r.TestRunWithLimitRetry(ctx, mockRun, "test prompt", "claude")
+
+	require.Error(t, result.Error)
+	require.ErrorIs(t, result.Error, context.Canceled)
+	assert.Equal(t, 1, callCount, "should not retry when context canceled")
+}
+
+func TestRunner_RunWithLimitRetry_PatternMatchErrorNotRetried(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.WaitOnLimit = 10 * time.Millisecond
+	appCfg.WaitOnLimitSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	callCount := 0
+	mockRun := func(_ context.Context, _ string) executor.Result {
+		callCount++
+		return executor.Result{Error: &executor.PatternMatchError{Pattern: "API Error", HelpCmd: "claude /usage"}}
+	}
+
+	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+
+	require.Error(t, result.Error)
+	var patternErr *executor.PatternMatchError
+	require.ErrorAs(t, result.Error, &patternErr)
+	assert.Equal(t, "API Error", patternErr.Pattern)
+	assert.Equal(t, 1, callCount, "should not retry PatternMatchError")
+}
+
+func TestRunner_RunWithLimitRetry_MultipleRetries(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.WaitOnLimit = 5 * time.Millisecond
+	appCfg.WaitOnLimitSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	callCount := 0
+	mockRun := func(_ context.Context, _ string) executor.Result {
+		callCount++
+		if callCount <= 3 {
+			return executor.Result{Error: &executor.LimitPatternError{Pattern: "rate limit", HelpCmd: "claude /usage"}}
+		}
+		return executor.Result{Output: "finally done"}
+	}
+
+	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "finally done", result.Output)
+	assert.Equal(t, 4, callCount, "should retry multiple times until success")
+}
+
+func TestRunner_RunWithLimitRetry_NoErrorPassesThrough(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.WaitOnLimit = time.Hour
+	appCfg.WaitOnLimitSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	callCount := 0
+	mockRun := func(_ context.Context, _ string) executor.Result {
+		callCount++
+		return executor.Result{Output: "success", Signal: status.Completed}
+	}
+
+	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "success", result.Output)
+	assert.Equal(t, status.Completed, result.Signal)
+	assert.Equal(t, 1, callCount, "should not retry on success")
+}
+
+func TestRunner_WaitOnLimit_PopulatedFromConfig(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.WaitOnLimit = 45 * time.Minute
+	appCfg.WaitOnLimitSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	assert.Equal(t, 45*time.Minute, r.TestConfig().WaitOnLimit)
+}
+
+func TestRunner_WaitOnLimit_ZeroWhenNoConfig(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{} // no AppConfig
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+
+	assert.Zero(t, r.TestConfig().WaitOnLimit)
+}
+
+func TestRunner_Finalize_LimitPatternWithWaitRetries(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	callCount := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			callCount++
+			if callCount == 1 {
+				// first call during finalize: codex review loop (returns ReviewDone)
+				return executor.Result{Output: "review done", Signal: status.ReviewDone}
+			}
+			if callCount == 2 {
+				// finalize: limit error on first attempt
+				return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
+			}
+			// finalize: success on retry
+			return executor.Result{Output: "finalize done", Signal: status.ReviewDone}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.WaitOnLimit = 10 * time.Millisecond
+	appCfg.WaitOnLimitSet = true
+
+	cfg := processor.Config{
+		Mode:            processor.ModeCodexOnly,
+		MaxIterations:   50,
+		CodexEnabled:    false, // skip codex phase
+		FinalizeEnabled: true,
+		AppConfig:       appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, callCount, "should retry finalize after limit error")
+}
+
+func TestRunner_Finalize_LimitPatternWithoutWaitLogsAndContinues(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	callCount := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			callCount++
+			if callCount == 1 {
+				return executor.Result{Output: "review done", Signal: status.ReviewDone}
+			}
+			// finalize: limit error, no wait configured
+			return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:            processor.ModeCodexOnly,
+		MaxIterations:   50,
+		CodexEnabled:    false,
+		FinalizeEnabled: true,
+		AppConfig:       testAppConfig(t), // default: WaitOnLimit = 0
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	err := r.Run(context.Background())
+
+	require.NoError(t, err, "finalize limit error should not block success (best-effort)")
+	assert.Equal(t, 2, callCount, "should not retry when wait is zero")
+
+	// verify limit log message (handlePatternMatchError logs "error: detected %q in %s output")
+	var foundLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "detected") {
+			foundLog = true
+			break
+		}
+	}
+	assert.True(t, foundLog, "should log limit pattern message via handlePatternMatchError")
 }
