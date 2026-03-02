@@ -292,14 +292,21 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
         add(resolve_path(gitconfig), "/home/app/.gitconfig", ro=True)
 
     # 10. global gitignore -> remap home-relative paths to /home/app/
+    # mount at both remapped path (for tilde refs in .gitconfig) and original
+    # absolute path (for expanded absolute refs like /Users/alice/.gitignore)
     global_gitignore = get_global_gitignore()
     if global_gitignore:
         src = resolve_path(global_gitignore)
         if global_gitignore.is_relative_to(home):
             dst = "/home/app/" + str(global_gitignore.relative_to(home))
+            add(src, dst, ro=True)
+            # also mount at original absolute path so .gitconfig absolute refs work
+            original = str(global_gitignore)
+            if original != dst:
+                add(src, original, ro=True)
         else:
             dst = str(global_gitignore)
-        add(src, dst, ro=True)
+            add(src, dst, ro=True)
 
     # 11. extra user-defined volumes via RALPHEX_EXTRA_VOLUMES env var (comma-separated)
     extra = os.environ.get("RALPHEX_EXTRA_VOLUMES", "")
@@ -690,6 +697,24 @@ def run_tests() -> None:
             expected_dst = "/home/app/.gitignore"
             found = any(expected_dst + ":ro" in v for v in vols)
             self.assertTrue(found, f"expected mount destination {expected_dst}:ro in volumes, got {vols}")
+
+        def test_global_gitignore_also_mounted_at_original_absolute_path(self) -> None:
+            """gitignore under $HOME should also be mounted at original absolute path for .gitconfig refs."""
+            home = Path.home()
+            fake_ignore = home / ".gitignore_global"
+            with (
+                unittest.mock.patch(f"{__name__}.get_global_gitignore", return_value=fake_ignore),
+                unittest.mock.patch(f"{__name__}.selinux_enabled", return_value=False),
+            ):
+                vols = build_volumes(None)
+            # remapped mount for tilde-based .gitconfig references
+            remapped = "/home/app/.gitignore_global"
+            found_remapped = any(remapped + ":ro" in v for v in vols)
+            self.assertTrue(found_remapped, f"expected remapped mount {remapped}:ro in volumes, got {vols}")
+            # original absolute mount for absolute .gitconfig references
+            original = str(fake_ignore)
+            found_original = any(original + ":ro" in v for v in vols)
+            self.assertTrue(found_original, f"expected original mount {original}:ro in volumes, got {vols}")
 
         def test_global_gitignore_outside_home_keeps_path(self) -> None:
             """global gitignore outside $HOME should keep its absolute path as mount destination."""
