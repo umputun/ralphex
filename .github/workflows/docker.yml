@@ -55,10 +55,8 @@ jobs:
         id: prep
         env:
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           echo "branch=${HEAD_BRANCH}" >> $GITHUB_OUTPUT
-          echo "version=${HEAD_BRANCH}-${HEAD_SHA:0:7}-$(date +%Y%m%dT%H%M%S)" >> $GITHUB_OUTPUT
 
       - name: build and push base image by digest
         id: build
