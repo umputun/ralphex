@@ -141,12 +141,16 @@ jobs:
 
       - name: create manifest and push
         working-directory: /tmp/digests
+        env:
+          TAG: ${{ steps.tags.outputs.tag }}
+          MINOR: ${{ steps.tags.outputs.minor }}
+          IS_LATEST: ${{ steps.tags.outputs.latest }}
         run: |
-          tags="-t ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ steps.tags.outputs.tag }}"
-          if [ -n "${{ steps.tags.outputs.minor }}" ]; then
-            tags="$tags -t ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ steps.tags.outputs.minor }}"
+          tags="-t ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${TAG}"
+          if [ -n "${MINOR}" ]; then
+            tags="$tags -t ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${MINOR}"
           fi
-          if [ "${{ steps.tags.outputs.latest }}" == "true" ]; then
+          if [ "${IS_LATEST}" == "true" ]; then
             tags="$tags -t ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:latest"
           fi
           docker buildx imagetools create $tags \
@@ -278,12 +282,16 @@ jobs:
 
       - name: create manifest and push
         working-directory: /tmp/digests
+        env:
+          TAG: ${{ steps.tags.outputs.tag }}
+          MINOR: ${{ steps.tags.outputs.minor }}
+          IS_LATEST: ${{ steps.tags.outputs.latest }}
         run: |
-          tags="-t ${{ env.REGISTRY }}/${{ env.IMAGE_GO }}:${{ steps.tags.outputs.tag }}"
-          if [ -n "${{ steps.tags.outputs.minor }}" ]; then
-            tags="$tags -t ${{ env.REGISTRY }}/${{ env.IMAGE_GO }}:${{ steps.tags.outputs.minor }}"
+          tags="-t ${{ env.REGISTRY }}/${{ env.IMAGE_GO }}:${TAG}"
+          if [ -n "${MINOR}" ]; then
+            tags="$tags -t ${{ env.REGISTRY }}/${{ env.IMAGE_GO }}:${MINOR}"
           fi
-          if [ "${{ steps.tags.outputs.latest }}" == "true" ]; then
+          if [ "${IS_LATEST}" == "true" ]; then
             tags="$tags -t ${{ env.REGISTRY }}/${{ env.IMAGE_GO }}:latest"
           fi
           docker buildx imagetools create $tags \
