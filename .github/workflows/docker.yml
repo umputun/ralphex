@@ -53,11 +53,12 @@ jobs:
 
       - name: prepare build args
         id: prep
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          branch="${{ github.event.workflow_run.head_branch }}"
-          sha="${{ github.event.workflow_run.head_sha }}"
-          echo "branch=${branch}" >> $GITHUB_OUTPUT
-          echo "version=${branch}-${sha:0:7}-$(date +%Y%m%dT%H%M%S)" >> $GITHUB_OUTPUT
+          echo "branch=${HEAD_BRANCH}" >> $GITHUB_OUTPUT
+          echo "version=${HEAD_BRANCH}-${HEAD_SHA:0:7}-$(date +%Y%m%dT%H%M%S)" >> $GITHUB_OUTPUT
 
       - name: build and push base image by digest
         id: build
@@ -124,15 +125,16 @@ jobs:
 
       - name: set docker tags
         id: tags
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          branch="${{ github.event.workflow_run.head_branch }}"
-          if [[ "$branch" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          if [[ "$HEAD_BRANCH" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             # semver tag: v0.7.2 -> tags: 0.7.2, 0.7, latest
             echo "tag=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" >> $GITHUB_OUTPUT
             echo "minor=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
             echo "latest=true" >> $GITHUB_OUTPUT
           else
-            echo "tag=${branch}" >> $GITHUB_OUTPUT
+            echo "tag=${HEAD_BRANCH}" >> $GITHUB_OUTPUT
             echo "minor=" >> $GITHUB_OUTPUT
             echo "latest=false" >> $GITHUB_OUTPUT
           fi
@@ -187,12 +189,13 @@ jobs:
 
       - name: determine base tag
         id: base
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          branch="${{ github.event.workflow_run.head_branch }}"
-          if [[ "$branch" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          if [[ "$HEAD_BRANCH" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             echo "tag=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" >> $GITHUB_OUTPUT
           else
-            echo "tag=${branch}" >> $GITHUB_OUTPUT
+            echo "tag=${HEAD_BRANCH}" >> $GITHUB_OUTPUT
           fi
 
       - name: build and push go image by digest
@@ -259,15 +262,16 @@ jobs:
 
       - name: set docker tags
         id: tags
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          branch="${{ github.event.workflow_run.head_branch }}"
-          if [[ "$branch" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          if [[ "$HEAD_BRANCH" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             # semver tag: v0.7.2 -> tags: 0.7.2, 0.7, latest
             echo "tag=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" >> $GITHUB_OUTPUT
             echo "minor=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
             echo "latest=true" >> $GITHUB_OUTPUT
           else
-            echo "tag=${branch}" >> $GITHUB_OUTPUT
+            echo "tag=${HEAD_BRANCH}" >> $GITHUB_OUTPUT
             echo "minor=" >> $GITHUB_OUTPUT
             echo "latest=false" >> $GITHUB_OUTPUT
           fi
