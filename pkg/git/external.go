@@ -220,24 +220,26 @@ func (e *externalBackend) fileHasChanges(path string) (bool, error) {
 	return out != "", nil
 }
 
-// HasChangesOtherThan returns true if there are uncommitted changes to files other than the given file.
+// hasChangesOtherThan returns the list of dirty file paths (excluding the given file).
 // this includes modified/deleted tracked files, staged changes, and untracked files (excluding gitignored).
-func (e *externalBackend) hasChangesOtherThan(path string) (bool, error) {
+// an empty slice means no other changes.
+func (e *externalBackend) hasChangesOtherThan(path string) ([]string, error) {
 	rel, err := e.toRelative(path)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
 	// use -uall to list individual files, not collapsed directories
 	out, err := e.run("status", "--porcelain", "-uall")
 	if err != nil {
-		return false, fmt.Errorf("get status: %w", err)
+		return nil, fmt.Errorf("get status: %w", err)
 	}
 
 	if out == "" {
-		return false, nil
+		return nil, nil
 	}
 
+	var dirty []string
 	for line := range strings.SplitSeq(out, "\n") {
 		if line == "" {
 			continue
@@ -247,9 +249,9 @@ func (e *externalBackend) hasChangesOtherThan(path string) (bool, error) {
 		if filePath == rel {
 			continue
 		}
-		return true, nil
+		dirty = append(dirty, filePath)
 	}
-	return false, nil
+	return dirty, nil
 }
 
 // IsIgnored checks if a path is ignored by gitignore rules.

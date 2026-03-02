@@ -264,6 +264,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - `~/.codex/` - codex credentials if present
 - `~/.config/ralphex/` - user-level ralphex configuration
 - `~/.gitconfig` - git identity for commits
+- Global gitignore (`core.excludesFile`) - auto-detected and mounted
 - `.ralphex/` - project-level configuration if present
 
 **Container CANNOT access:**

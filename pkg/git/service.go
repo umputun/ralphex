@@ -32,7 +32,7 @@ type backend interface {
 	checkoutBranch(name string) error
 	isDirty() (bool, error)
 	fileHasChanges(path string) (bool, error)
-	hasChangesOtherThan(path string) (bool, error)
+	hasChangesOtherThan(path string) ([]string, error)
 	isIgnored(path string) (bool, error)
 	add(path string) error
 	moveFile(src, dst string) error
@@ -164,21 +164,24 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 	branchName := plan.ExtractBranchName(planFile)
 
 	// check for uncommitted changes to files other than the plan
-	hasOtherChanges, err := s.repo.hasChangesOtherThan(planFile)
+	dirtyFiles, err := s.repo.hasChangesOtherThan(planFile)
 	if err != nil {
 		return "", false, fmt.Errorf("check uncommitted files: %w", err)
 	}
-	if hasOtherChanges {
+	if len(dirtyFiles) > 0 {
+		fileList := s.formatDirtyFiles(dirtyFiles)
 		if requireDefault {
-			return "", false, errors.New("cannot create worktree: worktree has uncommitted changes other than the plan file")
+			return "", false, fmt.Errorf("cannot create worktree: worktree has uncommitted changes other than the plan file\n\n"+
+				"uncommitted files:\n%s", fileList)
 		}
 		return "", false, fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+
+			"uncommitted files:\n%s\n\n"+
 			"ralphex needs to create a feature branch from %s to isolate plan work.\n\n"+
 			"options:\n"+
 			"  git stash && ralphex %s && git stash pop   # stash changes temporarily\n"+
 			"  git commit -am \"wip\"                       # commit changes first\n"+
 			"  ralphex --review                           # skip branch creation (review-only mode)",
-			branchName, currentBranch, planFile)
+			branchName, fileList, currentBranch, planFile)
 	}
 
 	// check if plan file needs to be committed (untracked, modified, or staged)
@@ -507,4 +510,19 @@ func (s *Service) CommitIgnoreChanges() error {
 	}
 	s.log.Printf("committed .gitignore changes\n")
 	return nil
+}
+
+// formatDirtyFiles formats a list of dirty file paths for display in error messages.
+// truncates to 10 files with "and N more" suffix.
+func (s *Service) formatDirtyFiles(files []string) string {
+	const maxFiles = 10
+	var b strings.Builder
+	for i, f := range files {
+		if i >= maxFiles {
+			fmt.Fprintf(&b, "  ... and %d more", len(files)-maxFiles)
+			break
+		}
+		fmt.Fprintf(&b, "  %s\n", f)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

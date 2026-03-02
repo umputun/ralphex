@@ -291,10 +291,15 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
     if gitconfig.exists():
         add(resolve_path(gitconfig), "/home/app/.gitconfig", ro=True)
 
-    # 10. global gitignore -> same path in container:ro
+    # 10. global gitignore -> remap home-relative paths to /home/app/
     global_gitignore = get_global_gitignore()
     if global_gitignore:
-        add(resolve_path(global_gitignore), str(global_gitignore), ro=True)
+        src = resolve_path(global_gitignore)
+        if global_gitignore.is_relative_to(home):
+            dst = "/home/app/" + str(global_gitignore.relative_to(home))
+        else:
+            dst = str(global_gitignore)
+        add(src, dst, ro=True)
 
     # 11. extra user-defined volumes via RALPHEX_EXTRA_VOLUMES env var (comma-separated)
     extra = os.environ.get("RALPHEX_EXTRA_VOLUMES", "")
@@ -671,6 +676,32 @@ def run_tests() -> None:
                 vols = build_volumes(None)
                 found = any("/mnt/claude:ro,z" in v for v in vols)
                 self.assertTrue(found, "should mount ~/.claude to /mnt/claude:ro,z")
+
+    class TestBuildVolumesGitignore(unittest.TestCase):
+        def test_global_gitignore_remapped_to_home_app(self) -> None:
+            """global gitignore under $HOME should be mounted at /home/app/<relative>."""
+            home = Path.home()
+            fake_ignore = home / ".gitignore"
+            with (
+                unittest.mock.patch(f"{__name__}.get_global_gitignore", return_value=fake_ignore),
+                unittest.mock.patch(f"{__name__}.selinux_enabled", return_value=False),
+            ):
+                vols = build_volumes(None)
+            expected_dst = "/home/app/.gitignore"
+            found = any(expected_dst + ":ro" in v for v in vols)
+            self.assertTrue(found, f"expected mount destination {expected_dst}:ro in volumes, got {vols}")
+
+        def test_global_gitignore_outside_home_keeps_path(self) -> None:
+            """global gitignore outside $HOME should keep its absolute path as mount destination."""
+            fake_ignore = Path("/etc/gitignore_global")
+            with (
+                unittest.mock.patch(f"{__name__}.get_global_gitignore", return_value=fake_ignore),
+                unittest.mock.patch(f"{__name__}.selinux_enabled", return_value=False),
+                unittest.mock.patch(f"{__name__}.resolve_path", side_effect=lambda p: p),
+            ):
+                vols = build_volumes(None)
+            found = any("/etc/gitignore_global:ro" in v for v in vols)
+            self.assertTrue(found, f"expected /etc/gitignore_global:ro in volumes, got {vols}")
 
     class TestDetectGitWorktree(unittest.TestCase):
         def test_regular_dir(self) -> None:
@@ -1057,7 +1088,7 @@ def run_tests() -> None:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
-               TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
+               TestBuildVolumesGitignore, TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes]:

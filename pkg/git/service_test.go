@@ -282,6 +282,7 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 		err = svc.CreateBranchForPlan(planFile, "master")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "worktree has uncommitted changes")
+		assert.Contains(t, err.Error(), "other.txt")
 	})
 
 	t.Run("auto-commits plan file if only dirty file", func(t *testing.T) {

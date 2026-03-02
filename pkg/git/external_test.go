@@ -466,17 +466,17 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 }
 
 func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
-	t.Run("returns false when no changes", func(t *testing.T) {
+	t.Run("returns empty when no changes", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
 
-		has, err := eb.hasChangesOtherThan("nonexistent.md")
+		dirty, err := eb.hasChangesOtherThan("nonexistent.md")
 		require.NoError(t, err)
-		assert.False(t, has)
+		assert.Empty(t, dirty)
 	})
 
-	t.Run("returns false when only target file is untracked", func(t *testing.T) {
+	t.Run("returns empty when only target file is untracked", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
@@ -486,12 +486,12 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 		planFile := filepath.Join("docs", "plans", "feature.md")
 		require.NoError(t, os.WriteFile(filepath.Join(dir, planFile), []byte("# Plan"), 0o600))
 
-		has, err := eb.hasChangesOtherThan(planFile)
+		dirty, err := eb.hasChangesOtherThan(planFile)
 		require.NoError(t, err)
-		assert.False(t, has)
+		assert.Empty(t, dirty)
 	})
 
-	t.Run("returns true when other file is untracked", func(t *testing.T) {
+	t.Run("returns dirty file when other file is untracked", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
@@ -502,12 +502,12 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, planFile), []byte("# Plan"), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o600))
 
-		has, err := eb.hasChangesOtherThan(planFile)
+		dirty, err := eb.hasChangesOtherThan(planFile)
 		require.NoError(t, err)
-		assert.True(t, has)
+		assert.Equal(t, []string{"other.txt"}, dirty)
 	})
 
-	t.Run("returns true when tracked file is modified", func(t *testing.T) {
+	t.Run("returns dirty file when tracked file is modified", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		eb, err := newExternalBackend(dir, "git")
 		require.NoError(t, err)
@@ -519,9 +519,9 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified"), 0o600))
 
-		has, err := eb.hasChangesOtherThan(planFile)
+		dirty, err := eb.hasChangesOtherThan(planFile)
 		require.NoError(t, err)
-		assert.True(t, has)
+		assert.Equal(t, []string{"README.md"}, dirty)
 	})
 }
 
