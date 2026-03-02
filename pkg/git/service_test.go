@@ -919,6 +919,27 @@ func TestService_CreateWorktreeForPlan(t *testing.T) {
 		require.NoError(t, svc.RemoveWorktree(wtPath))
 	})
 
+	t.Run("fails with other uncommitted changes", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create plan file
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "feature.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		// create another uncommitted file
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o600))
+
+		_, _, err = svc.CreateWorktreeForPlan(planFile, "master")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot create worktree")
+		assert.Contains(t, err.Error(), "uncommitted changes")
+		assert.Contains(t, err.Error(), "other.txt")
+	})
+
 	t.Run("fails when worktree already exists", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
@@ -1261,5 +1282,54 @@ func TestService_FileHasChanges(t *testing.T) {
 		changed, err := svc.FileHasChanges("nonexistent.txt")
 		require.NoError(t, err)
 		assert.False(t, changed)
+	})
+}
+
+func TestService_formatDirtyFiles(t *testing.T) {
+	svc := &Service{}
+
+	t.Run("single file", func(t *testing.T) {
+		result := svc.formatDirtyFiles([]string{"file.txt"})
+		assert.Equal(t, "  file.txt", result)
+	})
+
+	t.Run("few files", func(t *testing.T) {
+		result := svc.formatDirtyFiles([]string{"a.txt", "b.txt", "c.txt"})
+		assert.Equal(t, "  a.txt\n  b.txt\n  c.txt", result)
+	})
+
+	t.Run("exactly 10 files", func(t *testing.T) {
+		files := make([]string, 10)
+		for i := range files {
+			files[i] = fmt.Sprintf("file%d.txt", i)
+		}
+		result := svc.formatDirtyFiles(files)
+		assert.NotContains(t, result, "more")
+		assert.Contains(t, result, "file9.txt")
+	})
+
+	t.Run("11 files truncates with and-more suffix", func(t *testing.T) {
+		files := make([]string, 11)
+		for i := range files {
+			files[i] = fmt.Sprintf("file%d.txt", i)
+		}
+		result := svc.formatDirtyFiles(files)
+		assert.Contains(t, result, "file9.txt")
+		assert.NotContains(t, result, "file10.txt")
+		assert.Contains(t, result, "... and 1 more")
+	})
+
+	t.Run("15 files shows 10 plus count", func(t *testing.T) {
+		files := make([]string, 15)
+		for i := range files {
+			files[i] = fmt.Sprintf("file%d.txt", i)
+		}
+		result := svc.formatDirtyFiles(files)
+		assert.Contains(t, result, "... and 5 more")
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		assert.Empty(t, svc.formatDirtyFiles(nil))
+		assert.Empty(t, svc.formatDirtyFiles([]string{}))
 	})
 }
