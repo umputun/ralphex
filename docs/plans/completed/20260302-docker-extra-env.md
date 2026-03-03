@@ -145,13 +145,13 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 - Modify: `README.md`
 - Modify: `scripts/ralphex-dk.sh` (docstring)
 
-- [ ] add `RALPHEX_EXTRA_ENV` to Environment variables section in `llms.txt`
-- [ ] add `RALPHEX_EXTRA_ENV` to Docker environment variables section in `README.md` (~line 299)
-- [ ] add `-e` usage example to `README.md` Docker usage section (~line 306)
-- [ ] update script docstring (lines 4-11) with `-e` example
-- [ ] document format: comma-separated, `VAR=value` or `VAR`
-- [ ] document security warning behavior
-- [ ] move this plan to `docs/plans/completed/`
+- [x] add `RALPHEX_EXTRA_ENV` to Environment variables section in `llms.txt`
+- [x] add `RALPHEX_EXTRA_ENV` to Docker environment variables section in `README.md` (~line 299)
+- [x] add `-e` usage example to `README.md` Docker usage section (~line 306)
+- [x] update script docstring (lines 4-11) with `-e` example
+- [x] document format: comma-separated, `VAR=value` or `VAR`
+- [x] document security warning behavior
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

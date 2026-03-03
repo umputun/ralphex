@@ -6,8 +6,14 @@ example: ralphex-dk.sh docs/plans/feature.md
 example: ralphex-dk.sh --serve docs/plans/feature.md
 example: ralphex-dk.sh --review
 example: ralphex-dk.sh -v /data:/mnt/data:ro docs/plans/feature.md
+example: ralphex-dk.sh -e DEBUG=1 -e API_KEY docs/plans/feature.md
 example: ralphex-dk.sh --update         # pull latest docker image
 example: ralphex-dk.sh --update-script  # update this wrapper script
+
+Environment variables:
+- RALPHEX_EXTRA_ENV: comma-separated env vars (VAR=value or VAR to inherit from host)
+- RALPHEX_EXTRA_VOLUMES: comma-separated volume mounts (src:dest[:opts])
+- Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values
 """
 
 import difflib
