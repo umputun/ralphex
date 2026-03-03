@@ -812,6 +812,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 func TestTasksOnlyModeBranchCreation(t *testing.T) {
 	t.Run("tasks_only_creates_branch_for_plan", func(t *testing.T) {
 		skipIfClaudeNotAvailable(t)
+		configDir := t.TempDir() // isolate from global config
 
 		dir := setupTestRepo(t)
 		origDir, err := os.Getwd()
@@ -836,7 +837,7 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			o := opts{TasksOnly: true, PlanFile: planPath, MaxIterations: 1}
+			o := opts{TasksOnly: true, PlanFile: planPath, MaxIterations: 1, ConfigDir: configDir}
 			_ = run(ctx, o)
 		}()
 
@@ -856,6 +857,7 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 
 	t.Run("review_mode_does_not_create_branch", func(t *testing.T) {
 		skipIfClaudeNotAvailable(t)
+		configDir := t.TempDir() // isolate from global config
 
 		dir := setupTestRepo(t)
 		origDir, err := os.Getwd()
@@ -875,10 +877,10 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		// run with review mode, cancel immediately and wait for exit
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		o := opts{Review: true, PlanFile: planPath, MaxIterations: 1}
+		o := opts{Review: true, PlanFile: planPath, MaxIterations: 1, ConfigDir: configDir}
 		_ = run(ctx, o)
 
-		// verify branch was NOT created (still on master)
+		// verify branch was NOT created (still on master) 24d70519 (fix: isolate TestTasksOnlyModeBranchCreation from global config)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
@@ -888,6 +890,7 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 
 	t.Run("codex_only_mode_does_not_create_branch", func(t *testing.T) {
 		skipIfClaudeNotAvailable(t)
+		configDir := t.TempDir() // isolate from global config
 
 		dir := setupTestRepo(t)
 		origDir, err := os.Getwd()
@@ -907,10 +910,10 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		// run with codex-only mode, cancel immediately and wait for exit
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1}
+		o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1, ConfigDir: configDir}
 		_ = run(ctx, o)
 
-		// verify branch was NOT created (still on master)
+		// verify branch was NOT created (still on master) 24d70519 (fix: isolate TestTasksOnlyModeBranchCreation from global config)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
@@ -920,6 +923,7 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 
 	t.Run("external_only_mode_does_not_create_branch", func(t *testing.T) {
 		skipIfClaudeNotAvailable(t)
+		configDir := t.TempDir() // isolate from global config
 
 		dir := setupTestRepo(t)
 		origDir, err := os.Getwd()
@@ -939,10 +943,10 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		// run with external-only mode, cancel immediately and wait for exit
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		o := opts{ExternalOnly: true, PlanFile: planPath, MaxIterations: 1}
+		o := opts{ExternalOnly: true, PlanFile: planPath, MaxIterations: 1, ConfigDir: configDir}
 		_ = run(ctx, o)
 
-		// verify branch was NOT created (still on master)
+		// verify branch was NOT created (still on master) 24d70519 (fix: isolate TestTasksOnlyModeBranchCreation from global config)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
