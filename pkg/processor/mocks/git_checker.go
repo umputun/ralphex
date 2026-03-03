@@ -13,6 +13,9 @@ import (
 //
 //		// make and configure a mocked processor.GitChecker
 //		mockedGitChecker := &GitCheckerMock{
+//			DiffFingerprintFunc: func() (string, error) {
+//				panic("mock out the DiffFingerprint method")
+//			},
 //			HeadHashFunc: func() (string, error) {
 //				panic("mock out the HeadHash method")
 //			},
@@ -23,16 +26,50 @@ import (
 //
 //	}
 type GitCheckerMock struct {
+	// DiffFingerprintFunc mocks the DiffFingerprint method.
+	DiffFingerprintFunc func() (string, error)
+
 	// HeadHashFunc mocks the HeadHash method.
 	HeadHashFunc func() (string, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// DiffFingerprint holds details about calls to the DiffFingerprint method.
+		DiffFingerprint []struct {
+		}
 		// HeadHash holds details about calls to the HeadHash method.
 		HeadHash []struct {
 		}
 	}
-	lockHeadHash sync.RWMutex
+	lockDiffFingerprint sync.RWMutex
+	lockHeadHash        sync.RWMutex
+}
+
+// DiffFingerprint calls DiffFingerprintFunc.
+func (mock *GitCheckerMock) DiffFingerprint() (string, error) {
+	if mock.DiffFingerprintFunc == nil {
+		panic("GitCheckerMock.DiffFingerprintFunc: method is nil but GitChecker.DiffFingerprint was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockDiffFingerprint.Lock()
+	mock.calls.DiffFingerprint = append(mock.calls.DiffFingerprint, callInfo)
+	mock.lockDiffFingerprint.Unlock()
+	return mock.DiffFingerprintFunc()
+}
+
+// DiffFingerprintCalls gets all the calls that were made to DiffFingerprint.
+// Check the length with:
+//
+//	len(mockedGitChecker.DiffFingerprintCalls())
+func (mock *GitCheckerMock) DiffFingerprintCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockDiffFingerprint.RLock()
+	calls = mock.calls.DiffFingerprint
+	mock.lockDiffFingerprint.RUnlock()
+	return calls
 }
 
 // HeadHash calls HeadHashFunc.

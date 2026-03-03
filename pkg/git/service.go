@@ -30,6 +30,7 @@ type backend interface {
 	branchExists(name string) bool
 	createBranch(name string) error
 	checkoutBranch(name string) error
+	diffFingerprint() (string, error)
 	isDirty() (bool, error)
 	fileHasChanges(path string) (bool, error)
 	hasChangesOtherThan(path string) ([]string, error)
@@ -83,6 +84,12 @@ func (s *Service) Root() string {
 // HeadHash returns the current HEAD commit hash as a hex string.
 func (s *Service) HeadHash() (string, error) {
 	return s.repo.headHash()
+}
+
+// DiffFingerprint returns a hash of the current working tree state (tracked diffs + untracked file content).
+// used for stalemate detection - if the fingerprint changes between rounds, Claude made edits.
+func (s *Service) DiffFingerprint() (string, error) {
+	return s.repo.diffFingerprint()
 }
 
 // CurrentBranch returns the name of the current branch, or empty string for detached HEAD state.

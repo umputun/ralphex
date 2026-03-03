@@ -1022,7 +1022,7 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 
 // startBreakReader starts a goroutine that reads stdin for "break" command.
 // returns a channel that is closed when "break" is typed, or nil if stdin is not a TTY.
-// the goroutine exits when the context is done.
+// the goroutine exits when "break" is received, stdin is closed, or the process exits.
 func startBreakReader(ctx context.Context) <-chan struct{} {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return nil

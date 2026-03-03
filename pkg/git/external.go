@@ -2,6 +2,8 @@ package git
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -80,6 +82,44 @@ func (e *externalBackend) headHash() (string, error) {
 		return "", fmt.Errorf("get HEAD: %w", err)
 	}
 	return out, nil
+}
+
+// diffFingerprint returns a sha256 hash of the working tree state (tracked diffs + untracked file content).
+// includes untracked file content hashes so that edits to existing untracked files are detected,
+// not just new file creation.
+func (e *externalBackend) diffFingerprint() (string, error) {
+	out, err := e.run("diff", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("diff fingerprint: %w", err)
+	}
+	untracked, err := e.run("ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return "", fmt.Errorf("diff fingerprint (untracked): %w", err)
+	}
+
+	h := sha256.New()
+	h.Write([]byte(out))
+	h.Write([]byte{0})
+
+	// for each untracked file, include both name and content hash so that edits
+	// to existing untracked files change the fingerprint (not just new file creation).
+	// -z flag produces null-terminated output, safe for filenames with special characters
+	if untracked != "" {
+		for name := range strings.SplitSeq(untracked, "\x00") {
+			if name == "" {
+				continue
+			}
+			h.Write([]byte(name))
+			h.Write([]byte{0})
+			// git hash-object computes blob hash from file content
+			if blobHash, hashErr := e.run("hash-object", "--", name); hashErr == nil {
+				h.Write([]byte(blobHash))
+			}
+			h.Write([]byte{0})
+		}
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // HasCommits returns true if the repository has at least one commit.

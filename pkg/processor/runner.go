@@ -90,6 +90,7 @@ type InputCollector interface {
 // GitChecker provides git state inspection for the review loop.
 type GitChecker interface {
 	HeadHash() (string, error)
+	DiffFingerprint() (string, error)
 }
 
 // Runner orchestrates the execution loop.
@@ -497,6 +498,33 @@ func (r *Runner) headHash() string {
 	return hash
 }
 
+// diffFingerprint returns a hash of the current working tree diff, or empty string if unavailable.
+func (r *Runner) diffFingerprint() string {
+	if r.git == nil {
+		return ""
+	}
+	fp, err := r.git.DiffFingerprint()
+	if err != nil {
+		r.log.Print("warning: failed to get diff fingerprint: %v", err)
+		return ""
+	}
+	return fp
+}
+
+// checkStalemate compares git state before and after claude evaluation to detect unchanged rounds.
+// returns the updated unchanged round counter: incremented if no changes detected, reset to 0 otherwise.
+// when diff fingerprints are unavailable (error), falls back to HEAD-only comparison.
+func (r *Runner) checkStalemate(headBefore, headAfter, diffBefore, diffAfter string, unchangedRounds int) int {
+	unchanged := headAfter == headBefore
+	if diffBefore != "" && diffAfter != "" {
+		unchanged = unchanged && diffAfter == diffBefore
+	}
+	if unchanged {
+		return unchangedRounds + 1
+	}
+	return 0
+}
+
 // externalReviewTool returns the effective external review tool to use.
 // handles backward compatibility: codex_enabled = false → "none"
 // the CodexEnabled flag takes precedence for backward compatibility.
@@ -562,7 +590,9 @@ type externalReviewConfig struct {
 	makeSection     func(iteration int) status.Section                       // create section header
 }
 
-// runExternalReviewLoop runs a generic external review tool-claude loop until no findings.
+// runExternalReviewLoop runs a generic external review tool-claude loop.
+// it terminates when no findings remain, max iterations are reached,
+// stalemate is detected (review patience), or a manual break is requested.
 func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewConfig) error {
 	maxIterations := max(minCodexIterations, r.cfg.MaxIterations/codexIterationDivisor)
 	if r.cfg.MaxExternalIterations > 0 {
@@ -610,8 +640,12 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// show findings summary before Claude evaluation
 		cfg.showSummary(reviewResult.Output)
 
-		// capture HEAD hash before claude evaluation for stalemate detection
-		headBefore := r.headHash()
+		// capture state before claude evaluation for stalemate detection (only when enabled)
+		var headBefore, diffBefore string
+		if r.cfg.ReviewPatience > 0 {
+			headBefore = r.headHash()
+			diffBefore = r.diffFingerprint()
+		}
 
 		// pass output to claude for evaluation and fixing
 		r.phaseHolder.Set(status.PhaseClaudeEval)
@@ -639,13 +673,12 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 			return nil
 		}
 
-		// stalemate detection: track consecutive rounds with no commits
+		// stalemate detection: track consecutive rounds with no changes (commits or working tree edits).
+		// the eval prompt tells claude not to commit during fix rounds, so HEAD alone can't distinguish
+		// "rejected findings" from "made fixes without commit". checking the diff fingerprint catches
+		// working tree edits, making the detection accurate for both cases.
 		if r.cfg.ReviewPatience > 0 && headBefore != "" {
-			if headAfter := r.headHash(); headAfter == headBefore {
-				unchangedRounds++
-			} else {
-				unchangedRounds = 0
-			}
+			unchangedRounds = r.checkStalemate(headBefore, r.headHash(), diffBefore, r.diffFingerprint(), unchangedRounds)
 			if unchangedRounds >= r.cfg.ReviewPatience {
 				r.log.Print("stalemate detected after %d unchanged rounds, external review terminated early", unchangedRounds)
 				return nil
@@ -685,7 +718,15 @@ func (r *Runner) breakContext(parent context.Context) (context.Context, context.
 // isManualBreak returns true if the break channel was fired but the parent context is still alive.
 // this distinguishes manual break from SIGINT/timeout.
 func (r *Runner) isManualBreak(parentCtx context.Context) bool {
-	return r.breakCh != nil && parentCtx.Err() == nil
+	if r.breakCh == nil || parentCtx.Err() != nil {
+		return false
+	}
+	select {
+	case <-r.breakCh:
+		return true
+	default:
+		return false
+	}
 }
 
 // buildCodexPrompt creates the prompt for codex review.

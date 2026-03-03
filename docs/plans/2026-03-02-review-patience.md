@@ -110,8 +110,8 @@ Line numbers are approximate and may shift during implementation.
 - Modify: `llms.txt` — add review_patience to customization section
 - Modify: `README.md` — add review_patience option and break command to usage docs
 
-- [ ] add `review_patience` to CLAUDE.md config section and key patterns
-- [ ] add `review_patience` and `break` command to llms.txt customization section
-- [ ] add to README.md: config option description, CLI flag, break command
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `make lint`
+- [x] add `review_patience` to CLAUDE.md config section and key patterns
+- [x] add `review_patience` and `break` command to llms.txt customization section
+- [x] add to README.md: config option description, CLI flag, break command
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `make lint`

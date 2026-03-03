@@ -1836,11 +1836,10 @@ func TestRunner_ReviewLoop_NoCommitExit(t *testing.T) {
 	})
 	codex := newMockExecutor(nil)
 
-	// mock git checker returns same hash both times (no commits made)
+	// mock git checker returns same hash and diff both times (no changes made)
 	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc: func() (string, error) {
-			return "abc123def456abc123def456abc123def456abcd", nil
-		},
+		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
 	}
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
@@ -1890,6 +1889,7 @@ func TestRunner_ReviewLoop_CommitDetected_ContinuesLoop(t *testing.T) {
 			hashIdx++
 			return h, nil
 		},
+		DiffFingerprintFunc: func() (string, error) { return "constant-diff", nil },
 	}
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
@@ -1942,9 +1942,8 @@ func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
 
 	// git checker always returns error — should degrade gracefully (run to max iterations)
 	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc: func() (string, error) {
-			return "", errors.New("git HEAD error")
-		},
+		HeadHashFunc:        func() (string, error) { return "", errors.New("git HEAD error") },
+		DiffFingerprintFunc: func() (string, error) { return "", errors.New("git diff error") },
 	}
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, CodexEnabled: false, AppConfig: testAppConfig(t)}
@@ -2403,9 +2402,10 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_BreaksAfterN(t *testing.T)
 		{Output: "found issue in foo.go:10"}, // codex iteration 2
 	})
 
-	// git checker returns same hash every time (no commits made by claude)
+	// git checker returns same hash and diff every time (no changes made by claude)
 	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc: func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
 	}
 
 	cfg := processor.Config{
@@ -2466,6 +2466,7 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnCommit(t *testing.
 			hashIdx++
 			return h, nil
 		},
+		DiffFingerprintFunc: func() (string, error) { return "constant-diff", nil },
 	}
 
 	cfg := processor.Config{
@@ -2491,6 +2492,68 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnCommit(t *testing.
 	assert.False(t, foundStalemate, "should not log stalemate when counter was reset")
 }
 
+func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnDiffChange(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// with ReviewPatience=2, if diff fingerprint changes on round 2 (working tree edits without commit),
+	// counter resets and needs 2 more unchanged rounds. HEAD stays the same throughout (no commits).
+	// round 1: unchanged (counter=1), round 2: diff changed (counter=0), round 3: codex done
+	claude := newMockExecutor([]executor.Result{
+		{Output: "rejected findings, no changes"},          // claude eval iteration 1 (no edits)
+		{Output: "fixed the issue"},                        // claude eval iteration 2 (edited files, no commit)
+		{Output: "done", Signal: status.CodexDone},         // claude eval iteration 3 (codex done signal)
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue in foo.go:10"}, // codex iteration 1
+		{Output: "found issue in bar.go:20"}, // codex iteration 2
+		{Output: "found issue in baz.go:30"}, // codex iteration 3
+	})
+
+	// git checker: HEAD never changes (no commits), but diff fingerprint changes on round 2
+	diffIdx := 0
+	diffs := []string{
+		"diff-aaa", // round 1 before
+		"diff-aaa", // round 1 after (unchanged - stalemate round)
+		"diff-aaa", // round 2 before
+		"diff-bbb", // round 2 after (changed - claude edited files)
+		"diff-bbb", // round 3 before (codex done, no after call)
+	}
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+		DiffFingerprintFunc: func() (string, error) {
+			if diffIdx >= len(diffs) {
+				return "diff-zzz", nil
+			}
+			d := diffs[diffIdx]
+			diffIdx++
+			return d, nil
+		},
+	}
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		ReviewPatience: 2, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	r.SetGitChecker(gitMock)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (no stalemate, diff change reset counter)")
+	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
+
+	// verify no stalemate log
+	var foundStalemate bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "stalemate detected") {
+			foundStalemate = true
+			break
+		}
+	}
+	assert.False(t, foundStalemate, "should not log stalemate when diff fingerprint changed")
+}
+
 func TestRunner_ExternalReviewLoop_StalemateDetection_DisabledWhenZero(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
@@ -2508,9 +2571,10 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_DisabledWhenZero(t *testin
 		{Output: "found issue"}, // codex iteration 3
 	})
 
-	// git checker returns same hash (would trigger stalemate if enabled)
+	// git checker returns same hash and diff (would trigger stalemate if enabled)
 	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc: func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
 	}
 
 	cfg := processor.Config{

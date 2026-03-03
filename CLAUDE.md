@@ -63,6 +63,8 @@ docs/plans/         # plan files location
 - `--base-ref` flag overrides default branch for review diffs (branch name or commit hash)
 - `--skip-finalize` flag disables finalize step for a single run
 - `--wait` flag enables rate limit retry with specified duration (e.g., `--wait 1h`)
+- `--review-patience` flag terminates external review after N unchanged rounds (stalemate detection)
+- Manual `break` command during external review loop terminates it early via injected channel
 - Custom external review support via scripts (wraps any AI tool)
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
@@ -101,6 +103,8 @@ Allows using custom scripts instead of codex for external code review:
   - Subsequent iterations: `git diff` (uncommitted changes only)
 - `--external-only` (-e) flag runs only external review; `--codex-only` (-c) is deprecated alias
 - `max_external_iterations` config / `--max-external-iterations` CLI flag overrides external review loop limit (0 = auto, derived as `max(3, max_iterations/5)`)
+- `review_patience` config / `--review-patience` CLI flag enables stalemate detection: tracks consecutive rounds with no commits, terminates early when threshold reached (0 = disabled)
+- Manual break: typing `break` + Enter during external review terminates the loop immediately via context cancellation. Break channel injected from `cmd/ralphex/` into Runner via `SetBreakCh()`, only active when stdin is a TTY
 - `codex_enabled = false` backward compat: treated as `external_review_tool = none`
 
 Key files:
@@ -212,6 +216,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
 - `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
 - Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
+- `review_patience` config option: terminate external review after N consecutive unchanged rounds (0 = disabled). CLI flag `--review-patience` takes precedence
 - `wait_on_limit` config option: duration to wait before retrying on rate limit (e.g., "1h", "30m"). CLI flag `--wait` takes precedence. Disabled by default
 
 ### Local Project Config (.ralphex/)

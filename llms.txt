@@ -36,6 +36,9 @@ ralphex --external-only
 # limit external review iterations (0 = auto, derived from max-iterations)
 ralphex --max-external-iterations=5 docs/plans/feature.md
 
+# terminate external review after 3 unchanged rounds (stalemate detection)
+ralphex --review-patience=3 docs/plans/feature.md
+
 # wait and retry on rate limit (instead of exiting)
 ralphex --wait 1h docs/plans/feature.md
 
@@ -90,6 +93,10 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in custom_review.txt)
 
 **External review iterations:** By default, external review runs up to `max(3, max_iterations/5)` iterations. Override with `max_external_iterations` config option or `--max-external-iterations` CLI flag (0 = auto).
+
+**Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when Claude produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and Claude can't agree on findings.
+
+**Manual break:** Type `break` + Enter during the external review loop to terminate it immediately. Only available when stdin is a TTY.
 
 **Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing.
 

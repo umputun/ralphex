@@ -118,6 +118,12 @@ Claude verifies findings, fixes confirmed issues, and commits.
 2. Claude evaluates findings, fixes valid issues
 3. Iterates until no open issues
 
+The loop terminates when: all issues resolved, max iterations reached, stalemate detected (via `--review-patience`), or manual `break` command entered.
+
+**Stalemate detection:** When the external tool and Claude can't agree on findings, the loop can waste tokens iterating to the max. Set `--review-patience=N` (or `review_patience` in config) to terminate after N consecutive rounds with no commits.
+
+**Manual break:** Type `break` + Enter during the external review loop to terminate it immediately. The current executor run is cancelled via context cancellation. Only available when stdin is a TTY.
+
 Supported tools:
 - **codex** (default): OpenAI Codex for independent code review
 - **custom**: Your own script wrapping any AI (OpenRouter, local LLM, etc.)
@@ -437,6 +443,9 @@ ralphex --max-iterations=100 docs/plans/feature.md
 # limit external review iterations (0 = auto, derived from max-iterations)
 ralphex --max-external-iterations=5 docs/plans/feature.md
 
+# terminate external review after 3 unchanged rounds (stalemate detection)
+ralphex --review-patience=3 docs/plans/feature.md
+
 # wait and retry on rate limit (instead of exiting)
 ralphex --wait 1h docs/plans/feature.md
 
@@ -453,6 +462,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 |------|-------------|---------|
 | `-m, --max-iterations` | Maximum task iterations | 50 |
 | `--max-external-iterations` | Override external review iteration limit (0 = auto) | 0 |
+| `--review-patience` | Terminate external review after N unchanged rounds (0 = disabled) | 0 |
 | `-r, --review` | Skip task execution, run full review pipeline | false |
 | `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
 | `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
@@ -682,6 +692,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `external_review_tool` | External review tool (`codex`, `custom`, `none`) | `codex` |
 | `custom_review_script` | Path to custom review script (when `external_review_tool = custom`) | - |
 | `max_external_iterations` | Override external review iteration limit (0 = auto, derived from `max_iterations`) | `0` |
+| `review_patience` | Terminate external review after N consecutive unchanged rounds (0 = disabled) | `0` |
 | `iteration_delay_ms` | Delay between iterations | `2000` |
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
