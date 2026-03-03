@@ -63,7 +63,7 @@ func TestRunner_Run_UnknownMode(t *testing.T) {
 	codex := newMockExecutor(nil)
 
 	r := processor.NewWithExecutors(processor.Config{Mode: "invalid"}, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown mode")
@@ -75,7 +75,7 @@ func TestRunner_RunFull_NoPlanFile(t *testing.T) {
 	codex := newMockExecutor(nil)
 
 	r := processor.NewWithExecutors(processor.Config{Mode: processor.ModeFull}, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plan file required")
@@ -101,7 +101,7 @@ func TestRunner_RunFull_Success(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 1)
@@ -125,7 +125,7 @@ func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 }
@@ -144,7 +144,7 @@ func TestRunner_RunReviewOnly_Success(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 1)
@@ -162,7 +162,7 @@ func TestRunner_RunCodexOnly_Success(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 1)
@@ -179,7 +179,7 @@ func TestRunner_RunCodexOnly_NoFindings(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 }
@@ -198,11 +198,11 @@ func TestRunner_MaxExternalIterations_ExplicitLimit(t *testing.T) {
 	})
 
 	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50,
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
 		MaxExternalIterations: 2, CodexEnabled: true, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 2, "codex should be called exactly MaxExternalIterations times")
@@ -224,11 +224,11 @@ func TestRunner_MaxExternalIterations_DerivedFormula(t *testing.T) {
 	})
 
 	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 15,
+		Mode: processor.ModeCodexOnly, MaxIterations: 15, IterationDelayMs: 1,
 		MaxExternalIterations: 0, CodexEnabled: true, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 3, "codex should use derived formula: max(3, 15/5) = 3")
@@ -243,7 +243,7 @@ func TestRunner_CodexDisabled_SkipsCodexPhase(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Empty(t, codex.RunCalls(), "codex should not be called when disabled")
@@ -263,7 +263,7 @@ func TestRunner_RunTasksOnly_Success(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 50, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Empty(t, codex.RunCalls(), "codex should not be called in tasks-only mode")
@@ -276,7 +276,7 @@ func TestRunner_RunTasksOnly_NoPlanFile(t *testing.T) {
 	codex := newMockExecutor(nil)
 
 	r := processor.NewWithExecutors(processor.Config{Mode: processor.ModeTasksOnly}, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plan file required")
@@ -296,7 +296,7 @@ func TestRunner_RunTasksOnly_TaskPhaseError(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FAILED signal")
@@ -321,7 +321,7 @@ func TestRunner_RunTasksOnly_NoReviews(t *testing.T) {
 		AppConfig:     testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// verify no review or codex phases ran - only task phase
@@ -343,7 +343,7 @@ func TestRunner_TaskPhase_FailedSignal(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FAILED signal")
@@ -362,9 +362,9 @@ func TestRunner_TaskPhase_MaxIterations(t *testing.T) {
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 3, AppConfig: testAppConfig(t)}
+	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 3, IterationDelayMs: 1, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max iterations")
@@ -375,7 +375,7 @@ func TestRunner_TaskPhase_ContextCanceled(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately
 
 	log := newMockLogger("progress.txt")
@@ -399,7 +399,7 @@ func TestRunner_ClaudeReview_FailedSignal(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FAILED signal")
@@ -417,7 +417,7 @@ func TestRunner_CodexPhase_Error(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "codex")
@@ -437,7 +437,7 @@ func TestRunner_ClaudeExecution_Error(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "claude execution")
@@ -609,7 +609,7 @@ func TestRunner_TaskRetryCount_UsedCorrectly(t *testing.T) {
 		AppConfig:        testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FAILED signal")
@@ -649,7 +649,7 @@ func TestRunner_RunPlan_Success(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 1)
@@ -679,7 +679,7 @@ func TestRunner_RunPlan_WithQuestion(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 2)
@@ -697,7 +697,7 @@ func TestRunner_RunPlan_NoPlanDescription(t *testing.T) {
 	cfg := processor.Config{Mode: processor.ModePlan, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plan description required")
@@ -711,7 +711,7 @@ func TestRunner_RunPlan_NoInputCollector(t *testing.T) {
 	cfg := processor.Config{Mode: processor.ModePlan, PlanDescription: "test", AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	// don't set input collector
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input collector required")
@@ -734,7 +734,7 @@ func TestRunner_RunPlan_FailedSignal(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FAILED signal")
@@ -762,14 +762,14 @@ func TestRunner_RunPlan_MaxIterations(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max plan iterations")
 }
 
 func TestRunner_RunPlan_ContextCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately
 
 	log := newMockLogger("")
@@ -809,7 +809,7 @@ func TestRunner_RunPlan_ClaudeError(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "claude execution")
@@ -840,7 +840,7 @@ func TestRunner_RunPlan_InputCollectorError(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "collect answer")
@@ -953,7 +953,7 @@ func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	var patternErr *executor.PatternMatchError
@@ -990,7 +990,7 @@ func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	var limitErr *executor.LimitPatternError
@@ -1024,7 +1024,7 @@ func TestRunner_ErrorPatternMatch_CodexInReviewPhase(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	var patternErr *executor.PatternMatchError
@@ -1052,7 +1052,7 @@ func TestRunner_ErrorPatternMatch_ClaudeInReviewLoop(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	var patternErr *executor.PatternMatchError
@@ -1078,7 +1078,7 @@ func TestRunner_ErrorPatternMatch_ClaudeInPlanCreation(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	var patternErr *executor.PatternMatchError
@@ -1149,7 +1149,7 @@ This is a test plan.
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 2)
@@ -1196,7 +1196,7 @@ func TestRunner_RunPlan_PlanDraft_ReviseFlow(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 3)
@@ -1237,7 +1237,7 @@ func TestRunner_RunPlan_PlanDraft_RejectFlow(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, processor.ErrUserRejectedPlan)
@@ -1272,7 +1272,7 @@ func TestRunner_RunPlan_PlanDraft_AskDraftReviewError(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "collect draft review")
@@ -1301,7 +1301,7 @@ This content has no END marker`
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// should log warning but continue
@@ -1350,7 +1350,7 @@ func TestRunner_RunPlan_PlanDraft_WithQuestionThenDraft(t *testing.T) {
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetInputCollector(inputCollector)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 3)
@@ -1382,7 +1382,7 @@ func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
 		AppConfig:       testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// verify finalize step ran (5 claude calls total)
@@ -1422,7 +1422,7 @@ func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
 		AppConfig:       testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// verify finalize step did NOT run (only 4 claude calls)
@@ -1453,7 +1453,7 @@ func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
 		AppConfig:       testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	// run should succeed despite finalize failure
 	require.NoError(t, err)
@@ -1493,7 +1493,7 @@ func TestRunner_Finalize_FailedSignalDoesNotBlockSuccess(t *testing.T) {
 		AppConfig:       testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	// run should succeed despite finalize FAILED signal
 	require.NoError(t, err)
@@ -1527,7 +1527,7 @@ func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
 		AppConfig:       testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// verify finalize ran (4 claude calls total)
@@ -1550,7 +1550,7 @@ func TestRunner_Finalize_RunsInCodexOnlyMode(t *testing.T) {
 		AppConfig:       testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// verify finalize ran (2 claude calls total)
@@ -1632,7 +1632,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 				AppConfig:       testAppConfig(t),
 			}
 			r := processor.NewWithExecutors(cfg, log, claude, codex, nil, holder)
-			err := r.Run(context.Background())
+			err := r.Run(t.Context())
 
 			require.NoError(t, err)
 			assert.Len(t, claude.RunCalls(), tc.expClaude)
@@ -1660,7 +1660,7 @@ func TestRunner_Finalize_ContextCancellationPropagates(t *testing.T) {
 		AppConfig:       testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	// run should fail with context canceled error
 	require.Error(t, err)
@@ -1688,7 +1688,7 @@ func TestRunner_ExternalReviewTool_CodexEnabled(t *testing.T) {
 		AppConfig:     appCfg,
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 1, "codex should be called when external_review_tool=codex")
@@ -1711,7 +1711,7 @@ func TestRunner_ExternalReviewTool_None(t *testing.T) {
 		AppConfig:     appCfg,
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Empty(t, codex.RunCalls(), "codex should not be called when external_review_tool=none")
@@ -1735,7 +1735,7 @@ func TestRunner_ExternalReviewTool_BackwardCompat_CodexDisabled(t *testing.T) {
 		AppConfig:     appCfg,
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Empty(t, codex.RunCalls(), "codex should not be called when CodexEnabled=false (backward compat)")
@@ -1780,7 +1780,7 @@ func TestRunner_ExternalReviewTool_Custom_Success(t *testing.T) {
 		AppConfig:     appCfg,
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, customExec, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Empty(t, codex.RunCalls(), "codex should not be called when external_review_tool=custom")
@@ -1804,7 +1804,7 @@ func TestRunner_ExternalReviewTool_Custom_NotConfigured(t *testing.T) {
 	}
 	// no custom executor passed
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom review script not configured")
@@ -1845,7 +1845,7 @@ func TestRunner_ReviewLoop_NoCommitExit(t *testing.T) {
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetGitChecker(gitMock)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 3)
@@ -1892,10 +1892,10 @@ func TestRunner_ReviewLoop_CommitDetected_ContinuesLoop(t *testing.T) {
 		DiffFingerprintFunc: func() (string, error) { return "constant-diff", nil },
 	}
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: false, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetGitChecker(gitMock)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 4)
@@ -1917,9 +1917,9 @@ func TestRunner_ReviewLoop_GitCheckerNil_SkipsNoCommitCheck(t *testing.T) {
 	codex := newMockExecutor(nil)
 
 	// no git checker - nil
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, IterationDelayMs: 1, CodexEnabled: false, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// first review + pre-codex loop (1 iteration) + post-codex loop (3 iterations, max reached)
@@ -1946,10 +1946,10 @@ func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
 		DiffFingerprintFunc: func() (string, error) { return "", errors.New("git diff error") },
 	}
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, IterationDelayMs: 1, CodexEnabled: false, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetGitChecker(gitMock)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	// first review + pre-codex loop (1 iteration) + post-codex loop (3 iterations, max reached)
@@ -1983,7 +1983,7 @@ func TestRunner_SleepWithContext_CancelDuringDelay(t *testing.T) {
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 
 	// cancel context after a short delay (50ms) — well before iteration delay (5s)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
@@ -2081,7 +2081,7 @@ func TestRunner_TaskPhase_UsesPlanTaskPosition(t *testing.T) {
 
 	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 50, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 
@@ -2127,7 +2127,7 @@ func TestRunner_RunWithLimitRetry_RetryOnLimitError(t *testing.T) {
 		return executor.Result{Output: "success", Signal: status.Completed}
 	}
 
-	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "success", result.Output)
@@ -2162,7 +2162,7 @@ func TestRunner_RunWithLimitRetry_NoRetryWhenWaitZero(t *testing.T) {
 		return executor.Result{Error: &executor.LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}}
 	}
 
-	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
 
 	require.Error(t, result.Error)
 	var limitErr *executor.LimitPatternError
@@ -2183,7 +2183,7 @@ func TestRunner_RunWithLimitRetry_ContextCancelledDuringWait(t *testing.T) {
 	cfg := processor.Config{AppConfig: appCfg}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	callCount := 0
 	mockRun := func(_ context.Context, _ string) executor.Result {
@@ -2218,7 +2218,7 @@ func TestRunner_RunWithLimitRetry_PatternMatchErrorNotRetried(t *testing.T) {
 		return executor.Result{Error: &executor.PatternMatchError{Pattern: "API Error", HelpCmd: "claude /usage"}}
 	}
 
-	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
 
 	require.Error(t, result.Error)
 	var patternErr *executor.PatternMatchError
@@ -2248,7 +2248,7 @@ func TestRunner_RunWithLimitRetry_MultipleRetries(t *testing.T) {
 		return executor.Result{Output: "finally done"}
 	}
 
-	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "finally done", result.Output)
@@ -2273,7 +2273,7 @@ func TestRunner_RunWithLimitRetry_NoErrorPassesThrough(t *testing.T) {
 		return executor.Result{Output: "success", Signal: status.Completed}
 	}
 
-	result := r.TestRunWithLimitRetry(context.Background(), mockRun, "test prompt", "claude")
+	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "success", result.Output)
@@ -2340,7 +2340,7 @@ func TestRunner_Finalize_LimitPatternWithWaitRetries(t *testing.T) {
 		AppConfig:       appCfg,
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Equal(t, 3, callCount, "should retry finalize after limit error")
@@ -2370,7 +2370,7 @@ func TestRunner_Finalize_LimitPatternWithoutWaitLogsAndContinues(t *testing.T) {
 		AppConfig:       testAppConfig(t), // default: WaitOnLimit = 0
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err, "finalize limit error should not block success (best-effort)")
 	assert.Equal(t, 2, callCount, "should not retry when wait is zero")
@@ -2409,12 +2409,12 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_BreaksAfterN(t *testing.T)
 	}
 
 	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
 		ReviewPatience: 2, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetGitChecker(gitMock)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 2, "codex should run exactly 2 times before stalemate")
@@ -2470,12 +2470,12 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnCommit(t *testing.
 	}
 
 	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
 		ReviewPatience: 2, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetGitChecker(gitMock)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (no stalemate)")
@@ -2532,12 +2532,12 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnDiffChange(t *test
 	}
 
 	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
 		ReviewPatience: 2, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetGitChecker(gitMock)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (no stalemate, diff change reset counter)")
@@ -2578,12 +2578,12 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_DisabledWhenZero(t *testin
 	}
 
 	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
 		ReviewPatience: 0, MaxExternalIterations: 3, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetGitChecker(gitMock)
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 3, "codex should run all 3 iterations (stalemate disabled)")
@@ -2620,12 +2620,12 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_NilGitChecker(t *testing.T
 
 	// no git checker set (nil)
 	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
 		ReviewPatience: 2, MaxExternalIterations: 3, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	// deliberately NOT calling r.SetGitChecker()
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, codex.RunCalls(), 3, "codex should run all 3 iterations (git checker nil)")
@@ -2669,7 +2669,7 @@ func TestRunner_ExternalReviewLoop_BreakChannel_ExitsEarly(t *testing.T) {
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	r.SetBreakCh(breakCh)
 
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 	require.NoError(t, err)
 
 	// codex called once (interrupted by break)
@@ -2708,7 +2708,7 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 	// deliberately NOT calling r.SetBreakCh() — nil channel
 
-	err := r.Run(context.Background())
+	err := r.Run(t.Context())
 	require.NoError(t, err)
 
 	assert.Len(t, codex.RunCalls(), 1, "codex should run once")

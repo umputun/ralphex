@@ -220,13 +220,13 @@ func TestStartServerAsync_PortInUse(t *testing.T) {
 	}, session)
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// first server should start
 	errCh, err := startServerAsync(ctx, srv, 8999)
 	require.NoError(t, err)
-	defer func() { <-errCh }()
+	defer func() { cancel(); <-errCh }()
 
 	// second server should fail
 	_, err = startServerAsync(ctx, srv2, 8999)

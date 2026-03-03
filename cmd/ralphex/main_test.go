@@ -73,7 +73,7 @@ func TestPromptPlanDescription(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			reader := strings.NewReader(tc.input)
-			result := plan.PromptDescription(context.Background(), reader, colors)
+			result := plan.PromptDescription(t.Context(), reader, colors)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
@@ -81,13 +81,13 @@ func TestPromptPlanDescription(t *testing.T) {
 	t.Run("eof_returns_empty", func(t *testing.T) {
 		// empty reader simulates EOF (Ctrl+D)
 		reader := strings.NewReader("")
-		result := plan.PromptDescription(context.Background(), reader, colors)
+		result := plan.PromptDescription(t.Context(), reader, colors)
 		assert.Empty(t, result)
 	})
 
 	t.Run("context_canceled_returns_empty", func(t *testing.T) {
 		// canceled context simulates Ctrl+C
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // cancel immediately
 		reader := strings.NewReader("some input\n")
 		result := plan.PromptDescription(ctx, reader, colors)
@@ -156,7 +156,7 @@ func TestPlanFlagConflict(t *testing.T) {
 			PlanDescription: "add caching",
 			PlanFile:        "docs/plans/some-plan.md",
 		}
-		err := run(context.Background(), o)
+		err := run(t.Context(), o)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "--plan flag conflicts")
 	})
@@ -164,7 +164,7 @@ func TestPlanFlagConflict(t *testing.T) {
 	t.Run("no_error_when_only_plan_flag_set", func(t *testing.T) {
 		// this test will fail at a later point (missing git repo etc), but not at validation
 		o := opts{PlanDescription: "add caching"}
-		err := run(context.Background(), o)
+		err := run(t.Context(), o)
 		// should fail at git repo check, not at validation
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "--plan flag conflicts")
@@ -173,7 +173,7 @@ func TestPlanFlagConflict(t *testing.T) {
 	t.Run("no_error_when_only_planfile_set", func(t *testing.T) {
 		// this test will fail at a later point (file not found etc), but not at validation
 		o := opts{PlanFile: "nonexistent-plan.md"}
-		err := run(context.Background(), o)
+		err := run(t.Context(), o)
 		// should fail at git repo check, not at validation
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "--plan flag conflicts")
@@ -194,7 +194,7 @@ func TestPlanModeIntegration(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 		o := opts{PlanDescription: "add caching feature"}
-		err = run(context.Background(), o)
+		err = run(t.Context(), o)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no .git directory")
 	})
@@ -209,7 +209,7 @@ func TestPlanModeIntegration(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 		// run in plan mode - will fail at claude execution but should pass validation and setup
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // cancel immediately to stop execution
 
 		o := opts{PlanDescription: "add caching feature", MaxIterations: 1}
@@ -243,7 +243,7 @@ func TestPlanModeIntegration(t *testing.T) {
 		require.NoError(t, os.MkdirAll("docs/plans", 0o750))
 
 		// run with immediate cancel - should fail at executor, not validation
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		o := opts{PlanDescription: "test plan description", MaxIterations: 1}
@@ -277,7 +277,7 @@ func TestAutoPlanModeDetection(t *testing.T) {
 
 		// run without arguments - should error because we're on feature branch
 		o := opts{MaxIterations: 1}
-		err = run(context.Background(), o)
+		err = run(t.Context(), o)
 		require.Error(t, err)
 		// should still get the no plans found error, not auto-plan-mode
 		assert.ErrorIs(t, err, plan.ErrNoPlansFound, "should return ErrNoPlansFound on feature branch")
@@ -299,7 +299,7 @@ func TestAutoPlanModeDetection(t *testing.T) {
 
 		// run in review mode with canceled context - should not trigger auto-plan-mode
 		// plan is optional in review mode, so it proceeds (then fails on canceled context)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // cancel immediately to avoid actual execution
 
 		o := opts{Review: true, MaxIterations: 1}
@@ -326,7 +326,7 @@ func TestAutoPlanModeDetection(t *testing.T) {
 
 		// run in codex-only mode with canceled context - should not trigger auto-plan-mode
 		// plan is optional in codex-only mode, so it proceeds (then fails on canceled context)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // cancel immediately to avoid actual execution
 
 		o := opts{CodexOnly: true, MaxIterations: 1}
@@ -353,7 +353,7 @@ func TestAutoPlanModeDetection(t *testing.T) {
 
 		// run in external-only mode with canceled context - should not trigger auto-plan-mode
 		// plan is optional in external-only mode, so it proceeds (then fails on canceled context)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // cancel immediately to avoid actual execution
 
 		o := opts{ExternalOnly: true, MaxIterations: 1}
@@ -722,7 +722,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader(""), &stdout)
+		err = ensureRepoHasCommits(t.Context(), gitSvc, strings.NewReader(""), &stdout)
 		assert.NoError(t, err)
 	})
 
@@ -742,7 +742,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		assert.False(t, hasCommits)
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(t.Context(), gitSvc, strings.NewReader("y\n"), &stdout)
 		require.NoError(t, err)
 
 		// verify commit was created
@@ -762,7 +762,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader("n\n"), &stdout)
+		err = ensureRepoHasCommits(t.Context(), gitSvc, strings.NewReader("n\n"), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
 	})
@@ -774,7 +774,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader(""), &stdout)
+		err = ensureRepoHasCommits(t.Context(), gitSvc, strings.NewReader(""), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no commits - please create initial commit manually")
 	})
@@ -788,7 +788,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		require.NoError(t, err)
 
 		var stdout bytes.Buffer
-		err = ensureRepoHasCommits(context.Background(), gitSvc, strings.NewReader("y\n"), &stdout)
+		err = ensureRepoHasCommits(t.Context(), gitSvc, strings.NewReader("y\n"), &stdout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "create initial commit")
 	})
@@ -799,7 +799,7 @@ func TestEnsureRepoHasCommits(t *testing.T) {
 		gitSvc, err := git.NewService(dir, noopLogger())
 		require.NoError(t, err)
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // cancel immediately
 
 		var stdout bytes.Buffer
@@ -830,7 +830,7 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		runGit(t, dir, "commit", "-m", "add test plan")
 
 		// run with tasks-only mode in background
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
 		done := make(chan struct{})
@@ -872,27 +872,18 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		runGit(t, dir, "add", "docs/plans/review-plan.md")
 		runGit(t, dir, "commit", "-m", "add review plan")
 
-		// run with review mode in background
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		// run with review mode, cancel immediately and wait for exit
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		o := opts{Review: true, PlanFile: planPath, MaxIterations: 1}
+		_ = run(ctx, o)
 
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			o := opts{Review: true, PlanFile: planPath, MaxIterations: 1}
-			_ = run(ctx, o)
-		}()
-
-		// verify branch was NOT created (still on master) - wait briefly then check
-		time.Sleep(500 * time.Millisecond)
+		// verify branch was NOT created (still on master)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch, "review mode should not create branch")
-
-		cancel()
-		<-done
 	})
 
 	t.Run("codex_only_mode_does_not_create_branch", func(t *testing.T) {
@@ -913,27 +904,18 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		runGit(t, dir, "add", "docs/plans/codex-plan.md")
 		runGit(t, dir, "commit", "-m", "add codex plan")
 
-		// run with codex-only mode in background
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		// run with codex-only mode, cancel immediately and wait for exit
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1}
+		_ = run(ctx, o)
 
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			o := opts{CodexOnly: true, PlanFile: planPath, MaxIterations: 1}
-			_ = run(ctx, o)
-		}()
-
-		// verify branch was NOT created (still on master) - wait briefly then check
-		time.Sleep(500 * time.Millisecond)
+		// verify branch was NOT created (still on master)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch, "codex-only mode should not create branch")
-
-		cancel()
-		<-done
 	})
 
 	t.Run("external_only_mode_does_not_create_branch", func(t *testing.T) {
@@ -954,27 +936,18 @@ func TestTasksOnlyModeBranchCreation(t *testing.T) {
 		runGit(t, dir, "add", "docs/plans/external-plan.md")
 		runGit(t, dir, "commit", "-m", "add external plan")
 
-		// run with external-only mode in background
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		// run with external-only mode, cancel immediately and wait for exit
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		o := opts{ExternalOnly: true, PlanFile: planPath, MaxIterations: 1}
+		_ = run(ctx, o)
 
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			o := opts{ExternalOnly: true, PlanFile: planPath, MaxIterations: 1}
-			_ = run(ctx, o)
-		}()
-
-		// verify branch was NOT created (still on master) - wait briefly then check
-		time.Sleep(500 * time.Millisecond)
+		// verify branch was NOT created (still on master)
 		gitSvc, err := git.NewService(dir, testColors().Info())
 		require.NoError(t, err)
 		branch, err := gitSvc.CurrentBranch()
 		require.NoError(t, err)
 		assert.Equal(t, "master", branch, "external-only mode should not create branch")
-
-		cancel()
-		<-done
 	})
 }
 
@@ -1030,7 +1003,7 @@ func TestNotificationServiceCreation(t *testing.T) {
 	t.Run("nil_service_send_is_noop", func(t *testing.T) {
 		// verify nil-safe Send doesn't panic
 		var svc *notify.Service
-		svc.Send(context.Background(), notify.Result{Status: "success"})
+		svc.Send(t.Context(), notify.Result{Status: "success"})
 	})
 }
 
@@ -1042,7 +1015,7 @@ func TestExecutePlanRequestHasNotifySvc(t *testing.T) {
 	assert.Nil(t, req.NotifySvc)
 
 	// verify nil-safe call through the struct
-	req.NotifySvc.Send(context.Background(), notify.Result{Status: "success"})
+	req.NotifySvc.Send(t.Context(), notify.Result{Status: "success"})
 }
 
 // runGit executes a git command in the given directory and fails the test on error.
@@ -1279,7 +1252,7 @@ func TestRunWithWorktree(t *testing.T) {
 		wtCleanup := &worktreeCleanupFn{}
 
 		// cancel context immediately to stop executePlan fast
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
@@ -1327,7 +1300,7 @@ func TestRunWithWorktree(t *testing.T) {
 		called := false
 		wtCleanup := &worktreeCleanupFn{fn: func() { called = true }}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		_ = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
@@ -1362,7 +1335,7 @@ func TestRunWithWorktree(t *testing.T) {
 		cfg := &config.Config{WorktreeEnabled: true}
 		wtCleanup := &worktreeCleanupFn{}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		_ = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
@@ -1396,7 +1369,7 @@ func TestWorktreeMode_SkippedForNonBranchModes(t *testing.T) {
 		runGit(t, dir, "add", "docs/plans/wt-skip.md")
 		runGit(t, dir, "commit", "-m", "add wt skip plan")
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		o := opts{Worktree: true, Review: true, PlanFile: planPath, MaxIterations: 1, NoColor: true}
@@ -1439,7 +1412,7 @@ func TestRunWithWorktree_UntrackedPlan(t *testing.T) {
 	cfg := &config.Config{WorktreeEnabled: true}
 	wtCleanup := &worktreeCleanupFn{}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
@@ -1487,8 +1460,7 @@ func TestRunWithWorktree_CreateWorktreeError(t *testing.T) {
 	cfg := &config.Config{WorktreeEnabled: true}
 	wtCleanup := &worktreeCleanupFn{}
 
-	ctx := context.Background()
-	err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+	err = runWithWorktree(t.Context(), opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
 		PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: cfg,
 		Colors: colors, DefaultBranch: "master", WtCleanup: wtCleanup,
 	})
