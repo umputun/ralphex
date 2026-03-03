@@ -217,13 +217,15 @@ Started: 2026-01-22 10:00:00
 	require.NoError(t, tailer.Start(true))
 
 	var liveEvents []Event
-	timeout := time.After(2 * time.Second)
+	idle := time.NewTimer(200 * time.Millisecond)
+	defer idle.Stop()
 loop:
 	for {
 		select {
 		case event := <-tailer.Events():
 			liveEvents = append(liveEvents, event)
-		case <-timeout:
+			idle.Reset(200 * time.Millisecond)
+		case <-idle.C:
 			break loop
 		}
 	}
