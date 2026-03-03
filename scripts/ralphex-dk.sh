@@ -1110,13 +1110,52 @@ def run_tests() -> None:
             self.assertEqual(extra, ["-v", "/x:/y:ro"])
             self.assertEqual(remaining, ["--serve", "plan.md"])
 
+    class TestIsSensitiveName(unittest.TestCase):
+        def test_matches_sensitive_patterns(self) -> None:
+            """names containing KEY, SECRET, TOKEN etc. are sensitive."""
+            self.assertTrue(is_sensitive_name("API_KEY"))
+            self.assertTrue(is_sensitive_name("SECRET_TOKEN"))
+            self.assertTrue(is_sensitive_name("MY_PASSWORD"))
+            self.assertTrue(is_sensitive_name("PASSWD"))
+            self.assertTrue(is_sensitive_name("DB_CREDENTIAL"))
+            self.assertTrue(is_sensitive_name("AUTH_TOKEN"))
+
+        def test_case_insensitivity(self) -> None:
+            """matching is case insensitive."""
+            self.assertTrue(is_sensitive_name("api_key"))
+            self.assertTrue(is_sensitive_name("API_KEY"))
+            self.assertTrue(is_sensitive_name("Api_Key"))
+            self.assertTrue(is_sensitive_name("secret"))
+            self.assertTrue(is_sensitive_name("SECRET"))
+
+        def test_non_sensitive_names(self) -> None:
+            """names without sensitive patterns return False."""
+            self.assertFalse(is_sensitive_name("DEBUG"))
+            self.assertFalse(is_sensitive_name("LOG_LEVEL"))
+            self.assertFalse(is_sensitive_name("PORT"))
+            self.assertFalse(is_sensitive_name("HOME"))
+            self.assertFalse(is_sensitive_name("PATH"))
+
+        def test_partial_matches_at_word_boundary(self) -> None:
+            """substring matches at word boundaries are sensitive."""
+            self.assertTrue(is_sensitive_name("MY_API_KEY"))
+            self.assertTrue(is_sensitive_name("SECRET_VALUE"))
+            self.assertTrue(is_sensitive_name("USER_TOKEN_ID"))
+
+        def test_no_match_without_word_boundary(self) -> None:
+            """substring without word boundary is not sensitive."""
+            self.assertFalse(is_sensitive_name("MONKEY"))  # KEY is substring but not at boundary
+            self.assertFalse(is_sensitive_name("BUCKET"))  # no sensitive pattern
+            self.assertFalse(is_sensitive_name("AUTHENTICATE"))  # AUTH is substring but not complete
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
                TestBuildVolumesGitignore, TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
-               TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes]:
+               TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
+               TestIsSensitiveName]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

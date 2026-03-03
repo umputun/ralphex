@@ -46,14 +46,14 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `TestIsSensitiveName` test class after `TestExtractExtraVolumes`
-- [ ] add test for matching sensitive patterns (KEY, SECRET, TOKEN, etc.)
-- [ ] add test for case insensitivity (api_key, API_KEY, Api_Key)
-- [ ] add test for non-sensitive names returning False
-- [ ] add test for partial matches (MY_API_KEY should match - substring match)
-- [ ] add test for non-matches (MONKEY should NOT match - KEY is substring but not at word boundary)
-- [ ] add `TestIsSensitiveName` to suite loader list
-- [ ] run tests - expect failures (function not implemented yet)
+- [x] add `TestIsSensitiveName` test class after `TestExtractExtraVolumes`
+- [x] add test for matching sensitive patterns (KEY, SECRET, TOKEN, etc.)
+- [x] add test for case insensitivity (api_key, API_KEY, Api_Key)
+- [x] add test for non-sensitive names returning False
+- [x] add test for partial matches (MY_API_KEY should match - substring match)
+- [x] add test for non-matches (MONKEY should NOT match - KEY is substring but not at word boundary)
+- [x] add `TestIsSensitiveName` to suite loader list
+- [x] run tests - expect failures (function not implemented yet)
 
 ### Task 2: Implement is_sensitive_name() function
 
