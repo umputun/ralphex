@@ -111,12 +111,12 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `build_env_vars() -> list[str]` after `build_volumes()`
-- [ ] parse `RALPHEX_EXTRA_ENV` env var, split by comma
-- [ ] validate format: valid env var name with optional `=value`
-- [ ] warn on sensitive names with explicit values (print to stderr)
-- [ ] return flat list `["-e", "FOO=bar", "-e", "BAZ", ...]`
-- [ ] run tests - `TestBuildEnvVars` must pass
+- [x] add `build_env_vars() -> list[str]` after `build_volumes()`
+- [x] parse `RALPHEX_EXTRA_ENV` env var, split by comma
+- [x] validate format: valid env var name with optional `=value`
+- [x] warn on sensitive names with explicit values (print to stderr)
+- [x] return flat list `["-e", "FOO=bar", "-e", "BAZ", ...]`
+- [x] run tests - `TestBuildEnvVars` must pass
 
 ### Task 7: Update run_docker() and main()
 

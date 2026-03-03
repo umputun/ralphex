@@ -14,6 +14,7 @@ import difflib
 import hashlib
 import os
 import platform
+import re
 import shutil
 import signal
 import stat
@@ -349,6 +350,33 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
             vols.extend(["-v", mount])
 
     return vols
+
+
+# regex for valid env var name with optional =value
+ENV_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(=.*)?$")
+
+
+def build_env_vars() -> list[str]:
+    """build docker -e flags from RALPHEX_EXTRA_ENV env var."""
+    extra = os.environ.get("RALPHEX_EXTRA_ENV", "")
+    if not extra:
+        return []
+
+    result: list[str] = []
+    for entry in extra.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if not ENV_VAR_PATTERN.match(entry):
+            continue
+        # extract var name (everything before = or entire entry)
+        name = entry.split("=", 1)[0]
+        # warn if sensitive name with explicit value
+        if "=" in entry and is_sensitive_name(name):
+            print(f"warning: {name} has explicit value - use -e {name} to inherit from host for better security", file=sys.stderr)
+        result.extend(["-e", entry])
+
+    return result
 
 
 def handle_update(image: str) -> int:
