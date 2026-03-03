@@ -118,11 +118,11 @@ Claude verifies findings, fixes confirmed issues, and commits.
 2. Claude evaluates findings, fixes valid issues
 3. Iterates until no open issues
 
-The loop terminates when: all issues resolved, max iterations reached, stalemate detected (via `--review-patience`), or manual `break` command entered.
+The loop terminates when: all issues resolved, max iterations reached, stalemate detected (via `--review-patience`), or manual break via Ctrl+\ (SIGQUIT).
 
 **Stalemate detection:** When the external tool and Claude can't agree on findings, the loop can waste tokens iterating to the max. Set `--review-patience=N` (or `review_patience` in config) to terminate after N consecutive rounds with no commits.
 
-**Manual break:** Type `break` + Enter during the external review loop to terminate it immediately. The current executor run is cancelled via context cancellation. Only available when stdin is a TTY.
+**Manual break:** Press Ctrl+\ (SIGQUIT) during the external review loop to terminate it immediately. The current executor run is cancelled via context cancellation. Not available on Windows.
 
 Supported tools:
 - **codex** (default): OpenAI Codex for independent code review
