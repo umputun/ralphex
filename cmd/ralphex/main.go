@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,11 +12,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jessevdk/go-flags"
+	"golang.org/x/term"
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
@@ -425,6 +428,13 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// create and run the runner
 	r := createRunner(req, o, runnerLog, holder)
+
+	// start stdin break reader for manual external review loop termination.
+	// only when stdin is a TTY (not piped/redirected).
+	if breakCh := startBreakReader(ctx); breakCh != nil {
+		r.SetBreakCh(breakCh)
+	}
+
 	if runErr := r.Run(ctx); runErr != nil {
 		// send failure notification before returning error.
 		// use context.Background() because the parent ctx may be canceled (e.g. SIGINT),
@@ -1008,6 +1018,30 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// startBreakReader starts a goroutine that reads stdin for "break" command.
+// returns a channel that is closed when "break" is typed, or nil if stdin is not a TTY.
+// the goroutine exits when the context is done.
+func startBreakReader(ctx context.Context) <-chan struct{} {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return nil
+	}
+
+	ch := make(chan struct{})
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			if ctx.Err() != nil {
+				return
+			}
+			if strings.TrimSpace(scanner.Text()) == "break" {
+				close(ch)
+				return
+			}
+		}
+	}()
+	return ch
 }
 
 // applyCLIOverrides applies CLI flag overrides to config.

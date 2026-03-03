@@ -94,14 +94,14 @@ Line numbers are approximate and may shift during implementation.
 - Modify: `pkg/processor/runner.go` — `Runner` struct, `runExternalReviewLoop()`
 - Modify: `pkg/processor/runner_test.go`
 
-- [ ] add `BreakCh <-chan struct{}` field to `Runner` struct (nil = feature disabled)
-- [ ] add `SetBreakCh(ch <-chan struct{})` setter on Runner (follows `SetGitChecker` pattern)
-- [ ] in `cmd/ralphex/main.go`: create break channel, start stdin reader goroutine that reads lines and sends on "break" input. Check `isatty` on stdin — if not a TTY, skip reader (leave channel nil). Wire channel to runner via `SetBreakCh()`
-- [ ] in `runExternalReviewLoop()`: if `r.breakCh` is not nil, derive a child context that cancels when break channel fires. Use this child context for executor calls within the loop so break takes effect immediately, interrupting the current executor run
-- [ ] on break (context cancelled via break channel): log `"manual break requested, external review terminated early"`, return nil
-- [ ] write test: pre-closed break channel, verify loop exits early via context cancellation
-- [ ] write test: nil break channel, verify loop runs normally
-- [ ] run `go test ./pkg/processor/...` — must pass before task 5
+- [x] add `BreakCh <-chan struct{}` field to `Runner` struct (nil = feature disabled)
+- [x] add `SetBreakCh(ch <-chan struct{})` setter on Runner (follows `SetGitChecker` pattern)
+- [x] in `cmd/ralphex/main.go`: create break channel, start stdin reader goroutine that reads lines and sends on "break" input. Check `isatty` on stdin — if not a TTY, skip reader (leave channel nil). Wire channel to runner via `SetBreakCh()`
+- [x] in `runExternalReviewLoop()`: if `r.breakCh` is not nil, derive a child context that cancels when break channel fires. Use this child context for executor calls within the loop so break takes effect immediately, interrupting the current executor run
+- [x] on break (context cancelled via break channel): log `"manual break requested, external review terminated early"`, return nil
+- [x] write test: pre-closed break channel, verify loop exits early via context cancellation
+- [x] write test: nil break channel, verify loop runs normally
+- [x] run `go test ./pkg/processor/...` — must pass before task 5
 
 ### Task 5: Update documentation and CLAUDE.md
 

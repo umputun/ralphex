@@ -105,6 +105,7 @@ type Runner struct {
 	iterationDelay time.Duration
 	taskRetryCount int
 	waitOnLimit    time.Duration
+	breakCh        <-chan struct{} // nil = feature disabled; close to break external review loop
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
@@ -214,6 +215,12 @@ func (r *Runner) SetInputCollector(c InputCollector) {
 // SetGitChecker sets the git checker for no-commit detection in review loops.
 func (r *Runner) SetGitChecker(g GitChecker) {
 	r.git = g
+}
+
+// SetBreakCh sets the break channel for manual termination of the external review loop.
+// closing the channel causes the current executor run to be canceled and the loop to exit.
+func (r *Runner) SetBreakCh(ch <-chan struct{}) {
+	r.breakCh = ch
 }
 
 // Run executes the main loop based on configured mode.
@@ -562,12 +569,20 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		maxIterations = r.cfg.MaxExternalIterations
 	}
 
+	// derive a child context that cancels when break channel fires
+	loopCtx, loopCancel := r.breakContext(ctx)
+	defer loopCancel()
+
 	var claudeResponse string // first iteration has no prior response
 	var unchangedRounds int   // consecutive iterations with no commits (for stalemate detection)
 
 	for i := 1; i <= maxIterations; i++ {
 		select {
-		case <-ctx.Done():
+		case <-loopCtx.Done():
+			if r.isManualBreak(ctx) {
+				r.log.Print("manual break requested, external review terminated early")
+				return nil
+			}
 			return fmt.Errorf("%s loop: %w", cfg.name, ctx.Err())
 		default:
 		}
@@ -575,8 +590,12 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		r.log.PrintSection(cfg.makeSection(i))
 
 		// run external review tool
-		reviewResult := r.runWithLimitRetry(ctx, cfg.runReview, cfg.buildPrompt(i == 1, claudeResponse), cfg.name)
+		reviewResult := r.runWithLimitRetry(loopCtx, cfg.runReview, cfg.buildPrompt(i == 1, claudeResponse), cfg.name)
 		if reviewResult.Error != nil {
+			if r.isManualBreak(ctx) {
+				r.log.Print("manual break requested, external review terminated early")
+				return nil
+			}
 			if err := r.handlePatternMatchError(reviewResult.Error, cfg.name); err != nil {
 				return err
 			}
@@ -597,11 +616,15 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// pass output to claude for evaluation and fixing
 		r.phaseHolder.Set(status.PhaseClaudeEval)
 		r.log.PrintSection(status.NewClaudeEvalSection())
-		claudeResult := r.runWithLimitRetry(ctx, r.claude.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
+		claudeResult := r.runWithLimitRetry(loopCtx, r.claude.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
 
 		// restore codex phase for next iteration
 		r.phaseHolder.Set(status.PhaseCodex)
 		if claudeResult.Error != nil {
+			if r.isManualBreak(ctx) {
+				r.log.Print("manual break requested, external review terminated early")
+				return nil
+			}
 			if err := r.handlePatternMatchError(claudeResult.Error, "claude"); err != nil {
 				return err
 			}
@@ -629,13 +652,40 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 			}
 		}
 
-		if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+		if err := r.sleepWithContext(loopCtx, r.iterationDelay); err != nil {
+			if r.isManualBreak(ctx) {
+				r.log.Print("manual break requested, external review terminated early")
+				return nil
+			}
 			return fmt.Errorf("interrupted: %w", err)
 		}
 	}
 
 	r.log.Print("max %s iterations reached, continuing to next phase...", cfg.name)
 	return nil
+}
+
+// breakContext derives a child context that cancels when the break channel fires.
+// if no break channel is configured, returns the parent context and a no-op cancel.
+func (r *Runner) breakContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if r.breakCh == nil {
+		return parent, func() {}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	go func() {
+		select {
+		case <-r.breakCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
+}
+
+// isManualBreak returns true if the break channel was fired but the parent context is still alive.
+// this distinguishes manual break from SIGINT/timeout.
+func (r *Runner) isManualBreak(parentCtx context.Context) bool {
+	return r.breakCh != nil && parentCtx.Err() == nil
 }
 
 // buildCodexPrompt creates the prompt for codex review.

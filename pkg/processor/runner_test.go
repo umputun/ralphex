@@ -2577,3 +2577,86 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_NilGitChecker(t *testing.T
 	}
 	assert.False(t, foundStalemate, "should not log stalemate when git checker is nil")
 }
+
+func TestRunner_ExternalReviewLoop_BreakChannel_ExitsEarly(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// break channel is closed during codex execution, causing context cancellation.
+	// codex-only flow: codex run (break fires) → loop exits → post-codex claude review.
+	breakCh := make(chan struct{})
+
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			return executor.Result{Output: "done", Signal: status.ReviewDone}
+		},
+	}
+	codex := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			close(breakCh) // trigger break during codex execution
+			<-ctx.Done()   // wait for context cancellation
+			return executor.Result{Error: ctx.Err()}
+		},
+	}
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		MaxExternalIterations: 5, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	r.SetBreakCh(breakCh)
+
+	err := r.Run(context.Background())
+	require.NoError(t, err)
+
+	// codex called once (interrupted by break)
+	assert.Len(t, codex.RunCalls(), 1, "codex should run once before break interrupts it")
+
+	// claude called once for post-codex review (after break exits external loop)
+	assert.Len(t, claude.RunCalls(), 1, "claude should be called once for post-codex review")
+
+	// verify break log message
+	var foundBreak bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "manual break requested") {
+			foundBreak = true
+			break
+		}
+	}
+	assert.True(t, foundBreak, "should log manual break message")
+}
+
+func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// nil break channel: loop runs to completion based on CodexDone signal
+	claude := newMockExecutor([]executor.Result{
+		{Output: "no issues", Signal: status.CodexDone}, // claude eval (codex done)
+		{Output: "done", Signal: status.ReviewDone},     // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue in foo.go:10"}, // codex iteration 1
+	})
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		MaxExternalIterations: 5, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	// deliberately NOT calling r.SetBreakCh() — nil channel
+
+	err := r.Run(context.Background())
+	require.NoError(t, err)
+
+	assert.Len(t, codex.RunCalls(), 1, "codex should run once")
+	assert.Len(t, claude.RunCalls(), 2, "claude: 1 eval + 1 post-codex review")
+
+	// verify no break log
+	var foundBreak bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "manual break") {
+			foundBreak = true
+			break
+		}
+	}
+	assert.False(t, foundBreak, "should not log manual break with nil channel")
+}
