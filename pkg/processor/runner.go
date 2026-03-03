@@ -525,6 +525,25 @@ func (r *Runner) checkStalemate(headBefore, headAfter, diffBefore, diffAfter str
 	return 0
 }
 
+// updateStalemate checks if review patience is enabled, computes the "after" git state,
+// and returns the updated unchanged-rounds counter plus a flag indicating stalemate.
+// skips the update if "after" values are empty (transient git error) to avoid resetting the counter.
+func (r *Runner) updateStalemate(headBefore, diffBefore string, unchangedRounds int) (int, bool) {
+	if r.cfg.ReviewPatience <= 0 || headBefore == "" {
+		return unchangedRounds, false
+	}
+	// skip stalemate update if "after" values are empty (transient git error),
+	// so errors don't reset unchangedRounds and inadvertently disable early exit
+	if headAfter, diffAfter := r.headHash(), r.diffFingerprint(); headAfter != "" && diffAfter != "" {
+		unchangedRounds = r.checkStalemate(headBefore, headAfter, diffBefore, diffAfter, unchangedRounds)
+	}
+	if unchangedRounds >= r.cfg.ReviewPatience {
+		r.log.Print("stalemate detected after %d unchanged rounds, external review terminated early", unchangedRounds)
+		return unchangedRounds, true
+	}
+	return unchangedRounds, false
+}
+
 // externalReviewTool returns the effective external review tool to use.
 // handles backward compatibility: codex_enabled = false → "none"
 // the CodexEnabled flag takes precedence for backward compatibility.
@@ -677,12 +696,10 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// the eval prompt tells claude not to commit during fix rounds, so HEAD alone can't distinguish
 		// "rejected findings" from "made fixes without commit". checking the diff fingerprint catches
 		// working tree edits, making the detection accurate for both cases.
-		if r.cfg.ReviewPatience > 0 && headBefore != "" {
-			unchangedRounds = r.checkStalemate(headBefore, r.headHash(), diffBefore, r.diffFingerprint(), unchangedRounds)
-			if unchangedRounds >= r.cfg.ReviewPatience {
-				r.log.Print("stalemate detected after %d unchanged rounds, external review terminated early", unchangedRounds)
-				return nil
-			}
+		var stalemate bool
+		unchangedRounds, stalemate = r.updateStalemate(headBefore, diffBefore, unchangedRounds)
+		if stalemate {
+			return nil
 		}
 
 		if err := r.sleepWithContext(loopCtx, r.iterationDelay); err != nil {

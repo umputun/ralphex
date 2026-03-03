@@ -120,7 +120,7 @@ Claude verifies findings, fixes confirmed issues, and commits.
 
 The loop terminates when: all issues resolved, max iterations reached, stalemate detected (via `--review-patience`), or manual break via Ctrl+\ (SIGQUIT).
 
-**Stalemate detection:** When the external tool and Claude can't agree on findings, the loop can waste tokens iterating to the max. Set `--review-patience=N` (or `review_patience` in config) to terminate after N consecutive rounds with no commits.
+**Stalemate detection:** When the external tool and Claude can't agree on findings, the loop can waste tokens iterating to the max. Set `--review-patience=N` (or `review_patience` in config) to terminate after N consecutive rounds with no commits or working tree changes.
 
 **Manual break:** Press Ctrl+\ (SIGQUIT) during the external review loop to terminate it immediately. The current executor run is cancelled via context cancellation. Not available on Windows.
 

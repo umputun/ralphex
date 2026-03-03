@@ -224,6 +224,12 @@ loop:
 		select {
 		case event := <-tailer.Events():
 			liveEvents = append(liveEvents, event)
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
 			idle.Reset(200 * time.Millisecond)
 		case <-idle.C:
 			break loop
