@@ -1166,6 +1166,49 @@ def run_tests() -> None:
             self.assertFalse(is_sensitive_name("BUCKET"))  # no sensitive pattern
             self.assertFalse(is_sensitive_name("AUTHENTICATE"))  # AUTH is substring but not complete
 
+    class TestExtractExtraEnv(unittest.TestCase):
+        def test_extracts_e_flag_with_value(self) -> None:
+            """-e FOO=bar is extracted from args."""
+            extra, remaining = extract_extra_env(["-e", "FOO=bar", "plan.md"])
+            self.assertEqual(extra, ["-e", "FOO=bar"])
+            self.assertEqual(remaining, ["plan.md"])
+
+        def test_extracts_e_flag_name_only(self) -> None:
+            """-e FOO (name-only) is extracted from args."""
+            extra, remaining = extract_extra_env(["-e", "FOO", "plan.md"])
+            self.assertEqual(extra, ["-e", "FOO"])
+            self.assertEqual(remaining, ["plan.md"])
+
+        def test_extracts_env_flag(self) -> None:
+            """--env FOO=bar is extracted from args."""
+            extra, remaining = extract_extra_env(["--env", "FOO=bar", "plan.md"])
+            self.assertEqual(extra, ["-e", "FOO=bar"])
+            self.assertEqual(remaining, ["plan.md"])
+
+        def test_multiple_env_flags(self) -> None:
+            """multiple -e flags are all extracted."""
+            extra, remaining = extract_extra_env(["-e", "FOO=bar", "-e", "BAZ", "plan.md"])
+            self.assertEqual(extra, ["-e", "FOO=bar", "-e", "BAZ"])
+            self.assertEqual(remaining, ["plan.md"])
+
+        def test_no_env_flags(self) -> None:
+            """args without -e pass through unchanged."""
+            extra, remaining = extract_extra_env(["--serve", "plan.md"])
+            self.assertEqual(extra, [])
+            self.assertEqual(remaining, ["--serve", "plan.md"])
+
+        def test_e_at_end_without_value(self) -> None:
+            """-e at end of args without a value is kept as remaining."""
+            extra, remaining = extract_extra_env(["plan.md", "-e"])
+            self.assertEqual(extra, [])
+            self.assertEqual(remaining, ["plan.md", "-e"])
+
+        def test_mixed_with_other_flags(self) -> None:
+            """-e interleaved with other flags."""
+            extra, remaining = extract_extra_env(["--serve", "-e", "DEBUG=1", "plan.md"])
+            self.assertEqual(extra, ["-e", "DEBUG=1"])
+            self.assertEqual(remaining, ["--serve", "plan.md"])
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -1173,7 +1216,7 @@ def run_tests() -> None:
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
-               TestIsSensitiveName]:
+               TestIsSensitiveName, TestExtractExtraEnv]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

@@ -70,16 +70,16 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `TestExtractExtraEnv` test class (mirror `TestExtractExtraVolumes`)
-- [ ] add test for `-e FOO=bar` extraction
-- [ ] add test for `-e FOO` (name-only) extraction
-- [ ] add test for `--env` variant
-- [ ] add test for multiple flags
-- [ ] add test for no flags (passthrough)
-- [ ] add test for `-e` at end without value
-- [ ] add test for mixed with other flags
-- [ ] add `TestExtractExtraEnv` to suite loader list
-- [ ] run tests - expect failures
+- [x] add `TestExtractExtraEnv` test class (mirror `TestExtractExtraVolumes`)
+- [x] add test for `-e FOO=bar` extraction
+- [x] add test for `-e FOO` (name-only) extraction
+- [x] add test for `--env` variant
+- [x] add test for multiple flags
+- [x] add test for no flags (passthrough)
+- [x] add test for `-e` at end without value
+- [x] add test for mixed with other flags
+- [x] add `TestExtractExtraEnv` to suite loader list
+- [x] run tests - expect failures
 
 ### Task 4: Implement extract_extra_env() function
 
