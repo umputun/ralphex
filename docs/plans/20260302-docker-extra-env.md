@@ -132,11 +132,11 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] verify `RALPHEX_EXTRA_ENV="FOO=bar,BAZ"` works
-- [ ] verify `-e FOO=bar -e BAZ` CLI flags work
-- [ ] verify sensitive name warning appears for `API_KEY=secret`
-- [ ] verify name-only inheritance works (`-e VARNAME`)
-- [ ] run full test suite: `python3 scripts/ralphex-dk.sh --test`
+- [x] verify `RALPHEX_EXTRA_ENV="FOO=bar,BAZ"` works
+- [x] verify `-e FOO=bar -e BAZ` CLI flags work
+- [x] verify sensitive name warning appears for `API_KEY=secret`
+- [x] verify name-only inheritance works (`-e VARNAME`)
+- [x] run full test suite: `python3 scripts/ralphex-dk.sh --test`
 
 ### Task 9: Update documentation
 
