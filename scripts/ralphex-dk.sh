@@ -1224,6 +1224,95 @@ def run_tests() -> None:
             self.assertEqual(extra, ["-e", "DEBUG=1"])
             self.assertEqual(remaining, ["--serve", "plan.md"])
 
+    class TestBuildEnvVars(unittest.TestCase):
+        def test_extra_env_with_explicit_values(self) -> None:
+            """RALPHEX_EXTRA_ENV with explicit values builds -e flags."""
+            old = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ["RALPHEX_EXTRA_ENV"] = "FOO=bar,BAZ=qux"
+            try:
+                env_vars = build_env_vars()
+                self.assertEqual(env_vars, ["-e", "FOO=bar", "-e", "BAZ=qux"])
+            finally:
+                if old is None:
+                    os.environ.pop("RALPHEX_EXTRA_ENV", None)
+                else:
+                    os.environ["RALPHEX_EXTRA_ENV"] = old
+
+        def test_name_only_inherits_from_host(self) -> None:
+            """RALPHEX_EXTRA_ENV with name-only entries inherit from host."""
+            old = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ["RALPHEX_EXTRA_ENV"] = "FOO,BAR"
+            try:
+                env_vars = build_env_vars()
+                self.assertEqual(env_vars, ["-e", "FOO", "-e", "BAR"])
+            finally:
+                if old is None:
+                    os.environ.pop("RALPHEX_EXTRA_ENV", None)
+                else:
+                    os.environ["RALPHEX_EXTRA_ENV"] = old
+
+        def test_comma_separation_and_whitespace_trimming(self) -> None:
+            """entries are split by comma and whitespace is trimmed."""
+            old = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ["RALPHEX_EXTRA_ENV"] = "FOO=bar , BAZ , QUUX=123"
+            try:
+                env_vars = build_env_vars()
+                self.assertEqual(env_vars, ["-e", "FOO=bar", "-e", "BAZ", "-e", "QUUX=123"])
+            finally:
+                if old is None:
+                    os.environ.pop("RALPHEX_EXTRA_ENV", None)
+                else:
+                    os.environ["RALPHEX_EXTRA_ENV"] = old
+
+        def test_invalid_entries_skipped(self) -> None:
+            """entries with invalid var names are silently skipped."""
+            old = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ["RALPHEX_EXTRA_ENV"] = "123BAD,FOO=bar,-invalid,GOOD"
+            try:
+                env_vars = build_env_vars()
+                self.assertEqual(env_vars, ["-e", "FOO=bar", "-e", "GOOD"])
+            finally:
+                if old is None:
+                    os.environ.pop("RALPHEX_EXTRA_ENV", None)
+                else:
+                    os.environ["RALPHEX_EXTRA_ENV"] = old
+
+        def test_empty_env_var_is_noop(self) -> None:
+            """empty or unset RALPHEX_EXTRA_ENV returns empty list."""
+            old = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ.pop("RALPHEX_EXTRA_ENV", None)
+            try:
+                env_vars = build_env_vars()
+                self.assertEqual(env_vars, [])
+                os.environ["RALPHEX_EXTRA_ENV"] = ""
+                env_vars = build_env_vars()
+                self.assertEqual(env_vars, [])
+            finally:
+                if old is None:
+                    os.environ.pop("RALPHEX_EXTRA_ENV", None)
+                else:
+                    os.environ["RALPHEX_EXTRA_ENV"] = old
+
+        def test_sensitive_name_warning(self) -> None:
+            """sensitive name with explicit value prints warning to stderr."""
+            old = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ["RALPHEX_EXTRA_ENV"] = "API_KEY=secret"
+            try:
+                import io
+                captured = io.StringIO()
+                with unittest.mock.patch("sys.stderr", captured):
+                    env_vars = build_env_vars()
+                self.assertEqual(env_vars, ["-e", "API_KEY=secret"])
+                warning = captured.getvalue()
+                self.assertIn("warning:", warning)
+                self.assertIn("API_KEY", warning)
+                self.assertIn("-e API_KEY", warning)
+            finally:
+                if old is None:
+                    os.environ.pop("RALPHEX_EXTRA_ENV", None)
+                else:
+                    os.environ["RALPHEX_EXTRA_ENV"] = old
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -1231,7 +1320,7 @@ def run_tests() -> None:
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
-               TestIsSensitiveName, TestExtractExtraEnv]:
+               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

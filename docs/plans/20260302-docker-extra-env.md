@@ -96,15 +96,15 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `TestBuildEnvVars` test class
-- [ ] add test for `RALPHEX_EXTRA_ENV` parsing with explicit values
-- [ ] add test for name-only entries (inherit from host)
-- [ ] add test for comma separation and whitespace trimming
-- [ ] add test for invalid entries skipped (entries with invalid var names)
-- [ ] add test for empty env var is noop
-- [ ] add test for sensitive name warning (capture stderr)
-- [ ] add `TestBuildEnvVars` to suite loader list
-- [ ] run tests - expect failures
+- [x] add `TestBuildEnvVars` test class
+- [x] add test for `RALPHEX_EXTRA_ENV` parsing with explicit values
+- [x] add test for name-only entries (inherit from host)
+- [x] add test for comma separation and whitespace trimming
+- [x] add test for invalid entries skipped (entries with invalid var names)
+- [x] add test for empty env var is noop
+- [x] add test for sensitive name warning (capture stderr)
+- [x] add `TestBuildEnvVars` to suite loader list
+- [x] run tests - expect failures
 
 ### Task 6: Implement build_env_vars() function
 
