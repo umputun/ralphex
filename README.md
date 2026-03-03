@@ -329,6 +329,8 @@ export API_KEY=secret123
 ralphex -e API_KEY docs/plans/feature.md
 ```
 
+**Note:** The wrapper's `-e` flag shadows ralphex's `-e` (`--external-only`). Use `--external-only` (long form) when running via Docker wrapper.
+
 **Updating:**
 ```bash
 ralphex --update         # pull latest docker image
@@ -478,7 +480,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `--max-external-iterations` | Override external review iteration limit (0 = auto) | 0 |
 | `--review-patience` | Terminate external review after N unchanged rounds (0 = disabled) | 0 |
 | `-r, --review` | Skip task execution, run full review pipeline | false |
-| `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
+| `-e, --external-only` | Skip tasks and first review, run only external review loop (use `--external-only` in Docker wrapper, `-e` is used for env vars) | false |
 | `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |

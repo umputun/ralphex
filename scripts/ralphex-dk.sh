@@ -14,6 +14,9 @@ Environment variables:
 - RALPHEX_EXTRA_ENV: comma-separated env vars (VAR=value or VAR to inherit from host)
 - RALPHEX_EXTRA_VOLUMES: comma-separated volume mounts (src:dest[:opts])
 - Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values
+
+Note: -e/--env flags are consumed by wrapper for Docker env vars.
+      Use --external-only (long form) instead of -e for external-only mode.
 """
 
 import difflib
@@ -52,16 +55,20 @@ def is_sensitive_name(name: str) -> bool:
     """check if env var name contains sensitive patterns at word boundaries."""
     upper = name.upper()
     for pattern in SENSITIVE_PATTERNS:
-        idx = upper.find(pattern)
-        if idx == -1:
-            continue
-        # check left boundary: start of string or underscore
-        left_ok = idx == 0 or upper[idx - 1] == "_"
-        # check right boundary: end of string or underscore
-        end = idx + len(pattern)
-        right_ok = end == len(upper) or upper[end] == "_"
-        if left_ok and right_ok:
-            return True
+        # check ALL occurrences of pattern, not just the first
+        start = 0
+        while True:
+            idx = upper.find(pattern, start)
+            if idx == -1:
+                break
+            # check left boundary: start of string or underscore
+            left_ok = idx == 0 or upper[idx - 1] == "_"
+            # check right boundary: end of string or underscore
+            end = idx + len(pattern)
+            right_ok = end == len(upper) or upper[end] == "_"
+            if left_ok and right_ok:
+                return True
+            start = idx + 1  # move past this occurrence and try again
     return False
 
 
@@ -1226,6 +1233,13 @@ def run_tests() -> None:
             self.assertTrue(is_sensitive_name("MY_API_KEY"))
             self.assertTrue(is_sensitive_name("SECRET_VALUE"))
             self.assertTrue(is_sensitive_name("USER_TOKEN_ID"))
+
+        def test_later_occurrence_matches(self) -> None:
+            """pattern at later position in string is still detected."""
+            # MONKEY_API_KEY: first KEY in MONKEY is not at boundary, but _KEY at end is
+            self.assertTrue(is_sensitive_name("MONKEY_API_KEY"))
+            self.assertTrue(is_sensitive_name("KEY_MONKEY_KEY"))  # KEY at start and end
+            self.assertTrue(is_sensitive_name("XSECRET_TOKEN"))  # SECRET not at boundary, but TOKEN is
 
         def test_no_match_without_word_boundary(self) -> None:
             """substring without word boundary is not sensitive."""
