@@ -604,6 +604,14 @@ def main() -> int:
 
         # build env vars from RALPHEX_EXTRA_ENV, then append CLI -e/--env flags
         env_vars = build_env_vars()
+        # warn for CLI flags with sensitive names and explicit values
+        for i in range(0, len(cli_env), 2):
+            if i + 1 < len(cli_env):
+                entry = cli_env[i + 1]
+                if "=" in entry:
+                    name = entry.split("=", 1)[0]
+                    if is_sensitive_name(name):
+                        print(f"warning: {name} has explicit value - use -e {name} to inherit from host for better security", file=sys.stderr)
         env_vars.extend(cli_env)
 
         if claude_config_dir_env:
@@ -1223,7 +1231,9 @@ def run_tests() -> None:
             """substring without word boundary is not sensitive."""
             self.assertFalse(is_sensitive_name("MONKEY"))  # KEY is substring but not at boundary
             self.assertFalse(is_sensitive_name("BUCKET"))  # no sensitive pattern
-            self.assertFalse(is_sensitive_name("AUTHENTICATE"))  # AUTH is substring but not complete
+            self.assertFalse(is_sensitive_name("AUTHENTICATE"))  # AUTH not at word boundary (no _ before/after)
+            self.assertFalse(is_sensitive_name("AUTHX"))  # AUTH at start but no right boundary
+            self.assertFalse(is_sensitive_name("XAUTH"))  # AUTH at end but no left boundary
 
     class TestExtractExtraEnv(unittest.TestCase):
         def test_extracts_e_flag_with_value(self) -> None:
@@ -1351,6 +1361,24 @@ def run_tests() -> None:
                 self.assertIn("warning:", warning)
                 self.assertIn("API_KEY", warning)
                 self.assertIn("-e API_KEY", warning)
+            finally:
+                if old is None:
+                    os.environ.pop("RALPHEX_EXTRA_ENV", None)
+                else:
+                    os.environ["RALPHEX_EXTRA_ENV"] = old
+
+        def test_sensitive_name_no_warning_for_name_only(self) -> None:
+            """sensitive name without explicit value does not print warning."""
+            old = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ["RALPHEX_EXTRA_ENV"] = "API_KEY"
+            try:
+                import io
+                captured = io.StringIO()
+                with unittest.mock.patch("sys.stderr", captured):
+                    env_vars = build_env_vars()
+                self.assertEqual(env_vars, ["-e", "API_KEY"])
+                warning = captured.getvalue()
+                self.assertEqual(warning, "")
             finally:
                 if old is None:
                     os.environ.pop("RALPHEX_EXTRA_ENV", None)
