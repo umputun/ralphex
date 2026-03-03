@@ -60,10 +60,10 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `SENSITIVE_PATTERNS` constant after `SCRIPT_URL`
-- [ ] add `is_sensitive_name(name: str) -> bool` function after `selinux_enabled()`
-- [ ] implement case-insensitive pattern matching
-- [ ] run tests - `TestIsSensitiveName` must pass
+- [x] add `SENSITIVE_PATTERNS` constant after `SCRIPT_URL`
+- [x] add `is_sensitive_name(name: str) -> bool` function after `selinux_enabled()`
+- [x] implement case-insensitive pattern matching
+- [x] run tests - `TestIsSensitiveName` must pass
 
 ### Task 3: Add TestExtractExtraEnv test class (TDD)
 

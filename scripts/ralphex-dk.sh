@@ -31,6 +31,7 @@ from urllib.request import urlopen
 DEFAULT_IMAGE = "ghcr.io/umputun/ralphex-go:latest"
 DEFAULT_PORT = "8080"
 SCRIPT_URL = "https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
+SENSITIVE_PATTERNS = ["KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH"]
 
 
 def selinux_enabled() -> bool:
@@ -38,6 +39,23 @@ def selinux_enabled() -> bool:
     if platform.system() != "Linux":
         return False
     return Path("/sys/fs/selinux/enforce").exists()
+
+
+def is_sensitive_name(name: str) -> bool:
+    """check if env var name contains sensitive patterns at word boundaries."""
+    upper = name.upper()
+    for pattern in SENSITIVE_PATTERNS:
+        idx = upper.find(pattern)
+        if idx == -1:
+            continue
+        # check left boundary: start of string or underscore
+        left_ok = idx == 0 or upper[idx - 1] == "_"
+        # check right boundary: end of string or underscore
+        end = idx + len(pattern)
+        right_ok = end == len(upper) or upper[end] == "_"
+        if left_ok and right_ok:
+            return True
+    return False
 
 
 def resolve_path(path: Path) -> Path:
