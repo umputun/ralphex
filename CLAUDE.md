@@ -179,21 +179,6 @@ Key files:
 - `pkg/processor/signals.go` - signal detection helpers (IsReviewDone, IsCodexDone, etc.)
 - `pkg/config/defaults/prompts/make_plan.txt` - plan creation prompt
 
-### Docker Wrapper Script
-
-`scripts/ralphex-dk.sh` is a Python wrapper that runs ralphex in Docker containers:
-
-- Env vars for configuration: `RALPHEX_IMAGE`, `RALPHEX_PORT`, `RALPHEX_CONFIG_DIR`, `CLAUDE_CONFIG_DIR`
-- `RALPHEX_EXTRA_VOLUMES`: comma-separated volume mounts (e.g., `/data:/mnt/data:ro`)
-- `RALPHEX_EXTRA_ENV`: comma-separated env vars (`VAR=value` or `VAR` to inherit from host)
-- `-v`/`--volume` and `-e`/`--env` CLI flags consumed by wrapper, not passed to ralphex
-- Security warning emitted for sensitive names (KEY, SECRET, TOKEN, PASSWORD, PASSWD, CREDENTIAL, AUTH) with explicit values
-
-Key functions:
-- `is_sensitive_name(name)` - word-boundary pattern matching for sensitive env var names
-- `extract_extra_env(args)` - extracts `-e`/`--env` flags from CLI args
-- `build_env_vars()` - parses `RALPHEX_EXTRA_ENV` and returns Docker `-e` flags
-
 ## Platform Support
 
 - **Linux/macOS:** fully supported
