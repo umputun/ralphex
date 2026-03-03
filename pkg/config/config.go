@@ -63,6 +63,7 @@ type Config struct {
 	MaxIterations         int  `json:"max_iterations"`
 	MaxIterationsSet      bool `json:"-"` // tracks if max_iterations was explicitly set in config
 	MaxExternalIterations int  `json:"max_external_iterations"`
+	ReviewPatience        int  `json:"review_patience"`
 
 	FinalizeEnabled    bool `json:"finalize_enabled"`
 	FinalizeEnabledSet bool `json:"-"` // tracks if finalize_enabled was explicitly set in config
@@ -258,6 +259,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		MaxIterations:         values.MaxIterations,
 		MaxIterationsSet:      values.MaxIterationsSet,
 		MaxExternalIterations: values.MaxExternalIterations,
+		ReviewPatience:        values.ReviewPatience,
 		FinalizeEnabled:       values.FinalizeEnabled,
 		FinalizeEnabledSet:    values.FinalizeEnabledSet,
 		WorktreeEnabled:       values.WorktreeEnabled,

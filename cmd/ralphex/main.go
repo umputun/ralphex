@@ -32,6 +32,7 @@ import (
 type opts struct {
 	MaxIterations         int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
 	MaxExternalIterations int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
+	ReviewPatience        int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
 	Review                bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
 	ExternalOnly          bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
 	CodexOnly             bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
@@ -746,12 +747,19 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		maxExtIter = o.MaxExternalIterations
 	}
 
+	// resolve review patience: CLI flag > config file > 0 (disabled)
+	reviewPatience := req.Config.ReviewPatience
+	if o.ReviewPatience > 0 {
+		reviewPatience = o.ReviewPatience
+	}
+
 	r := processor.New(processor.Config{
 		PlanFile:              req.PlanFile,
 		ProgressPath:          log.Path(),
 		Mode:                  req.Mode,
 		MaxIterations:         resolveMaxIterations(o.MaxIterations, req.Config),
 		MaxExternalIterations: maxExtIter,
+		ReviewPatience:        reviewPatience,
 		Debug:                 o.Debug,
 		NoColor:               o.NoColor,
 		IterationDelayMs:      req.Config.IterationDelayMs,

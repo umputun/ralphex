@@ -40,6 +40,7 @@ type Values struct {
 	MaxIterations         int
 	MaxIterationsSet      bool // tracks if max_iterations was explicitly set
 	MaxExternalIterations int  // override external review iteration limit (0 = auto)
+	ReviewPatience        int  // terminate external review after N unchanged rounds (0 = disabled)
 	FinalizeEnabled       bool
 	FinalizeEnabledSet    bool // tracks if finalize_enabled was explicitly set
 	WorktreeEnabled       bool
@@ -259,6 +260,16 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		}
 		values.MaxExternalIterations = val
 	}
+	if key, err := section.GetKey("review_patience"); err == nil {
+		val, intErr := key.Int()
+		if intErr != nil {
+			return Values{}, fmt.Errorf("invalid review_patience: %w", intErr)
+		}
+		if val < 0 {
+			return Values{}, fmt.Errorf("invalid review_patience: must be non-negative, got %d", val)
+		}
+		values.ReviewPatience = val
+	}
 
 	// finalize settings
 	if key, err := section.GetKey("finalize_enabled"); err == nil {
@@ -437,6 +448,9 @@ func (dst *Values) mergeExecutionFrom(src *Values) {
 	}
 	if src.MaxExternalIterations > 0 {
 		dst.MaxExternalIterations = src.MaxExternalIterations
+	}
+	if src.ReviewPatience > 0 {
+		dst.ReviewPatience = src.ReviewPatience
 	}
 }
 

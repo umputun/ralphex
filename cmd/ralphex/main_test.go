@@ -452,6 +452,29 @@ func TestCreateRunner(t *testing.T) {
 		// can't inspect Runner.cfg directly, but the wiring code is exercised
 		// behavioral verification is in runner_test.go (TestRunner_MaxExternalIterations_ExplicitLimit)
 	})
+
+	t.Run("review_patience_cli_overrides_config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		oldWd, wdErr := os.Getwd()
+		require.NoError(t, wdErr)
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+		cfg := &config.Config{ReviewPatience: 5}        // config says 5
+		o := opts{MaxIterations: 50, ReviewPatience: 3} // CLI says 3
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		log, err := progress.NewLogger(progress.Config{Mode: "full", Branch: "test", NoColor: true}, colors, holder)
+		require.NoError(t, err)
+		defer log.Close()
+
+		// verify the resolution logic: CLI=3 should win over config=5
+		req := executePlanRequest{Mode: processor.ModeFull, Config: cfg, DefaultBranch: "main"}
+		runner := createRunner(req, o, log, holder)
+		assert.NotNil(t, runner)
+		// behavioral verification is in runner_test.go
+	})
 }
 
 func TestResolveDefaultBranch(t *testing.T) {

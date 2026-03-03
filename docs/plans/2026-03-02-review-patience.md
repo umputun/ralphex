@@ -46,16 +46,16 @@ Line numbers are approximate and may shift during implementation.
 - Modify: `pkg/config/values_test.go`
 - Modify: `pkg/config/config_test.go`
 
-- [ ] add `ReviewPatience int` to `Values` struct (after `MaxExternalIterations`)
-- [ ] add INI parsing in `parseValuesFromSection()` — validate non-negative, follow `MaxExternalIterations` pattern
-- [ ] add merge logic in `mergeFrom()` — simple `> 0` override, no `*Set` needed
-- [ ] add `ReviewPatience int` to `config.Config` struct with `json:"review_patience"` tag
-- [ ] wire Values → Config in `Load()`
-- [ ] add commented default to `pkg/config/defaults/config` after `max_external_iterations` block: `# review_patience = 0`
-- [ ] write tests in `values_test.go`: parsing valid value, zero, negative → error, invalid string → error
-- [ ] write tests in `values_test.go`: merge behavior (non-zero overrides, zero preserves, global+local merge)
-- [ ] write test in `config_test.go`: config loads `review_patience`
-- [ ] run `go test ./pkg/config/...` — must pass before task 2
+- [x] add `ReviewPatience int` to `Values` struct (after `MaxExternalIterations`)
+- [x] add INI parsing in `parseValuesFromSection()` — validate non-negative, follow `MaxExternalIterations` pattern
+- [x] add merge logic in `mergeFrom()` — simple `> 0` override, no `*Set` needed
+- [x] add `ReviewPatience int` to `config.Config` struct with `json:"review_patience"` tag
+- [x] wire Values → Config in `Load()`
+- [x] add commented default to `pkg/config/defaults/config` after `max_external_iterations` block: `# review_patience = 0`
+- [x] write tests in `values_test.go`: parsing valid value, zero, negative → error, invalid string → error
+- [x] write tests in `values_test.go`: merge behavior (non-zero overrides, zero preserves, global+local merge)
+- [x] write test in `config_test.go`: config loads `review_patience`
+- [x] run `go test ./pkg/config/...` — must pass before task 2
 
 ### Task 2: Add CLI flag and wire to processor Config
 
@@ -64,11 +64,11 @@ Line numbers are approximate and may shift during implementation.
 - Modify: `pkg/processor/runner.go` (Config struct only)
 - Modify: `cmd/ralphex/main_test.go`
 
-- [ ] add `ReviewPatience int` to `opts` struct with `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
-- [ ] add `ReviewPatience int` to `processor.Config` struct
-- [ ] wire in `createRunner()`: CLI flag > config value > 0 (follows `MaxExternalIterations` pattern)
-- [ ] write test in `main_test.go`: CLI flag overrides config value (follow `max_external_iterations_cli_overrides_config` pattern)
-- [ ] run `go test ./cmd/ralphex/...` — must pass before task 3
+- [x] add `ReviewPatience int` to `opts` struct with `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
+- [x] add `ReviewPatience int` to `processor.Config` struct
+- [x] wire in `createRunner()`: CLI flag > config value > 0 (follows `MaxExternalIterations` pattern)
+- [x] write test in `main_test.go`: CLI flag overrides config value (follow `max_external_iterations_cli_overrides_config` pattern)
+- [x] run `go test ./cmd/ralphex/...` — must pass before task 3
 
 ### Task 3: Implement stalemate detection in external review loop
 
@@ -76,16 +76,16 @@ Line numbers are approximate and may shift during implementation.
 - Modify: `pkg/processor/runner.go` — `runExternalReviewLoop()`
 - Modify: `pkg/processor/runner_test.go`
 
-- [ ] in `runExternalReviewLoop()`, before the for loop: initialize `unchangedRounds := 0`
-- [ ] after external tool runs but before Claude evaluation: capture `headBefore` via `r.git.HeadHash()`; if git is nil or HeadHash errors, skip stalemate check (graceful degradation)
-- [ ] after Claude evaluation: capture `headAfter` via `r.git.HeadHash()`
-- [ ] if `r.cfg.ReviewPatience > 0`: compare heads; if unchanged → increment `unchangedRounds`; if changed → reset to 0
-- [ ] if `unchangedRounds >= r.cfg.ReviewPatience`: log `"stalemate detected after %d unchanged rounds, external review terminated early"`, break loop
-- [ ] write test: mock git returning same hash (2 * ReviewPatience calls), verify loop breaks after N unchanged rounds
-- [ ] write test: mock git returning new hash on round 2, verify counter resets
-- [ ] write test: ReviewPatience=0 disables stalemate detection, loop runs to max iterations
-- [ ] write test: git checker nil → stalemate detection skipped gracefully
-- [ ] run `go test ./pkg/processor/...` — must pass before task 4
+- [x] in `runExternalReviewLoop()`, before the for loop: initialize `unchangedRounds := 0`
+- [x] after external tool runs but before Claude evaluation: capture `headBefore` via `r.git.HeadHash()`; if git is nil or HeadHash errors, skip stalemate check (graceful degradation)
+- [x] after Claude evaluation: capture `headAfter` via `r.git.HeadHash()`
+- [x] if `r.cfg.ReviewPatience > 0`: compare heads; if unchanged → increment `unchangedRounds`; if changed → reset to 0
+- [x] if `unchangedRounds >= r.cfg.ReviewPatience`: log `"stalemate detected after %d unchanged rounds, external review terminated early"`, break loop
+- [x] write test: mock git returning same hash (2 * ReviewPatience calls), verify loop breaks after N unchanged rounds
+- [x] write test: mock git returning new hash on round 2, verify counter resets
+- [x] write test: ReviewPatience=0 disables stalemate detection, loop runs to max iterations
+- [x] write test: git checker nil → stalemate detection skipped gracefully
+- [x] run `go test ./pkg/processor/...` — must pass before task 4
 
 ### Task 4: Implement manual "break" command via injected channel
 

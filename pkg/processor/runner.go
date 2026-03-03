@@ -48,6 +48,7 @@ type Config struct {
 	Mode                  Mode           // execution mode
 	MaxIterations         int            // maximum iterations for task phase
 	MaxExternalIterations int            // override external review iteration limit (0 = auto)
+	ReviewPatience        int            // terminate external review after N unchanged rounds (0 = disabled)
 	Debug                 bool           // enable debug output
 	NoColor               bool           // disable color output
 	IterationDelayMs      int            // delay between iterations in milliseconds
@@ -562,6 +563,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 	}
 
 	var claudeResponse string // first iteration has no prior response
+	var unchangedRounds int   // consecutive iterations with no commits (for stalemate detection)
 
 	for i := 1; i <= maxIterations; i++ {
 		select {
@@ -589,6 +591,9 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// show findings summary before Claude evaluation
 		cfg.showSummary(reviewResult.Output)
 
+		// capture HEAD hash before claude evaluation for stalemate detection
+		headBefore := r.headHash()
+
 		// pass output to claude for evaluation and fixing
 		r.phaseHolder.Set(status.PhaseClaudeEval)
 		r.log.PrintSection(status.NewClaudeEvalSection())
@@ -609,6 +614,19 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		if IsCodexDone(claudeResult.Signal) {
 			r.log.Print("%s review complete - no more findings", cfg.name)
 			return nil
+		}
+
+		// stalemate detection: track consecutive rounds with no commits
+		if r.cfg.ReviewPatience > 0 && headBefore != "" {
+			if headAfter := r.headHash(); headAfter == headBefore {
+				unchangedRounds++
+			} else {
+				unchangedRounds = 0
+			}
+			if unchangedRounds >= r.cfg.ReviewPatience {
+				r.log.Print("stalemate detected after %d unchanged rounds, external review terminated early", unchangedRounds)
+				return nil
+			}
 		}
 
 		if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {

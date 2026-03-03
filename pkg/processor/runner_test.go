@@ -2386,3 +2386,194 @@ func TestRunner_Finalize_LimitPatternWithoutWaitLogsAndContinues(t *testing.T) {
 	}
 	assert.True(t, foundLog, "should log limit pattern message via handlePatternMatchError")
 }
+
+func TestRunner_ExternalReviewLoop_StalemateDetection_BreaksAfterN(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// codex-only flow: external review loop → post-codex claude review loop
+	// with ReviewPatience=2, loop should break after 2 unchanged rounds
+	// external loop: codex run → claude eval (no signal, no commit) → codex run → claude eval (no signal, no commit) → stalemate break
+	claude := newMockExecutor([]executor.Result{
+		{Output: "rejected findings, no changes"},   // claude eval iteration 1 - no CodexDone signal
+		{Output: "rejected findings again"},         // claude eval iteration 2 - no CodexDone signal (stalemate break here)
+		{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue in foo.go:10"}, // codex iteration 1
+		{Output: "found issue in foo.go:10"}, // codex iteration 2
+	})
+
+	// git checker returns same hash every time (no commits made by claude)
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+	}
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		ReviewPatience: 2, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	r.SetGitChecker(gitMock)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 2, "codex should run exactly 2 times before stalemate")
+	assert.Len(t, claude.RunCalls(), 3, "claude: 2 evals + 1 post-codex review")
+
+	// verify stalemate log message
+	var foundStalemate bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "stalemate detected") && strings.Contains(call.Format, "unchanged rounds") {
+			foundStalemate = true
+			break
+		}
+	}
+	assert.True(t, foundStalemate, "should log stalemate detection message")
+}
+
+func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnCommit(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// with ReviewPatience=2, if hash changes on round 2, counter resets and needs 2 more unchanged
+	// round 1: unchanged (counter=1), round 2: changed (counter=0), round 3: codex done
+	claude := newMockExecutor([]executor.Result{
+		{Output: "rejected findings, no changes"},          // claude eval iteration 1 (unchanged)
+		{Output: "fixed the issue, committed"},             // claude eval iteration 2 (hash changed)
+		{Output: "done", Signal: status.CodexDone},         // claude eval iteration 3 (codex done signal)
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue in foo.go:10"}, // codex iteration 1
+		{Output: "found issue in bar.go:20"}, // codex iteration 2
+		{Output: "found issue in baz.go:30"}, // codex iteration 3
+	})
+
+	// git checker: same hash for round 1 (before+after), different hash for round 2
+	hashIdx := 0
+	hashes := []string{
+		"aaaa00000000000000000000000000000000aaaa", // round 1 before
+		"aaaa00000000000000000000000000000000aaaa", // round 1 after (unchanged)
+		"aaaa00000000000000000000000000000000aaaa", // round 2 before
+		"bbbb00000000000000000000000000000000bbbb", // round 2 after (changed - reset)
+		"bbbb00000000000000000000000000000000bbbb", // round 3 before (codex done, no after call)
+	}
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) {
+			if hashIdx >= len(hashes) {
+				return "ffff00000000000000000000000000000000ffff", nil
+			}
+			h := hashes[hashIdx]
+			hashIdx++
+			return h, nil
+		},
+	}
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		ReviewPatience: 2, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	r.SetGitChecker(gitMock)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (no stalemate)")
+	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
+
+	// verify no stalemate log
+	var foundStalemate bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "stalemate detected") {
+			foundStalemate = true
+			break
+		}
+	}
+	assert.False(t, foundStalemate, "should not log stalemate when counter was reset")
+}
+
+func TestRunner_ExternalReviewLoop_StalemateDetection_DisabledWhenZero(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// with ReviewPatience=0 (disabled), loop runs to max iterations even with unchanged HEAD
+	// max external iterations = max(3, 50/5) = 10, but we limit to 3 via MaxExternalIterations
+	claude := newMockExecutor([]executor.Result{
+		{Output: "rejected findings"},               // claude eval iteration 1
+		{Output: "rejected findings"},               // claude eval iteration 2
+		{Output: "rejected findings"},               // claude eval iteration 3
+		{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue"}, // codex iteration 1
+		{Output: "found issue"}, // codex iteration 2
+		{Output: "found issue"}, // codex iteration 3
+	})
+
+	// git checker returns same hash (would trigger stalemate if enabled)
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc: func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+	}
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		ReviewPatience: 0, MaxExternalIterations: 3, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	r.SetGitChecker(gitMock)
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 3, "codex should run all 3 iterations (stalemate disabled)")
+	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
+
+	// verify no stalemate log
+	var foundStalemate bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "stalemate detected") {
+			foundStalemate = true
+			break
+		}
+	}
+	assert.False(t, foundStalemate, "should not log stalemate when ReviewPatience=0")
+}
+
+func TestRunner_ExternalReviewLoop_StalemateDetection_NilGitChecker(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// with ReviewPatience=2 and nil git checker, stalemate detection should be skipped gracefully
+	// headHash() returns "" when git is nil, and stalemate check requires headBefore != ""
+	// max external iterations limited to 3
+	claude := newMockExecutor([]executor.Result{
+		{Output: "rejected findings"},               // claude eval iteration 1
+		{Output: "rejected findings"},               // claude eval iteration 2
+		{Output: "rejected findings"},               // claude eval iteration 3
+		{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue"}, // codex iteration 1
+		{Output: "found issue"}, // codex iteration 2
+		{Output: "found issue"}, // codex iteration 3
+	})
+
+	// no git checker set (nil)
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
+		ReviewPatience: 2, MaxExternalIterations: 3, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+	// deliberately NOT calling r.SetGitChecker()
+	err := r.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 3, "codex should run all 3 iterations (git checker nil)")
+	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
+
+	// verify no stalemate log
+	var foundStalemate bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "stalemate detected") {
+			foundStalemate = true
+			break
+		}
+	}
+	assert.False(t, foundStalemate, "should not log stalemate when git checker is nil")
+}

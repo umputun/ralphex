@@ -119,6 +119,14 @@ task_retry_count = 1
 # default: 0
 # max_external_iterations = 0
 
+# review_patience: terminate external review after N consecutive unchanged rounds
+# when the external review tool and Claude can't agree on findings, the loop
+# runs until max_external_iterations. set review_patience to break early when
+# N consecutive rounds produce no commits (Claude wins the dispute).
+# 0 = disabled (loop runs to max iterations)
+# default: 0
+# review_patience = 0
+
 # ------------------------------------------------------------------------------
 # paths
 # ------------------------------------------------------------------------------

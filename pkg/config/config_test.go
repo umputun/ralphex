@@ -824,6 +824,38 @@ func TestLoad_MaxExternalIterations_DefaultZero(t *testing.T) {
 	assert.Equal(t, 0, cfg.MaxExternalIterations)
 }
 
+func TestLoad_ReviewPatience(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	configContent := `review_patience = 3`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, cfg.ReviewPatience)
+}
+
+func TestLoad_ReviewPatience_DefaultZero(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// empty config - default should be 0 (disabled)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, cfg.ReviewPatience)
+}
+
 func TestLocalConfig_LocalOverridesExternalReviewTool(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalDir := filepath.Join(tmpDir, "global")

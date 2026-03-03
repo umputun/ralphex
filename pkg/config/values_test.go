@@ -144,6 +144,8 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 		{name: "negative max_iterations", config: "max_iterations = -5", errPart: "max_iterations"},
 		{name: "negative max_external_iterations", config: "max_external_iterations = -1", errPart: "max_external_iterations"},
 		{name: "invalid max_external_iterations", config: "max_external_iterations = abc", errPart: "max_external_iterations"},
+		{name: "negative review_patience", config: "review_patience = -1", errPart: "review_patience"},
+		{name: "invalid review_patience", config: "review_patience = abc", errPart: "review_patience"},
 		{name: "invalid wait_on_limit", config: "wait_on_limit = not-a-duration", errPart: "wait_on_limit"},
 		{name: "negative wait_on_limit", config: "wait_on_limit = -30m", errPart: "wait_on_limit"},
 	}
@@ -1487,6 +1489,101 @@ func TestValues_mergeFrom_MaxExternalIterations(t *testing.T) {
 		values, err := loader.Load(localCfg, globalCfg)
 		require.NoError(t, err)
 		assert.Equal(t, 5, values.MaxExternalIterations)
+	})
+}
+
+func TestValuesLoader_Load_ReviewPatience(t *testing.T) {
+	t.Run("parse valid value", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`review_patience = 5`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, 5, values.ReviewPatience)
+	})
+
+	t.Run("parse zero means disabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`review_patience = 0`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, 0, values.ReviewPatience)
+	})
+
+	t.Run("negative returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`review_patience = -1`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		_, err := loader.Load("", cfgPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "review_patience")
+	})
+
+	t.Run("invalid value returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`review_patience = abc`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		_, err := loader.Load("", cfgPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "review_patience")
+	})
+
+	t.Run("not set defaults to zero", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Equal(t, 0, values.ReviewPatience)
+	})
+}
+
+func TestValues_mergeFrom_ReviewPatience(t *testing.T) {
+	t.Run("non-zero overrides", func(t *testing.T) {
+		dst := Values{ReviewPatience: 0}
+		src := Values{ReviewPatience: 5}
+		dst.mergeFrom(&src)
+		assert.Equal(t, 5, dst.ReviewPatience)
+	})
+
+	t.Run("zero preserves existing", func(t *testing.T) {
+		dst := Values{ReviewPatience: 5}
+		src := Values{ReviewPatience: 0}
+		dst.mergeFrom(&src)
+		assert.Equal(t, 5, dst.ReviewPatience)
+	})
+
+	t.Run("global=5 local unset preserves 5", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`review_patience = 5`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(``), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, 5, values.ReviewPatience)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`review_patience = 5`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`review_patience = 3`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, 3, values.ReviewPatience)
 	})
 }
 
