@@ -422,6 +422,9 @@ def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args:
         "-e", "SKIP_HOME_CHOWN=1",
         "-e", "INIT_QUIET=1",
         "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
+        "-e", "GIT_CONFIG_COUNT=1",
+        "-e", "GIT_CONFIG_KEY_0=commit.gpgsign",
+        "-e", "GIT_CONFIG_VALUE_0=false",
     ])
 
     if bind_port:
@@ -846,6 +849,22 @@ def run_tests() -> None:
                 self.assertIn(mount, vols)
             finally:
                 os.unlink(tmp_path)
+
+    class TestGpgSigningDisabled(unittest.TestCase):
+        def test_git_config_env_vars_in_docker_cmd(self) -> None:
+            """run_docker command should include GIT_CONFIG_* env vars to disable GPG signing."""
+            with unittest.mock.patch("subprocess.Popen") as mock_popen:
+                mock_proc = unittest.mock.MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.wait.return_value = 0
+                mock_popen.return_value = mock_proc
+                with unittest.mock.patch("sys.stdin") as mock_stdin:
+                    mock_stdin.isatty.return_value = False
+                    run_docker("img", "8080", [], False, [])
+                cmd = mock_popen.call_args[0][0]
+                self.assertIn("GIT_CONFIG_COUNT=1", cmd)
+                self.assertIn("GIT_CONFIG_KEY_0=commit.gpgsign", cmd)
+                self.assertIn("GIT_CONFIG_VALUE_0=false", cmd)
 
     class TestKeychainServiceName(unittest.TestCase):
         def test_default_claude_dir(self) -> None:
