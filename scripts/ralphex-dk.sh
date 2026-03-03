@@ -111,6 +111,21 @@ def extract_extra_volumes(args: list[str]) -> tuple[list[str], list[str]]:
     return extra, remaining
 
 
+def extract_extra_env(args: list[str]) -> tuple[list[str], list[str]]:
+    """extract -e/--env flags from args, return (extra_env_flags, remaining_args)."""
+    extra: list[str] = []
+    remaining: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] in ("-e", "--env") and i + 1 < len(args):
+            extra.extend(["-e", args[i + 1]])
+            i += 2
+        else:
+            remaining.append(args[i])
+            i += 1
+    return extra, remaining
+
+
 def should_bind_port(args: list[str]) -> bool:
     """check for --serve or -s in arguments."""
     return "--serve" in args or "-s" in args

@@ -86,10 +86,10 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `extract_extra_env(args: list[str]) -> tuple[list[str], list[str]]` after `extract_extra_volumes()`
-- [ ] extract `-e`/`--env` flags from args
-- [ ] return `(extra_env_flags, remaining_args)` - flags as `["-e", "VAL", ...]`
-- [ ] run tests - `TestExtractExtraEnv` must pass
+- [x] add `extract_extra_env(args: list[str]) -> tuple[list[str], list[str]]` after `extract_extra_volumes()`
+- [x] extract `-e`/`--env` flags from args
+- [x] return `(extra_env_flags, remaining_args)` - flags as `["-e", "VAL", ...]`
+- [x] run tests - `TestExtractExtraEnv` must pass
 
 ### Task 5: Add TestBuildEnvVars test class (TDD)
 
