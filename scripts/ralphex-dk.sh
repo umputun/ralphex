@@ -6,17 +6,13 @@ example: ralphex-dk.sh docs/plans/feature.md
 example: ralphex-dk.sh --serve docs/plans/feature.md
 example: ralphex-dk.sh --review
 example: ralphex-dk.sh -v /data:/mnt/data:ro docs/plans/feature.md
-example: ralphex-dk.sh -e DEBUG=1 -e API_KEY docs/plans/feature.md
+example: ralphex-dk.sh -E DEBUG=1 -E API_KEY docs/plans/feature.md
 example: ralphex-dk.sh --update         # pull latest docker image
 example: ralphex-dk.sh --update-script  # update this wrapper script
 
 Environment variables:
-- RALPHEX_EXTRA_ENV: comma-separated env vars (VAR=value or VAR to inherit from host)
+- RALPHEX_EXTRA_ENV: comma-separated env vars (VAR=value or VAR to inherit from host). Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values. Values containing commas cannot use RALPHEX_EXTRA_ENV; use -E flag instead.
 - RALPHEX_EXTRA_VOLUMES: comma-separated volume mounts (src:dest[:opts])
-- Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values
-
-Note: -e/--env flags are consumed by wrapper for Docker env vars.
-      Use --external-only (long form) instead of -e for external-only mode.
 """
 
 import difflib
@@ -126,13 +122,15 @@ def extract_extra_volumes(args: list[str]) -> tuple[list[str], list[str]]:
 
 
 def extract_extra_env(args: list[str]) -> tuple[list[str], list[str]]:
-    """extract -e/--env flags from args, return (extra_env_flags, remaining_args)."""
+    """extract and validate -E/--env flags from args, return (docker_env_flags, remaining_args)."""
     extra: list[str] = []
     remaining: list[str] = []
     i = 0
     while i < len(args):
-        if args[i] in ("-e", "--env") and i + 1 < len(args):
-            extra.extend(["-e", args[i + 1]])
+        if args[i] in ("-E", "--env") and i + 1 < len(args):
+            entry = args[i + 1]
+            if validated := validate_env_entry(entry, warn_invalid=True):
+                extra.extend(["-e", validated])
             i += 2
         else:
             remaining.append(args[i])
@@ -369,6 +367,19 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
 ENV_VAR_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(=.*)?$")
 
 
+def validate_env_entry(entry: str, warn_invalid: bool = False) -> Optional[str]:
+    """validate a single env var entry. returns entry if valid, None if invalid."""
+    if not ENV_VAR_PATTERN.match(entry):
+        if warn_invalid:
+            print(f"warning: skipping invalid env var: {entry}", file=sys.stderr)
+        return None
+    if "=" in entry:
+        name = entry.split("=", 1)[0]
+        if is_sensitive_name(name):
+            print(f"warning: {name} has explicit value - use -E {name} to inherit from host for better security", file=sys.stderr)
+    return entry
+
+
 def build_env_vars() -> list[str]:
     """build docker -e flags from RALPHEX_EXTRA_ENV env var."""
     extra = os.environ.get("RALPHEX_EXTRA_ENV", "")
@@ -378,17 +389,8 @@ def build_env_vars() -> list[str]:
     result: list[str] = []
     for entry in extra.split(","):
         entry = entry.strip()
-        if not entry:
-            continue
-        if not ENV_VAR_PATTERN.match(entry):
-            continue
-        # extract var name (everything before = or entire entry)
-        name = entry.split("=", 1)[0]
-        # warn if sensitive name with explicit value
-        if "=" in entry and is_sensitive_name(name):
-            print(f"warning: {name} has explicit value - use -e {name} to inherit from host for better security", file=sys.stderr)
-        result.extend(["-e", entry])
-
+        if entry and (validated := validate_env_entry(entry)):
+            result.extend(["-e", validated])
     return result
 
 
@@ -609,16 +611,8 @@ def main() -> int:
         volumes = build_volumes(creds_temp, claude_home)
         volumes.extend(cli_volumes)
 
-        # build env vars from RALPHEX_EXTRA_ENV, then append CLI -e/--env flags
+        # build env vars from RALPHEX_EXTRA_ENV, then append validated CLI -E/--env flags
         env_vars = build_env_vars()
-        # warn for CLI flags with sensitive names and explicit values
-        for i in range(0, len(cli_env), 2):
-            if i + 1 < len(cli_env):
-                entry = cli_env[i + 1]
-                if "=" in entry:
-                    name = entry.split("=", 1)[0]
-                    if is_sensitive_name(name):
-                        print(f"warning: {name} has explicit value - use -e {name} to inherit from host for better security", file=sys.stderr)
         env_vars.extend(cli_env)
 
         if claude_config_dir_env:
@@ -1250,15 +1244,15 @@ def run_tests() -> None:
             self.assertFalse(is_sensitive_name("XAUTH"))  # AUTH at end but no left boundary
 
     class TestExtractExtraEnv(unittest.TestCase):
-        def test_extracts_e_flag_with_value(self) -> None:
-            """-e FOO=bar is extracted from args."""
-            extra, remaining = extract_extra_env(["-e", "FOO=bar", "plan.md"])
+        def test_extracts_uppercase_e_flag_with_value(self) -> None:
+            """-E FOO=bar is extracted from args."""
+            extra, remaining = extract_extra_env(["-E", "FOO=bar", "plan.md"])
             self.assertEqual(extra, ["-e", "FOO=bar"])
             self.assertEqual(remaining, ["plan.md"])
 
-        def test_extracts_e_flag_name_only(self) -> None:
-            """-e FOO (name-only) is extracted from args."""
-            extra, remaining = extract_extra_env(["-e", "FOO", "plan.md"])
+        def test_extracts_uppercase_e_flag_name_only(self) -> None:
+            """-E FOO (name-only) is extracted from args."""
+            extra, remaining = extract_extra_env(["-E", "FOO", "plan.md"])
             self.assertEqual(extra, ["-e", "FOO"])
             self.assertEqual(remaining, ["plan.md"])
 
@@ -1269,28 +1263,59 @@ def run_tests() -> None:
             self.assertEqual(remaining, ["plan.md"])
 
         def test_multiple_env_flags(self) -> None:
-            """multiple -e flags are all extracted."""
-            extra, remaining = extract_extra_env(["-e", "FOO=bar", "-e", "BAZ", "plan.md"])
+            """multiple -E flags are all extracted."""
+            extra, remaining = extract_extra_env(["-E", "FOO=bar", "-E", "BAZ", "plan.md"])
             self.assertEqual(extra, ["-e", "FOO=bar", "-e", "BAZ"])
             self.assertEqual(remaining, ["plan.md"])
 
         def test_no_env_flags(self) -> None:
-            """args without -e pass through unchanged."""
+            """args without -E pass through unchanged."""
             extra, remaining = extract_extra_env(["--serve", "plan.md"])
             self.assertEqual(extra, [])
             self.assertEqual(remaining, ["--serve", "plan.md"])
 
-        def test_e_at_end_without_value(self) -> None:
-            """-e at end of args without a value is kept as remaining."""
-            extra, remaining = extract_extra_env(["plan.md", "-e"])
-            self.assertEqual(extra, [])
-            self.assertEqual(remaining, ["plan.md", "-e"])
-
         def test_mixed_with_other_flags(self) -> None:
-            """-e interleaved with other flags."""
-            extra, remaining = extract_extra_env(["--serve", "-e", "DEBUG=1", "plan.md"])
+            """-E interleaved with other flags."""
+            extra, remaining = extract_extra_env(["--serve", "-E", "DEBUG=1", "plan.md"])
             self.assertEqual(extra, ["-e", "DEBUG=1"])
             self.assertEqual(remaining, ["--serve", "plan.md"])
+
+        def test_lowercase_e_passes_through(self) -> None:
+            """-e (ralphex's external-only flag) passes through to ralphex."""
+            extra, remaining = extract_extra_env(["-e", "plan.md"])
+            self.assertEqual(extra, [])
+            self.assertEqual(remaining, ["-e", "plan.md"])
+
+        def test_invalid_entries_skipped_with_warning(self) -> None:
+            """invalid env var names are skipped with warning."""
+            import io
+            captured = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured):
+                extra, remaining = extract_extra_env(["-E", "=bad", "-E", "GOOD=val", "-E", "123BAD", "plan.md"])
+            self.assertEqual(extra, ["-e", "GOOD=val"])
+            self.assertEqual(remaining, ["plan.md"])
+            warning = captured.getvalue()
+            self.assertIn("=bad", warning)
+            self.assertIn("123BAD", warning)
+
+        def test_sensitive_name_warning(self) -> None:
+            """sensitive name with explicit value prints warning."""
+            import io
+            captured = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured):
+                extra, remaining = extract_extra_env(["-E", "API_KEY=secret", "plan.md"])
+            self.assertEqual(extra, ["-e", "API_KEY=secret"])
+            warning = captured.getvalue()
+            self.assertIn("-E API_KEY", warning)
+
+        def test_sensitive_name_no_warning_for_name_only(self) -> None:
+            """sensitive name without explicit value does not print warning."""
+            import io
+            captured = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured):
+                extra, remaining = extract_extra_env(["-E", "API_KEY", "plan.md"])
+            self.assertEqual(extra, ["-e", "API_KEY"])
+            self.assertEqual(captured.getvalue(), "")
 
     class TestBuildEnvVars(unittest.TestCase):
         def setUp(self) -> None:
@@ -1346,7 +1371,7 @@ def run_tests() -> None:
             warning = captured.getvalue()
             self.assertIn("warning:", warning)
             self.assertIn("API_KEY", warning)
-            self.assertIn("-e API_KEY", warning)
+            self.assertIn("-E API_KEY", warning)
 
         def test_sensitive_name_no_warning_for_name_only(self) -> None:
             """sensitive name without explicit value does not print warning."""

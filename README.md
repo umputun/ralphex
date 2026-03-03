@@ -318,18 +318,19 @@ RALPHEX_EXTRA_VOLUMES="/data:/mnt/data:ro,/models:/mnt/models" ralphex docs/plan
 
 **Extra environment variables:**
 ```bash
-# via CLI flags (can use multiple -e)
-ralphex -e DEBUG=1 -e API_KEY docs/plans/feature.md
+# via CLI flags (can use multiple -E)
+ralphex -E DEBUG=1 -E API_KEY docs/plans/feature.md
 
 # via environment variable (comma-separated)
 RALPHEX_EXTRA_ENV="DEBUG=1,LOG_LEVEL=verbose" ralphex docs/plans/feature.md
 
 # name-only form inherits value from host (recommended for secrets)
 export API_KEY=secret123
-ralphex -e API_KEY docs/plans/feature.md
-```
+ralphex -E API_KEY docs/plans/feature.md
 
-**Note:** The wrapper's `-e` flag shadows ralphex's `-e` (`--external-only`). Use `--external-only` (long form) when running via Docker wrapper.
+# values containing commas require -E flag (env var splits on commas)
+ralphex -E "TAGS=foo,bar,baz" docs/plans/feature.md
+```
 
 **Updating:**
 ```bash
@@ -480,7 +481,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `--max-external-iterations` | Override external review iteration limit (0 = auto) | 0 |
 | `--review-patience` | Terminate external review after N unchanged rounds (0 = disabled) | 0 |
 | `-r, --review` | Skip task execution, run full review pipeline | false |
-| `-e, --external-only` | Skip tasks and first review, run only external review loop (use `--external-only` in Docker wrapper, `-e` is used for env vars) | false |
+| `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
 | `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
