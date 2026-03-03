@@ -123,12 +123,12 @@ This mirrors the existing `RALPHEX_EXTRA_VOLUMES` and `-v`/`--volume` pattern fo
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `env_vars: list[str]` parameter to `run_docker()` signature
-- [ ] insert env vars after `CLAUDE_CONFIG_DIR` env var (line ~413) and before `if bind_port:` block
-- [ ] in `main()`: call `extract_extra_env(args)` after `extract_extra_volumes()`
-- [ ] in `main()`: call `build_env_vars()` and merge with CLI env flags (CLI after env var entries)
-- [ ] in `main()`: pass combined env vars to `run_docker()`
-- [ ] run all tests - must pass
+- [x] add `env_vars: list[str]` parameter to `run_docker()` signature
+- [x] insert env vars after `CLAUDE_CONFIG_DIR` env var (line ~413) and before `if bind_port:` block
+- [x] in `main()`: call `extract_extra_env(args)` after `extract_extra_volumes()`
+- [x] in `main()`: call `build_env_vars()` and merge with CLI env flags (CLI after env var entries)
+- [x] in `main()`: pass combined env vars to `run_docker()`
+- [x] run all tests - must pass
 
 ### Task 8: Verify acceptance criteria
 

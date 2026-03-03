@@ -468,7 +468,7 @@ def schedule_cleanup(creds_temp: Optional[Path]) -> None:
     t.start()
 
 
-def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args: list[str]) -> int:
+def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str]) -> int:
     """build and execute docker run command."""
     cmd = ["docker", "run"]
 
@@ -484,6 +484,9 @@ def run_docker(image: str, port: str, volumes: list[str], bind_port: bool, args:
         "-e", "INIT_QUIET=1",
         "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
     ])
+
+    # add extra env vars from RALPHEX_EXTRA_ENV and -e/--env CLI flags
+    cmd.extend(env_vars)
 
     if bind_port:
         cmd.extend(["-p", f"127.0.0.1:{port}:8080"])
@@ -550,6 +553,9 @@ def main() -> int:
     # extract -v/--volume flags (consumed by wrapper, not passed to ralphex)
     cli_volumes, args = extract_extra_volumes(args)
 
+    # extract -e/--env flags (consumed by wrapper, not passed to ralphex)
+    cli_env, args = extract_extra_env(args)
+
     # resolve claude config directory
     claude_config_dir_env = os.environ.get("CLAUDE_CONFIG_DIR", "")
     if claude_config_dir_env:
@@ -590,6 +596,10 @@ def main() -> int:
         volumes = build_volumes(creds_temp, claude_home)
         volumes.extend(cli_volumes)
 
+        # build env vars from RALPHEX_EXTRA_ENV, then append CLI -e/--env flags
+        env_vars = build_env_vars()
+        env_vars.extend(cli_env)
+
         if claude_config_dir_env:
             print(f"using claude config dir: {claude_home}", file=sys.stderr)
         print(f"using image: {image}", file=sys.stderr)
@@ -600,7 +610,7 @@ def main() -> int:
         # determine port binding
         bind_port = should_bind_port(args)
 
-        return run_docker(image, port, volumes, bind_port, args)
+        return run_docker(image, port, volumes, env_vars, bind_port, args)
     finally:
         _cleanup_creds()
 
