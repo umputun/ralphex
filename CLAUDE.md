@@ -64,7 +64,7 @@ docs/plans/         # plan files location
 - `--skip-finalize` flag disables finalize step for a single run
 - `--wait` flag enables rate limit retry with specified duration (e.g., `--wait 1h`)
 - `--review-patience` flag terminates external review after N unchanged rounds (stalemate detection)
-- Manual `break` command during external review loop terminates it early via injected channel
+- Manual break via SIGQUIT (Ctrl+\) during external review loop terminates it early via injected channel
 - Custom external review support via scripts (wraps any AI tool)
 - Configuration via `~/.config/ralphex/` with embedded defaults
 - File watching for multi-session dashboard using fsnotify
@@ -104,7 +104,7 @@ Allows using custom scripts instead of codex for external code review:
 - `--external-only` (-e) flag runs only external review; `--codex-only` (-c) is deprecated alias
 - `max_external_iterations` config / `--max-external-iterations` CLI flag overrides external review loop limit (0 = auto, derived as `max(3, max_iterations/5)`)
 - `review_patience` config / `--review-patience` CLI flag enables stalemate detection: tracks consecutive rounds with no commits, terminates early when threshold reached (0 = disabled)
-- Manual break: typing `break` + Enter during external review terminates the loop immediately via context cancellation. Break channel injected from `cmd/ralphex/` into Runner via `SetBreakCh()`, only active when stdin is a TTY
+- Manual break: pressing Ctrl+\ (SIGQUIT) during external review terminates the loop immediately via context cancellation. Break channel injected from `cmd/ralphex/` into Runner via `SetBreakCh()`. Not available on Windows
 - `codex_enabled = false` backward compat: treated as `external_review_tool = none`
 
 Key files:
