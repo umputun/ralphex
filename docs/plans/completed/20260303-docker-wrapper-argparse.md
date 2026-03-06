@@ -140,8 +140,8 @@
 
 ### Task 7: [Final] Update documentation
 
-- [ ] update docstring at top of `scripts/ralphex-dk.sh`
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update docstring at top of `scripts/ralphex-dk.sh`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

@@ -1,18 +1,38 @@
 #!/usr/bin/env python3
 """ralphex-dk.sh - run ralphex in a docker container
 
-usage: ralphex-dk.sh [ralphex-args]
-example: ralphex-dk.sh docs/plans/feature.md
-example: ralphex-dk.sh --serve docs/plans/feature.md
-example: ralphex-dk.sh --review
-example: ralphex-dk.sh -v /data:/mnt/data:ro docs/plans/feature.md
-example: ralphex-dk.sh -E DEBUG=1 -E API_KEY docs/plans/feature.md
-example: ralphex-dk.sh --update         # pull latest docker image
-example: ralphex-dk.sh --update-script  # update this wrapper script
+Usage: ralphex-dk.sh [wrapper-flags] [ralphex-args]
+       ralphex-dk.sh [wrapper-flags] -- [ralphex-args]
+
+Wrapper-specific flags (parsed by this script):
+  -E, --env VAR[=val]        extra env var to pass to container (repeatable)
+  -v, --volume src:dst[:opts] extra volume mount (repeatable)
+  --update                   pull latest Docker image and exit
+  --update-script            update this wrapper script and exit
+  --test                     run embedded unit tests and exit
+  -h, --help                 show wrapper + ralphex help, then exit
+
+All other arguments are passed through to ralphex inside the container.
+Use -- to explicitly separate wrapper flags from ralphex args.
+
+Examples:
+  ralphex-dk.sh docs/plans/feature.md
+  ralphex-dk.sh --serve docs/plans/feature.md
+  ralphex-dk.sh --review
+  ralphex-dk.sh -v /data:/mnt/data:ro docs/plans/feature.md
+  ralphex-dk.sh -E DEBUG=1 -E API_KEY docs/plans/feature.md
+  ralphex-dk.sh -E FOO -- -v /ignored:path plan.md   # -v goes to ralphex
+  ralphex-dk.sh --update
+  ralphex-dk.sh --update-script
 
 Environment variables:
-- RALPHEX_EXTRA_ENV: comma-separated env vars (VAR=value or VAR to inherit from host). Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values. Values containing commas cannot use RALPHEX_EXTRA_ENV; use -E flag instead.
-- RALPHEX_EXTRA_VOLUMES: comma-separated volume mounts (src:dest[:opts])
+  RALPHEX_IMAGE         Docker image (default: ghcr.io/umputun/ralphex-go:latest)
+  RALPHEX_PORT          Web dashboard port with --serve (default: 8080)
+  RALPHEX_EXTRA_ENV     Comma-separated env vars (VAR=value or VAR to inherit)
+  RALPHEX_EXTRA_VOLUMES Comma-separated volume mounts (src:dst[:opts])
+
+Note: RALPHEX_EXTRA_ENV emits warnings for sensitive names (KEY, SECRET, TOKEN,
+etc.) with explicit values. Values containing commas must use -E flag instead.
 """
 
 import argparse
