@@ -538,6 +538,17 @@ def schedule_cleanup(creds_temp: Optional[Path]) -> None:
     t.start()
 
 
+def build_base_env_vars() -> list[str]:
+    """build base docker environment variable flags shared by all docker commands."""
+    return [
+        "-e", f"APP_UID={os.getuid()}",
+        "-e", f"TIME_ZONE={detect_timezone()}",
+        "-e", "SKIP_HOME_CHOWN=1",
+        "-e", "INIT_QUIET=1",
+        "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
+    ]
+
+
 def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str]) -> int:
     """build and execute docker run command."""
     cmd = ["docker", "run"]
@@ -547,13 +558,7 @@ def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], b
         cmd.append("-it")
     cmd.append("--rm")
 
-    cmd.extend([
-        "-e", f"APP_UID={os.getuid()}",
-        "-e", f"TIME_ZONE={detect_timezone()}",
-        "-e", "SKIP_HOME_CHOWN=1",
-        "-e", "INIT_QUIET=1",
-        "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
-    ])
+    cmd.extend(build_base_env_vars())
 
     # add extra env vars from RALPHEX_EXTRA_ENV and -e/--env CLI flags
     cmd.extend(env_vars)
@@ -636,20 +641,14 @@ def main() -> int:
         print("\n" + "-" * 70)
         if not claude_home.is_dir():
             print("ralphex options: (cannot show - claude config not found)")
-            print(f"  run 'claude' first to authenticate, then re-run --help")
+            print("  run 'claude' first to authenticate, then re-run --help")
             return 0
         print("ralphex options (from container):\n")
         creds_temp = extract_macos_credentials(claude_home)
         try:
             volumes = build_volumes(creds_temp, claude_home)
             cmd = ["docker", "run", "--rm"]
-            cmd.extend([
-                "-e", f"APP_UID={os.getuid()}",
-                "-e", f"TIME_ZONE={detect_timezone()}",
-                "-e", "SKIP_HOME_CHOWN=1",
-                "-e", "INIT_QUIET=1",
-                "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
-            ])
+            cmd.extend(build_base_env_vars())
             cmd.extend(volumes)
             cmd.extend(["-w", "/workspace"])
             cmd.extend([image, "/srv/ralphex", "--help"])
