@@ -78,15 +78,15 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] create `merge_env_flags()` helper: combines env var entries with CLI entries
-- [ ] create `merge_volume_flags()` helper: combines env var entries with CLI entries
-- [ ] merge `RALPHEX_EXTRA_ENV` with `args.env` (env first, CLI appends)
-- [ ] merge `RALPHEX_EXTRA_VOLUMES` with `args.volume` (env first, CLI appends)
-- [ ] validate merged env entries using `validate_env_entry()`, skip invalid (with warning)
-- [ ] validate merged volume entries: skip entries without `:` (silent, matching current behavior)
-- [ ] write tests for merge behavior (env only, CLI only, env + CLI combination)
-- [ ] write tests for validation on merged results (invalid entries dropped)
-- [ ] run tests - must pass before task 4
+- [x] create `merge_env_flags()` helper: combines env var entries with CLI entries
+- [x] create `merge_volume_flags()` helper: combines env var entries with CLI entries
+- [x] merge `RALPHEX_EXTRA_ENV` with `args.env` (env first, CLI appends)
+- [x] merge `RALPHEX_EXTRA_VOLUMES` with `args.volume` (env first, CLI appends)
+- [x] validate merged env entries using `validate_env_entry()`, skip invalid (with warning)
+- [x] validate merged volume entries: skip entries without `:` (silent, matching current behavior)
+- [x] write tests for merge behavior (env only, CLI only, env + CLI combination)
+- [x] write tests for validation on merged results (invalid entries dropped)
+- [x] run tests - must pass before task 4
 
 ### Task 4: Implement combined --help behavior
 

@@ -428,6 +428,42 @@ def build_env_vars() -> list[str]:
     return result
 
 
+def merge_env_flags(args_env: list[str]) -> list[str]:
+    """merge RALPHEX_EXTRA_ENV with CLI -E flags, validate entries.
+
+    env var entries come first, CLI entries append. invalid entries are skipped
+    with a warning.
+    """
+    result: list[str] = []
+    # env var entries first
+    result.extend(build_env_vars())
+    # cli entries append (with validation)
+    for entry in args_env:
+        if validated := validate_env_entry(entry, warn_invalid=True):
+            result.extend(["-e", validated])
+    return result
+
+
+def merge_volume_flags(args_volume: list[str]) -> list[str]:
+    """merge RALPHEX_EXTRA_VOLUMES with CLI -v flags, validate entries.
+
+    env var entries come first, CLI entries append. entries without ':'
+    are silently skipped (matching current behavior).
+    """
+    result: list[str] = []
+    # env var entries first
+    extra = os.environ.get("RALPHEX_EXTRA_VOLUMES", "")
+    for mount in extra.split(","):
+        mount = mount.strip()
+        if mount and ":" in mount:
+            result.extend(["-v", mount])
+    # cli entries append (with validation)
+    for mount in args_volume:
+        if ":" in mount:
+            result.extend(["-v", mount])
+    return result
+
+
 def handle_update(image: str) -> int:
     """pull latest docker image."""
     print(f"pulling latest image: {image}", file=sys.stderr)
@@ -602,16 +638,11 @@ def main() -> int:
         script_path = Path(os.path.realpath(sys.argv[0]))
         return handle_update_script(script_path)
 
-    # build docker -e flags from CLI -E/--env flags, validating each entry
-    cli_env: list[str] = []
-    for entry in parsed.env:
-        if validated := validate_env_entry(entry, warn_invalid=True):
-            cli_env.extend(["-e", validated])
+    # merge env var entries with CLI -E/--env flags (env first, CLI appends)
+    extra_env = merge_env_flags(parsed.env)
 
-    # build docker -v flags from CLI -v/--volume flags
-    cli_volumes: list[str] = []
-    for mount in parsed.volume:
-        cli_volumes.extend(["-v", mount])
+    # merge env var entries with CLI -v/--volume flags (env first, CLI appends)
+    extra_volumes = merge_volume_flags(parsed.volume)
 
     # resolve claude config directory
     claude_config_dir_env = os.environ.get("CLAUDE_CONFIG_DIR", "")
@@ -649,13 +680,9 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _term_handler)
 
     try:
-        # build volumes
+        # build volumes (base + extra from env var + CLI)
         volumes = build_volumes(creds_temp, claude_home)
-        volumes.extend(cli_volumes)
-
-        # build env vars from RALPHEX_EXTRA_ENV, then append validated CLI -E/--env flags
-        env_vars = build_env_vars()
-        env_vars.extend(cli_env)
+        volumes.extend(extra_volumes)
 
         if claude_config_dir_env:
             print(f"using claude config dir: {claude_home}", file=sys.stderr)
@@ -667,7 +694,7 @@ def main() -> int:
         # determine port binding
         bind_port = should_bind_port(ralphex_args)
 
-        return run_docker(image, port, volumes, env_vars, bind_port, ralphex_args)
+        return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args)
     finally:
         _cleanup_creds()
 
@@ -1426,6 +1453,110 @@ def run_tests() -> None:
             warning = captured.getvalue()
             self.assertEqual(warning, "")
 
+    class TestMergeEnvFlags(unittest.TestCase):
+        def setUp(self) -> None:
+            self._old_extra_env = os.environ.get("RALPHEX_EXTRA_ENV")
+            os.environ.pop("RALPHEX_EXTRA_ENV", None)
+
+        def tearDown(self) -> None:
+            if self._old_extra_env is None:
+                os.environ.pop("RALPHEX_EXTRA_ENV", None)
+            else:
+                os.environ["RALPHEX_EXTRA_ENV"] = self._old_extra_env
+
+        def test_env_only(self) -> None:
+            """with only env var set, returns env var entries."""
+            os.environ["RALPHEX_EXTRA_ENV"] = "FOO=bar,BAZ"
+            result = merge_env_flags([])
+            self.assertEqual(result, ["-e", "FOO=bar", "-e", "BAZ"])
+
+        def test_cli_only(self) -> None:
+            """with only CLI args, returns CLI entries."""
+            result = merge_env_flags(["FOO=bar", "BAZ"])
+            self.assertEqual(result, ["-e", "FOO=bar", "-e", "BAZ"])
+
+        def test_env_then_cli(self) -> None:
+            """env var entries come first, CLI entries append."""
+            os.environ["RALPHEX_EXTRA_ENV"] = "ENV1=a,ENV2"
+            result = merge_env_flags(["CLI1=b", "CLI2"])
+            self.assertEqual(result, ["-e", "ENV1=a", "-e", "ENV2", "-e", "CLI1=b", "-e", "CLI2"])
+
+        def test_invalid_cli_entries_skipped(self) -> None:
+            """invalid CLI entries are skipped with warning."""
+            import io
+            captured = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured):
+                result = merge_env_flags(["=invalid", "VALID=val", "123BAD"])
+            self.assertEqual(result, ["-e", "VALID=val"])
+            warning = captured.getvalue()
+            self.assertIn("=invalid", warning)
+            self.assertIn("123BAD", warning)
+
+        def test_sensitive_name_warning_for_cli(self) -> None:
+            """sensitive name with explicit value in CLI prints warning."""
+            import io
+            captured = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured):
+                result = merge_env_flags(["API_KEY=secret"])
+            self.assertEqual(result, ["-e", "API_KEY=secret"])
+            warning = captured.getvalue()
+            self.assertIn("API_KEY", warning)
+
+        def test_empty_both(self) -> None:
+            """with no env var and no CLI args, returns empty list."""
+            result = merge_env_flags([])
+            self.assertEqual(result, [])
+
+    class TestMergeVolumeFlags(unittest.TestCase):
+        def setUp(self) -> None:
+            self._old_extra_volumes = os.environ.get("RALPHEX_EXTRA_VOLUMES")
+            os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
+
+        def tearDown(self) -> None:
+            if self._old_extra_volumes is None:
+                os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
+            else:
+                os.environ["RALPHEX_EXTRA_VOLUMES"] = self._old_extra_volumes
+
+        def test_env_only(self) -> None:
+            """with only env var set, returns env var entries."""
+            os.environ["RALPHEX_EXTRA_VOLUMES"] = "/a:/b,/c:/d:ro"
+            result = merge_volume_flags([])
+            self.assertEqual(result, ["-v", "/a:/b", "-v", "/c:/d:ro"])
+
+        def test_cli_only(self) -> None:
+            """with only CLI args, returns CLI entries."""
+            result = merge_volume_flags(["/a:/b", "/c:/d:ro"])
+            self.assertEqual(result, ["-v", "/a:/b", "-v", "/c:/d:ro"])
+
+        def test_env_then_cli(self) -> None:
+            """env var entries come first, CLI entries append."""
+            os.environ["RALPHEX_EXTRA_VOLUMES"] = "/env1:/mnt/env1"
+            result = merge_volume_flags(["/cli1:/mnt/cli1", "/cli2:/mnt/cli2:ro"])
+            self.assertEqual(result, ["-v", "/env1:/mnt/env1", "-v", "/cli1:/mnt/cli1", "-v", "/cli2:/mnt/cli2:ro"])
+
+        def test_invalid_env_entries_skipped(self) -> None:
+            """env var entries without ':' are silently skipped."""
+            os.environ["RALPHEX_EXTRA_VOLUMES"] = "badentry,/ok:/mnt/ok"
+            result = merge_volume_flags([])
+            self.assertEqual(result, ["-v", "/ok:/mnt/ok"])
+
+        def test_invalid_cli_entries_skipped(self) -> None:
+            """CLI entries without ':' are silently skipped."""
+            result = merge_volume_flags(["badentry", "/ok:/mnt/ok"])
+            self.assertEqual(result, ["-v", "/ok:/mnt/ok"])
+
+        def test_empty_both(self) -> None:
+            """with no env var and no CLI args, returns empty list."""
+            result = merge_volume_flags([])
+            self.assertEqual(result, [])
+
+        def test_whitespace_trimmed(self) -> None:
+            """whitespace in env var entries is trimmed."""
+            os.environ["RALPHEX_EXTRA_VOLUMES"] = "  /a:/b  ,  /c:/d  "
+            result = merge_volume_flags([])
+            self.assertEqual(result, ["-v", "/a:/b", "-v", "/c:/d"])
+
     class TestBuildParser(unittest.TestCase):
         def test_returns_argument_parser(self) -> None:
             """build_parser returns an ArgumentParser instance."""
@@ -1807,7 +1938,8 @@ def run_tests() -> None:
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
-               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars, TestBuildParser,
+               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars,
+               TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
