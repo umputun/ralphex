@@ -129,14 +129,14 @@
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] verify all wrapper flags work: `-E`, `-v`, `--update`, `--update-script`, `--test`, `-h`
-- [ ] verify ralphex args pass through correctly: `--serve`, `--review`, plan files
-- [ ] verify `-e` (lowercase) passes through to ralphex (external-only flag)
-- [ ] verify env var + CLI merge works correctly
-- [ ] verify `--help` shows both wrapper and ralphex help
-- [ ] verify args after `--` pass through unchanged
-- [ ] run full test suite: `python3 scripts/ralphex-dk.sh --test`
-- [ ] manual test: `./scripts/ralphex-dk.sh -E FOO=bar -v /tmp:/mnt/tmp --help`
+- [x] verify all wrapper flags work: `-E`, `-v`, `--update`, `--update-script`, `--test`, `-h`
+- [x] verify ralphex args pass through correctly: `--serve`, `--review`, plan files
+- [x] verify `-e` (lowercase) passes through to ralphex (external-only flag)
+- [x] verify env var + CLI merge works correctly
+- [x] verify `--help` shows both wrapper and ralphex help
+- [x] verify args after `--` pass through unchanged
+- [x] run full test suite: `python3 scripts/ralphex-dk.sh --test`
+- [x] manual test: `./scripts/ralphex-dk.sh -E FOO=bar -v /tmp:/mnt/tmp --help`
 
 ### Task 7: [Final] Update documentation
 
