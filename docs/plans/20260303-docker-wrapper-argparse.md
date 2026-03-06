@@ -93,13 +93,13 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] detect `args.help` flag in main()
-- [ ] print wrapper help via `parser.print_help()`
-- [ ] print separator line between wrapper and ralphex help
-- [ ] run container with `["--help"]` to show ralphex options (manual verification only)
-- [ ] return exit code from container's help command
-- [ ] write tests for help flag detection (unit testable)
-- [ ] run tests - must pass before task 5
+- [x] detect `args.help` flag in main()
+- [x] print wrapper help via `parser.print_help()`
+- [x] print separator line between wrapper and ralphex help
+- [x] run container with `["--help"]` to show ralphex options (manual verification only)
+- [x] return exit code from container's help command
+- [x] write tests for help flag detection (unit testable)
+- [x] run tests - must pass before task 5
 
 ### Task 5: Remove deprecated manual extraction functions
 

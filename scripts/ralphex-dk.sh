@@ -470,6 +470,27 @@ def handle_update(image: str) -> int:
     return subprocess.run(["docker", "pull", image], check=False).returncode
 
 
+def handle_help(parser: argparse.ArgumentParser, image: str, claude_home: Path, creds_temp: Optional[Path]) -> int:
+    """print wrapper help, separator, then run container with --help."""
+    parser.print_help()
+    print("\n" + "-" * 70)
+    print("ralphex options (from container):\n")
+    # run container with --help (non-interactive - no -it flags)
+    volumes = build_volumes(creds_temp, claude_home)
+    cmd = ["docker", "run", "--rm"]
+    cmd.extend([
+        "-e", f"APP_UID={os.getuid()}",
+        "-e", f"TIME_ZONE={detect_timezone()}",
+        "-e", "SKIP_HOME_CHOWN=1",
+        "-e", "INIT_QUIET=1",
+        "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
+    ])
+    cmd.extend(volumes)
+    cmd.extend(["-w", "/workspace"])
+    cmd.extend([image, "/srv/ralphex", "--help"])
+    return subprocess.run(cmd, check=False).returncode
+
+
 def handle_update_script(script_path: Path) -> int:
     """download latest wrapper script, show diff, prompt user to update."""
     print("checking for ralphex docker wrapper updates...", file=sys.stderr)
@@ -638,13 +659,7 @@ def main() -> int:
         script_path = Path(os.path.realpath(sys.argv[0]))
         return handle_update_script(script_path)
 
-    # merge env var entries with CLI -E/--env flags (env first, CLI appends)
-    extra_env = merge_env_flags(parsed.env)
-
-    # merge env var entries with CLI -v/--volume flags (env first, CLI appends)
-    extra_volumes = merge_volume_flags(parsed.volume)
-
-    # resolve claude config directory
+    # resolve claude config directory (needed for --help and normal execution)
     claude_config_dir_env = os.environ.get("CLAUDE_CONFIG_DIR", "")
     if claude_config_dir_env:
         claude_home = Path(claude_config_dir_env).expanduser().resolve()
@@ -656,8 +671,25 @@ def main() -> int:
         print(f"error: {claude_home} directory not found (run 'claude' first to authenticate)", file=sys.stderr)
         return 1
 
-    # extract macOS credentials
+    # extract macOS credentials (needed for volume mounts)
     creds_temp = extract_macos_credentials(claude_home)
+
+    # handle --help: show wrapper help + ralphex help from container
+    if parsed.help:
+        try:
+            return handle_help(parser, image, claude_home, creds_temp)
+        finally:
+            if creds_temp:
+                try:
+                    creds_temp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    # merge env var entries with CLI -E/--env flags (env first, CLI appends)
+    extra_env = merge_env_flags(parsed.env)
+
+    # merge env var entries with CLI -v/--volume flags (env first, CLI appends)
+    extra_volumes = merge_volume_flags(parsed.volume)
 
     def _cleanup_creds() -> None:
         if creds_temp:
@@ -1931,6 +1963,123 @@ def run_tests() -> None:
             finally:
                 shutil.rmtree(tmp)
 
+    class TestHelpFlag(unittest.TestCase):
+        """tests for --help flag handling."""
+
+        def setUp(self) -> None:
+            """save environment."""
+            self._saved_env: dict[str, str | None] = {}
+            for key in ["RALPHEX_IMAGE", "CLAUDE_CONFIG_DIR"]:
+                self._saved_env[key] = os.environ.get(key)
+                os.environ.pop(key, None)
+            self._saved_argv = sys.argv[:]
+
+        def tearDown(self) -> None:
+            """restore environment and sys.argv."""
+            for key, val in self._saved_env.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+            sys.argv[:] = self._saved_argv
+
+        def test_help_flag_calls_handle_help(self) -> None:
+            """--help triggers handle_help with correct arguments."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_calls: list[tuple] = []
+
+                def fake_handle_help(parser: argparse.ArgumentParser, image: str,
+                                     claude_home: Path, creds_temp: Optional[Path]) -> int:
+                    captured_calls.append((parser, image, claude_home, creds_temp))
+                    return 0
+
+                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--help"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(len(captured_calls), 1)
+                _, image, claude_home, _ = captured_calls[0]
+                self.assertEqual(image, DEFAULT_IMAGE)
+                self.assertEqual(claude_home, claude_dir)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_h_flag_calls_handle_help(self) -> None:
+            """-h (short form) triggers handle_help."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                calls: list[int] = []
+
+                def fake_handle_help(*args: object) -> int:
+                    calls.append(1)
+                    return 0
+
+                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "-h"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(len(calls), 1)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_help_returns_handle_help_exit_code(self) -> None:
+            """main() returns exit code from handle_help."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                def fake_handle_help(*args: object) -> int:
+                    return 42
+
+                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--help"]
+                        result = main()
+
+                self.assertEqual(result, 42)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_help_with_env_flags_ignored(self) -> None:
+            """wrapper flags (-E, -v) before --help are still parsed but help takes precedence."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                calls: list[int] = []
+
+                def fake_handle_help(*args: object) -> int:
+                    calls.append(1)
+                    return 0
+
+                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        # -E and -v are parsed, but --help wins and run_docker is never called
+                        sys.argv = ["ralphex-dk", "-E", "FOO=bar", "-v", "/a:/b", "--help"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(len(calls), 1)
+            finally:
+                shutil.rmtree(tmp)
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -1940,7 +2089,7 @@ def run_tests() -> None:
                TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
                TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
-               TestMainArgparse]:
+               TestMainArgparse, TestHelpFlag]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
