@@ -46,18 +46,18 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `import argparse` at top of file
-- [ ] create `build_parser()` function that returns `ArgumentParser`
-- [ ] define `-E/--env` flag with `action="append"`, `default=[]`
-- [ ] define `-v/--volume` flag with `action="append"`, `default=[]`
-- [ ] define `--update`, `--update-script`, `--test` as `store_true`
-- [ ] define `-h/--help` with `add_help=False` and custom `store_true`
-- [ ] add epilog documenting env vars (`RALPHEX_IMAGE`, `RALPHEX_PORT`, `RALPHEX_EXTRA_ENV`, `RALPHEX_EXTRA_VOLUMES`)
-- [ ] write tests for `build_parser()` (flags parsed correctly)
-- [ ] write tests for unknown args handling (`parse_known_args`)
-- [ ] write test for `--` delimiter: args after `--` are NOT consumed by wrapper
-- [ ] write test for `-E` at end without value (argparse raises error - document this behavior change)
-- [ ] run tests - must pass before task 2
+- [x] add `import argparse` at top of file
+- [x] create `build_parser()` function that returns `ArgumentParser`
+- [x] define `-E/--env` flag with `action="append"`, `default=[]`
+- [x] define `-v/--volume` flag with `action="append"`, `default=[]`
+- [x] define `--update`, `--update-script`, `--test` as `store_true`
+- [x] define `-h/--help` with `add_help=False` and custom `store_true`
+- [x] add epilog documenting env vars (`RALPHEX_IMAGE`, `RALPHEX_PORT`, `RALPHEX_EXTRA_ENV`, `RALPHEX_EXTRA_VOLUMES`)
+- [x] write tests for `build_parser()` (flags parsed correctly)
+- [x] write tests for unknown args handling (`parse_known_args`)
+- [x] write test for `--` delimiter: args after `--` are NOT consumed by wrapper
+- [x] write test for `-E` at end without value (argparse raises error - document this behavior change)
+- [x] run tests - must pass before task 2
 
 ### Task 2: Refactor main() to use argparse
 

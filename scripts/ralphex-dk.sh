@@ -15,6 +15,7 @@ Environment variables:
 - RALPHEX_EXTRA_VOLUMES: comma-separated volume mounts (src:dest[:opts])
 """
 
+import argparse
 import difflib
 import hashlib
 import os
@@ -26,6 +27,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import unittest
 import unittest.mock
@@ -38,6 +40,38 @@ DEFAULT_IMAGE = "ghcr.io/umputun/ralphex-go:latest"
 DEFAULT_PORT = "8080"
 SCRIPT_URL = "https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
 SENSITIVE_PATTERNS = ["KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH"]
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """build argparse parser for wrapper-specific flags."""
+    parser = argparse.ArgumentParser(
+        prog="ralphex-dk",
+        description="Run ralphex in a Docker container",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
+        epilog=textwrap.dedent("""\
+            Environment variables:
+              RALPHEX_IMAGE         Docker image (default: ghcr.io/umputun/ralphex-go:latest)
+              RALPHEX_PORT          Web dashboard port with --serve (default: 8080)
+              RALPHEX_EXTRA_ENV     Comma-separated env vars (VAR=value or VAR)
+              RALPHEX_EXTRA_VOLUMES Comma-separated volume mounts (src:dst[:opts])
+
+            All other arguments are passed through to ralphex.
+        """),
+    )
+    parser.add_argument("-E", "--env", action="append", default=[], metavar="VAR[=val]",
+                        help="extra env var to pass to container (can be repeated)")
+    parser.add_argument("-v", "--volume", action="append", default=[], metavar="src:dst[:opts]",
+                        help="extra volume mount (can be repeated)")
+    parser.add_argument("--update", action="store_true",
+                        help="pull latest Docker image and exit")
+    parser.add_argument("--update-script", action="store_true",
+                        help="update this wrapper script and exit")
+    parser.add_argument("--test", action="store_true",
+                        help="run embedded unit tests and exit")
+    parser.add_argument("-h", "--help", action="store_true", dest="help",
+                        help="show this help and ralphex help, then exit")
+    return parser
 
 
 def selinux_enabled() -> bool:
@@ -1384,6 +1418,134 @@ def run_tests() -> None:
             warning = captured.getvalue()
             self.assertEqual(warning, "")
 
+    class TestBuildParser(unittest.TestCase):
+        def test_returns_argument_parser(self) -> None:
+            """build_parser returns an ArgumentParser instance."""
+            parser = build_parser()
+            self.assertIsInstance(parser, argparse.ArgumentParser)
+
+        def test_env_flag_short(self) -> None:
+            """-E flag is parsed correctly."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-E", "FOO=bar"])
+            self.assertEqual(args.env, ["FOO=bar"])
+
+        def test_env_flag_long(self) -> None:
+            """--env flag is parsed correctly."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["--env", "FOO=bar"])
+            self.assertEqual(args.env, ["FOO=bar"])
+
+        def test_env_flag_multiple(self) -> None:
+            """multiple -E flags accumulate."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-E", "FOO=bar", "-E", "BAZ"])
+            self.assertEqual(args.env, ["FOO=bar", "BAZ"])
+
+        def test_volume_flag_short(self) -> None:
+            """-v flag is parsed correctly."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-v", "/a:/b"])
+            self.assertEqual(args.volume, ["/a:/b"])
+
+        def test_volume_flag_long(self) -> None:
+            """--volume flag is parsed correctly."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["--volume", "/a:/b:ro"])
+            self.assertEqual(args.volume, ["/a:/b:ro"])
+
+        def test_volume_flag_multiple(self) -> None:
+            """multiple -v flags accumulate."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-v", "/a:/b", "-v", "/c:/d"])
+            self.assertEqual(args.volume, ["/a:/b", "/c:/d"])
+
+        def test_update_flag(self) -> None:
+            """--update flag is store_true."""
+            parser = build_parser()
+            args, _ = parser.parse_known_args(["--update"])
+            self.assertTrue(args.update)
+
+        def test_update_script_flag(self) -> None:
+            """--update-script flag is store_true."""
+            parser = build_parser()
+            args, _ = parser.parse_known_args(["--update-script"])
+            self.assertTrue(args.update_script)
+
+        def test_test_flag(self) -> None:
+            """--test flag is store_true."""
+            parser = build_parser()
+            args, _ = parser.parse_known_args(["--test"])
+            self.assertTrue(args.test)
+
+        def test_help_flag(self) -> None:
+            """-h/--help flag is store_true (custom handling)."""
+            parser = build_parser()
+            args, _ = parser.parse_known_args(["-h"])
+            self.assertTrue(args.help)
+            args, _ = parser.parse_known_args(["--help"])
+            self.assertTrue(args.help)
+
+        def test_unknown_args_pass_through(self) -> None:
+            """unknown args (ralphex args) are returned in second tuple element."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["--serve", "plan.md", "--review"])
+            self.assertEqual(unknown, ["--serve", "plan.md", "--review"])
+            self.assertEqual(args.env, [])
+            self.assertEqual(args.volume, [])
+
+        def test_mixed_known_and_unknown(self) -> None:
+            """known and unknown args are separated correctly."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-E", "FOO=bar", "--serve", "-v", "/a:/b", "plan.md"])
+            self.assertEqual(args.env, ["FOO=bar"])
+            self.assertEqual(args.volume, ["/a:/b"])
+            self.assertEqual(unknown, ["--serve", "plan.md"])
+
+        def test_double_dash_delimiter(self) -> None:
+            """args after -- are NOT consumed by wrapper (-- is preserved in pass-through)."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-E", "FOO", "--", "-v", "/ignored", "plan.md"])
+            self.assertEqual(args.env, ["FOO"])
+            self.assertEqual(args.volume, [])
+            # note: -- is preserved and passed through to ralphex along with remaining args
+            self.assertEqual(unknown, ["--", "-v", "/ignored", "plan.md"])
+
+        def test_lowercase_e_passes_through(self) -> None:
+            """-e (lowercase) is not consumed by wrapper, passes to ralphex."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-e", "plan.md"])
+            self.assertEqual(args.env, [])
+            self.assertEqual(unknown, ["-e", "plan.md"])
+
+        def test_e_at_end_without_value_raises_error(self) -> None:
+            """-E at end without value raises argparse error."""
+            parser = build_parser()
+            with self.assertRaises(SystemExit):
+                import io
+                with unittest.mock.patch("sys.stderr", io.StringIO()):
+                    parser.parse_known_args(["-E"])
+
+        def test_v_at_end_without_value_raises_error(self) -> None:
+            """-v at end without value raises argparse error."""
+            parser = build_parser()
+            with self.assertRaises(SystemExit):
+                import io
+                with unittest.mock.patch("sys.stderr", io.StringIO()):
+                    parser.parse_known_args(["-v"])
+
+        def test_defaults_when_no_args(self) -> None:
+            """all flags have sensible defaults when no args provided."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args([])
+            self.assertEqual(args.env, [])
+            self.assertEqual(args.volume, [])
+            self.assertFalse(args.update)
+            self.assertFalse(args.update_script)
+            self.assertFalse(args.test)
+            self.assertFalse(args.help)
+            self.assertEqual(unknown, [])
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -1391,7 +1553,7 @@ def run_tests() -> None:
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
-               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars]:
+               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars, TestBuildParser]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
