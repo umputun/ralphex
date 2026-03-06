@@ -69,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run ralphex in a Docker container",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,
+        allow_abbrev=False,
         epilog=textwrap.dedent("""\
             Environment variables:
               RALPHEX_IMAGE         Docker image (default: ghcr.io/umputun/ralphex-go:latest)
@@ -454,27 +455,6 @@ def handle_update(image: str) -> int:
     return subprocess.run(["docker", "pull", image], check=False).returncode
 
 
-def handle_help(parser: argparse.ArgumentParser, image: str, claude_home: Path, creds_temp: Optional[Path]) -> int:
-    """print wrapper help, separator, then run container with --help."""
-    parser.print_help()
-    print("\n" + "-" * 70)
-    print("ralphex options (from container):\n")
-    # run container with --help (non-interactive - no -it flags)
-    volumes = build_volumes(creds_temp, claude_home)
-    cmd = ["docker", "run", "--rm"]
-    cmd.extend([
-        "-e", f"APP_UID={os.getuid()}",
-        "-e", f"TIME_ZONE={detect_timezone()}",
-        "-e", "SKIP_HOME_CHOWN=1",
-        "-e", "INIT_QUIET=1",
-        "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
-    ])
-    cmd.extend(volumes)
-    cmd.extend(["-w", "/workspace"])
-    cmd.extend([image, "/srv/ralphex", "--help"])
-    return subprocess.run(cmd, check=False).returncode
-
-
 def handle_update_script(script_path: Path) -> int:
     """download latest wrapper script, show diff, prompt user to update."""
     print("checking for ralphex docker wrapper updates...", file=sys.stderr)
@@ -643,31 +623,51 @@ def main() -> int:
         script_path = Path(os.path.realpath(sys.argv[0]))
         return handle_update_script(script_path)
 
-    # resolve claude config directory (needed for --help and normal execution)
+    # resolve claude config directory
     claude_config_dir_env = os.environ.get("CLAUDE_CONFIG_DIR", "")
     if claude_config_dir_env:
         claude_home = Path(claude_config_dir_env).expanduser().resolve()
     else:
         claude_home = Path.home() / ".claude"
 
-    # check required directories
-    if not claude_home.is_dir():
-        print(f"error: {claude_home} directory not found (run 'claude' first to authenticate)", file=sys.stderr)
-        return 1
-
-    # extract macOS credentials (needed for volume mounts)
-    creds_temp = extract_macos_credentials(claude_home)
-
-    # handle --help: show wrapper help + ralphex help from container
+    # handle --help: show wrapper help unconditionally, then try container help if config exists
     if parsed.help:
+        parser.print_help()
+        print("\n" + "-" * 70)
+        if not claude_home.is_dir():
+            print("ralphex options: (cannot show - claude config not found)")
+            print(f"  run 'claude' first to authenticate, then re-run --help")
+            return 0
+        print("ralphex options (from container):\n")
+        creds_temp = extract_macos_credentials(claude_home)
         try:
-            return handle_help(parser, image, claude_home, creds_temp)
+            volumes = build_volumes(creds_temp, claude_home)
+            cmd = ["docker", "run", "--rm"]
+            cmd.extend([
+                "-e", f"APP_UID={os.getuid()}",
+                "-e", f"TIME_ZONE={detect_timezone()}",
+                "-e", "SKIP_HOME_CHOWN=1",
+                "-e", "INIT_QUIET=1",
+                "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
+            ])
+            cmd.extend(volumes)
+            cmd.extend(["-w", "/workspace"])
+            cmd.extend([image, "/srv/ralphex", "--help"])
+            return subprocess.run(cmd, check=False).returncode
         finally:
             if creds_temp:
                 try:
                     creds_temp.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    # check required directories (after --help handling)
+    if not claude_home.is_dir():
+        print(f"error: {claude_home} directory not found (run 'claude' first to authenticate)", file=sys.stderr)
+        return 1
+
+    # extract macOS credentials (needed for volume mounts)
+    creds_temp = extract_macos_credentials(claude_home)
 
     # merge env var entries with CLI -E/--env flags (env first, CLI appends)
     extra_env = merge_env_flags(parsed.env)
@@ -1544,6 +1544,19 @@ def run_tests() -> None:
             self.assertFalse(args.help)
             self.assertEqual(unknown, [])
 
+        def test_abbreviations_disabled(self) -> None:
+            """flag abbreviations are disabled to preserve pass-through semantics."""
+            parser = build_parser()
+            # --te should NOT match --test (abbreviation), should pass through to ralphex
+            args, unknown = parser.parse_known_args(["--te"])
+            self.assertFalse(args.test)
+            self.assertEqual(unknown, ["--te"])
+            # --up should NOT fail as ambiguous, should pass through to ralphex
+            args, unknown = parser.parse_known_args(["--up"])
+            self.assertFalse(args.update)
+            self.assertFalse(args.update_script)
+            self.assertEqual(unknown, ["--up"])
+
     class TestMainArgparse(unittest.TestCase):
         """tests for main() argparse integration."""
 
@@ -1810,70 +1823,94 @@ def run_tests() -> None:
                     os.environ[key] = val
             sys.argv[:] = self._saved_argv
 
-        def test_help_flag_calls_handle_help(self) -> None:
-            """--help triggers handle_help with correct arguments."""
+        def test_help_without_claude_config_shows_wrapper_help(self) -> None:
+            """--help shows wrapper help even when claude config is missing."""
+            os.environ["CLAUDE_CONFIG_DIR"] = "/tmp/nonexistent-dir-12345"
+
+            captured_output: list[str] = []
+
+            def fake_print(*args: object, **kwargs: object) -> None:
+                out = " ".join(str(a) for a in args)
+                captured_output.append(out)
+
+            with unittest.mock.patch("builtins.print", side_effect=fake_print):
+                sys.argv = ["ralphex-dk", "--help"]
+                result = main()
+
+            self.assertEqual(result, 0)
+            output = "\n".join(captured_output)
+            self.assertIn("ralphex options: (cannot show - claude config not found)", output)
+            self.assertIn("run 'claude' first to authenticate", output)
+
+        def test_help_with_claude_config_runs_container(self) -> None:
+            """--help with valid claude config runs container for ralphex help."""
             tmp = Path(tempfile.mkdtemp())
             try:
                 claude_dir = tmp / ".claude"
                 claude_dir.mkdir()
                 os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
-                captured_calls: list[tuple] = []
+                docker_calls: list[list[str]] = []
 
-                def fake_handle_help(parser: argparse.ArgumentParser, image: str,
-                                     claude_home: Path, creds_temp: Optional[Path]) -> int:
-                    captured_calls.append((parser, image, claude_home, creds_temp))
-                    return 0
+                def fake_run(cmd: list[str], **kwargs: object) -> unittest.mock.Mock:
+                    mock_result = unittest.mock.Mock()
+                    mock_result.returncode = 0
+                    mock_result.stdout = ""  # default for git commands
+                    if cmd and cmd[0] == "docker":
+                        docker_calls.append(cmd)
+                    return mock_result
 
-                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
+                with unittest.mock.patch("subprocess.run", side_effect=fake_run):
                     with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
                         sys.argv = ["ralphex-dk", "--help"]
                         result = main()
 
                 self.assertEqual(result, 0)
-                self.assertEqual(len(captured_calls), 1)
-                _, image, claude_home, _ = captured_calls[0]
-                self.assertEqual(image, DEFAULT_IMAGE)
-                self.assertEqual(claude_home, claude_dir)
+                # should have called docker run with --help
+                self.assertEqual(len(docker_calls), 1)
+                cmd = docker_calls[0]
+                self.assertEqual(cmd[0], "docker")
+                self.assertEqual(cmd[1], "run")
+                self.assertIn("--help", cmd)
             finally:
                 shutil.rmtree(tmp)
 
-        def test_h_flag_calls_handle_help(self) -> None:
-            """-h (short form) triggers handle_help."""
+        def test_h_flag_same_as_help(self) -> None:
+            """-h (short form) behaves same as --help."""
+            os.environ["CLAUDE_CONFIG_DIR"] = "/tmp/nonexistent-dir-12345"
+
+            captured_output: list[str] = []
+
+            def fake_print(*args: object, **kwargs: object) -> None:
+                out = " ".join(str(a) for a in args)
+                captured_output.append(out)
+
+            with unittest.mock.patch("builtins.print", side_effect=fake_print):
+                sys.argv = ["ralphex-dk", "-h"]
+                result = main()
+
+            self.assertEqual(result, 0)
+            output = "\n".join(captured_output)
+            self.assertIn("cannot show - claude config not found", output)
+
+        def test_help_returns_container_exit_code(self) -> None:
+            """main() returns exit code from container's --help."""
             tmp = Path(tempfile.mkdtemp())
             try:
                 claude_dir = tmp / ".claude"
                 claude_dir.mkdir()
                 os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
-                calls: list[int] = []
+                def fake_run(cmd: list[str], **kwargs: object) -> unittest.mock.Mock:
+                    mock_result = unittest.mock.Mock()
+                    mock_result.stdout = ""  # default for git commands
+                    if cmd and cmd[0] == "docker":
+                        mock_result.returncode = 42  # docker run exit code
+                    else:
+                        mock_result.returncode = 0  # git commands succeed
+                    return mock_result
 
-                def fake_handle_help(*args: object) -> int:
-                    calls.append(1)
-                    return 0
-
-                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
-                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
-                        sys.argv = ["ralphex-dk", "-h"]
-                        result = main()
-
-                self.assertEqual(result, 0)
-                self.assertEqual(len(calls), 1)
-            finally:
-                shutil.rmtree(tmp)
-
-        def test_help_returns_handle_help_exit_code(self) -> None:
-            """main() returns exit code from handle_help."""
-            tmp = Path(tempfile.mkdtemp())
-            try:
-                claude_dir = tmp / ".claude"
-                claude_dir.mkdir()
-                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
-
-                def fake_handle_help(*args: object) -> int:
-                    return 42
-
-                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
+                with unittest.mock.patch("subprocess.run", side_effect=fake_run):
                     with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
                         sys.argv = ["ralphex-dk", "--help"]
                         result = main()
@@ -1882,30 +1919,24 @@ def run_tests() -> None:
             finally:
                 shutil.rmtree(tmp)
 
-        def test_help_with_env_flags_ignored(self) -> None:
-            """wrapper flags (-E, -v) before --help are still parsed but help takes precedence."""
-            tmp = Path(tempfile.mkdtemp())
-            try:
-                claude_dir = tmp / ".claude"
-                claude_dir.mkdir()
-                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+        def test_help_with_env_flags_still_shows_help(self) -> None:
+            """wrapper flags (-E, -v) before --help are parsed but help takes precedence."""
+            os.environ["CLAUDE_CONFIG_DIR"] = "/tmp/nonexistent-dir-12345"
 
-                calls: list[int] = []
+            captured_output: list[str] = []
 
-                def fake_handle_help(*args: object) -> int:
-                    calls.append(1)
-                    return 0
+            def fake_print(*args: object, **kwargs: object) -> None:
+                out = " ".join(str(a) for a in args)
+                captured_output.append(out)
 
-                with unittest.mock.patch("__main__.handle_help", side_effect=fake_handle_help):
-                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
-                        # -E and -v are parsed, but --help wins and run_docker is never called
-                        sys.argv = ["ralphex-dk", "-E", "FOO=bar", "-v", "/a:/b", "--help"]
-                        result = main()
+            with unittest.mock.patch("builtins.print", side_effect=fake_print):
+                # -E and -v are parsed, but --help wins and run_docker is never called
+                sys.argv = ["ralphex-dk", "-E", "FOO=bar", "-v", "/a:/b", "--help"]
+                result = main()
 
-                self.assertEqual(result, 0)
-                self.assertEqual(len(calls), 1)
-            finally:
-                shutil.rmtree(tmp)
+            self.assertEqual(result, 0)
+            output = "\n".join(captured_output)
+            self.assertIn("cannot show - claude config not found", output)
 
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
