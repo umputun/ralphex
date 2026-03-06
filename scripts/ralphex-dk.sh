@@ -375,12 +375,8 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
             dst = str(global_gitignore)
             add(src, dst, ro=True)
 
-    # 11. extra user-defined volumes via RALPHEX_EXTRA_VOLUMES env var (comma-separated)
-    extra = os.environ.get("RALPHEX_EXTRA_VOLUMES", "")
-    for mount in extra.split(","):
-        mount = mount.strip()
-        if mount and ":" in mount:
-            vols.extend(["-v", mount])
+    # note: RALPHEX_EXTRA_VOLUMES is handled by merge_volume_flags() in main()
+    # to properly merge with CLI -v flags. do not duplicate processing here.
 
     return vols
 
@@ -1199,54 +1195,8 @@ def run_tests() -> None:
                 else:
                     os.environ["CLAUDE_CONFIG_DIR"] = old
 
-    class TestExtraVolumes(unittest.TestCase):
-        def test_extra_volumes_added(self) -> None:
-            """RALPHEX_EXTRA_VOLUMES adds user-defined mounts."""
-            old = os.environ.get("RALPHEX_EXTRA_VOLUMES")
-            os.environ["RALPHEX_EXTRA_VOLUMES"] = "/tmp/a:/mnt/a:ro,/tmp/b:/mnt/b"
-            try:
-                with unittest.mock.patch(f"{__name__}.selinux_enabled", return_value=False):
-                    vols = build_volumes(None)
-                self.assertIn("/tmp/a:/mnt/a:ro", vols)
-                self.assertIn("/tmp/b:/mnt/b", vols)
-            finally:
-                if old is None:
-                    os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
-                else:
-                    os.environ["RALPHEX_EXTRA_VOLUMES"] = old
-
-        def test_empty_extra_volumes_is_noop(self) -> None:
-            """empty RALPHEX_EXTRA_VOLUMES adds no extra mounts."""
-            old = os.environ.get("RALPHEX_EXTRA_VOLUMES")
-            os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
-            try:
-                with unittest.mock.patch(f"{__name__}.selinux_enabled", return_value=False):
-                    vols = build_volumes(None)
-                base_count = len(vols)
-                os.environ["RALPHEX_EXTRA_VOLUMES"] = ""
-                with unittest.mock.patch(f"{__name__}.selinux_enabled", return_value=False):
-                    vols2 = build_volumes(None)
-                self.assertEqual(len(vols), len(vols2))
-            finally:
-                if old is None:
-                    os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
-                else:
-                    os.environ["RALPHEX_EXTRA_VOLUMES"] = old
-
-        def test_invalid_entries_skipped(self) -> None:
-            """entries without ':' are silently skipped."""
-            old = os.environ.get("RALPHEX_EXTRA_VOLUMES")
-            os.environ["RALPHEX_EXTRA_VOLUMES"] = "badentry,/tmp/ok:/mnt/ok"
-            try:
-                with unittest.mock.patch(f"{__name__}.selinux_enabled", return_value=False):
-                    vols = build_volumes(None)
-                self.assertNotIn("badentry", vols)
-                self.assertIn("/tmp/ok:/mnt/ok", vols)
-            finally:
-                if old is None:
-                    os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
-                else:
-                    os.environ["RALPHEX_EXTRA_VOLUMES"] = old
+    # note: TestExtraVolumes removed - RALPHEX_EXTRA_VOLUMES is now handled by
+    # merge_volume_flags() in main(), tested by TestMergeVolumeFlags class.
 
     class TestIsSensitiveName(unittest.TestCase):
         def test_matches_sensitive_patterns(self) -> None:
@@ -1960,10 +1910,11 @@ def run_tests() -> None:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
-               TestBuildVolumesGitignore, TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
+               TestBuildVolumesGitignore, TestDetectGitWorktree, TestDetectTimezone,
+               TestExtractCredentials, TestScheduleCleanup,
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
-               TestClaudeConfigDirEnv, TestExtraVolumes, TestIsSensitiveName, TestBuildEnvVars,
+               TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse, TestHelpFlag]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
