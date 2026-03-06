@@ -140,38 +140,6 @@ def symlink_target_dirs(src: Path, maxdepth: int = 2) -> list[Path]:
     return sorted(dirs)
 
 
-def extract_extra_volumes(args: list[str]) -> tuple[list[str], list[str]]:
-    """extract -v/--volume flags from args, return (extra_volumes, remaining_args)."""
-    extra: list[str] = []
-    remaining: list[str] = []
-    i = 0
-    while i < len(args):
-        if args[i] in ("-v", "--volume") and i + 1 < len(args):
-            extra.extend(["-v", args[i + 1]])
-            i += 2
-        else:
-            remaining.append(args[i])
-            i += 1
-    return extra, remaining
-
-
-def extract_extra_env(args: list[str]) -> tuple[list[str], list[str]]:
-    """extract and validate -E/--env flags from args, return (docker_env_flags, remaining_args)."""
-    extra: list[str] = []
-    remaining: list[str] = []
-    i = 0
-    while i < len(args):
-        if args[i] in ("-E", "--env") and i + 1 < len(args):
-            entry = args[i + 1]
-            if validated := validate_env_entry(entry, warn_invalid=True):
-                extra.extend(["-e", validated])
-            i += 2
-        else:
-            remaining.append(args[i])
-            i += 1
-    return extra, remaining
-
-
 def should_bind_port(args: list[str]) -> bool:
     """check for --serve or -s in arguments."""
     return "--serve" in args or "-s" in args
@@ -1260,43 +1228,6 @@ def run_tests() -> None:
                 else:
                     os.environ["RALPHEX_EXTRA_VOLUMES"] = old
 
-    class TestExtractExtraVolumes(unittest.TestCase):
-        def test_extracts_v_flag(self) -> None:
-            """'-v src:dst' is extracted from args."""
-            extra, remaining = extract_extra_volumes(["-v", "/a:/b", "plan.md"])
-            self.assertEqual(extra, ["-v", "/a:/b"])
-            self.assertEqual(remaining, ["plan.md"])
-
-        def test_extracts_volume_flag(self) -> None:
-            """'--volume src:dst' is extracted from args."""
-            extra, remaining = extract_extra_volumes(["--volume", "/a:/b", "plan.md"])
-            self.assertEqual(extra, ["-v", "/a:/b"])
-            self.assertEqual(remaining, ["plan.md"])
-
-        def test_multiple_volumes(self) -> None:
-            """multiple -v flags are all extracted."""
-            extra, remaining = extract_extra_volumes(["-v", "/a:/b", "-v", "/c:/d", "plan.md"])
-            self.assertEqual(extra, ["-v", "/a:/b", "-v", "/c:/d"])
-            self.assertEqual(remaining, ["plan.md"])
-
-        def test_no_volumes(self) -> None:
-            """args without -v pass through unchanged."""
-            extra, remaining = extract_extra_volumes(["--serve", "plan.md"])
-            self.assertEqual(extra, [])
-            self.assertEqual(remaining, ["--serve", "plan.md"])
-
-        def test_v_at_end_without_value(self) -> None:
-            """-v at end of args without a value is kept as remaining."""
-            extra, remaining = extract_extra_volumes(["plan.md", "-v"])
-            self.assertEqual(extra, [])
-            self.assertEqual(remaining, ["plan.md", "-v"])
-
-        def test_mixed_with_other_flags(self) -> None:
-            """-v interleaved with other flags."""
-            extra, remaining = extract_extra_volumes(["--serve", "-v", "/x:/y:ro", "plan.md"])
-            self.assertEqual(extra, ["-v", "/x:/y:ro"])
-            self.assertEqual(remaining, ["--serve", "plan.md"])
-
     class TestIsSensitiveName(unittest.TestCase):
         def test_matches_sensitive_patterns(self) -> None:
             """names containing KEY, SECRET, TOKEN etc. are sensitive."""
@@ -1343,80 +1274,6 @@ def run_tests() -> None:
             self.assertFalse(is_sensitive_name("AUTHENTICATE"))  # AUTH not at word boundary (no _ before/after)
             self.assertFalse(is_sensitive_name("AUTHX"))  # AUTH at start but no right boundary
             self.assertFalse(is_sensitive_name("XAUTH"))  # AUTH at end but no left boundary
-
-    class TestExtractExtraEnv(unittest.TestCase):
-        def test_extracts_uppercase_e_flag_with_value(self) -> None:
-            """-E FOO=bar is extracted from args."""
-            extra, remaining = extract_extra_env(["-E", "FOO=bar", "plan.md"])
-            self.assertEqual(extra, ["-e", "FOO=bar"])
-            self.assertEqual(remaining, ["plan.md"])
-
-        def test_extracts_uppercase_e_flag_name_only(self) -> None:
-            """-E FOO (name-only) is extracted from args."""
-            extra, remaining = extract_extra_env(["-E", "FOO", "plan.md"])
-            self.assertEqual(extra, ["-e", "FOO"])
-            self.assertEqual(remaining, ["plan.md"])
-
-        def test_extracts_env_flag(self) -> None:
-            """--env FOO=bar is extracted from args."""
-            extra, remaining = extract_extra_env(["--env", "FOO=bar", "plan.md"])
-            self.assertEqual(extra, ["-e", "FOO=bar"])
-            self.assertEqual(remaining, ["plan.md"])
-
-        def test_multiple_env_flags(self) -> None:
-            """multiple -E flags are all extracted."""
-            extra, remaining = extract_extra_env(["-E", "FOO=bar", "-E", "BAZ", "plan.md"])
-            self.assertEqual(extra, ["-e", "FOO=bar", "-e", "BAZ"])
-            self.assertEqual(remaining, ["plan.md"])
-
-        def test_no_env_flags(self) -> None:
-            """args without -E pass through unchanged."""
-            extra, remaining = extract_extra_env(["--serve", "plan.md"])
-            self.assertEqual(extra, [])
-            self.assertEqual(remaining, ["--serve", "plan.md"])
-
-        def test_mixed_with_other_flags(self) -> None:
-            """-E interleaved with other flags."""
-            extra, remaining = extract_extra_env(["--serve", "-E", "DEBUG=1", "plan.md"])
-            self.assertEqual(extra, ["-e", "DEBUG=1"])
-            self.assertEqual(remaining, ["--serve", "plan.md"])
-
-        def test_lowercase_e_passes_through(self) -> None:
-            """-e (ralphex's external-only flag) passes through to ralphex."""
-            extra, remaining = extract_extra_env(["-e", "plan.md"])
-            self.assertEqual(extra, [])
-            self.assertEqual(remaining, ["-e", "plan.md"])
-
-        def test_invalid_entries_skipped_with_warning(self) -> None:
-            """invalid env var names are skipped with warning."""
-            import io
-            captured = io.StringIO()
-            with unittest.mock.patch("sys.stderr", captured):
-                extra, remaining = extract_extra_env(["-E", "=bad", "-E", "GOOD=val", "-E", "123BAD", "plan.md"])
-            self.assertEqual(extra, ["-e", "GOOD=val"])
-            self.assertEqual(remaining, ["plan.md"])
-            warning = captured.getvalue()
-            self.assertIn("=bad", warning)
-            self.assertIn("123BAD", warning)
-
-        def test_sensitive_name_warning(self) -> None:
-            """sensitive name with explicit value prints warning."""
-            import io
-            captured = io.StringIO()
-            with unittest.mock.patch("sys.stderr", captured):
-                extra, remaining = extract_extra_env(["-E", "API_KEY=secret", "plan.md"])
-            self.assertEqual(extra, ["-e", "API_KEY=secret"])
-            warning = captured.getvalue()
-            self.assertIn("-E API_KEY", warning)
-
-        def test_sensitive_name_no_warning_for_name_only(self) -> None:
-            """sensitive name without explicit value does not print warning."""
-            import io
-            captured = io.StringIO()
-            with unittest.mock.patch("sys.stderr", captured):
-                extra, remaining = extract_extra_env(["-E", "API_KEY", "plan.md"])
-            self.assertEqual(extra, ["-e", "API_KEY"])
-            self.assertEqual(captured.getvalue(), "")
 
     class TestBuildEnvVars(unittest.TestCase):
         def setUp(self) -> None:
@@ -2086,8 +1943,7 @@ def run_tests() -> None:
                TestBuildVolumesGitignore, TestDetectGitWorktree, TestExtractCredentials, TestScheduleCleanup,
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
-               TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
-               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars,
+               TestClaudeConfigDirEnv, TestExtraVolumes, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse, TestHelpFlag]:
         suite.addTests(loader.loadTestsFromTestCase(tc))

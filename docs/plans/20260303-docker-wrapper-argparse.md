@@ -106,13 +106,13 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] verify new argparse tests cover equivalent cases from `TestExtractExtraVolumes`:
+- [x] verify new argparse tests cover equivalent cases from `TestExtractExtraVolumes`:
   - `-v src:dst` extracted correctly
   - `--volume src:dst` extracted correctly
   - multiple `-v` flags handled
   - `-v` at end without value (behavior change: now errors instead of pass-through)
   - mixed with other flags
-- [ ] verify new argparse tests cover equivalent cases from `TestExtractExtraEnv`:
+- [x] verify new argparse tests cover equivalent cases from `TestExtractExtraEnv`:
   - `-E FOO=bar` extracted correctly
   - `-E FOO` (name-only) extracted correctly
   - `--env` long form works
@@ -120,12 +120,12 @@
   - lowercase `-e` passes through to ralphex (NOT consumed)
   - invalid entries skipped with warning
   - sensitive name warning
-- [ ] remove `extract_extra_volumes()` function
-- [ ] remove `extract_extra_env()` function
-- [ ] remove `TestExtractExtraVolumes` test class
-- [ ] remove `TestExtractExtraEnv` test class
-- [ ] update test suite list to exclude removed classes
-- [ ] run tests - verify no regressions
+- [x] remove `extract_extra_volumes()` function
+- [x] remove `extract_extra_env()` function
+- [x] remove `TestExtractExtraVolumes` test class
+- [x] remove `TestExtractExtraEnv` test class
+- [x] update test suite list to exclude removed classes
+- [x] run tests - verify no regressions
 
 ### Task 6: Verify acceptance criteria
 
