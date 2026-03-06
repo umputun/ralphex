@@ -581,29 +581,37 @@ def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], b
 
 def main() -> int:
     """entry point."""
+    # parse wrapper-specific flags using argparse
+    parser = build_parser()
+    parsed, ralphex_args = parser.parse_known_args(sys.argv[1:])
+
     # handle --test flag
-    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+    if parsed.test:
         run_tests()
         return 0
 
     image = os.environ.get("RALPHEX_IMAGE", DEFAULT_IMAGE)
     port = os.environ.get("RALPHEX_PORT", DEFAULT_PORT)
-    args = sys.argv[1:]
 
     # handle --update
-    if args and args[0] == "--update":
+    if parsed.update:
         return handle_update(image)
 
     # handle --update-script
-    if args and args[0] == "--update-script":
+    if parsed.update_script:
         script_path = Path(os.path.realpath(sys.argv[0]))
         return handle_update_script(script_path)
 
-    # extract -v/--volume flags (consumed by wrapper, not passed to ralphex)
-    cli_volumes, args = extract_extra_volumes(args)
+    # build docker -e flags from CLI -E/--env flags, validating each entry
+    cli_env: list[str] = []
+    for entry in parsed.env:
+        if validated := validate_env_entry(entry, warn_invalid=True):
+            cli_env.extend(["-e", validated])
 
-    # extract -e/--env flags (consumed by wrapper, not passed to ralphex)
-    cli_env, args = extract_extra_env(args)
+    # build docker -v flags from CLI -v/--volume flags
+    cli_volumes: list[str] = []
+    for mount in parsed.volume:
+        cli_volumes.extend(["-v", mount])
 
     # resolve claude config directory
     claude_config_dir_env = os.environ.get("CLAUDE_CONFIG_DIR", "")
@@ -657,9 +665,9 @@ def main() -> int:
         schedule_cleanup(creds_temp)
 
         # determine port binding
-        bind_port = should_bind_port(args)
+        bind_port = should_bind_port(ralphex_args)
 
-        return run_docker(image, port, volumes, env_vars, bind_port, args)
+        return run_docker(image, port, volumes, env_vars, bind_port, ralphex_args)
     finally:
         _cleanup_creds()
 
@@ -1546,6 +1554,252 @@ def run_tests() -> None:
             self.assertFalse(args.help)
             self.assertEqual(unknown, [])
 
+    class TestMainArgparse(unittest.TestCase):
+        """tests for main() argparse integration."""
+
+        def setUp(self) -> None:
+            """save environment and mock external dependencies."""
+            self._saved_env: dict[str, str | None] = {}
+            for key in ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
+                        "RALPHEX_EXTRA_VOLUMES", "CLAUDE_CONFIG_DIR"]:
+                self._saved_env[key] = os.environ.get(key)
+                os.environ.pop(key, None)
+            self._saved_argv = sys.argv[:]
+
+        def tearDown(self) -> None:
+            """restore environment and sys.argv."""
+            for key, val in self._saved_env.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+            sys.argv[:] = self._saved_argv
+
+        def test_update_flag_triggers_handle_update(self) -> None:
+            """--update calls handle_update with image."""
+            calls: list[str] = []
+            with unittest.mock.patch("__main__.handle_update", side_effect=lambda img: (calls.append(img), 0)[1]):
+                sys.argv = ["ralphex-dk", "--update"]
+                result = main()
+            self.assertEqual(calls, [DEFAULT_IMAGE])
+            self.assertEqual(result, 0)
+
+        def test_update_with_custom_image(self) -> None:
+            """--update uses RALPHEX_IMAGE env var."""
+            os.environ["RALPHEX_IMAGE"] = "custom:latest"
+            calls: list[str] = []
+            with unittest.mock.patch("__main__.handle_update", side_effect=lambda img: (calls.append(img), 0)[1]):
+                sys.argv = ["ralphex-dk", "--update"]
+                result = main()
+            self.assertEqual(calls, ["custom:latest"])
+            self.assertEqual(result, 0)
+
+        def test_update_script_flag_triggers_handle_update_script(self) -> None:
+            """--update-script calls handle_update_script."""
+            calls: list[Path] = []
+            with unittest.mock.patch("__main__.handle_update_script", side_effect=lambda p: (calls.append(p), 0)[1]):
+                sys.argv = ["ralphex-dk", "--update-script"]
+                result = main()
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(result, 0)
+
+        def test_env_flags_build_cli_env(self) -> None:
+            """CLI -E/--env flags are converted to docker -e flags."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_env: list[str] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                    captured_env.extend(env_vars)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "-E", "FOO=bar", "--env", "BAZ", "plan.md"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertIn("-e", captured_env)
+                self.assertIn("FOO=bar", captured_env)
+                self.assertIn("BAZ", captured_env)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_volume_flags_build_cli_volumes(self) -> None:
+            """CLI -v/--volume flags are added to volume list."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_volumes: list[str] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                    captured_volumes.extend(volumes)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "-v", "/a:/b", "--volume", "/c:/d:ro", "plan.md"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertIn("-v", captured_volumes)
+                self.assertIn("/a:/b", captured_volumes)
+                self.assertIn("/c:/d:ro", captured_volumes)
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_ralphex_args_pass_through(self) -> None:
+            """unknown args pass through to run_docker."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_args: list[str] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                    captured_args.extend(args)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--serve", "plan.md", "--review"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(captured_args, ["--serve", "plan.md", "--review"])
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_double_dash_delimiter_pass_through(self) -> None:
+            """args after -- pass through unchanged to ralphex, including -- itself."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_args: list[str] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                    captured_args.extend(args)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        # -E FOO is consumed, but -v after -- is NOT consumed
+                        sys.argv = ["ralphex-dk", "-E", "FOO", "--", "-v", "/ignored", "plan.md"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                # -- and everything after it passes through
+                self.assertEqual(captured_args, ["--", "-v", "/ignored", "plan.md"])
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_lowercase_e_passes_to_ralphex(self) -> None:
+            """-e (ralphex's external-only flag) passes through to ralphex."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_args: list[str] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                    captured_args.extend(args)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "-e", "plan.md"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(captured_args, ["-e", "plan.md"])
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_mixed_wrapper_and_ralphex_args(self) -> None:
+            """wrapper args are separated from ralphex args correctly."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_args: list[str] = []
+                captured_env: list[str] = []
+                captured_volumes: list[str] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                    captured_args.extend(args)
+                    captured_env.extend(env_vars)
+                    captured_volumes.extend(volumes)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "-E", "DEBUG=1", "--serve", "-v", "/data:/mnt", "plan.md", "-e"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                # wrapper args consumed
+                self.assertIn("DEBUG=1", captured_env)
+                self.assertIn("/data:/mnt", captured_volumes)
+                # ralphex args passed through
+                self.assertEqual(captured_args, ["--serve", "plan.md", "-e"])
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_invalid_env_entries_skipped_with_warning(self) -> None:
+            """invalid -E entries are skipped with warning."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_env: list[str] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                    captured_env.extend(env_vars)
+                    return 0
+
+                import io
+                captured_stderr = io.StringIO()
+                with unittest.mock.patch("sys.stderr", captured_stderr):
+                    with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                        with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                            sys.argv = ["ralphex-dk", "-E", "=invalid", "-E", "VALID=val"]
+                            result = main()
+
+                self.assertEqual(result, 0)
+                # only valid entry is included
+                self.assertIn("VALID=val", captured_env)
+                self.assertNotIn("=invalid", captured_env)
+                # warning printed
+                warning = captured_stderr.getvalue()
+                self.assertIn("=invalid", warning)
+            finally:
+                shutil.rmtree(tmp)
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -1553,7 +1807,8 @@ def run_tests() -> None:
                TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestExtraVolumes, TestExtractExtraVolumes,
-               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars, TestBuildParser]:
+               TestIsSensitiveName, TestExtractExtraEnv, TestBuildEnvVars, TestBuildParser,
+               TestMainArgparse]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

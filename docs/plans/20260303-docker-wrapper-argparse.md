@@ -64,14 +64,14 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] replace manual `--test` check with argparse result
-- [ ] replace manual `--update` check with argparse result
-- [ ] replace manual `--update-script` check with argparse result
-- [ ] use `parse_known_args()` to separate wrapper flags from ralphex args
-- [ ] pass `ralphex_args` (unknown) through to `run_docker()`
-- [ ] write tests for main flow with various flag combinations
-- [ ] write test for `--` delimiter pass-through to ralphex
-- [ ] run tests - must pass before task 3
+- [x] replace manual `--test` check with argparse result
+- [x] replace manual `--update` check with argparse result
+- [x] replace manual `--update-script` check with argparse result
+- [x] use `parse_known_args()` to separate wrapper flags from ralphex args
+- [x] pass `ralphex_args` (unknown) through to `run_docker()`
+- [x] write tests for main flow with various flag combinations
+- [x] write test for `--` delimiter pass-through to ralphex
+- [x] run tests - must pass before task 3
 
 ### Task 3: Integrate CLI flags with env var defaults
 
