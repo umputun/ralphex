@@ -129,14 +129,14 @@ Instead, use `aws configure export-credentials` to export only the needed creden
 
 ### Task 6: [Final] Update documentation
 
-- [ ] create `docs/bedrock-setup.md` with:
+- [x] create `docs/bedrock-setup.md` with:
   - security best practices (separate profile, minimal permissions)
   - example IAM policy for Bedrock access (see Technical Details)
   - step-by-step setup instructions for SSO and IAM user scenarios
   - troubleshooting common auth errors
-- [ ] update llms.txt with new flag (`--claude-provider`) and env var (`RALPHEX_CLAUDE_PROVIDER`)
-- [ ] add example usage for Bedrock mode
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update llms.txt with new flag (`--claude-provider`) and env var (`RALPHEX_CLAUDE_PROVIDER`)
+- [x] add example usage for Bedrock mode
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
