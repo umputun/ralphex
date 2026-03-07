@@ -43,20 +43,20 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `--claude-provider` flag to argparse (values: `default`, `bedrock`; default: `default`)
-- [ ] add `RALPHEX_CLAUDE_PROVIDER` env var as fallback (CLI flag takes precedence)
-- [ ] add `BEDROCK_ENV_VARS` constant with list of AWS/Bedrock-related env vars to passthrough
-- [ ] add `get_claude_provider()` function returning provider from CLI or env var
-- [ ] add `build_bedrock_env_args()` function to pass BEDROCK_ENV_VARS when provider is `bedrock`
-- [ ] integrate into `run_docker()` alongside extra env vars
-- [ ] write `TestClaudeProvider` test class with cases:
+- [x] add `--claude-provider` flag to argparse (values: `default`, `bedrock`; default: `default`)
+- [x] add `RALPHEX_CLAUDE_PROVIDER` env var as fallback (CLI flag takes precedence)
+- [x] add `BEDROCK_ENV_VARS` constant with list of AWS/Bedrock-related env vars to passthrough
+- [x] add `get_claude_provider()` function returning provider from CLI or env var
+- [x] add `build_bedrock_env_args()` function to pass BEDROCK_ENV_VARS when provider is `bedrock`
+- [x] integrate into `run_docker()` alongside extra env vars
+- [x] write `TestClaudeProvider` test class with cases:
   - `test_default_provider_no_bedrock_env` - no flag, no env → provider is "default", no AWS vars
   - `test_cli_flag_bedrock` - `--claude-provider bedrock` → provider is "bedrock"
   - `test_env_var_fallback` - no flag, `RALPHEX_CLAUDE_PROVIDER=bedrock` → provider is "bedrock"
   - `test_cli_overrides_env` - flag and env var set → CLI wins
   - `test_bedrock_passes_set_vars` - only passes BEDROCK_ENV_VARS that are actually set
   - `test_invalid_provider_rejected` - unknown provider value → error
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
 
 ### Task 2: Add AWS profile credential export for Bedrock
 

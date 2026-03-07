@@ -60,6 +60,33 @@ DEFAULT_IMAGE = "ghcr.io/umputun/ralphex-go:latest"
 DEFAULT_PORT = "8080"
 SCRIPT_URL = "https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
 SENSITIVE_PATTERNS = ["KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH"]
+VALID_CLAUDE_PROVIDERS = ["default", "bedrock"]
+
+# environment variables to pass through when using bedrock provider
+BEDROCK_ENV_VARS = [
+    # core bedrock config (user must set CLAUDE_CODE_USE_BEDROCK=1 on host)
+    "CLAUDE_CODE_USE_BEDROCK",
+    "AWS_REGION",
+    # explicit credentials (exported from profile or set directly by user)
+    # NOTE: AWS_PROFILE is NOT in this list - it requires ~/.aws/config which
+    # we don't mount. Profile is used on host only to export temp credentials.
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    # bedrock API key auth
+    "AWS_BEARER_TOKEN_BEDROCK",
+    # model configuration (for inference profiles, custom model ARNs)
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+    # optional
+    "DISABLE_PROMPT_CACHING",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,6 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="run embedded unit tests and exit")
     parser.add_argument("-h", "--help", action="store_true", dest="help",
                         help="show this help and ralphex help, then exit")
+    parser.add_argument("--claude-provider", dest="claude_provider", metavar="PROVIDER",
+                        choices=VALID_CLAUDE_PROVIDERS,
+                        help="claude provider: 'default' or 'bedrock' (env: RALPHEX_CLAUDE_PROVIDER)")
     return parser
 
 
@@ -449,6 +479,34 @@ def merge_volume_flags(args_volume: list[str]) -> list[str]:
     return result
 
 
+def get_claude_provider(cli_provider: Optional[str]) -> str:
+    """get claude provider from CLI flag or env var. returns 'default' or 'bedrock'.
+
+    priority: CLI flag > RALPHEX_CLAUDE_PROVIDER env var > 'default'
+    raises ValueError if provider value is invalid.
+    """
+    if cli_provider is not None:
+        return cli_provider  # already validated by argparse choices
+    env_provider = os.environ.get("RALPHEX_CLAUDE_PROVIDER", "").strip().lower()
+    if not env_provider:
+        return "default"
+    if env_provider not in VALID_CLAUDE_PROVIDERS:
+        raise ValueError(f"invalid RALPHEX_CLAUDE_PROVIDER: {env_provider!r} (valid: {', '.join(VALID_CLAUDE_PROVIDERS)})")
+    return env_provider
+
+
+def build_bedrock_env_args() -> list[str]:
+    """build docker -e flags for bedrock env vars that are actually set.
+
+    only passes through BEDROCK_ENV_VARS that have values in the host environment.
+    """
+    result: list[str] = []
+    for var in BEDROCK_ENV_VARS:
+        if var in os.environ:
+            result.extend(["-e", var])
+    return result
+
+
 def handle_update(image: str) -> int:
     """pull latest docker image."""
     print(f"pulling latest image: {image}", file=sys.stderr)
@@ -660,16 +718,29 @@ def main() -> int:
                 except OSError:
                     pass
 
+    # get claude provider (CLI flag takes precedence over env var)
+    try:
+        provider = get_claude_provider(parsed.claude_provider)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
     # check required directories (after --help handling)
-    if not claude_home.is_dir():
+    # skip claude_home check when using bedrock provider (no anthropic credentials needed)
+    if provider != "bedrock" and not claude_home.is_dir():
         print(f"error: {claude_home} directory not found (run 'claude' first to authenticate)", file=sys.stderr)
         return 1
 
     # extract macOS credentials (needed for volume mounts)
-    creds_temp = extract_macos_credentials(claude_home)
+    # skip when using bedrock provider (uses AWS credentials instead)
+    creds_temp = None if provider == "bedrock" else extract_macos_credentials(claude_home)
 
     # merge env var entries with CLI -E/--env flags (env first, CLI appends)
     extra_env = merge_env_flags(parsed.env)
+
+    # add bedrock env vars when using bedrock provider
+    if provider == "bedrock":
+        extra_env.extend(build_bedrock_env_args())
 
     # merge env var entries with CLI -v/--volume flags (env first, CLI appends)
     extra_volumes = merge_volume_flags(parsed.volume)
@@ -702,6 +773,8 @@ def main() -> int:
         if claude_config_dir_env:
             print(f"using claude config dir: {claude_home}", file=sys.stderr)
         print(f"using image: {image}", file=sys.stderr)
+        if provider == "bedrock":
+            print("claude provider: bedrock (keychain skipped)", file=sys.stderr)
 
         # schedule credential cleanup
         schedule_cleanup(creds_temp)
@@ -1937,6 +2010,95 @@ def run_tests() -> None:
             output = "\n".join(captured_output)
             self.assertIn("cannot show - claude config not found", output)
 
+    class TestClaudeProvider(unittest.TestCase):
+        """tests for claude provider selection and bedrock env var handling."""
+
+        def setUp(self) -> None:
+            """save environment."""
+            self._saved_env: dict[str, str | None] = {}
+            # save and clear RALPHEX_CLAUDE_PROVIDER plus all BEDROCK_ENV_VARS
+            keys_to_clear = ["RALPHEX_CLAUDE_PROVIDER"] + BEDROCK_ENV_VARS
+            for key in keys_to_clear:
+                self._saved_env[key] = os.environ.get(key)
+                os.environ.pop(key, None)
+
+        def tearDown(self) -> None:
+            """restore environment."""
+            for key, val in self._saved_env.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+
+        def test_default_provider_no_bedrock_env(self) -> None:
+            """no flag, no env → provider is 'default', no AWS vars in bedrock args."""
+            provider = get_claude_provider(None)
+            self.assertEqual(provider, "default")
+            # build_bedrock_env_args should return empty when no bedrock vars set
+            args = build_bedrock_env_args()
+            self.assertEqual(args, [])
+
+        def test_cli_flag_bedrock(self) -> None:
+            """--claude-provider bedrock → provider is 'bedrock'."""
+            provider = get_claude_provider("bedrock")
+            self.assertEqual(provider, "bedrock")
+
+        def test_env_var_fallback(self) -> None:
+            """no flag, RALPHEX_CLAUDE_PROVIDER=bedrock → provider is 'bedrock'."""
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = "bedrock"
+            provider = get_claude_provider(None)
+            self.assertEqual(provider, "bedrock")
+
+        def test_cli_overrides_env(self) -> None:
+            """flag and env var set → CLI wins."""
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = "bedrock"
+            provider = get_claude_provider("default")
+            self.assertEqual(provider, "default")
+            # also test the reverse
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = "default"
+            provider = get_claude_provider("bedrock")
+            self.assertEqual(provider, "bedrock")
+
+        def test_bedrock_passes_set_vars(self) -> None:
+            """only passes BEDROCK_ENV_VARS that are actually set."""
+            os.environ["AWS_REGION"] = "us-east-1"
+            os.environ["AWS_ACCESS_KEY_ID"] = "AKIATEST"
+            # AWS_SECRET_ACCESS_KEY is NOT set
+            args = build_bedrock_env_args()
+            self.assertIn("-e", args)
+            self.assertIn("AWS_REGION", args)
+            self.assertIn("AWS_ACCESS_KEY_ID", args)
+            self.assertNotIn("AWS_SECRET_ACCESS_KEY", args)
+
+        def test_invalid_provider_rejected(self) -> None:
+            """unknown provider value → error."""
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = "invalid"
+            with self.assertRaises(ValueError) as ctx:
+                get_claude_provider(None)
+            self.assertIn("invalid", str(ctx.exception))
+            self.assertIn("RALPHEX_CLAUDE_PROVIDER", str(ctx.exception))
+
+        def test_env_var_case_insensitive(self) -> None:
+            """env var value is case-insensitive."""
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = "BEDROCK"
+            provider = get_claude_provider(None)
+            self.assertEqual(provider, "bedrock")
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = "Bedrock"
+            provider = get_claude_provider(None)
+            self.assertEqual(provider, "bedrock")
+
+        def test_env_var_whitespace_trimmed(self) -> None:
+            """env var value whitespace is trimmed."""
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = "  bedrock  "
+            provider = get_claude_provider(None)
+            self.assertEqual(provider, "bedrock")
+
+        def test_empty_env_var_defaults(self) -> None:
+            """empty env var falls back to default."""
+            os.environ["RALPHEX_CLAUDE_PROVIDER"] = ""
+            provider = get_claude_provider(None)
+            self.assertEqual(provider, "default")
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -1946,7 +2108,7 @@ def run_tests() -> None:
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
-               TestMainArgparse, TestHelpFlag]:
+               TestMainArgparse, TestHelpFlag, TestClaudeProvider]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
