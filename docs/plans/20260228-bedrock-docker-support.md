@@ -67,18 +67,20 @@
 Instead, use `aws configure export-credentials` to export only the needed credentials.
 
 - [ ] add `export_aws_profile_credentials()` function:
+  - check if `aws` CLI is available (`shutil.which("aws")`); if not, log warning and return empty dict
   - check if `AWS_PROFILE` is set and explicit creds (`AWS_ACCESS_KEY_ID`) are NOT set
-  - run `aws configure export-credentials --profile $AWS_PROFILE --format env`
-  - parse output to extract `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
-  - return dict of exported credentials (may be empty if command fails)
+  - run `aws configure export-credentials --profile $AWS_PROFILE --format json`
+  - parse JSON output to extract `AccessKeyId`, `SecretAccessKey`, `SessionToken`
+  - return dict with env var names (`AWS_ACCESS_KEY_ID`, etc.) as keys
   - handle command failure gracefully (return empty dict, log warning)
 - [ ] integrate into `run_docker()` - add exported creds to env args when bedrock enabled
 - [ ] write `TestAwsCredentialExport` test class with cases:
-  - `test_exports_credentials_with_profile` - AWS_PROFILE set → runs aws cli, parses output
+  - `test_exports_credentials_with_profile` - AWS_PROFILE set → runs aws cli, parses JSON output
   - `test_skips_export_when_explicit_creds` - AWS_ACCESS_KEY_ID set → no aws cli call
   - `test_skips_export_when_no_profile` - AWS_PROFILE not set → no aws cli call
   - `test_handles_export_failure` - aws cli fails → empty dict, no crash
-  - `test_parses_env_format_output` - correctly extracts key/secret/token from env format
+  - `test_handles_missing_aws_cli` - aws CLI not installed → empty dict, warning logged
+  - `test_parses_json_output` - correctly extracts AccessKeyId/SecretAccessKey/SessionToken from JSON
 - [ ] run tests - must pass before next task
 
 ### Task 3: Skip keychain and claude_home checks for Bedrock
@@ -93,6 +95,7 @@ Instead, use `aws configure export-credentials` to export only the needed creden
   - `test_skips_credentials_extraction_when_bedrock` - creds_temp is None
   - `test_skips_claude_home_check_when_bedrock` - no error if ~/.claude missing
   - `test_normal_mode_still_extracts_credentials` - backwards compat with default provider
+  - `test_startup_message_shows_bedrock_mode` - output includes "bedrock" and "keychain skipped"
 - [ ] run tests - must pass before next task
 
 ### Task 4: Add validation and user feedback
@@ -100,10 +103,11 @@ Instead, use `aws configure export-credentials` to export only the needed creden
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `validate_bedrock_config()` function returning list of warnings (only called when provider is `bedrock`)
+- [ ] add `validate_bedrock_config()` function returning list of warning strings (only called when provider is `bedrock`)
 - [ ] check: CLAUDE_CODE_USE_BEDROCK set (warn if not - required for Claude Code inside container)
 - [ ] check: AWS_REGION set (warn if not)
 - [ ] check: AWS_PROFILE set OR AWS_ACCESS_KEY_ID set (warn if neither)
+- [ ] call `validate_bedrock_config()` in `main()` after startup message, print warnings before `run_docker()`
 - [ ] print provider mode and passed env vars on startup
 - [ ] write `TestBedrockValidation` test class with cases:
   - `test_warns_missing_claude_code_use_bedrock`
@@ -227,18 +231,18 @@ Check your Bedrock console for exact inference profile IDs available in your acc
 **BEDROCK_ENV_VARS list:**
 ```python
 BEDROCK_ENV_VARS = [
-    # core bedrock config
+    # core bedrock config (user must set CLAUDE_CODE_USE_BEDROCK=1 on host)
     "CLAUDE_CODE_USE_BEDROCK",
     "AWS_REGION",
-    # profile-based auth
-    "AWS_PROFILE",
-    # explicit credentials
+    # explicit credentials (exported from profile or set directly by user)
+    # NOTE: AWS_PROFILE is NOT in this list - it requires ~/.aws/config which
+    # we don't mount. Profile is used on host only to export temp credentials.
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
     # bedrock API key auth
     "AWS_BEARER_TOKEN_BEDROCK",
-    # model configuration
+    # model configuration (for inference profiles, custom model ARNs)
     "ANTHROPIC_MODEL",
     "ANTHROPIC_SMALL_FAST_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
