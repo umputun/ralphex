@@ -103,19 +103,19 @@ Instead, use `aws configure export-credentials` to export only the needed creden
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `validate_bedrock_config()` function returning list of warning strings (only called when provider is `bedrock`)
-- [ ] check: CLAUDE_CODE_USE_BEDROCK set (warn if not - required for Claude Code inside container)
-- [ ] check: AWS_REGION set (warn if not)
-- [ ] check: AWS_PROFILE set OR AWS_ACCESS_KEY_ID set (warn if neither)
-- [ ] call `validate_bedrock_config()` in `main()` after startup message, print warnings before `run_docker()`
-- [ ] print provider mode and passed env vars on startup
-- [ ] write `TestBedrockValidation` test class with cases:
+- [x] add `validate_bedrock_config()` function returning list of warning strings (only called when provider is `bedrock`)
+- [x] check: CLAUDE_CODE_USE_BEDROCK set (warn if not - required for Claude Code inside container)
+- [x] check: AWS_REGION set (warn if not)
+- [x] check: AWS_PROFILE set OR AWS_ACCESS_KEY_ID set (warn if neither)
+- [x] call `validate_bedrock_config()` in `main()` after startup message, print warnings before `run_docker()`
+- [x] print provider mode and passed env vars on startup
+- [x] write `TestBedrockValidation` test class with cases:
   - `test_warns_missing_claude_code_use_bedrock`
   - `test_warns_missing_aws_region`
   - `test_warns_no_credentials_found`
   - `test_no_warning_with_profile`
   - `test_no_warning_with_explicit_creds`
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
 
 ### Task 5: Verify acceptance criteria
 

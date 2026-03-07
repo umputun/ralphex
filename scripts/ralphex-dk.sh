@@ -563,6 +563,33 @@ def export_aws_profile_credentials() -> dict[str, str]:
         return {}
 
 
+def validate_bedrock_config() -> list[str]:
+    """validate bedrock configuration and return list of warning messages.
+
+    checks for common misconfigurations when using bedrock provider:
+    - CLAUDE_CODE_USE_BEDROCK must be set (required for Claude Code inside container)
+    - AWS_REGION should be set
+    - either AWS_PROFILE or AWS_ACCESS_KEY_ID should be set for credentials
+    """
+    warnings: list[str] = []
+
+    # check CLAUDE_CODE_USE_BEDROCK
+    if not os.environ.get("CLAUDE_CODE_USE_BEDROCK"):
+        warnings.append("CLAUDE_CODE_USE_BEDROCK not set (required for Claude Code to use Bedrock inside container)")
+
+    # check AWS_REGION
+    if not os.environ.get("AWS_REGION"):
+        warnings.append("AWS_REGION not set (recommended for Bedrock)")
+
+    # check for credentials source
+    has_profile = bool(os.environ.get("AWS_PROFILE", "").strip())
+    has_explicit_creds = bool(os.environ.get("AWS_ACCESS_KEY_ID"))
+    if not has_profile and not has_explicit_creds:
+        warnings.append("no AWS credentials found (set AWS_PROFILE or AWS_ACCESS_KEY_ID)")
+
+    return warnings
+
+
 def handle_update(image: str) -> int:
     """pull latest docker image."""
     print(f"pulling latest image: {image}", file=sys.stderr)
@@ -836,6 +863,20 @@ def main() -> int:
         print(f"using image: {image}", file=sys.stderr)
         if provider == "bedrock":
             print("claude provider: bedrock (keychain skipped)", file=sys.stderr)
+            # show credential source
+            if exported_creds:
+                profile = os.environ.get("AWS_PROFILE", "")
+                print(f"  exporting credentials from profile: {profile}", file=sys.stderr)
+            elif os.environ.get("AWS_ACCESS_KEY_ID"):
+                print("  using explicit credentials", file=sys.stderr)
+            # show which bedrock env vars are being passed
+            passed_vars = [var for var in BEDROCK_ENV_VARS if var in os.environ]
+            if passed_vars:
+                print(f"  passing: {', '.join(passed_vars)}", file=sys.stderr)
+            # validate bedrock config and print warnings
+            bedrock_warnings = validate_bedrock_config()
+            for warning in bedrock_warnings:
+                print(f"  warning: {warning}", file=sys.stderr)
 
         # schedule credential cleanup
         schedule_cleanup(creds_temp)
@@ -2449,6 +2490,78 @@ def run_tests() -> None:
             self.assertIn("bedrock", output.lower())
             self.assertIn("keychain skipped", output.lower())
 
+    class TestBedrockValidation(unittest.TestCase):
+        """tests for validate_bedrock_config() function."""
+
+        def setUp(self) -> None:
+            """save environment."""
+            self._saved_env: dict[str, str | None] = {}
+            keys_to_clear = ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_PROFILE", "AWS_ACCESS_KEY_ID"]
+            for key in keys_to_clear:
+                self._saved_env[key] = os.environ.get(key)
+                os.environ.pop(key, None)
+
+        def tearDown(self) -> None:
+            """restore environment."""
+            for key, val in self._saved_env.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+
+        def test_warns_missing_claude_code_use_bedrock(self) -> None:
+            """warns when CLAUDE_CODE_USE_BEDROCK is not set."""
+            # set other vars, but not CLAUDE_CODE_USE_BEDROCK
+            os.environ["AWS_REGION"] = "us-east-1"
+            os.environ["AWS_ACCESS_KEY_ID"] = "AKIATEST"
+
+            warnings = validate_bedrock_config()
+
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("CLAUDE_CODE_USE_BEDROCK", warnings[0])
+
+        def test_warns_missing_aws_region(self) -> None:
+            """warns when AWS_REGION is not set."""
+            # set other vars, but not AWS_REGION
+            os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+            os.environ["AWS_ACCESS_KEY_ID"] = "AKIATEST"
+
+            warnings = validate_bedrock_config()
+
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("AWS_REGION", warnings[0])
+
+        def test_warns_no_credentials_found(self) -> None:
+            """warns when neither AWS_PROFILE nor AWS_ACCESS_KEY_ID is set."""
+            os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+            os.environ["AWS_REGION"] = "us-east-1"
+            # no credentials set
+
+            warnings = validate_bedrock_config()
+
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("no AWS credentials found", warnings[0])
+
+        def test_no_warning_with_profile(self) -> None:
+            """no credential warning when AWS_PROFILE is set."""
+            os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+            os.environ["AWS_REGION"] = "us-east-1"
+            os.environ["AWS_PROFILE"] = "my-profile"
+
+            warnings = validate_bedrock_config()
+
+            self.assertEqual(len(warnings), 0)
+
+        def test_no_warning_with_explicit_creds(self) -> None:
+            """no credential warning when AWS_ACCESS_KEY_ID is set."""
+            os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+            os.environ["AWS_REGION"] = "us-east-1"
+            os.environ["AWS_ACCESS_KEY_ID"] = "AKIATEST"
+
+            warnings = validate_bedrock_config()
+
+            self.assertEqual(len(warnings), 0)
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -2459,7 +2572,7 @@ def run_tests() -> None:
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
-               TestBedrockSkipKeychain]:
+               TestBedrockSkipKeychain, TestBedrockValidation]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
