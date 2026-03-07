@@ -88,15 +88,15 @@ Instead, use `aws configure export-credentials` to export only the needed creden
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] modify `main()` to skip `extract_macos_credentials()` when provider is `bedrock`
-- [ ] modify `main()` to skip `claude_home.is_dir()` check when provider is `bedrock`
-- [ ] add startup message indicating bedrock mode and keychain skip
-- [ ] write `TestBedrockSkipKeychain` test class with cases:
+- [x] modify `main()` to skip `extract_macos_credentials()` when provider is `bedrock`
+- [x] modify `main()` to skip `claude_home.is_dir()` check when provider is `bedrock`
+- [x] add startup message indicating bedrock mode and keychain skip
+- [x] write `TestBedrockSkipKeychain` test class with cases:
   - `test_skips_credentials_extraction_when_bedrock` - creds_temp is None
   - `test_skips_claude_home_check_when_bedrock` - no error if ~/.claude missing
   - `test_normal_mode_still_extracts_credentials` - backwards compat with default provider
   - `test_startup_message_shows_bedrock_mode` - output includes "bedrock" and "keychain skipped"
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
 
 ### Task 4: Add validation and user feedback
 

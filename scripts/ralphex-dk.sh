@@ -2321,6 +2321,134 @@ def run_tests() -> None:
             self.assertIn("warning:", warning)
             self.assertIn("parse credentials JSON", warning)
 
+    class TestBedrockSkipKeychain(unittest.TestCase):
+        """tests for bedrock mode skipping keychain and claude_home checks."""
+
+        def setUp(self) -> None:
+            """save environment."""
+            self._saved_env: dict[str, str | None] = {}
+            keys_to_clear = ["RALPHEX_CLAUDE_PROVIDER"] + BEDROCK_ENV_VARS
+            for key in keys_to_clear:
+                self._saved_env[key] = os.environ.get(key)
+                os.environ.pop(key, None)
+            self._saved_argv = sys.argv.copy()
+
+        def tearDown(self) -> None:
+            """restore environment."""
+            for key, val in self._saved_env.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+            sys.argv = self._saved_argv
+
+        def test_skips_credentials_extraction_when_bedrock(self) -> None:
+            """bedrock provider skips extract_macos_credentials (creds_temp is None)."""
+            captured_creds_temp: list[object] = []
+
+            def fake_run_docker(
+                image: str, port: int, volumes: list[str], extra_env: list[str],
+                bind_port: bool, ralphex_args: list[str]
+            ) -> int:
+                # capture what we need via side effect - creds_temp should be None for bedrock
+                return 0
+
+            extract_calls = [0]
+
+            def fake_extract(claude_home: Path) -> Optional[Path]:
+                extract_calls[0] += 1
+                return None
+
+            import io
+            captured_stderr = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured_stderr):
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", side_effect=fake_extract):
+                        with unittest.mock.patch("__main__.export_aws_profile_credentials", return_value={}):
+                            sys.argv = ["ralphex-dk", "--claude-provider", "bedrock", "plan.md"]
+                            result = main()
+
+            self.assertEqual(result, 0)
+            # extract_macos_credentials should NOT be called for bedrock
+            self.assertEqual(extract_calls[0], 0)
+
+        def test_skips_claude_home_check_when_bedrock(self) -> None:
+            """bedrock provider skips claude_home.is_dir() check - no error if ~/.claude missing."""
+            import io
+            captured_stderr = io.StringIO()
+
+            def fake_run_docker(
+                image: str, port: int, volumes: list[str], extra_env: list[str],
+                bind_port: bool, ralphex_args: list[str]
+            ) -> int:
+                return 0
+
+            # use a non-existent claude home path
+            with tempfile.TemporaryDirectory() as tmpdir:
+                fake_claude_home = Path(tmpdir) / "nonexistent_claude"
+                # do NOT create the directory
+
+                with unittest.mock.patch("sys.stderr", captured_stderr):
+                    with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                        with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                            with unittest.mock.patch("__main__.export_aws_profile_credentials", return_value={}):
+                                # mock Path.home to return our temp dir so claude_home resolves to nonexistent
+                                with unittest.mock.patch.object(Path, "home", return_value=Path(tmpdir)):
+                                    sys.argv = ["ralphex-dk", "--claude-provider", "bedrock", "plan.md"]
+                                    result = main()
+
+            self.assertEqual(result, 0)
+            # should NOT see "directory not found" error
+            self.assertNotIn("directory not found", captured_stderr.getvalue())
+
+        def test_normal_mode_still_extracts_credentials(self) -> None:
+            """default provider still calls extract_macos_credentials for backwards compat."""
+            extract_calls = [0]
+
+            def fake_extract(claude_home: Path) -> Optional[Path]:
+                extract_calls[0] += 1
+                return None
+
+            def fake_run_docker(
+                image: str, port: int, volumes: list[str], extra_env: list[str],
+                bind_port: bool, ralphex_args: list[str]
+            ) -> int:
+                return 0
+
+            import io
+            captured_stderr = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured_stderr):
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", side_effect=fake_extract):
+                        sys.argv = ["ralphex-dk", "plan.md"]
+                        result = main()
+
+            self.assertEqual(result, 0)
+            # extract_macos_credentials SHOULD be called for default provider
+            self.assertEqual(extract_calls[0], 1)
+
+        def test_startup_message_shows_bedrock_mode(self) -> None:
+            """startup output includes 'bedrock' and 'keychain skipped'."""
+            def fake_run_docker(
+                image: str, port: int, volumes: list[str], extra_env: list[str],
+                bind_port: bool, ralphex_args: list[str]
+            ) -> int:
+                return 0
+
+            import io
+            captured_stderr = io.StringIO()
+            with unittest.mock.patch("sys.stderr", captured_stderr):
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        with unittest.mock.patch("__main__.export_aws_profile_credentials", return_value={}):
+                            sys.argv = ["ralphex-dk", "--claude-provider", "bedrock", "plan.md"]
+                            result = main()
+
+            self.assertEqual(result, 0)
+            output = captured_stderr.getvalue()
+            self.assertIn("bedrock", output.lower())
+            self.assertIn("keychain skipped", output.lower())
+
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
@@ -2330,7 +2458,8 @@ def run_tests() -> None:
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
-               TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport]:
+               TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
+               TestBedrockSkipKeychain]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
