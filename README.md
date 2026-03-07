@@ -306,6 +306,33 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`). Entries without `:` are silently skipped
 - `RALPHEX_EXTRA_ENV` - Extra environment variables, comma-separated (e.g., `DEBUG=1,API_KEY`). Format: `VAR=value` or `VAR` (inherit from host). Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values - use name-only form for secure credential passing
 - `TZ` - Override container timezone (default: auto-detected from host via `/etc/localtime`). Example: `TZ=Europe/Berlin ralphex docs/plans/feature.md`
+- `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
+
+**AWS Bedrock support:**
+
+When `--claude-provider bedrock` or `RALPHEX_CLAUDE_PROVIDER=bedrock` is set:
+- Keychain credential extraction is skipped (not needed for Bedrock auth)
+- AWS credentials are automatically exported from `AWS_PROFILE` via `aws configure export-credentials`
+- Required Bedrock env vars are passed to container: `CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION`, credentials
+
+Required environment for Bedrock:
+- `CLAUDE_CODE_USE_BEDROCK=1` - enables Bedrock mode in Claude Code
+- `AWS_REGION` - AWS region where Bedrock is enabled
+- `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` - authentication
+
+```bash
+# with AWS profile (credentials exported automatically)
+export CLAUDE_CODE_USE_BEDROCK=1
+export AWS_PROFILE=my-bedrock-profile
+export AWS_REGION=us-east-1
+ralphex --claude-provider bedrock docs/plans/feature.md
+
+# or use env var for session-wide setting
+export RALPHEX_CLAUDE_PROVIDER=bedrock
+ralphex docs/plans/feature.md
+```
+
+See [Bedrock setup documentation](docs/bedrock-setup.md) for detailed IAM policies and setup instructions.
 
 **Extra volume mounts:**
 ```bash

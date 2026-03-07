@@ -185,9 +185,13 @@ ralphex --claude-provider bedrock docs/plans/feature.md
 |----------|-------------|
 | `ANTHROPIC_MODEL` | Override default Claude model |
 | `ANTHROPIC_SMALL_FAST_MODEL` | Model for fast operations |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | Custom Opus model ARN |
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | Custom Sonnet model ARN |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Custom Haiku model ARN |
+| `ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION` | AWS region for small/fast model |
 | `ANTHROPIC_BEDROCK_BASE_URL` | Custom Bedrock endpoint |
+| `AWS_BEARER_TOKEN_BEDROCK` | Bearer token for Bedrock API key auth |
+| `CLAUDE_CODE_SKIP_BEDROCK_AUTH` | Skip Bedrock authentication (for testing) |
 | `DISABLE_PROMPT_CACHING` | Set to disable prompt caching |
 
 ## Example Usage

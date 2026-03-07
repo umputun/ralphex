@@ -123,6 +123,24 @@ Note: default Claude flags may still be passed due to config fallback; wrappers 
 Env vars: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE` (set to 1 for command output).
 Documentation: `docs/custom-providers.md`
 
+### AWS Bedrock Provider (Docker Wrapper Only)
+
+The Docker wrapper script (`scripts/ralphex-dk.sh`) supports AWS Bedrock as an alternative Claude provider:
+
+- Config: `--claude-provider bedrock` CLI flag or `RALPHEX_CLAUDE_PROVIDER=bedrock` env var
+- Requires: `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, and either `AWS_PROFILE` or explicit credentials
+- When enabled: skips macOS keychain extraction and `~/.claude` directory check
+- Credential export: uses `aws configure export-credentials` to extract temporary credentials from AWS profiles
+- Never mounts `~/.aws` directory - exports only specific credentials needed
+
+Key functions in `scripts/ralphex-dk.sh`:
+- `get_claude_provider()` - returns provider from CLI flag or env var
+- `build_bedrock_env_args()` - builds docker -e flags for BEDROCK_ENV_VARS
+- `export_aws_profile_credentials()` - exports credentials from AWS profile using aws CLI
+- `validate_bedrock_config()` - validates bedrock configuration and returns warnings
+
+Documentation: `docs/bedrock-setup.md`
+
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, error)`
