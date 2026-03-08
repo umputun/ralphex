@@ -18,6 +18,11 @@ AWS Bedrock provides access to Claude models through your AWS account. This allo
 3. Use short-lived credentials when possible (SSO, STS)
 4. ralphex never mounts `~/.aws` - it exports only the specific credentials needed
 
+**Avoid passing secrets on the command line.** When using `-E` to pass environment variables:
+- Prefer `-E VAR` (inherit form) over `-E VAR=value` for secrets
+- Values in `-E VAR=value` are visible in `ps` output to other users on the system
+- The inherit form passes the variable name only; Docker reads the value from the environment
+
 ## Minimal IAM Policy
 
 Create an IAM policy with only the permissions required for Claude via Bedrock.
