@@ -36,6 +36,7 @@ etc.) with explicit values. Values containing commas must use -E flag instead.
 """
 
 import argparse
+import dataclasses
 import difflib
 import hashlib
 import os
@@ -495,6 +496,42 @@ def get_claude_provider(cli_provider: Optional[str]) -> str:
     return env_provider
 
 
+@dataclasses.dataclass
+class ParsedEnvFlags:
+    """parsed result from docker -e flags."""
+    values: dict[str, str]  # var name -> value (resolved from os.environ for inherit form)
+    explicit: set[str]  # var names with explicit VAR=value form
+
+
+def parse_env_flags(extra_env: list[str] | None) -> ParsedEnvFlags:
+    """parse docker -e flags list into values dict and explicit names set.
+
+    parses ["-e", "VAR=value", "-e", "VAR2", ...] format.
+    for inherit-form entries (just "VAR"), resolves value from os.environ.
+    tracks which vars were set with explicit values (VAR=value form).
+    """
+    values: dict[str, str] = {}
+    explicit: set[str] = set()
+    if not extra_env:
+        return ParsedEnvFlags(values, explicit)
+    i = 0
+    while i < len(extra_env):
+        if extra_env[i] == "-e" and i + 1 < len(extra_env):
+            entry = extra_env[i + 1]
+            if "=" in entry:
+                var_name, value = entry.split("=", 1)
+                values[var_name] = value
+                explicit.add(var_name)
+            else:
+                # inherit form: use current env value if set
+                if entry in os.environ:
+                    values[entry] = os.environ[entry]
+            i += 2
+        else:
+            i += 1
+    return ParsedEnvFlags(values, explicit)
+
+
 def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
     """build docker -e flags for bedrock env vars that are actually set.
 
@@ -503,24 +540,8 @@ def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
     if they have values in the host environment.
     skips vars that are already explicitly set in existing_env (from -E flags).
     """
-    # extract var names already set via -E flags (format: ["-e", "VAR=val", ...] or ["-e", "VAR", ...])
-    # track both the var name and whether it was explicit (VAR=value) vs inherit (VAR)
-    already_set: set[str] = set()
-    explicit_values: set[str] = set()  # vars with explicit VAR=value form
-    if existing_env:
-        i = 0
-        while i < len(existing_env):
-            if existing_env[i] == "-e" and i + 1 < len(existing_env):
-                entry = existing_env[i + 1]
-                # extract var name from "VAR=value" or "VAR"
-                var_name = entry.split("=", 1)[0]
-                already_set.add(var_name)
-                # track if this is an explicit value (VAR=value) vs inherit form (VAR)
-                if "=" in entry:
-                    explicit_values.add(var_name)
-                i += 2
-            else:
-                i += 1
+    parsed = parse_env_flags(existing_env)
+    already_set = set(parsed.values.keys())
 
     result: list[str] = []
 
@@ -533,7 +554,7 @@ def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
     # if so, we should NOT inherit any session token from host env to avoid mixing
     # credentials from different sources (e.g., stale session token with new key/secret)
     # NOTE: inherit form (-E VAR) means user wants host values, so we should pass session token too
-    user_provides_explicit_creds = "AWS_ACCESS_KEY_ID" in explicit_values or "AWS_SECRET_ACCESS_KEY" in explicit_values
+    user_provides_explicit_creds = "AWS_ACCESS_KEY_ID" in parsed.explicit or "AWS_SECRET_ACCESS_KEY" in parsed.explicit
     skip_session_token = user_provides_explicit_creds and "AWS_SESSION_TOKEN" not in already_set
 
     for var in BEDROCK_ENV_VARS:
@@ -619,24 +640,7 @@ def extract_env_from_flags(extra_env: list[str] | None) -> dict[str, str]:
     parses ["-e", "VAR=value", "-e", "VAR2", ...] into dict.
     for inherit-form entries (just "VAR"), uses os.environ value.
     """
-    result: dict[str, str] = {}
-    if not extra_env:
-        return result
-    i = 0
-    while i < len(extra_env):
-        if extra_env[i] == "-e" and i + 1 < len(extra_env):
-            entry = extra_env[i + 1]
-            if "=" in entry:
-                var_name, value = entry.split("=", 1)
-                result[var_name] = value
-            else:
-                # inherit form: use current env value if set
-                if entry in os.environ:
-                    result[entry] = os.environ[entry]
-            i += 2
-        else:
-            i += 1
-    return result
+    return parse_env_flags(extra_env).values
 
 
 def validate_bedrock_config(extra_env: list[str] | None = None) -> list[str]:
@@ -2802,6 +2806,52 @@ def run_tests() -> None:
 
             self.assertEqual(len(warnings), 0)
 
+    class TestParseEnvFlags(unittest.TestCase):
+        """tests for parse_env_flags() function."""
+
+        def test_empty_list(self) -> None:
+            """empty list returns empty values and explicit sets."""
+            result = parse_env_flags([])
+            self.assertEqual(result.values, {})
+            self.assertEqual(result.explicit, set())
+
+            result = parse_env_flags(None)
+            self.assertEqual(result.values, {})
+            self.assertEqual(result.explicit, set())
+
+        def test_assignment_form_is_explicit(self) -> None:
+            """VAR=value form is tracked as explicit."""
+            extra_env = ["-e", "AWS_REGION=us-east-1", "-e", "AWS_ACCESS_KEY_ID=AKIATEST"]
+            result = parse_env_flags(extra_env)
+            self.assertEqual(result.values["AWS_REGION"], "us-east-1")
+            self.assertEqual(result.values["AWS_ACCESS_KEY_ID"], "AKIATEST")
+            self.assertIn("AWS_REGION", result.explicit)
+            self.assertIn("AWS_ACCESS_KEY_ID", result.explicit)
+
+        def test_inherit_form_not_explicit(self) -> None:
+            """VAR form (inherit) is not tracked as explicit."""
+            os.environ["MY_VAR"] = "my_value"
+            try:
+                extra_env = ["-e", "MY_VAR"]
+                result = parse_env_flags(extra_env)
+                self.assertEqual(result.values["MY_VAR"], "my_value")
+                self.assertNotIn("MY_VAR", result.explicit)
+            finally:
+                os.environ.pop("MY_VAR", None)
+
+        def test_mixed_forms(self) -> None:
+            """mix of explicit and inherit forms."""
+            os.environ["INHERIT_VAR"] = "inherited"
+            try:
+                extra_env = ["-e", "EXPLICIT_VAR=explicit", "-e", "INHERIT_VAR"]
+                result = parse_env_flags(extra_env)
+                self.assertEqual(result.values["EXPLICIT_VAR"], "explicit")
+                self.assertEqual(result.values["INHERIT_VAR"], "inherited")
+                self.assertIn("EXPLICIT_VAR", result.explicit)
+                self.assertNotIn("INHERIT_VAR", result.explicit)
+            finally:
+                os.environ.pop("INHERIT_VAR", None)
+
     class TestExtractEnvFromFlags(unittest.TestCase):
         """tests for extract_env_from_flags() function."""
 
@@ -2850,7 +2900,7 @@ def run_tests() -> None:
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
-               TestBedrockSkipKeychain, TestBedrockValidation, TestExtractEnvFromFlags]:
+               TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
