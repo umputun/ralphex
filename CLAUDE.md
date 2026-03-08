@@ -128,7 +128,8 @@ Documentation: `docs/custom-providers.md`
 The Docker wrapper script (`scripts/ralphex-dk.sh`) supports AWS Bedrock as an alternative Claude provider:
 
 - Config: `--claude-provider bedrock` CLI flag or `RALPHEX_CLAUDE_PROVIDER=bedrock` env var
-- Requires: `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, and either `AWS_PROFILE` or explicit credentials
+- Requires: `AWS_REGION`, and either `AWS_PROFILE` or explicit credentials
+- Auto-sets: `CLAUDE_CODE_USE_BEDROCK=1` when bedrock provider is selected
 - When enabled: skips macOS keychain extraction and `~/.claude` directory check
 - Credential export: uses `aws configure export-credentials` to extract temporary credentials from AWS profiles
 - Never mounts `~/.aws` directory - exports only specific credentials needed

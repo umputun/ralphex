@@ -316,13 +316,13 @@ When `--claude-provider bedrock` or `RALPHEX_CLAUDE_PROVIDER=bedrock` is set:
 - Required Bedrock env vars are passed to container: `CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION`, credentials
 
 Required environment for Bedrock:
-- `CLAUDE_CODE_USE_BEDROCK=1` - enables Bedrock mode in Claude Code
 - `AWS_REGION` - AWS region where Bedrock is enabled
 - `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` - authentication
 
+Note: `CLAUDE_CODE_USE_BEDROCK=1` is automatically set when using `--claude-provider bedrock`.
+
 ```bash
 # with AWS profile (credentials exported automatically)
-export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_PROFILE=my-bedrock-profile
 export AWS_REGION=us-east-1
 ralphex --claude-provider bedrock docs/plans/feature.md

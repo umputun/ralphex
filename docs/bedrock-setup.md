@@ -113,7 +113,6 @@ aws sso login --profile=ralphex-bedrock
 5. Run ralphex with Bedrock:
 
 ```bash
-export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_PROFILE=ralphex-bedrock
 export AWS_REGION=us-east-1
 
@@ -136,7 +135,6 @@ aws configure --profile ralphex-bedrock
 4. Run ralphex with Bedrock:
 
 ```bash
-export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_PROFILE=ralphex-bedrock
 export AWS_REGION=us-east-1
 
@@ -148,7 +146,6 @@ ralphex --claude-provider bedrock docs/plans/feature.md
 For CI/CD environments or when you have temporary credentials.
 
 ```bash
-export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_REGION=us-east-1
 export AWS_ACCESS_KEY_ID=AKIA...
 export AWS_SECRET_ACCESS_KEY=...
@@ -163,8 +160,9 @@ ralphex --claude-provider bedrock docs/plans/feature.md
 
 | Variable | Description |
 |----------|-------------|
-| `CLAUDE_CODE_USE_BEDROCK` | Must be set to `1` to enable Bedrock mode in Claude Code |
 | `AWS_REGION` | AWS region where Bedrock is enabled (e.g., `us-east-1`) |
+
+Note: `CLAUDE_CODE_USE_BEDROCK=1` is automatically set when using `--claude-provider bedrock` or `RALPHEX_CLAUDE_PROVIDER=bedrock`.
 
 ### Authentication (one of these is required)
 
@@ -200,7 +198,6 @@ ralphex --claude-provider bedrock docs/plans/feature.md
 
 ```bash
 # Set required environment
-export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_PROFILE=ralphex-bedrock
 export AWS_REGION=us-east-1
 
@@ -214,7 +211,6 @@ ralphex --claude-provider bedrock docs/plans/feature.md
 ### Session-wide Bedrock mode
 
 ```bash
-export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_PROFILE=ralphex-bedrock
 export AWS_REGION=us-east-1
 export RALPHEX_CLAUDE_PROVIDER=bedrock
@@ -227,7 +223,6 @@ ralphex --review
 ### With extra environment variables
 
 ```bash
-export CLAUDE_CODE_USE_BEDROCK=1
 export AWS_PROFILE=ralphex-bedrock
 export AWS_REGION=us-east-1
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000
