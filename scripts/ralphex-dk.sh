@@ -349,9 +349,8 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
             if target.is_dir() and target.is_relative_to(home):
                 add(target, str(target), ro=True)
 
-    # 1. claude_home (resolved) -> /mnt/claude:ro (skip if not exists, e.g. bedrock-only users)
-    if claude_home.is_dir():
-        add(resolve_path(claude_home), "/mnt/claude", ro=True)
+    # 1. claude_home (resolved) -> /mnt/claude:ro
+    add(resolve_path(claude_home), "/mnt/claude", ro=True)
 
     # 2. cwd -> /workspace
     add(cwd, "/workspace")
@@ -366,8 +365,7 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
         add(creds_temp, "/mnt/claude-credentials.json", ro=True)
 
     # 5. symlink targets under claude_home
-    if claude_home.is_dir():
-        add_symlink_targets(claude_home)
+    add_symlink_targets(claude_home)
 
     # 6. ~/.codex -> /mnt/codex:ro + symlink targets
     codex_dir = home / ".codex"
