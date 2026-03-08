@@ -64,7 +64,7 @@ VALID_CLAUDE_PROVIDERS = ["default", "bedrock"]
 
 # environment variables to pass through when using bedrock provider
 BEDROCK_ENV_VARS = [
-    # core bedrock config (user must set CLAUDE_CODE_USE_BEDROCK=1 on host)
+    # core bedrock config (auto-set to 1 when bedrock provider is selected)
     "CLAUDE_CODE_USE_BEDROCK",
     "AWS_REGION",
     # explicit credentials (exported from profile or set directly by user)
@@ -500,7 +500,9 @@ def get_claude_provider(cli_provider: Optional[str]) -> str:
 def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
     """build docker -e flags for bedrock env vars that are actually set.
 
-    only passes through BEDROCK_ENV_VARS that have values in the host environment.
+    always sets CLAUDE_CODE_USE_BEDROCK=1 (since this function is only called when
+    bedrock provider is explicitly selected). other vars are passed through only
+    if they have values in the host environment.
     skips vars that are already explicitly set in existing_env (from -E flags).
     """
     # extract var names already set via -E flags (format: ["-e", "VAR=val", ...] or ["-e", "VAR", ...])
@@ -524,6 +526,11 @@ def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
 
     result: list[str] = []
 
+    # always set CLAUDE_CODE_USE_BEDROCK=1 when bedrock provider is selected
+    # (this function is only called when user explicitly chose bedrock)
+    if "CLAUDE_CODE_USE_BEDROCK" not in already_set:
+        result.extend(["-e", "CLAUDE_CODE_USE_BEDROCK=1"])
+
     # check if user is providing explicit credential VALUES via -E VAR=value flags
     # if so, we should NOT inherit any session token from host env to avoid mixing
     # credentials from different sources (e.g., stale session token with new key/secret)
@@ -534,6 +541,9 @@ def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
     for var in BEDROCK_ENV_VARS:
         # skip vars that are already set via -E flags
         if var in already_set:
+            continue
+        # skip CLAUDE_CODE_USE_BEDROCK - already handled above with explicit =1
+        if var == "CLAUDE_CODE_USE_BEDROCK":
             continue
         # skip session token when user provides explicit credential values to avoid mixing
         if skip_session_token and var == "AWS_SESSION_TOKEN":
@@ -635,10 +645,10 @@ def validate_bedrock_config(extra_env: list[str] | None = None) -> list[str]:
     """validate bedrock configuration and return list of warning messages.
 
     checks for common misconfigurations when using bedrock provider:
-    - CLAUDE_CODE_USE_BEDROCK must be set (required for Claude Code inside container)
     - AWS_REGION should be set
     - either AWS_PROFILE or AWS_ACCESS_KEY_ID should be set for credentials
 
+    note: CLAUDE_CODE_USE_BEDROCK is auto-set to 1 when bedrock provider is selected.
     considers both os.environ and values from extra_env (CLI -E flags).
     """
     warnings: list[str] = []
@@ -654,10 +664,6 @@ def validate_bedrock_config(extra_env: list[str] | None = None) -> list[str]:
         if key in env_from_flags:
             return env_from_flags[key]  # may be empty string if explicitly set
         return os.environ.get(key, "")
-
-    # check CLAUDE_CODE_USE_BEDROCK
-    if not get_val("CLAUDE_CODE_USE_BEDROCK"):
-        warnings.append("CLAUDE_CODE_USE_BEDROCK not set (required for Claude Code to use Bedrock inside container)")
 
     # check AWS_REGION
     if not get_val("AWS_REGION"):
@@ -881,7 +887,7 @@ def main() -> int:
         print("ralphex options (from container):\n")
         creds_temp = None if provider == "bedrock" else extract_macos_credentials(claude_home)
         try:
-            volumes = build_volumes(creds_temp, claude_home) if provider != "bedrock" else []
+            volumes = build_volumes(creds_temp, claude_home)
             cmd = ["docker", "run", "--rm"]
             cmd.extend(build_base_env_vars())
             cmd.extend(volumes)
@@ -2230,12 +2236,12 @@ def run_tests() -> None:
                     os.environ[key] = val
 
         def test_default_provider_no_bedrock_env(self) -> None:
-            """no flag, no env → provider is 'default', no AWS vars in bedrock args."""
+            """no flag, no env → provider is 'default', bedrock args only has USE_BEDROCK=1."""
             provider = get_claude_provider(None)
             self.assertEqual(provider, "default")
-            # build_bedrock_env_args should return empty when no bedrock vars set
+            # build_bedrock_env_args always sets CLAUDE_CODE_USE_BEDROCK=1
             args = build_bedrock_env_args()
-            self.assertEqual(args, [])
+            self.assertEqual(args, ["-e", "CLAUDE_CODE_USE_BEDROCK=1"])
 
         def test_cli_flag_bedrock(self) -> None:
             """--claude-provider bedrock → provider is 'bedrock'."""
@@ -2686,18 +2692,6 @@ def run_tests() -> None:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = val
-
-        def test_warns_missing_claude_code_use_bedrock(self) -> None:
-            """warns when CLAUDE_CODE_USE_BEDROCK is not set."""
-            # set other vars, but not CLAUDE_CODE_USE_BEDROCK
-            os.environ["AWS_REGION"] = "us-east-1"
-            os.environ["AWS_ACCESS_KEY_ID"] = "AKIATEST"
-            os.environ["AWS_SECRET_ACCESS_KEY"] = "secret"
-
-            warnings = validate_bedrock_config()
-
-            self.assertEqual(len(warnings), 1)
-            self.assertIn("CLAUDE_CODE_USE_BEDROCK", warnings[0])
 
         def test_warns_missing_aws_region(self) -> None:
             """warns when AWS_REGION is not set."""
