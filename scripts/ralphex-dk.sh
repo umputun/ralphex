@@ -999,6 +999,34 @@ def main() -> int:
 def run_tests() -> None:
     """run embedded unit tests."""
 
+    class EnvTestCase(unittest.TestCase):
+        """base class for tests that modify environment variables.
+
+        subclasses should set:
+        - env_vars: list of env var names to save/clear before each test
+        - save_argv: True to also save/restore sys.argv
+        """
+
+        env_vars: list[str] = []
+        save_argv: bool = False
+
+        def setUp(self) -> None:
+            self._saved_env: dict[str, str | None] = {}
+            for key in self.env_vars:
+                self._saved_env[key] = os.environ.get(key)
+                os.environ.pop(key, None)
+            if self.save_argv:
+                self._saved_argv = sys.argv[:]
+
+        def tearDown(self) -> None:
+            for key, val in self._saved_env.items():
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+            if self.save_argv:
+                sys.argv[:] = self._saved_argv
+
     class TestResolvePath(unittest.TestCase):
         def test_regular_path(self) -> None:
             tmp = Path(tempfile.mkdtemp())
@@ -1523,16 +1551,8 @@ def run_tests() -> None:
             self.assertFalse(is_sensitive_name("AUTHX"))  # AUTH at start but no right boundary
             self.assertFalse(is_sensitive_name("XAUTH"))  # AUTH at end but no left boundary
 
-    class TestBuildEnvVars(unittest.TestCase):
-        def setUp(self) -> None:
-            self._old_extra_env = os.environ.get("RALPHEX_EXTRA_ENV")
-            os.environ.pop("RALPHEX_EXTRA_ENV", None)
-
-        def tearDown(self) -> None:
-            if self._old_extra_env is None:
-                os.environ.pop("RALPHEX_EXTRA_ENV", None)
-            else:
-                os.environ["RALPHEX_EXTRA_ENV"] = self._old_extra_env
+    class TestBuildEnvVars(EnvTestCase):
+        env_vars = ["RALPHEX_EXTRA_ENV"]
 
         def test_extra_env_with_explicit_values(self) -> None:
             """RALPHEX_EXTRA_ENV with explicit values builds -e flags."""
@@ -1590,16 +1610,8 @@ def run_tests() -> None:
             warning = captured.getvalue()
             self.assertEqual(warning, "")
 
-    class TestMergeEnvFlags(unittest.TestCase):
-        def setUp(self) -> None:
-            self._old_extra_env = os.environ.get("RALPHEX_EXTRA_ENV")
-            os.environ.pop("RALPHEX_EXTRA_ENV", None)
-
-        def tearDown(self) -> None:
-            if self._old_extra_env is None:
-                os.environ.pop("RALPHEX_EXTRA_ENV", None)
-            else:
-                os.environ["RALPHEX_EXTRA_ENV"] = self._old_extra_env
+    class TestMergeEnvFlags(EnvTestCase):
+        env_vars = ["RALPHEX_EXTRA_ENV"]
 
         def test_env_only(self) -> None:
             """with only env var set, returns env var entries."""
@@ -1644,16 +1656,8 @@ def run_tests() -> None:
             result = merge_env_flags([])
             self.assertEqual(result, [])
 
-    class TestMergeVolumeFlags(unittest.TestCase):
-        def setUp(self) -> None:
-            self._old_extra_volumes = os.environ.get("RALPHEX_EXTRA_VOLUMES")
-            os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
-
-        def tearDown(self) -> None:
-            if self._old_extra_volumes is None:
-                os.environ.pop("RALPHEX_EXTRA_VOLUMES", None)
-            else:
-                os.environ["RALPHEX_EXTRA_VOLUMES"] = self._old_extra_volumes
+    class TestMergeVolumeFlags(EnvTestCase):
+        env_vars = ["RALPHEX_EXTRA_VOLUMES"]
 
         def test_env_only(self) -> None:
             """with only env var set, returns env var entries."""
@@ -1835,26 +1839,11 @@ def run_tests() -> None:
             self.assertFalse(args.update_script)
             self.assertEqual(unknown, ["--up"])
 
-    class TestMainArgparse(unittest.TestCase):
+    class TestMainArgparse(EnvTestCase):
         """tests for main() argparse integration."""
-
-        def setUp(self) -> None:
-            """save environment and mock external dependencies."""
-            self._saved_env: dict[str, str | None] = {}
-            for key in ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
-                        "RALPHEX_EXTRA_VOLUMES", "CLAUDE_CONFIG_DIR"]:
-                self._saved_env[key] = os.environ.get(key)
-                os.environ.pop(key, None)
-            self._saved_argv = sys.argv[:]
-
-        def tearDown(self) -> None:
-            """restore environment and sys.argv."""
-            for key, val in self._saved_env.items():
-                if val is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = val
-            sys.argv[:] = self._saved_argv
+        env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
+                    "RALPHEX_EXTRA_VOLUMES", "CLAUDE_CONFIG_DIR"]
+        save_argv = True
 
         def test_update_flag_triggers_handle_update(self) -> None:
             """--update calls handle_update with image."""
@@ -2081,26 +2070,10 @@ def run_tests() -> None:
             finally:
                 shutil.rmtree(tmp)
 
-    class TestHelpFlag(unittest.TestCase):
+    class TestHelpFlag(EnvTestCase):
         """tests for --help flag handling."""
-
-        def setUp(self) -> None:
-            """save environment."""
-            self._saved_env: dict[str, str | None] = {}
-            # clear RALPHEX_CLAUDE_PROVIDER to ensure default provider is used
-            for key in ["RALPHEX_IMAGE", "CLAUDE_CONFIG_DIR", "RALPHEX_CLAUDE_PROVIDER"]:
-                self._saved_env[key] = os.environ.get(key)
-                os.environ.pop(key, None)
-            self._saved_argv = sys.argv[:]
-
-        def tearDown(self) -> None:
-            """restore environment and sys.argv."""
-            for key, val in self._saved_env.items():
-                if val is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = val
-            sys.argv[:] = self._saved_argv
+        env_vars = ["RALPHEX_IMAGE", "CLAUDE_CONFIG_DIR", "RALPHEX_CLAUDE_PROVIDER"]
+        save_argv = True
 
         def test_help_without_claude_config_shows_wrapper_help(self) -> None:
             """--help shows wrapper help even when claude config is missing."""
@@ -2217,25 +2190,9 @@ def run_tests() -> None:
             output = "\n".join(captured_output)
             self.assertIn("cannot show - claude config not found", output)
 
-    class TestClaudeProvider(unittest.TestCase):
+    class TestClaudeProvider(EnvTestCase):
         """tests for claude provider selection and bedrock env var handling."""
-
-        def setUp(self) -> None:
-            """save environment."""
-            self._saved_env: dict[str, str | None] = {}
-            # save and clear RALPHEX_CLAUDE_PROVIDER plus all BEDROCK_ENV_VARS
-            keys_to_clear = ["RALPHEX_CLAUDE_PROVIDER"] + BEDROCK_ENV_VARS
-            for key in keys_to_clear:
-                self._saved_env[key] = os.environ.get(key)
-                os.environ.pop(key, None)
-
-        def tearDown(self) -> None:
-            """restore environment."""
-            for key, val in self._saved_env.items():
-                if val is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = val
+        env_vars = ["RALPHEX_CLAUDE_PROVIDER"] + BEDROCK_ENV_VARS
 
         def test_default_provider_no_bedrock_env(self) -> None:
             """no flag, no env → provider is 'default', bedrock args only has USE_BEDROCK=1."""
@@ -2371,24 +2328,9 @@ def run_tests() -> None:
             provider = get_claude_provider(None)
             self.assertEqual(provider, "default")
 
-    class TestAwsCredentialExport(unittest.TestCase):
+    class TestAwsCredentialExport(EnvTestCase):
         """tests for AWS profile credential export."""
-
-        def setUp(self) -> None:
-            """save environment."""
-            self._saved_env: dict[str, str | None] = {}
-            keys_to_clear = ["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]
-            for key in keys_to_clear:
-                self._saved_env[key] = os.environ.get(key)
-                os.environ.pop(key, None)
-
-        def tearDown(self) -> None:
-            """restore environment."""
-            for key, val in self._saved_env.items():
-                if val is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = val
+        env_vars = ["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]
 
         def test_exports_credentials_with_profile(self) -> None:
             """AWS_PROFILE set → runs aws cli, parses JSON output."""
@@ -2548,26 +2490,10 @@ def run_tests() -> None:
             self.assertIn("warning:", warning)
             self.assertIn("failed to run aws CLI", warning)
 
-    class TestBedrockSkipKeychain(unittest.TestCase):
+    class TestBedrockSkipKeychain(EnvTestCase):
         """tests for bedrock mode skipping keychain and claude_home checks."""
-
-        def setUp(self) -> None:
-            """save environment."""
-            self._saved_env: dict[str, str | None] = {}
-            keys_to_clear = ["RALPHEX_CLAUDE_PROVIDER"] + BEDROCK_ENV_VARS
-            for key in keys_to_clear:
-                self._saved_env[key] = os.environ.get(key)
-                os.environ.pop(key, None)
-            self._saved_argv = sys.argv.copy()
-
-        def tearDown(self) -> None:
-            """restore environment."""
-            for key, val in self._saved_env.items():
-                if val is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = val
-            sys.argv = self._saved_argv
+        env_vars = ["RALPHEX_CLAUDE_PROVIDER"] + BEDROCK_ENV_VARS
+        save_argv = True
 
         def test_skips_credentials_extraction_when_bedrock(self) -> None:
             """bedrock provider skips extract_macos_credentials (creds_temp is None)."""
@@ -2676,24 +2602,10 @@ def run_tests() -> None:
             self.assertIn("bedrock", output.lower())
             self.assertIn("keychain skipped", output.lower())
 
-    class TestBedrockValidation(unittest.TestCase):
+    class TestBedrockValidation(EnvTestCase):
         """tests for validate_bedrock_config() function."""
-
-        def setUp(self) -> None:
-            """save environment."""
-            self._saved_env: dict[str, str | None] = {}
-            keys_to_clear = ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_BEARER_TOKEN_BEDROCK"]
-            for key in keys_to_clear:
-                self._saved_env[key] = os.environ.get(key)
-                os.environ.pop(key, None)
-
-        def tearDown(self) -> None:
-            """restore environment."""
-            for key, val in self._saved_env.items():
-                if val is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = val
+        env_vars = ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_PROFILE",
+                    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_BEARER_TOKEN_BEDROCK"]
 
         def test_warns_missing_aws_region(self) -> None:
             """warns when AWS_REGION is not set."""
