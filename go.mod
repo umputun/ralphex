@@ -12,7 +12,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tmaxmax/go-sse v0.11.0
-	golang.org/x/sys v0.41.0
+	golang.org/x/sys v0.42.0
 	golang.org/x/term v0.40.0
 	gopkg.in/ini.v1 v1.67.1
 	gopkg.in/yaml.v3 v3.0.1
