@@ -1642,6 +1642,58 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 	}
 }
 
+func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
+	t.Run("prefix applied when external review enabled", func(t *testing.T) {
+		log := newMockLogger("progress.txt")
+
+		var capturedPrompts []string
+		claude := &mocks.ExecutorMock{
+			RunFunc: func(_ context.Context, prompt string) executor.Result {
+				capturedPrompts = append(capturedPrompts, prompt)
+				switch len(capturedPrompts) {
+				case 1: // codex evaluation
+					return executor.Result{Output: "done", Signal: status.CodexDone}
+				case 2: // post-codex review loop
+					return executor.Result{Output: "review done", Signal: status.ReviewDone}
+				default:
+					return executor.Result{Error: errors.New("unexpected call")}
+				}
+			},
+		}
+		codex := newMockExecutor([]executor.Result{{Output: "found issue"}})
+
+		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+		r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+		err := r.Run(t.Context())
+
+		require.NoError(t, err)
+		require.Len(t, capturedPrompts, 2)
+		assert.Contains(t, capturedPrompts[1], "IMPORTANT: Before starting the review, run `git status`")
+		assert.Contains(t, capturedPrompts[1], "fix: address code review findings")
+	})
+
+	t.Run("no prefix when external review disabled", func(t *testing.T) {
+		log := newMockLogger("progress.txt")
+
+		var capturedPrompts []string
+		claude := &mocks.ExecutorMock{
+			RunFunc: func(_ context.Context, prompt string) executor.Result {
+				capturedPrompts = append(capturedPrompts, prompt)
+				return executor.Result{Output: "review done", Signal: status.ReviewDone}
+			},
+		}
+		codex := newMockExecutor(nil)
+
+		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
+		r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
+		err := r.Run(t.Context())
+
+		require.NoError(t, err)
+		require.Len(t, capturedPrompts, 1)
+		assert.NotContains(t, capturedPrompts[0], "IMPORTANT: Before starting the review, run `git status`")
+	})
+}
+
 func TestRunner_Finalize_ContextCancellationPropagates(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{

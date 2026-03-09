@@ -323,10 +323,21 @@ func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
 		return fmt.Errorf("codex loop: %w", err)
 	}
 
-	// claude review loop (critical/major) after codex
+	// claude review loop (critical/major) after codex.
+	// prepend commit-pending instruction only when external review actually ran,
+	// because the loop may exit early (max iterations, stalemate, manual break)
+	// leaving uncommitted fixes in the worktree.
 	r.phaseHolder.Set(status.PhaseReview)
 
-	if err := r.runClaudeReviewLoop(ctx); err != nil {
+	var commitPrefix string
+	if r.externalReviewTool() != "none" {
+		commitPrefix = "IMPORTANT: Before starting the review, run `git status`. " +
+			"If there are uncommitted changes from previous review phases, " +
+			"stage and commit them with message: " +
+			"`fix: address code review findings`\n" +
+			"Then continue with the sequence below.\n\n"
+	}
+	if err := r.runClaudeReviewLoop(ctx, commitPrefix); err != nil {
 		return fmt.Errorf("post-codex review loop: %w", err)
 	}
 
@@ -433,9 +444,15 @@ func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
 }
 
 // runClaudeReviewLoop runs claude review iterations using second review prompt.
-func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
+// optional promptPrefix is prepended to the review prompt (used for commit-pending instruction after codex).
+func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string) error {
 	// review iterations = 10% of max_iterations
 	maxReviewIterations := max(minReviewIterations, r.cfg.MaxIterations/reviewIterationDivisor)
+
+	prefix := ""
+	if len(promptPrefix) > 0 {
+		prefix = promptPrefix[0]
+	}
 
 	for i := 1; i <= maxReviewIterations; i++ {
 		select {
@@ -450,7 +467,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context) error {
 		headBefore := r.headHash()
 
 		result := r.runWithLimitRetry(ctx, r.claude.Run,
-			r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt), "claude")
+			prefix+r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt), "claude")
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
