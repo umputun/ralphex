@@ -60,7 +60,7 @@ jobs:
 
       - name: build and push base image by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -202,7 +202,7 @@ jobs:
 
       - name: build and push go image by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile-go
