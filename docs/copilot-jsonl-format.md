@@ -1,7 +1,13 @@
 # Copilot CLI JSONL Output Format Reference
 
 Reference for the JSONL event schema emitted by `copilot --output-format json -p "..."`.
-Based on captured fixtures in `pkg/executor/testdata/copilot_fixtures/`.
+Based on captured fixtures in `pkg/executor/testdata/copilot_fixtures/`:
+
+- `simple_text.jsonl` — Claude model, 36 lines, 5 turns. Despite the name, contains tool use (the model chose to use tools even for a simple prompt). Covers: reasoning, message deltas, tool execution, multi-turn flow
+- `simple_text_gpt.jsonl` — GPT model (gpt-4.1), 10 lines, text-only (no reasoning, no tool use)
+- `tool_use.jsonl` — Claude model, 118 lines, 6 turns, 7 tool invocations (view, edit, create, bash). Captured with `--allow-all`
+- `with_signal.jsonl` — Claude model, 24 lines. Contains `<<<RALPHEX:COMPLETED>>>` signal in message content
+- `error_exit_notes.md` — documents CLI error behavior (no JSONL produced for CLI argument errors)
 
 ## Common Envelope
 
