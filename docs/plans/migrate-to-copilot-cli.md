@@ -144,17 +144,17 @@ Replace Claude Code and OpenAI Codex CLI with GitHub Copilot CLI as the sole exe
 - Remove: `docs/bedrock-setup.md`
 - Modify: `docs/custom-providers.md`
 
-- [ ] In `main.go`: replace `claude` binary detection with `copilot` binary detection; update error message with Copilot CLI installation instructions
-- [ ] Remove `codex` binary detection logic (CopilotExecutor handles both modes)
-- [ ] Remove `ANTHROPIC_API_KEY` and `CLAUDECODE` env var stripping
-- [ ] Update any CLI flag descriptions that reference "claude" or "codex" (e.g., `--codex-only` → consider renaming or keeping as alias)
-- [ ] Delete `scripts/codex-as-claude.sh`
-- [ ] In `scripts/ralphex-dk.sh`: remove all Bedrock-related functions (`get_claude_provider`, `build_bedrock_env_args`, `export_aws_profile_credentials`, `validate_bedrock_config`), remove `--claude-provider` flag handling
-- [ ] In `scripts/ralphex-dk.sh`: replace macOS keychain credential extraction with `GITHUB_TOKEN` pass-through; remove `~/.claude` directory check; add `~/.copilot` directory mount
-- [ ] Delete `docs/bedrock-setup.md`
-- [ ] Rewrite `docs/custom-providers.md` for Copilot CLI context (or delete if no longer applicable — Copilot CLI IS the provider)
-- [ ] Test Docker wrapper manually if possible (or verify script syntax with `bash -n`)
-- [ ] Run project test suite: `make test` — must pass before task 5
+- [x] In `main.go`: replace `claude` binary detection with `copilot` binary detection; update error message with Copilot CLI installation instructions
+- [x] Remove `codex` binary detection logic (CopilotExecutor handles both modes)
+- [x] Remove `ANTHROPIC_API_KEY` and `CLAUDECODE` env var stripping
+- [x] Update any CLI flag descriptions that reference "claude" or "codex" (e.g., `--codex-only` → consider renaming or keeping as alias)
+- [x] Delete `scripts/codex-as-claude.sh`
+- [x] In `scripts/ralphex-dk.sh`: remove all Bedrock-related functions (`get_claude_provider`, `build_bedrock_env_args`, `export_aws_profile_credentials`, `validate_bedrock_config`), remove `--claude-provider` flag handling
+- [x] In `scripts/ralphex-dk.sh`: replace macOS keychain credential extraction with `GITHUB_TOKEN` pass-through; remove `~/.claude` directory check; add `~/.copilot` directory mount
+- [x] Delete `docs/bedrock-setup.md`
+- [x] Rewrite `docs/custom-providers.md` for Copilot CLI context (or delete if no longer applicable — Copilot CLI IS the provider)
+- [x] Test Docker wrapper manually if possible (or verify script syntax with `bash -n`)
+- [x] Run project test suite: `make test` — must pass before task 5
 
 ### Task 5: Update documentation and project metadata
 

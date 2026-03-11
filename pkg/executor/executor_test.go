@@ -64,53 +64,6 @@ func TestSplitArgs(t *testing.T) {
 	}
 }
 
-func TestFilterEnv(t *testing.T) {
-	tests := []struct {
-		name   string
-		env    []string
-		remove []string
-		want   []string
-	}{
-		{
-			name:   "removes single key",
-			env:    []string{"FOO=bar", "BAZ=qux", "CLAUDECODE=1"},
-			remove: []string{"CLAUDECODE"},
-			want:   []string{"FOO=bar", "BAZ=qux"},
-		},
-		{
-			name:   "removes multiple keys",
-			env:    []string{"A=1", "B=2", "C=3"},
-			remove: []string{"A", "C"},
-			want:   []string{"B=2"},
-		},
-		{
-			name:   "no match returns original",
-			env:    []string{"FOO=bar", "BAZ=qux"},
-			remove: []string{"NONEXISTENT"},
-			want:   []string{"FOO=bar", "BAZ=qux"},
-		},
-		{
-			name:   "empty env returns empty",
-			env:    []string{},
-			remove: []string{"FOO"},
-			want:   []string{},
-		},
-		{
-			name:   "partial key match not removed",
-			env:    []string{"CLAUDECODE_OLD=1", "CLAUDECODE=1"},
-			remove: []string{"CLAUDECODE"},
-			want:   []string{"CLAUDECODE_OLD=1"},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := filterEnv(tc.env, tc.remove...)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
 func TestPatternMatchError_Error(t *testing.T) {
 	err := &PatternMatchError{Pattern: "rate limit exceeded", HelpCmd: "copilot --help"}
 	assert.Equal(t, `detected error pattern: "rate limit exceeded"`, err.Error())

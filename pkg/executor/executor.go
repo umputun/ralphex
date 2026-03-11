@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -60,9 +59,6 @@ func (r *execRunner) Run(ctx context.Context, name string, args ...string) (io.R
 	// use exec.Command (not CommandContext) because we handle cancellation ourselves
 	// to ensure the entire process group is killed, not just the direct child
 	cmd := exec.Command(name, args...) //nolint:noctx // intentional: we handle context cancellation via process group kill
-
-	// filter out env vars that could interfere with copilot
-	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 
 	// create new process group so we can kill all descendants on cleanup
 	setupProcessGroup(cmd)
@@ -131,24 +127,6 @@ func splitArgs(s string) []string {
 	}
 
 	return args
-}
-
-// filterEnv returns a copy of env with specified keys removed.
-func filterEnv(env []string, keysToRemove ...string) []string {
-	result := make([]string, 0, len(env))
-	for _, e := range env {
-		skip := false
-		for _, key := range keysToRemove {
-			if strings.HasPrefix(e, key+"=") {
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			result = append(result, e)
-		}
-	}
-	return result
 }
 
 // detectSignal checks text for completion status.
