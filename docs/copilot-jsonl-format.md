@@ -11,9 +11,9 @@ Every line is a JSON object with these top-level keys:
 |-----|------|----------|-------------|
 | `type` | string | yes | Event type identifier (e.g. `assistant.message_delta`) |
 | `data` | object | yes (except `result`) | Event-specific payload |
-| `id` | string | yes | Unique event ID (UUID) |
+| `id` | string | yes (except `result`) | Unique event ID (UUID) |
 | `timestamp` | string | yes | ISO 8601 timestamp with milliseconds |
-| `parentId` | string | yes | ID of the parent event in the event tree |
+| `parentId` | string | yes (except `result`) | ID of the parent event in the event tree |
 | `ephemeral` | bool | no | If `true`, event is transient (deltas, reasoning). Absent when false |
 
 The `result` event is an exception: it has `type`, `timestamp`, `sessionId`, `exitCode`, and `usage` at top level (no `data`, `id`, or `parentId`).
@@ -414,14 +414,14 @@ Read `assistant.message_delta` events for real-time text output:
 - Field: `data.deltaContent`
 - Accumulate deltas with matching `data.messageId` for the current message
 - Ignore `assistant.reasoning_delta` (ephemeral internal reasoning, not user-facing output)
-- IMPORTANT: `assistant.message_delta` events may be absent even when the turn has text content (observed in multi-turn conversations). Always read `assistant.message.data.content` as the authoritative source for complete turn text, not just a fallback
+- IMPORTANT: `assistant.message_delta` events may be absent even when the turn has text content (observed in tool-heavy turns where the model proceeds directly to tool calls — see `simple_text.jsonl` turns 3-5). Always read `assistant.message.data.content` as the authoritative source for complete turn text, not just a fallback
 
 ### Signal Detection → scan for <<<RALPHEX:...>>>
 
 Scan `assistant.message_delta.data.deltaContent` during streaming for signal patterns.
 Signals pass through verbatim — no escaping or mangling.
 
-For reliable detection, also scan `assistant.message.data.content` (the complete message) as a fallback, since delta boundaries may split a signal across multiple events. Note: `assistant.message.data.content` may be empty on tool-only turns (no text output), so signal detection should primarily rely on `message_delta` accumulation.
+For reliable detection, also scan `assistant.message.data.content` (the complete message) as the authoritative check, since delta boundaries may split a signal across multiple events and `message_delta` events may be absent on some turns (see Edge Cases). Note: `assistant.message.data.content` may be an empty string on tool-only turns (no text output).
 
 Signal patterns to detect: `<<<RALPHEX:COMPLETED>>>`, `<<<RALPHEX:FAILED>>>`, `<<<RALPHEX:REVIEW_DONE>>>`, `<<<RALPHEX:QUESTION>>>`, `<<<RALPHEX:PLAN_DRAFT>>>`, `<<<RALPHEX:PLAN_READY>>>`
 
@@ -474,7 +474,7 @@ Unicode characters (emoji, CJK, mathematical symbols) pass through JSONL correct
 
 When the model produces minimal output, the event sequence remains structurally identical:
 - `user.message` → `assistant.turn_start` → (optional reasoning) → (optional `assistant.message_delta`(s)) → `assistant.message` → `assistant.turn_end` → `result`
-- `assistant.message_delta` events may be absent even when `assistant.message.data.content` is non-empty (observed in multi-turn conversations where short responses skip streaming deltas)
+- `assistant.message_delta` events may be absent even when `assistant.message.data.content` is non-empty (observed in tool-heavy turns where the model proceeds directly to tool calls without streaming deltas — see `simple_text.jsonl` turns 3-5)
 - The `assistant.message.data.content` may be an empty string `""` (observed when only tool calls are made with no text)
 - Zero-delta messages are valid — `assistant.message` is always emitted even with empty content
 - For parsing: treat `assistant.message.data.content` as the authoritative text source, not just a fallback for deltas
