@@ -18,7 +18,7 @@ var validModels = map[string]bool{
 	"claude-opus-4-6":   true,
 	"claude-sonnet-4-6": true,
 	"claude-haiku-4-5":  true,
-	"gpt-5.2-codex":    true,
+	"gpt-5.2-codex":     true,
 }
 
 // String returns a human-readable summary of the options for logging.

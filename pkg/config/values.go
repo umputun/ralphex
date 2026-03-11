@@ -15,16 +15,16 @@ import (
 // set in config. This allows distinguishing explicit false/0 from "not set", enabling
 // proper merge behavior where local config can override global config with zero values.
 type Values struct {
-	CopilotCommand       string
-	CopilotArgs          string
-	CopilotCodingModel   string
-	CopilotReviewModel   string
-	CopilotErrorPatterns []string // patterns to detect in copilot output (e.g., rate limit messages)
-	CopilotLimitPatterns []string // patterns to detect rate limits in copilot output (for wait+retry)
-	WaitOnLimit          time.Duration
-	WaitOnLimitSet       bool   // tracks if wait_on_limit was explicitly set
-	ExternalReviewTool   string // "copilot", "custom", or "none"
-	CustomReviewScript   string // path to custom review script (when ExternalReviewTool = "custom")
+	CopilotCommand        string
+	CopilotArgs           string
+	CopilotCodingModel    string
+	CopilotReviewModel    string
+	CopilotErrorPatterns  []string // patterns to detect in copilot output (e.g., rate limit messages)
+	CopilotLimitPatterns  []string // patterns to detect rate limits in copilot output (for wait+retry)
+	WaitOnLimit           time.Duration
+	WaitOnLimitSet        bool   // tracks if wait_on_limit was explicitly set
+	ExternalReviewTool    string // "copilot", "custom", or "none"
+	CustomReviewScript    string // path to custom review script (when ExternalReviewTool = "custom")
 	IterationDelayMs      int
 	IterationDelayMsSet   bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount        int

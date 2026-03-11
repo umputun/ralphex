@@ -16,14 +16,14 @@ var defaultsFS embed.FS
 
 // prompt file names
 const (
-	taskPromptFile         = "task.txt"
-	reviewFirstPromptFile  = "review_first.txt"
-	reviewSecondPromptFile = "review_second.txt"
+	taskPromptFile          = "task.txt"
+	reviewFirstPromptFile   = "review_first.txt"
+	reviewSecondPromptFile  = "review_second.txt"
 	copilotReviewPromptFile = "copilot_review.txt"
-	makePlanPromptFile     = "make_plan.txt"
-	finalizePromptFile     = "finalize.txt"
-	customReviewPromptFile = "custom_review.txt"
-	customEvalPromptFile   = "custom_eval.txt"
+	makePlanPromptFile      = "make_plan.txt"
+	finalizePromptFile      = "finalize.txt"
+	customReviewPromptFile  = "custom_review.txt"
+	customEvalPromptFile    = "custom_eval.txt"
 )
 
 // Config holds all configuration settings for ralphex.
@@ -39,8 +39,8 @@ const (
 //   - MaxIterationsSet: tracks if max_iterations was explicitly set
 //   - WaitOnLimitSet: tracks if wait_on_limit was explicitly set
 type Config struct {
-	CopilotCommand    string `json:"copilot_command"`
-	CopilotArgs       string `json:"copilot_args"`
+	CopilotCommand     string `json:"copilot_command"`
+	CopilotArgs        string `json:"copilot_args"`
 	CopilotCodingModel string `json:"copilot_coding_model"`
 	CopilotReviewModel string `json:"copilot_review_model"`
 

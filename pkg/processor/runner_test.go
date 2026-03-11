@@ -882,7 +882,7 @@ func TestRunner_New_CodexNotInstalled_CustomReviewStillWorks(t *testing.T) {
 
 	appCfg := testAppConfig(t)
 	appCfg.CopilotCommand = "/nonexistent/path/to/copilot" // command that doesn't exist
-	appCfg.ExternalReviewTool = "custom"               // using custom, not codex
+	appCfg.ExternalReviewTool = "custom"                   // using custom, not codex
 	appCfg.CustomReviewScript = "/path/to/script.sh"
 
 	cfg := processor.Config{
@@ -914,7 +914,7 @@ func TestRunner_New_CodexNotInstalled_NoneReviewStillWorks(t *testing.T) {
 
 	appCfg := testAppConfig(t)
 	appCfg.CopilotCommand = "/nonexistent/path/to/copilot" // command that doesn't exist
-	appCfg.ExternalReviewTool = "none"                 // external review disabled
+	appCfg.ExternalReviewTool = "none"                     // external review disabled
 
 	cfg := processor.Config{
 		Mode:          processor.ModeCodexOnly,

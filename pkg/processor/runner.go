@@ -20,13 +20,13 @@ import (
 const DefaultIterationDelay = 2 * time.Second
 
 const (
-	minReviewIterations       = 3    // minimum claude review iterations
-	reviewIterationDivisor    = 10   // review iterations = max_iterations / divisor
-	minExternalIterations     = 3    // minimum external review iterations
-	externalIterationDivisor  = 5    // external iterations = max_iterations / divisor
-	minPlanIterations         = 5    // minimum plan creation iterations
-	planIterationDivisor      = 5    // plan iterations = max_iterations / divisor
-	maxExternalSummaryLen     = 5000 // max chars for external review output summary
+	minReviewIterations      = 3    // minimum claude review iterations
+	reviewIterationDivisor   = 10   // review iterations = max_iterations / divisor
+	minExternalIterations    = 3    // minimum external review iterations
+	externalIterationDivisor = 5    // external iterations = max_iterations / divisor
+	minPlanIterations        = 5    // minimum plan creation iterations
+	planIterationDivisor     = 5    // plan iterations = max_iterations / divisor
+	maxExternalSummaryLen    = 5000 // max chars for external review output summary
 )
 
 // Mode represents the execution mode.

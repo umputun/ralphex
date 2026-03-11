@@ -175,14 +175,14 @@ Replace Claude Code and OpenAI Codex CLI with GitHub Copilot CLI as the sole exe
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Run full test suite: `make test`
-- [ ] Run linter: `make lint`
-- [ ] Run formatter: `make fmt`
-- [ ] Cross-compile Windows: `GOOS=windows GOARCH=amd64 go build ./...`
-- [ ] Verify test coverage meets 80%+ for new code (`go test -cover ./pkg/executor/...`)
-- [ ] Grep for leftover claude/codex CLI references: `grep -ri "claude_command\|codex_command\|ClaudeExecutor\|CodexExecutor" pkg/ cmd/`
-- [ ] Verify embedded defaults load correctly: `go run ./cmd/ralphex --dump-defaults /tmp/copilot-defaults && ls /tmp/copilot-defaults/`
-- [ ] Manual smoke test with toy project
+- [x] Run full test suite: `make test`
+- [x] Run linter: `make lint`
+- [x] Run formatter: `make fmt`
+- [x] Cross-compile Windows: `GOOS=windows GOARCH=amd64 go build ./...`
+- [x] Verify test coverage meets 80%+ for new code (`go test -cover ./pkg/executor/...`)
+- [x] Grep for leftover claude/codex CLI references: `grep -ri "claude_command\|codex_command\|ClaudeExecutor\|CodexExecutor" pkg/ cmd/`
+- [x] Verify embedded defaults load correctly: `go run ./cmd/ralphex --dump-defaults /tmp/copilot-defaults && ls /tmp/copilot-defaults/`
+- [x] Manual smoke test with toy project
 
 ### Task 7: Update documentation
 
