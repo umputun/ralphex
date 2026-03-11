@@ -413,3 +413,61 @@ To track what copilot is doing (for progress display):
 - `tool.execution_start` — tool name and arguments (show "editing file.go", "running tests", etc.)
 - `tool.execution_complete` — success/failure status
 - `assistant.turn_start` / `assistant.turn_end` — turn boundaries for iteration counting
+
+## Edge Cases
+
+### --silent flag behavior
+
+The `--silent` (`-s`) flag does NOT change the JSONL output structure when combined with `--output-format json`. Both modes produce identical event types and fields. `--silent` only affects plain-text output mode (suppresses stats and decoration).
+
+For ralphex: no special handling needed — always use `--output-format json` regardless of `--silent`.
+
+### --allow-all vs tool permissions
+
+Without `--allow-all`, tools that require approval emit `tool.execution_complete` with:
+- `success: false`
+- `error.message: "Permission denied and could not request permission from user"`
+- `error.code: "denied"`
+
+No special "approval" or "permission" event types exist. The JSONL structure is identical — only the `success` and `error` fields on `tool.execution_complete` differ.
+
+For ralphex: always pass `--allow-all` (or `--allow-all-tools`) in non-interactive mode. If tool denials appear, detect via `tool.execution_complete.data.error.code == "denied"`.
+
+### Unicode and special characters
+
+Unicode characters (emoji, CJK, mathematical symbols) pass through JSONL correctly with standard JSON encoding. No special escaping or mangling observed. Characters appear verbatim in `assistant.message_delta.data.deltaContent` and `assistant.message.data.content`.
+
+### Empty or near-empty responses
+
+When the model produces minimal output, the event sequence remains structurally identical:
+- `user.message` → `assistant.turn_start` → (optional reasoning) → `assistant.message_delta`(s) → `assistant.message` → `assistant.turn_end` → `result`
+- The `assistant.message.data.content` may be an empty string `""` (observed when only tool calls are made with no text)
+- Zero-delta messages are valid — `assistant.message` is always emitted even with empty content
+
+### CLI argument errors (no JSONL)
+
+Invalid CLI arguments (bad `--model`, unknown flags) produce NO JSONL output at all:
+- Error goes to stderr as plain text
+- Exit code is 1
+- stdout is empty
+
+For ralphex: detect by checking process exit code AND whether any JSONL was received. If exit code != 0 and no events parsed, read stderr for error message.
+
+### Multi-turn tool chains
+
+When the model uses multiple tools across turns, each turn follows the same event pattern:
+- `assistant.turn_start` (turnId increments: "0", "1", "2", ...)
+- reasoning/message deltas and complete message (with toolRequests)
+- `tool.execution_start` / `tool.execution_complete` pairs
+- `assistant.turn_end`
+
+Observed: up to 12 turns in a single session (without `--allow-all`, many retries due to denials). With `--allow-all`, typically 3-6 turns for complex operations.
+
+Multiple tools can execute within a single turn (parallel tool calls share the same turnId).
+
+### Streaming interruption
+
+If the copilot process is killed mid-stream:
+- The `result` event will NOT be emitted
+- The last event may be a partial JSON line (truncated)
+- For ralphex: treat absence of `result` event as abnormal termination. Use line-by-line JSON parsing that tolerates parse errors on the final line

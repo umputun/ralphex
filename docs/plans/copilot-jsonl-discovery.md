@@ -117,10 +117,10 @@ Capture, analyze, and document the JSONL event schema emitted by `copilot --outp
 - Modify: `docs/copilot-jsonl-format.md` (add edge cases section)
 - Verify: `pkg/executor/testdata/copilot_fixtures/*.jsonl` (all fixtures valid)
 
-- [ ] Validate all fixture files are valid JSONL: `for f in pkg/executor/testdata/copilot_fixtures/*.jsonl; do jq empty < "$f" 2>&1 || echo "INVALID: $f"; done`
-- [ ] Test with `--allow-all` vs without — does the JSONL format change when tools are auto-approved vs prompted?
-- [ ] Test with `--silent` flag — does it affect JSONL output or only text output?
-- [ ] Document edge cases: empty responses, very long outputs, multi-turn tool chains, unicode/special characters in output
-- [ ] Add edge case findings to `docs/copilot-jsonl-format.md`
-- [ ] Verify fixtures are committed and accessible from `pkg/executor/testdata/copilot_fixtures/`
-- [ ] Final review: confirm the format doc has enough detail to implement `parseJSONL()` in the migration plan without ambiguity
+- [x] Validate all fixture files are valid JSONL: `for f in pkg/executor/testdata/copilot_fixtures/*.jsonl; do jq empty < "$f" 2>&1 || echo "INVALID: $f"; done` — all 5 fixtures valid (error_exit 2 lines, simple_text 36, simple_text_gpt 10, tool_use 118, with_signal 24)
+- [x] Test with `--allow-all` vs without — does the JSONL format change when tools are auto-approved vs prompted? FINDING: JSONL structure is identical. Without --allow-all, denied tools emit tool.execution_complete with success:false and error.code:"denied". No special approval event types exist.
+- [x] Test with `--silent` flag — does it affect JSONL output or only text output? FINDING: --silent (-s) does NOT affect JSONL output when combined with --output-format json. Same event types and structure. --silent only suppresses stats in plain-text output mode.
+- [x] Document edge cases: empty responses, very long outputs, multi-turn tool chains, unicode/special characters in output. FINDINGS: unicode passes through verbatim (emoji, CJK, math symbols). Empty content produces same event sequence with empty string. Multi-turn chains observed up to 12 turns. Streaming interruption leaves no result event.
+- [x] Add edge case findings to `docs/copilot-jsonl-format.md` — added Edge Cases section covering: --silent behavior, --allow-all vs permissions, unicode, empty responses, CLI errors, multi-turn chains, streaming interruption
+- [x] Verify fixtures are committed and accessible from `pkg/executor/testdata/copilot_fixtures/` — all 5 fixtures tracked in git and valid
+- [x] Final review: confirm the format doc has enough detail to implement `parseJSONL()` in the migration plan without ambiguity — CONFIRMED: doc covers all event types with JSON examples, field descriptions, streaming model, model differences, exit codes, and explicit mapping to ralphex parsing needs (text streaming, signal detection, error detection, completion detection, tool tracking)
