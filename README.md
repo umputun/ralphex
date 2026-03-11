@@ -8,13 +8,13 @@
   <a href="https://goreportcard.com/report/github.com/umputun/ralphex"><img src="https://goreportcard.com/badge/github.com/umputun/ralphex?v=2" alt="Go Report Card"></a>
 </p>
 
-<h2 align="center">Autonomous plan execution with Claude Code</h2>
+<h2 align="center">Autonomous plan execution with GitHub Copilot CLI</h2>
 
-*ralphex is a standalone CLI tool that runs in your terminal from the root of a git repository. It orchestrates Claude Code to execute implementation plans autonomously - no IDE plugins or cloud services required, just Claude Code and a single binary.*
+*ralphex is a standalone CLI tool that runs in your terminal from the root of a git repository. It orchestrates GitHub Copilot CLI to execute implementation plans autonomously - no IDE plugins or cloud services required, just Copilot CLI and a single binary.*
 
-Claude Code is powerful but interactive - it requires you to watch, approve, and guide each step. For complex features spanning multiple tasks, this means hours of babysitting. Worse, as context fills up during long sessions, the model's quality degrades - it starts making mistakes, forgetting earlier decisions, and producing worse code.
+AI coding assistants are powerful but interactive - they require you to watch, approve, and guide each step. For complex features spanning multiple tasks, this means hours of babysitting. Worse, as context fills up during long sessions, the model's quality degrades - it starts making mistakes, forgetting earlier decisions, and producing worse code.
 
-ralphex solves both problems. Each task executes in a fresh Claude Code session with minimal context, keeping the model sharp throughout the entire plan. Write a plan with tasks and validation commands, start ralphex, and walk away. Come back to find your feature implemented, reviewed, and committed - or check the progress log to see what it's doing.
+ralphex solves both problems. Each task executes in a fresh Copilot CLI session with minimal context, keeping the model sharp throughout the entire plan. Write a plan with tasks and validation commands, start ralphex, and walk away. Come back to find your feature implemented, reviewed, and committed - or check the progress log to see what it's doing.
 
 <details markdown>
 <summary>Task Execution Screenshot</summary>
@@ -42,7 +42,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 - **Zero setup** - works out of the box with sensible defaults, no configuration required
 - **Autonomous task execution** - executes plan tasks one at a time with automatic retry
 - **Interactive plan creation** - create plans through dialogue with Claude via `--plan` flag
-- **Multi-phase code review** - 5 agents → codex → 2 agents review pipeline
+- **Multi-phase code review** - 5 agents → Copilot external review → 2 agents review pipeline
 - **Custom review agents** - configurable agents with `{{agent:name}}` template system and user defined prompts
 - **Automatic branch creation** - creates git branch from plan filename
 - **Plan completion tracking** - moves completed plans to `completed/` folder
@@ -91,14 +91,14 @@ ralphex executes plans in four phases with automated code reviews, plus an optio
 ### Phase 1: Task Execution
 
 1. Reads plan file and finds first incomplete task (`### Task N:` with `- [ ]` checkboxes)
-2. Sends task to Claude Code for execution
+2. Sends task to Copilot CLI for execution
 3. Runs validation commands (tests, linters) after each task
 4. Marks checkboxes as done `[x]`, commits changes
 5. Repeats until all tasks complete or max iterations reached
 
 ### Phase 2: First Code Review
 
-Launches 5 review agents **in parallel** via Claude Code Task tool:
+Launches 5 review agents **in parallel** via Copilot CLI Task tool:
 
 | Agent | Purpose |
 |-------|---------|
@@ -108,24 +108,24 @@ Launches 5 review agents **in parallel** via Claude Code Task tool:
 | `simplification` | detects over-engineering |
 | `documentation` | checks if docs need updates |
 
-Claude verifies findings, fixes confirmed issues, and commits.
+The coding model verifies findings, fixes confirmed issues, and commits.
 
 *[Default agents](https://github.com/umputun/ralphex/tree/master/pkg/config/defaults/agents) provide common, language-agnostic review steps. They can be customized and tuned for your specific needs, languages, and workflows. See [Customization](#customization) for details.*
 
 ### Phase 3: External Review (optional)
 
-1. Runs external review tool (codex by default, or custom script)
-2. Claude evaluates findings, fixes valid issues
+1. Runs external review tool (Copilot CLI with review model by default, or custom script)
+2. Coding model evaluates findings, fixes valid issues
 3. Iterates until no open issues
 
 The loop terminates when: all issues resolved, max iterations reached, stalemate detected (via `--review-patience`), or manual break via Ctrl+\ (SIGQUIT).
 
-**Stalemate detection:** When the external tool and Claude can't agree on findings, the loop can waste tokens iterating to the max. Set `--review-patience=N` (or `review_patience` in config) to terminate after N consecutive rounds with no commits or working tree changes.
+**Stalemate detection:** When the external tool and the coding model can't agree on findings, the loop can waste tokens iterating to the max. Set `--review-patience=N` (or `review_patience` in config) to terminate after N consecutive rounds with no commits or working tree changes.
 
 **Manual break:** Press Ctrl+\ (SIGQUIT) during the external review loop to terminate it immediately. The current executor run is cancelled via context cancellation. Not available on Windows.
 
 Supported tools:
-- **codex** (default): OpenAI Codex for independent code review
+- **copilot** (default): Copilot CLI with review model (gpt-5.2-codex) for independent code review
 - **custom**: Your own script wrapping any AI (OpenRouter, local LLM, etc.)
 - **none**: Skip external review entirely
 
@@ -144,7 +144,7 @@ See [Custom External Review](#custom-external-review) for details on using custo
 
 After all review phases complete successfully, ralphex can run an optional finalize step. Disabled by default.
 
-**What it does:** runs a single Claude Code session with a customizable prompt. The default `finalize.txt` prompt rebases commits onto the default branch and optionally squashes related commits into logical groups.
+**What it does:** runs a single Copilot CLI session with a customizable prompt. The default `finalize.txt` prompt rebases commits onto the default branch and optionally squashes related commits into logical groups.
 
 **How to enable:**
 
@@ -162,7 +162,7 @@ Edit `~/.config/ralphex/prompts/finalize.txt` (or `.ralphex/prompts/finalize.txt
 
 ### Review-Only Mode
 
-Review-only mode (`--review`) runs the full review pipeline (Phase 2 → Phase 3 → Phase 4) on changes already present on the current branch. This is useful when changes were made outside ralphex — via Claude Code's built-in plan mode, manual edits, other AI agents, or any other workflow.
+Review-only mode (`--review`) runs the full review pipeline (Phase 2 → Phase 3 → Phase 4) on changes already present on the current branch. This is useful when changes were made outside ralphex — via manual edits, other AI agents, or any other workflow.
 
 **Workflow:**
 
@@ -186,7 +186,7 @@ ralphex --review docs/plans/add-auth.md
 ### Plan Creation
 
 Plans can be created in several ways:
-- **[Claude Code](#claude-code-integration-optional)** - use slash commands like `/ralphex-plan` or your own planning workflows
+- **[Claude Code skills](#claude-code-integration-optional)** - use slash commands like `/ralphex-plan` or your own planning workflows
 - **Manually** - write markdown files directly in `docs/plans/`
 - **`--plan` flag** - integrated option that handles the entire flow
 - **Auto-detection** - running `ralphex` without arguments on master/main prompts for plan creation if no plans exist
@@ -197,7 +197,7 @@ The `--plan` flag provides a simpler integrated experience:
 ralphex --plan "add health check endpoint"
 ```
 
-Claude explores your codebase, asks clarifying questions via a terminal picker (fzf or numbered fallback), and generates a complete plan file in `docs/plans/`. When reviewing the draft, you can accept, revise with text feedback, open it in `$EDITOR` for interactive annotation, or reject it.
+The coding model explores your codebase, asks clarifying questions via a terminal picker (fzf or numbered fallback), and generates a complete plan file in `docs/plans/`. When reviewing the draft, you can accept, revise with text feedback, open it in `$EDITOR` for interactive annotation, or reject it.
 
 **Example session:**
 ```
@@ -254,9 +254,9 @@ The script defaults to the Go image (`ralphex-go`). For other languages, build a
 export RALPHEX_IMAGE=my-ralphex
 ```
 
-Then use `ralphex` as usual - it runs in a container with Claude Code and Codex pre-installed. The script shows which image it's using at startup.
+Then use `ralphex` as usual - it runs in a container with Copilot CLI pre-installed. The script shows which image it's using at startup.
 
-**Why use Docker?** ralphex runs Claude Code with `--dangerously-skip-permissions`, giving it full access to execute commands and modify files. Running in a container provides isolation - Claude can only access the mounted project directory, not your entire system. This makes autonomous execution significantly safer.
+**Why use Docker?** ralphex runs Copilot CLI with `--allow-all --no-ask-user`, giving it full access to execute commands and modify files. Running in a container provides isolation - the model can only access the mounted project directory, not your entire system. This makes autonomous execution significantly safer.
 
 <details markdown>
 <summary>Isolation details</summary>
@@ -266,8 +266,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - Git operations within the project (branch, commit, etc.)
 
 **Container CAN access (read-only):**
-- `~/.claude/` - credentials and settings (copied at startup, not modified)
-- `~/.codex/` - codex credentials if present
+- `~/.copilot/` - Copilot CLI credentials and settings (copied at startup, not modified)
 - `~/.config/ralphex/` - user-level ralphex configuration
 - `~/.gitconfig` - git identity for commits
 - Global gitignore (`core.excludesFile`) - auto-detected and mounted
@@ -280,60 +279,31 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - System files, binaries, or configurations
 - Other running processes or containers
 
-**Network:** Full network access (required for Claude API calls)
+**Network:** Full network access (required for Copilot API calls)
 
 **Privileges:** Runs as non-root user with no elevated capabilities
 
 </details>
 
 **Volume mounts:**
-- **Read-only**: `~/.claude` and `~/.codex` mounted to `/mnt/`, copied at startup to preserve isolation
+- **Read-only**: `~/.copilot` mounted to `/mnt/`, copied at startup to preserve isolation
 - **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
 - **Extra mounts**: user-defined volumes via `-v`/`--volume` flags or `RALPHEX_EXTRA_VOLUMES` env var
 
 **Requirements:**
 - Python 3.9+ (for the wrapper script)
 - Docker installed and running
-- Claude Code credentials in `~/.claude/` (or in `$CLAUDE_CONFIG_DIR` when set)
-- Codex credentials in `~/.codex/` (optional, for codex review phase)
+- GitHub authentication for Copilot CLI (via `GITHUB_TOKEN` or `~/.copilot/`)
 - Git config in `~/.gitconfig` (for commits)
 
 **Environment variables:**
 - `RALPHEX_IMAGE` - Docker image to use (default: `ghcr.io/umputun/ralphex-go:latest`)
 - `RALPHEX_PORT` - Port for web dashboard when using `--serve` (default: `8080`)
 - `RALPHEX_CONFIG_DIR` - Custom config directory (default: `~/.config/ralphex`). Overrides global config location for prompts, agents, and settings
-- `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works both with Docker wrapper (volume mounts and keychain derivation) and non-Docker usage (passed through to Claude Code directly). Keychain service name is derived automatically from the path.
+- `GITHUB_TOKEN` - GitHub token for Copilot CLI authentication (passed through to container)
 - `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`). Entries without `:` are silently skipped
 - `RALPHEX_EXTRA_ENV` - Extra environment variables, comma-separated (e.g., `DEBUG=1,API_KEY`). Format: `VAR=value` or `VAR` (inherit from host). Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values - use name-only form for secure credential passing
 - `TZ` - Override container timezone (default: auto-detected from host via `/etc/localtime`). Example: `TZ=Europe/Berlin ralphex docs/plans/feature.md`
-- `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
-
-**AWS Bedrock support:**
-
-When `--claude-provider bedrock` or `RALPHEX_CLAUDE_PROVIDER=bedrock` is set:
-- Keychain credential extraction is skipped (not needed for Bedrock auth)
-- AWS credentials are automatically exported from `AWS_PROFILE` via `aws configure export-credentials`
-- Required Bedrock env vars are passed to container: `CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION`, credentials
-
-Required environment for Bedrock:
-- `AWS_REGION` - AWS region where Bedrock is enabled
-- `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` - authentication
-
-Note: `CLAUDE_CODE_USE_BEDROCK=1` is automatically set when using `--claude-provider bedrock`.
-
-```bash
-# with AWS profile (credentials exported automatically)
-export AWS_PROFILE=my-bedrock-profile
-export AWS_REGION=us-east-1
-ralphex --claude-provider bedrock docs/plans/feature.md
-
-# or use env var for session-wide setting
-export RALPHEX_CLAUDE_PROVIDER=bedrock
-ralphex docs/plans/feature.md
-```
-
-See [Bedrock setup documentation](docs/bedrock-setup.md) for detailed IAM policies and setup instructions.
-
 **Extra volume mounts:**
 ```bash
 # via CLI flags (can use multiple -v)
@@ -373,23 +343,22 @@ Two images are published:
 
 | Image | Description |
 |-------|-------------|
-| `ghcr.io/umputun/ralphex:latest` | Base image with Claude Code, Codex, and core tools |
+| `ghcr.io/umputun/ralphex:latest` | Base image with Copilot CLI and core tools |
 | `ghcr.io/umputun/ralphex-go:latest` | Go development (extends base with Go toolchain) |
 
 **Base image includes:**
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Claude Code | latest | AI coding assistant |
-| Codex | latest | External code review |
-| Node.js/npm | 24.x | Required for Claude Code |
+| Copilot CLI | latest | AI coding assistant |
+| Node.js/npm | 24.x | Required for Copilot CLI |
 | Python/pip | 3.x | Scripts and automation |
 | git | 2.x | Version control |
 | make | 4.x | Build automation |
 | gcc, musl-dev | - | C compiler for native extensions |
 | bash | 5.x | Shell |
 | fzf | - | Fuzzy finder for plan selection |
-| ripgrep | - | Fast search (used by Claude Code) |
+| ripgrep | - | Fast search (used by Copilot CLI) |
 
 **Go image adds:**
 
@@ -527,7 +496,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 
 ## Plan File Format
 
-Plans are markdown files with task sections. Each task has checkboxes that claude marks complete.
+Plans are markdown files with task sections. Each task has checkboxes that the coding model marks complete.
 
 ```markdown
 # Plan: Add User Authentication
@@ -588,10 +557,10 @@ Review the code for quality issues...
 
 | Option | Values | Description |
 |--------|--------|-------------|
-| `model` | `haiku`, `sonnet`, `opus` | Claude model for this agent |
-| `agent` | any string | Claude Code Task tool subagent type |
+| `model` | `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.2-codex` | Copilot model for this agent |
+| `agent` | any string | Copilot CLI Task tool subagent type |
 
-Both options are optional. Without frontmatter, agents use default model and `general-purpose` subagent type. Full model IDs (e.g. `claude-sonnet-4-5-20250929`) are normalized to short keywords (`sonnet`) since Claude Code only accepts `haiku`, `sonnet`, `opus`. Invalid model values are dropped with a warning.
+Both options are optional. Without frontmatter, agents use default model and `general-purpose` subagent type. Full Copilot model IDs are used directly. Invalid model values are dropped with a warning.
 
 ### Template Syntax
 
@@ -618,7 +587,7 @@ Launch the following review agents in parallel:
 {{agent:testing}}
 ```
 
-Each `{{agent:name}}` expands to Task tool instructions that tell Claude Code to run that agent. Variables inside agent content are also expanded, so agents can use `{{DEFAULT_BRANCH}}` or other variables.
+Each `{{agent:name}}` expands to Task tool instructions that tell Copilot CLI to run that agent. Variables inside agent content are also expanded, so agents can use `{{DEFAULT_BRANCH}}` or other variables.
 
 ### Customization
 
@@ -629,13 +598,13 @@ The entire system is designed for customization - both task execution and review
 - Add new `.txt` files to create custom agents
 - Run `ralphex --reset` to interactively restore defaults, or delete all files manually
 - Run `ralphex --dump-defaults <dir>` to extract raw defaults for comparison
-- Use the `/ralphex-update` Claude Code skill to smart-merge updated defaults into customized files
-- Alternatively, reference agents already installed in your Claude Code directly in prompt files (see example below)
+- Use the `/ralphex-update` skill to smart-merge updated defaults into customized files
+- Alternatively, reference agents already installed in your Copilot CLI directly in prompt files (see example below)
 
 **Prompt files** (`~/.config/ralphex/prompts/`):
 - `task.txt` - task execution prompt
 - `review_first.txt` - comprehensive review (default: 5 language-agnostic agents - quality, implementation, testing, simplification, documentation; customizable)
-- `codex.txt` - codex review prompt
+- `copilot_review.txt` - Copilot external review prompt
 - `review_second.txt` - final review, critical/major issues only (default: 2 agents - quality, implementation; customizable)
 - `finalize.txt` - optional finalize step prompt (disabled by default)
 
@@ -659,9 +628,9 @@ Note: Inline comments are not supported (`text # comment` keeps the entire line)
 - Create language-specific agents (Python linting, TypeScript types)
 - Modify prompts to change how many agents run per phase
 
-**Using Claude Code agents directly:**
+**Using Copilot CLI agents directly:**
 
-Instead of creating agent files, you can reference agents installed in your Claude Code directly in prompt files:
+Instead of creating agent files, you can reference agents installed in your Copilot CLI directly in prompt files:
 
 ```txt
 # in review_first.txt - just list agent names with their prompts
@@ -673,9 +642,8 @@ Agents to launch:
 
 ## Requirements
 
-- `claude` - Claude Code CLI
+- `copilot` - GitHub Copilot CLI
 - `fzf` - for plan selection (optional)
-- `codex` - for external review (optional)
 
 ## Configuration
 
@@ -688,7 +656,7 @@ ralphex uses a configuration directory at `~/.config/ralphex/` (override with `-
 │   ├── task.txt
 │   ├── review_first.txt
 │   ├── review_second.txt
-│   └── codex.txt
+│   └── copilot_review.txt
 └── agents/             # custom review agents (*.txt files)
 ```
 
@@ -725,15 +693,11 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `claude_command` | Claude CLI command | `claude` |
-| `claude_args` | Claude CLI arguments | `--dangerously-skip-permissions --output-format stream-json --verbose` |
-| `codex_enabled` | Enable codex review phase | `true` |
-| `codex_command` | Codex CLI command | `codex` |
-| `codex_model` | Codex model ID | `gpt-5.4` |
-| `codex_reasoning_effort` | Reasoning effort level | `xhigh` |
-| `codex_timeout_ms` | Codex timeout in ms | `3600000` |
-| `codex_sandbox` | Sandbox mode | `read-only` |
-| `external_review_tool` | External review tool (`codex`, `custom`, `none`) | `codex` |
+| `copilot_command` | Copilot CLI command | `copilot` |
+| `copilot_args` | Copilot CLI arguments | `--allow-all --no-ask-user --output-format json` |
+| `copilot_coding_model` | Model for task execution and review phases | `claude-opus-4-6` |
+| `copilot_review_model` | Model for external review phases | `gpt-5.2-codex` |
+| `external_review_tool` | External review tool (`copilot`, `custom`, `none`) | `copilot` |
 | `custom_review_script` | Path to custom review script (when `external_review_tool = custom`) | - |
 | `max_external_iterations` | Override external review iteration limit (0 = auto, derived from `max_iterations`) | `0` |
 | `review_patience` | Terminate external review after N consecutive unchanged rounds (0 = disabled) | `0` |
@@ -746,24 +710,22 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `vcs_command` | VCS command for the git backend (set to a translation script for hg repos) | `git` |
 | `color_task` | Task execution phase color (hex) | `#00ff00` |
 | `color_review` | Review phase color (hex) | `#00ffff` |
-| `color_codex` | Codex review color (hex) | `#ff00ff` |
-| `color_claude_eval` | Claude evaluation color (hex) | `#64c8ff` |
+| `color_copilot` | Copilot review color (hex) | `#ff00ff` |
+| `color_copilot_eval` | Copilot evaluation color (hex) | `#64c8ff` |
 | `color_warn` | Warning messages color (hex) | `#ffff00` |
 | `color_error` | Error messages color (hex) | `#ff0000` |
 | `color_signal` | Completion/failure signals color (hex) | `#ff6464` |
 | `color_timestamp` | Timestamp prefix color (hex) | `#8a8a8a` |
 | `color_info` | Informational messages color (hex) | `#b4b4b4` |
-| `claude_error_patterns` | Patterns to detect in claude output (comma-separated) | `You've hit your limit,API Error:,cannot be launched inside another Claude Code session` |
-| `codex_error_patterns` | Patterns to detect in codex output (comma-separated) | `Rate limit,quota exceeded` |
-| `claude_limit_patterns` | Limit patterns for claude triggering wait+retry (comma-separated) | `You've hit your limit` |
-| `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit,quota exceeded` |
+| `copilot_error_patterns` | Patterns to detect in Copilot CLI output (comma-separated) | `Rate limit,quota exceeded,API Error` |
+| `copilot_limit_patterns` | Limit patterns triggering wait+retry (comma-separated) | `Rate limit,quota exceeded` |
 | `wait_on_limit` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 
 Colors use 24-bit RGB (true color), supported natively by all modern terminals (iTerm2, Kitty, Terminal.app, Windows Terminal, GNOME Terminal, Alacritty, Zed, VS Code, etc). Older terminals will degrade gracefully. Use `--no-color` to disable colors entirely.
 
-Error patterns use case-insensitive substring matching. When a pattern is detected in claude or codex output, ralphex exits gracefully with an informative message suggesting how to check usage/status. Multiple patterns are separated by commas, with whitespace trimmed from each pattern.
+Error patterns use case-insensitive substring matching. When a pattern is detected in Copilot CLI output, ralphex exits gracefully with an informative message suggesting how to check usage/status. Multiple patterns are separated by commas, with whitespace trimmed from each pattern.
 
-**Rate limit retry:** Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) work similarly but support optional wait+retry behavior. When `--wait` is set (or `wait_on_limit` in config), a limit pattern match triggers a wait followed by automatic retry instead of exiting. Without `--wait`, limit patterns fall through to error pattern behavior. Limit patterns are checked before error patterns — if the same string matches both, the limit pattern takes priority when wait is enabled.
+**Rate limit retry:** Limit patterns (`copilot_limit_patterns`) work similarly but support optional wait+retry behavior. When `--wait` is set (or `wait_on_limit` in config), a limit pattern match triggers a wait followed by automatic retry instead of exiting. Without `--wait`, limit patterns fall through to error pattern behavior. Limit patterns are checked before error patterns — if the same string matches both, the limit pattern takes priority when wait is enabled.
 
 ### Custom prompts
 
@@ -771,7 +733,7 @@ Place custom prompt files in `~/.config/ralphex/prompts/` to override the built-
 
 ### Custom External Review
 
-Use your own AI tool for external code review instead of codex. This allows integration with OpenRouter, local LLMs, or any custom pipeline.
+Use your own AI tool for external code review instead of Copilot CLI. This allows integration with OpenRouter, local LLMs, or any custom pipeline.
 
 **Configuration:**
 
@@ -783,7 +745,7 @@ custom_review_script = ~/.config/ralphex/scripts/my-review.sh
 
 **Script interface:**
 
-Your script receives a single argument: path to a prompt file containing review instructions. The script outputs findings to stdout - ralphex passes them to Claude for evaluation and fixing.
+Your script receives a single argument: path to a prompt file containing review instructions. The script outputs findings to stdout - ralphex passes them to the coding model for evaluation and fixing.
 
 ```bash
 #!/bin/bash
@@ -853,26 +815,19 @@ When running ralphex in Docker, your script must be accessible inside the contai
 - Ensure script dependencies are available (curl, jq, etc. are included in base image)
 - Environment variables (API keys) must be passed to container: `-e OPENROUTER_API_KEY`
 
-### Using Alternative Providers for Claude Phases
+### Copilot CLI Configuration
 
-The `claude_command` and `claude_args` config options let you replace Claude Code with any CLI that produces compatible `stream-json` output. This means codex, Gemini CLI, local LLMs, or any other tool can drive task execution and review phases — you just need a wrapper script that translates the tool's output format.
-
-A working example is included: [`scripts/codex-as-claude.sh`](https://github.com/umputun/ralphex/blob/master/scripts/codex-as-claude.sh) wraps codex to produce Claude-compatible events. To use it:
+The `copilot_command` and `copilot_args` config options let you override the Copilot CLI command and its arguments. The `CopilotExecutor` uses two models controlled by `copilot_coding_model` (default: `claude-opus-4-6`) and `copilot_review_model` (default: `gpt-5.2-codex`).
 
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
-claude_command = /path/to/codex-as-claude.sh
-claude_args =
+copilot_command = copilot
+copilot_args = --allow-all --no-ask-user --output-format json
+copilot_coding_model = claude-opus-4-6
+copilot_review_model = gpt-5.2-codex
 ```
 
-Setting `claude_args` to empty is optional. Note that default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`) may still be passed due to config fallback behavior. Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all.
-
-The wrapper supports environment variables:
-- `CODEX_MODEL` - codex model to use (default: codex default)
-- `CODEX_SANDBOX` - sandbox mode (default: `danger-full-access`)
-- `CODEX_VERBOSE` - set to `1` to include command execution output in the stream (default: `0`, only agent messages are shown)
-
-See [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for a detailed guide on writing wrappers for other providers.
+See [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for details on the JSONL output format and configuration.
 
 ### Configurable VCS Backend
 
@@ -885,7 +840,7 @@ vcs_command = ~/.config/ralphex/scripts/hg2git.sh
 
 A reference translation script is included at [`scripts/hg2git.sh`](https://github.com/umputun/ralphex/blob/master/scripts/hg2git.sh). It maps the ~15 git subcommands ralphex uses internally to Mercurial equivalents, with phase-based commit logic (amend on draft, commit on public). Requires bash 4.0+ (for associative arrays used in diff stats parsing).
 
-You will also need to customise prompt files to replace git commands that Claude executes as bash commands during reviews. See [Mercurial support documentation](https://github.com/umputun/ralphex/blob/master/docs/hg-support.md) for full setup instructions, prompt replacement examples, `.hgignore` setup, and known limitations.
+You will also need to customise prompt files to replace git commands that the coding model executes as bash commands during reviews. See [Mercurial support documentation](https://github.com/umputun/ralphex/blob/master/docs/hg-support.md) for full setup instructions, prompt replacement examples, `.hgignore` setup, and known limitations.
 
 <details markdown>
 <summary><b>FAQ</b></summary>
@@ -898,17 +853,17 @@ Create a plan file in `docs/plans/` (see [Quick Start](#quick-start) for format)
 
 First review is comprehensive (5 agents by default), second is a final check focusing on critical/major issues only (2 agents). See [How It Works](#how-it-works).
 
-**How do I use my own Claude Code agents?**
+**How do I use my own Copilot CLI agents?**
 
 Reference them directly in prompt files by name, e.g., `qa-expert - "Review for bugs"`. See [Customization](#customization).
 
-**What if codex isn't installed?**
+**What if external review is not needed?**
 
-Codex is optional. If not installed, the codex review phase is skipped automatically.
+External review is optional. Set `external_review_tool = none` in config to skip it entirely.
 
 **Can I run just reviews without task execution?**
 
-Yes, use `--review` flag to run the full review pipeline (Phase 2 → Phase 3 → Phase 4) on changes already on the current branch. This works for changes made by any tool — Claude Code's built-in mode, manual edits, other agents, etc. Switch to the feature branch, commit your changes, and run `ralphex --review`. See [Review-Only Mode](#review-only-mode) for details.
+Yes, use `--review` flag to run the full review pipeline (Phase 2 → Phase 3 → Phase 4) on changes already on the current branch. This works for changes made by any tool — manual edits, other AI agents, etc. Switch to the feature branch, commit your changes, and run `ralphex --review`. See [Review-Only Mode](#review-only-mode) for details.
 
 **Can I run ralphex in a non-git directory?**
 
@@ -924,7 +879,7 @@ For full mode, start on master - ralphex creates a branch automatically from the
 
 **How do I restore default agents after customizing?**
 
-Run `ralphex --reset` to interactively reset global config. Select which components to reset (config, prompts, agents). Alternatively, delete all `.txt` files from `~/.config/ralphex/agents/` manually. To smart-merge updated defaults into customized files (preserving your changes), use the `/ralphex-update` Claude Code skill or `ralphex --dump-defaults <dir>` to extract defaults for manual comparison.
+Run `ralphex --reset` to interactively reset global config. Select which components to reset (config, prompts, agents). Alternatively, delete all `.txt` files from `~/.config/ralphex/agents/` manually. To smart-merge updated defaults into customized files (preserving your changes), use the `/ralphex-update` skill or `ralphex --dump-defaults <dir>` to extract defaults for manual comparison.
 
 **How does local .ralphex/ config interact with global config?**
 
@@ -942,7 +897,7 @@ Completed tasks are already committed to the feature branch. To resume, re-run `
 
 Yes, two approaches depending on the situation:
 
-1. **Edit CLAUDE.md** — for behavioral changes (coding style, libraries, constraints). Each task runs in a fresh Claude Code session that reads CLAUDE.md at startup, so changes take effect on the next task or iteration automatically. No need to stop ralphex.
+1. **Edit CLAUDE.md** — for behavioral changes (coding style, libraries, constraints). Each task runs in a fresh Copilot CLI session that reads CLAUDE.md at startup, so changes take effect on the next task or iteration automatically. No need to stop ralphex.
 
 2. **Stop, edit plan, re-run** — for structural changes (reorder tasks, add/remove tasks, change requirements). Press Ctrl+C to stop, edit the plan file (uncheck `[x]` → `[ ]` to redo tasks, add new tasks, modify descriptions), then re-run `ralphex docs/plans/<plan>.md`. Ralphex picks up from the first incomplete task and adapts to the updated plan.
 
@@ -987,37 +942,15 @@ ralphex --wait 1h docs/plans/feature.md
 
 When a rate limit is detected, ralphex waits the specified duration and retries. Execution takes longer but completes unattended. You can also set `wait_on_limit = 1h` in config to make it the default.
 
-**Can I use Cursor CLI instead of Claude Code?**
+**Can I use a different model for task execution?**
 
-Yes. [Cursor CLI](https://cursor.com/cli) is community-tested as a drop-in alternative. Configure in `~/.config/ralphex/config`:
-
-```ini
-claude_command = agent
-claude_args = --force --output-format stream-json
-```
-
-Key differences: `agent` command (not `claude`), `--force` flag (not `--dangerously-skip-permissions`). Stream format and signals are compatible. *Note: this is community-tested, not officially supported. Compatibility depends on Cursor maintaining Claude Code compatibility.*
-
-**Can I use codex (or another model) for task execution instead of Claude?**
-
-Yes. Use the included wrapper script that translates codex output to Claude's stream-json format:
+Yes. Configure `copilot_coding_model` in `~/.config/ralphex/config`:
 
 ```ini
-claude_command = /path/to/codex-as-claude.sh
-claude_args =
+copilot_coding_model = claude-sonnet-4-6
 ```
 
-Set `CODEX_MODEL` env var to choose the model. See [Using Alternative Providers](#using-alternative-providers-for-claude-phases) and [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for writing wrappers for other tools.
-
-**How do I use multiple Claude accounts?**
-
-Set the `CLAUDE_CONFIG_DIR` environment variable to point to the alternate Claude config directory:
-
-```bash
-CLAUDE_CONFIG_DIR=~/.claude2 ralphex docs/plans/feature.md
-```
-
-This is the same env var Claude Code itself uses. With Docker, the wrapper script mounts the specified directory and derives the correct macOS Keychain service name from the path. Without Docker, the env var passes through to the child Claude Code process directly. Each Claude installation stores credentials under a unique Keychain entry based on its config directory. No additional configuration is needed — just point `CLAUDE_CONFIG_DIR` to the right directory.
+See [Copilot CLI Configuration](#copilot-cli-configuration) for all available options.
 
 **Can I run something after all phases complete (notifications, rebase commits, etc.)?**
 
@@ -1037,7 +970,7 @@ ralphex --serve docs/plans/feature.md
 ### Features
 
 - **Real-time streaming** - SSE connection for live output updates
-- **Phase navigation** - filter by All/Task/Review/Codex phases
+- **Phase navigation** - filter by All/Task/Review/External phases
 - **Collapsible sections** - organized output with expand/collapse
 - **Text search** - find text with highlighting (keyboard: `/` to focus, `Escape` to clear)
 - **Auto-scroll** - follows output, click to disable
@@ -1064,7 +997,7 @@ Multi-session features:
 
 ## Claude Code Integration (Optional)
 
-ralphex works standalone from the terminal. Optionally, you can add slash commands to Claude Code for a more integrated experience.
+ralphex works standalone from the terminal. Optionally, you can add slash commands for a more integrated experience.
 
 ### Available Commands
 
@@ -1076,7 +1009,7 @@ ralphex works standalone from the terminal. Optionally, you can add slash comman
 
 ### Installation
 
-The ralphex CLI is the primary interface. Claude Code skills (`/ralphex`, `/ralphex-plan`, and `/ralphex-update`) are optional convenience commands.
+The ralphex CLI is the primary interface. Skills (`/ralphex`, `/ralphex-plan`, and `/ralphex-update`) are optional convenience commands.
 
 **Via Plugin Marketplace (Recommended)**
 
@@ -1088,7 +1021,7 @@ The ralphex CLI is the primary interface. Claude Code skills (`/ralphex`, `/ralp
 /plugin install ralphex@umputun-ralphex
 ```
 
-Benefits: Auto-updates when marketplace refreshes (at Claude Code startup).
+Benefits: Auto-updates when marketplace refreshes (at startup).
 
 **Manual Installation (Alternative)**
 
@@ -1104,7 +1037,7 @@ To install, ask Claude Code to "install ralphex slash commands" or manually copy
 Once installed:
 
 ```
-# in Claude Code conversation
+# in conversation
 /ralphex-plan add user authentication    # creates plan interactively
 /ralphex docs/plans/auth.md              # launches execution
 "check ralphex"                          # gets status update
@@ -1112,7 +1045,7 @@ Once installed:
 
 The `/ralphex` command runs ralphex in the background and provides status updates on request. The `/ralphex-plan` command guides you through creating well-structured plans with context discovery and approach selection.
 
-> **Note:** ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Claude Code. However, running from a standalone terminal is still recommended for the best experience. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully.
+> **Note:** Running from a standalone terminal is recommended for the best experience.
 
 ## For LLMs
 

@@ -165,13 +165,13 @@ Replace Claude Code and OpenAI Codex CLI with GitHub Copilot CLI as the sole exe
 - Modify: `docs/notifications.md` (if it references claude/codex)
 - Modify: `docs/hg-support.md` (if it references claude/codex)
 
-- [ ] Update `CLAUDE.md`: replace all references to Claude Code and Codex with Copilot CLI; update config field documentation, executor descriptions, build commands, e2e test instructions, key patterns section
-- [ ] Update `llms.txt`: replace Claude Code/Codex references with Copilot CLI; update installation instructions, requirements, customization section, Docker section
-- [ ] Update `docs/custom-providers.md` or remove (done partially in Task 4)
-- [ ] Update `docs/hg-support.md` if it references `claude_command` or codex
-- [ ] Update `docs/notifications.md` if it references claude/codex error patterns
-- [ ] Grep entire codebase for remaining references to "claude" (as CLI tool, not model name), "codex" (as CLI tool), "anthropic_api_key", "bedrock" — fix any stragglers
-- [ ] Run project test suite: `make test` — must pass before task 6
+- [x] Update `CLAUDE.md`: replace all references to Claude Code and Codex with Copilot CLI; update config field documentation, executor descriptions, build commands, e2e test instructions, key patterns section
+- [x] Update `llms.txt`: replace Claude Code/Codex references with Copilot CLI; update installation instructions, requirements, customization section, Docker section
+- [x] Update `docs/custom-providers.md` or remove (done partially in Task 4)
+- [x] Update `docs/hg-support.md` if it references `claude_command` or codex
+- [x] Update `docs/notifications.md` if it references claude/codex error patterns
+- [x] Grep entire codebase for remaining references to "claude" (as CLI tool, not model name), "codex" (as CLI tool), "anthropic_api_key", "bedrock" — fix any stragglers
+- [x] Run project test suite: `make test` — must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 

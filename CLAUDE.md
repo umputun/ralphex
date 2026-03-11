@@ -1,10 +1,10 @@
 # ralphex
 
-Autonomous plan execution with Claude Code - Go rewrite of ralph.py.
+Autonomous plan execution with GitHub Copilot CLI - Go rewrite of ralph.py.
 
 ## LLM Documentation
 
-See @llms.txt for usage instructions and Claude Code integration commands.
+See @llms.txt for usage instructions and Copilot CLI integration commands.
 
 ## Build Commands
 
@@ -30,7 +30,7 @@ go mod tidy && go mod vendor                             # tidy and re-vendor
 ```
 cmd/ralphex/        # main entry point, CLI parsing
 pkg/config/         # configuration loading, defaults, prompts, agents
-pkg/executor/       # claude and codex CLI execution
+pkg/executor/       # copilot CLI execution
 pkg/git/            # git operations (external git CLI)
 pkg/input/          # terminal input collector (fzf/fallback, draft review)
 pkg/notify/         # notification delivery (telegram, email, slack, webhook, custom)
@@ -40,7 +40,7 @@ pkg/progress/       # timestamped logging with color
 pkg/status/         # shared execution model types: signals, phases, sections
 pkg/web/            # web dashboard, SSE streaming, session management
 e2e/                # playwright e2e tests for web dashboard
-scripts/            # utility scripts (hg2git.sh, codex-as-claude.sh, prep-toy-test.sh)
+scripts/            # utility scripts (hg2git.sh, prep-toy-test.sh)
 docs/plans/         # plan files location
 ```
 
@@ -59,7 +59,7 @@ docs/plans/         # plan files location
 - Progress logging to files
 - Progress file locking (flock) for active session detection
 - Progress file fresh start: completed files (with `Completed:` footer) are truncated on reuse instead of appending
-- Multiple execution modes: full, tasks-only, review-only, external-only/codex-only, plan creation
+- Multiple execution modes: full, tasks-only, review-only, external-only, plan creation
 - `--base-ref` flag overrides default branch for review diffs (branch name or commit hash)
 - `--skip-finalize` flag disables finalize step for a single run
 - `--wait` flag enables rate limit retry with specified duration (e.g., `--wait 1h`)
@@ -75,7 +75,7 @@ docs/plans/         # plan files location
 
 Optional post-completion step that runs after successful review phases:
 
-- Triggers on: ModeFull, ModeReview, ModeCodexOnly (modes with review pipeline)
+- Triggers on: ModeFull, ModeReview, ModeExternalOnly (modes with review pipeline)
 - Disabled by default (`finalize_enabled = false` in config)
 - Uses task color (green) for output
 - Runs once, no signal loop - best effort (failures logged but don't block success)
@@ -93,11 +93,11 @@ Key files:
 
 ### Custom External Review
 
-Allows using custom scripts instead of codex for external code review:
+Allows using custom scripts instead of Copilot CLI for external code review:
 
 - Config: `external_review_tool = custom` and `custom_review_script = /path/to/script.sh`
 - Script receives prompt file path as single argument
-- Script outputs findings to stdout (ralphex passes them to Claude for evaluation)
+- Script outputs findings to stdout (ralphex passes them to the coding model for evaluation)
 - `{{DIFF_INSTRUCTION}}` template variable expands based on iteration:
   - First iteration: `git diff main...HEAD` (all feature branch changes)
   - Subsequent iterations: `git diff` (uncommitted changes only)
@@ -105,42 +105,20 @@ Allows using custom scripts instead of codex for external code review:
 - `max_external_iterations` config / `--max-external-iterations` CLI flag overrides external review loop limit (0 = auto, derived as `max(3, max_iterations/5)`)
 - `review_patience` config / `--review-patience` CLI flag enables stalemate detection: tracks consecutive rounds with no commits, terminates early when threshold reached (0 = disabled)
 - Manual break: pressing Ctrl+\ (SIGQUIT) during external review terminates the loop immediately via context cancellation. Break channel injected from `cmd/ralphex/` into Runner via `SetBreakCh()`. Not available on Windows
-- `codex_enabled = false` backward compat: treated as `external_review_tool = none`
 
 Key files:
 - `pkg/executor/custom.go` - CustomExecutor for running external scripts
 - `pkg/config/defaults/prompts/custom_review.txt` - prompt sent to custom tool
-- `pkg/config/defaults/prompts/custom_eval.txt` - prompt for claude to evaluate custom tool output
+- `pkg/config/defaults/prompts/custom_eval.txt` - prompt for coding model to evaluate custom tool output
 - `pkg/processor/prompts.go` - `getDiffInstruction()` and `replaceVariablesWithIteration()`
 - `pkg/processor/runner.go` - dispatch logic in external review loop
 
-### Alternative Providers for Claude Phases
+### Copilot CLI Configuration
 
-`claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible `stream-json` output. A codex wrapper script is included at `scripts/codex-as-claude.sh`.
+`copilot_command` and `copilot_args` config options allow overriding the Copilot CLI command and arguments. The `CopilotExecutor` uses two models: `copilot_coding_model` (default: `claude-opus-4-6`) for task execution and review phases, and `copilot_review_model` (default: `gpt-5.2-codex`) for external review phases.
 
-Config: `claude_command = /path/to/codex-as-claude.sh` and optionally `claude_args =` (empty).
-Note: default Claude flags may still be passed due to config fallback; wrappers should ignore unknown flags gracefully (the included script does this via `*) shift ;;`).
-Env vars: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE` (set to 1 for command output).
+Config: `copilot_command = copilot` and `copilot_args = --allow-all --no-ask-user --output-format json`.
 Documentation: `docs/custom-providers.md`
-
-### AWS Bedrock Provider (Docker Wrapper Only)
-
-The Docker wrapper script (`scripts/ralphex-dk.sh`) supports AWS Bedrock as an alternative Claude provider:
-
-- Config: `--claude-provider bedrock` CLI flag or `RALPHEX_CLAUDE_PROVIDER=bedrock` env var
-- Requires: `AWS_REGION`, and either `AWS_PROFILE` or explicit credentials
-- Auto-sets: `CLAUDE_CODE_USE_BEDROCK=1` when bedrock provider is selected
-- When enabled: skips macOS keychain extraction and `~/.claude` directory check
-- Credential export: uses `aws configure export-credentials` to extract temporary credentials from AWS profiles
-- Never mounts `~/.aws` directory - exports only specific credentials needed
-
-Key functions in `scripts/ralphex-dk.sh`:
-- `get_claude_provider()` - returns provider from CLI flag or env var
-- `build_bedrock_env_args()` - builds docker -e flags for BEDROCK_ENV_VARS
-- `export_aws_profile_credentials()` - exports credentials from AWS profile using aws CLI
-- `validate_bedrock_config()` - validates bedrock configuration and returns warnings
-
-Documentation: `docs/bedrock-setup.md`
 
 ### Git Package API
 
@@ -195,7 +173,7 @@ Plan creation signals:
 Key files:
 - `pkg/input/input.go` - terminal input collector (fzf/fallback, draft review)
 - `pkg/status/status.go` - shared signal constants (COMPLETED, FAILED, REVIEW_DONE, etc.)
-- `pkg/processor/signals.go` - signal detection helpers (IsReviewDone, IsCodexDone, etc.)
+- `pkg/processor/signals.go` - signal detection helpers (IsReviewDone, IsCopilotDone, etc.)
 - `pkg/config/defaults/prompts/make_plan.txt` - plan creation prompt
 
 ## Platform Support
@@ -265,20 +243,18 @@ project/
 - **Fallback loading**: when loading config/prompts/agents, if file content is all-commented (no actual values), embedded defaults are used
 - **Comment handling**: leading meta-comment block (2+ contiguous `# ...` lines at top of file) is stripped when loading prompts and embedded defaults; a single `# Title` at the top is preserved (treated as markdown header, not meta-comment). Full `stripComments` is only used for emptiness detection to trigger fallback
 - **scalars/colors**: per-field fallback to embedded defaults if missing
-- `*Set` flags (e.g., `CodexEnabledSet`) distinguish explicit `false`/`0` from "not set"
+- `*Set` flags distinguish explicit `false`/`0` from "not set"
 
 ### Error Pattern Detection
 
-Configurable patterns detect rate limit and quota errors in claude/codex output:
-- `claude_error_patterns`: comma-separated patterns for claude (default: "You've hit your limit,API Error:,cannot be launched inside another Claude Code session")
-- `codex_error_patterns`: comma-separated patterns for codex (default: "Rate limit,quota exceeded")
+Configurable patterns detect rate limit and quota errors in Copilot CLI output:
+- `copilot_error_patterns`: comma-separated patterns (default: "Rate limit,quota exceeded,API Error")
 - Matching is case-insensitive substring search
 - Whitespace is trimmed from each pattern
 - On match, ralphex exits gracefully with pattern info and help command suggestion
 
 Limit patterns for wait+retry behavior:
-- `claude_limit_patterns`: comma-separated (default: "You've hit your limit")
-- `codex_limit_patterns`: comma-separated (default: "Rate limit,quota exceeded")
+- `copilot_limit_patterns`: comma-separated (default: "Rate limit,quota exceeded")
 - `wait_on_limit`: duration string (e.g., "1h", "30m"), disabled by default
 - `--wait` CLI flag overrides `wait_on_limit` config
 - Priority: limit patterns checked first; if match AND wait > 0, wait and retry; if match AND wait == 0, fall through to error pattern behavior
@@ -288,7 +264,7 @@ Implementation:
 - `PatternMatchError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
 - `LimitPatternError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
 - `matchPattern()` helper for case-insensitive matching (used by both error and limit pattern checks)
-- Patterns passed via `ClaudeExecutor.ErrorPatterns`/`LimitPatterns` and `CodexExecutor.ErrorPatterns`/`LimitPatterns`
+- Patterns passed via `CopilotExecutor.ErrorPatterns`/`LimitPatterns`
 - `runWithLimitRetry()` in `pkg/processor/runner.go` wraps executor calls with retry logic
 
 ### Agent System
@@ -301,10 +277,9 @@ Implementation:
 - `testing.txt` - reviews test coverage and quality
 
 **Frontmatter options:** Agent files support optional YAML frontmatter (`---` delimited) for per-agent model and subagent type:
-- `model: haiku|sonnet|opus` — Claude model for this agent
-- `agent: <type>` — Claude Code Task tool subagent type (default: `general-purpose`)
+- `model: claude-opus-4-6|claude-sonnet-4-6|claude-haiku-4-5|gpt-5.2-codex` — model for this agent (full Copilot model IDs)
+- `agent: <type>` — Copilot CLI Task tool subagent type (default: `general-purpose`)
 - Parsed by `parseOptions()` in `pkg/config/frontmatter.go`, validated by `Options.Validate()`
-- Full model IDs (e.g. `claude-sonnet-4-5-20250929`) are normalized to short keywords (`sonnet`)
 - Invalid model values are dropped with a warning, falling back to defaults
 
 **Template variables:** Prompt files support variable expansion via `replacePromptVariables()` in `pkg/processor/prompts.go`:
@@ -323,7 +298,7 @@ Variables are also expanded inside agent content, so custom agents can use `{{DE
 - Run `ralphex --reset` to interactively restore defaults, or delete ALL `.txt` files manually
 - Run `ralphex --dump-defaults <dir>` to extract raw embedded defaults for comparison or merging
 - Use `/ralphex-update` skill for smart merging of updated defaults into customized configs
-- Alternatively, reference agents installed in your Claude Code directly in prompt files (like `qa-expert`, `go-smells-expert`)
+- Alternatively, reference agents installed in your Copilot CLI directly in prompt files (like `qa-expert`, `go-smells-expert`)
 
 ## Testing
 
@@ -351,7 +326,7 @@ Tests cover: dashboard loading, SSE connection and reconnection, phase sections,
 
 ## End-to-End Testing
 
-Unit tests mock external calls. After ANY code changes, run e2e test with a toy project to verify actual claude/codex integration and output streaming.
+Unit tests mock external calls. After ANY code changes, run e2e test with a toy project to verify actual Copilot CLI integration and output streaming.
 
 ### Create Toy Project
 
@@ -371,9 +346,9 @@ cd /tmp/ralphex-test
 **Expected behavior:**
 1. Creates branch `fix-issues`
 2. Phase 1: executes Task 1, then Task 2
-3. Phase 2: first Claude review
-4. Phase 2.5: codex external review
-5. Phase 3: second Claude review
+3. Phase 2: first review
+4. Phase 2.5: Copilot external review
+5. Phase 3: second review
 6. Moves plan to `docs/plans/completed/`
 
 ### Test Review-Only Mode
@@ -390,13 +365,13 @@ git add -A && git commit -m "add comment"
 go run <ralphex-project-root>/cmd/ralphex --review
 ```
 
-### Test Codex-Only Mode
+### Test External-Only Mode
 
 ```bash
 cd /tmp/ralphex-test
 
-# run codex-only review
-go run <ralphex-project-root>/cmd/ralphex --codex-only
+# run external-only review
+go run <ralphex-project-root>/cmd/ralphex --external-only
 ```
 
 ### Monitor Progress
@@ -418,7 +393,7 @@ tail -50 .ralphex/progress/progress-*.txt
 3. **MUST** run end-to-end test with toy project (see above)
 4. Monitor `tail -f .ralphex/progress/progress-*.txt` to verify output streaming works
 
-Unit tests don't verify actual codex/claude integration or output formatting. The toy project test is the only way to verify streaming output works correctly.
+Unit tests don't verify actual Copilot CLI integration or output formatting. The toy project test is the only way to verify streaming output works correctly.
 
 ## Before Submitting a PR
 
@@ -460,7 +435,7 @@ If you're an AI agent preparing a contribution, complete this checklist:
 - **Landing page**: `site/docs/index.html` is a manually crafted HTML page, not generated by MkDocs. Edit it directly to update the landing page.
 - Template overrides: `site/overrides/` with `custom_dir: overrides` in mkdocs.yml
 - **CI constraint**: Cloudflare Pages uses mkdocs-material 9.2.x, must use `materialx.emoji` syntax (not `material.extensions.emoji` which requires 9.4+)
-- **Raw .md files**: MkDocs renders ALL `.md` files in `docs_dir` as HTML pages. To serve raw markdown (e.g., `assets/claude/*.md` for Claude Code skills), copy them AFTER `mkdocs build` - see `prep_site` target in Makefile
+- **Raw .md files**: MkDocs renders ALL `.md` files in `docs_dir` as HTML pages. To serve raw markdown (e.g., `assets/claude/*.md` for skills), copy them AFTER `mkdocs build` - see `prep_site` target in Makefile
 
 ## Testing Safety Rules
 

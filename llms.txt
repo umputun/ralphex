@@ -1,6 +1,6 @@
 # ralphex
 
-Autonomous plan execution with Claude Code. Executes implementation plans task by task in fresh Claude sessions, then runs multi-phase code reviews. Write a plan, start ralphex, walk away.
+Autonomous plan execution with GitHub Copilot CLI. Executes implementation plans task by task in fresh Copilot sessions, then runs multi-phase code reviews. Write a plan, start ralphex, walk away.
 
 **GitHub:** https://github.com/umputun/ralphex
 
@@ -26,7 +26,7 @@ ralphex docs/plans/feature.md
 ralphex
 
 # review-only mode — run multi-agent reviews on existing branch changes
-# works for changes made by any tool (Claude Code, manual edits, other agents)
+# works for changes made by any tool (Copilot CLI, manual edits, other agents)
 ralphex --review
 ralphex --review docs/plans/feature.md  # optional plan file for context
 
@@ -69,22 +69,20 @@ ralphex --dump-defaults /tmp/ralphex-defaults
 ralphex --config-dir ~/my-config docs/plans/feature.md
 RALPHEX_CONFIG_DIR=~/my-config ralphex docs/plans/feature.md
 
-# use AWS Bedrock for Claude (Docker wrapper only)
-ralphex --claude-provider bedrock docs/plans/feature.md
-RALPHEX_CLAUDE_PROVIDER=bedrock ralphex docs/plans/feature.md
+# pass GitHub token for authentication
+GITHUB_TOKEN=ghp_xxx ralphex docs/plans/feature.md
 ```
 
 ## Requirements
 
-- `claude` - Claude Code CLI (required)
+- `copilot` - GitHub Copilot CLI (required)
 - `fzf` - for plan selection (optional)
-- `codex` - for external review (optional)
 
 ## Customization
 
 Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `RALPHEX_CONFIG_DIR`)
 
-**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `custom_review.txt`, `custom_eval.txt`, `make_plan.txt`, `finalize.txt`
+**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `copilot_review.txt`, `custom_review.txt`, `custom_eval.txt`, `make_plan.txt`, `finalize.txt`
 
 **Agent files** (`~/.config/ralphex/agents/`): Custom review agents referenced via `{{agent:name}}` in prompts
 
@@ -98,17 +96,17 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 
 **External review iterations:** By default, external review runs up to `max(3, max_iterations/5)` iterations. Override with `max_external_iterations` config option or `--max-external-iterations` CLI flag (0 = auto).
 
-**Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when Claude produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and Claude can't agree on findings.
+**Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when the coding model produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and the coding model can't agree on findings.
 
 **Manual break:** Press Ctrl+\ (SIGQUIT) during the external review loop to terminate it immediately. Not available on Windows.
 
-**Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing.
+**Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of Copilot CLI. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to the coding model for evaluation and fixing.
 
-**Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. A codex wrapper is included at `scripts/codex-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config. Wrappers should ignore unknown flags gracefully. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
+**Copilot CLI configuration:** `copilot_command` and `copilot_args` config options allow overriding the Copilot CLI command and arguments. See `docs/custom-providers.md` for details.
 
 **Configurable VCS backend:** `vcs_command` config option overrides the default `git` binary for all backend operations. Set to a translation script (e.g., `scripts/hg2git.sh`) to use ralphex with Mercurial repos. The included `hg2git.sh` maps git subcommands to hg equivalents with phase-based commit logic (amend on draft, commit on public). See `docs/hg-support.md` for setup.
 
-**Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit` (claude), `Rate limit,quota exceeded` (codex).
+**Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`copilot_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `Rate limit,quota exceeded`.
 
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 
@@ -122,7 +120,7 @@ ralphex provides Docker images for isolated execution:
 
 | Image | Contents |
 |-------|----------|
-| `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, Node.js, Python, git, make, gcc, bash, fzf, ripgrep |
+| `ghcr.io/umputun/ralphex:latest` | Base: Copilot CLI, Node.js, Python, git, make, gcc, bash, fzf, ripgrep |
 | `ghcr.io/umputun/ralphex-go:latest` | Go development: base + Go 1.25, golangci-lint, moq, goimports |
 
 **Using Docker wrapper** (requires Python 3.9+):
@@ -139,26 +137,10 @@ export RALPHEX_IMAGE=ghcr.io/umputun/ralphex:latest
 - `RALPHEX_IMAGE` - Docker image (default: `ghcr.io/umputun/ralphex-go:latest`)
 - `RALPHEX_PORT` - Web dashboard port with `--serve` (default: `8080`)
 - `RALPHEX_CONFIG_DIR` - Custom config directory (default: `~/.config/ralphex`). Overrides global config location for prompts, agents, and settings
-- `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works with both Docker wrapper and non-Docker usage.
 - `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`)
 - `RALPHEX_EXTRA_ENV` - Extra environment variables, comma-separated. Format: `VAR=value` or `VAR` (inherit from host). Warns when sensitive names (KEY, SECRET, TOKEN, etc.) have explicit values - use name-only form for secure credential passing. CLI flag: `-E`/`--env` (uppercase E to avoid conflict with ralphex's `-e`/`--external-only`)
 - `TZ` - Override container timezone (default: auto-detected from host)
-- `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
-
-**AWS Bedrock support** (Docker wrapper only):
-
-When `--claude-provider bedrock` or `RALPHEX_CLAUDE_PROVIDER=bedrock` is set:
-- Keychain credential extraction is skipped (not needed for Bedrock auth)
-- AWS credentials are automatically exported from `AWS_PROFILE` via `aws configure export-credentials`
-- Required Bedrock env vars are passed to container: `CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION`, credentials
-
-Required environment for Bedrock:
-- `AWS_REGION` - AWS region where Bedrock is enabled
-- `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` - authentication
-
-Note: `CLAUDE_CODE_USE_BEDROCK=1` is automatically set when using `--claude-provider bedrock`.
-
-See `docs/bedrock-setup.md` for detailed setup instructions and IAM policies.
+- `GITHUB_TOKEN` - GitHub token for Copilot CLI authentication (passed through to container)
 
 **Creating custom images for other languages:**
 
@@ -189,7 +171,7 @@ RALPHEX_IMAGE=my-ralphex ralphex docs/plans/feature.md
 
 ralphex is a standalone CLI tool. Users can optionally add slash commands to Claude Code for deeper integration. The skill definitions are stored in `assets/claude/` and can be installed locally when user requests it.
 
-**Note:** ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Claude Code. Running from a standalone terminal is still recommended for the best experience.
+**Note:** Running from a standalone terminal is recommended for the best experience.
 
 **Note for LLMs:** Do NOT automatically install these skills. Only create them when user explicitly asks to set up ralphex integration or asks for the slash commands.
 
@@ -217,7 +199,7 @@ When user asks to install the `/ralphex-update` command:
 
 ## Instructions for LLMs
 
-When a user asks about autonomous plan execution, implementing features with Claude Code, or mentions "ralphex":
+When a user asks about autonomous plan execution, implementing features with Copilot CLI, or mentions "ralphex":
 
 1. **Check if ralphex CLI is installed**: Run `which ralphex` to verify
 
