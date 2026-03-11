@@ -164,8 +164,8 @@ Complete assistant message. Contains full text and any tool call requests.
 - `data.toolRequests[].name` — tool name: `create`, `edit`, `view`, `bash`, `report_intent`
 - `data.toolRequests[].arguments` — tool-specific arguments object
 - `data.toolRequests[].type` — always `"function"`
-- `data.reasoningOpaque` — opaque encrypted reasoning blob (Claude only, not present on GPT)
-- `data.reasoningText` — plaintext reasoning (Claude only, not present on GPT)
+- `data.reasoningOpaque` — opaque encrypted reasoning blob (Claude only, not present on GPT; only present on first turn's `assistant.message`, absent on subsequent turns)
+- `data.reasoningText` — plaintext reasoning (Claude only, not present on GPT; only present on first turn's `assistant.message`, absent on subsequent turns)
 - `data.outputTokens` — token count for this message
 - `data.interactionId` — shared interaction ID
 
@@ -336,7 +336,7 @@ Final event in every session. Unique envelope structure (no `data`, `id`, or `pa
 - `usage.premiumRequests` — number of premium API requests made
 - `usage.totalApiDurationMs` — total time spent in API calls
 - `usage.sessionDurationMs` — total wall-clock session time
-- `usage.codeChanges` — summary of file modifications
+- `usage.codeChanges` — summary of file modifications. Note: `filesModified` may only include edited files, not newly created ones (e.g. files created via `create` tool are excluded). Use `tool.execution_complete` events with `create` tool to track file creations
 
 ## Streaming Model
 
@@ -345,10 +345,10 @@ Copilot emits incremental text deltas, similar to Claude Code's `content_block_d
 1. Events arrive incrementally with ~20ms gaps between consecutive deltas
 2. Order within each turn:
    - `assistant.turn_start`
-   - `assistant.reasoning_delta` * (Claude only, ephemeral)
+   - `assistant.reasoning_delta` * (Claude only, ephemeral, typically first turn only)
    - `assistant.message_delta` * (ephemeral, carries streaming text)
    - `assistant.message` (complete message with full text + tool requests)
-   - `assistant.reasoning` (Claude only, ephemeral, complete reasoning)
+   - `assistant.reasoning` (Claude only, ephemeral, complete reasoning, typically first turn only)
    - `tool.execution_start` * (one per tool call)
    - `session.info` * (ephemeral, emitted for file operations between tool start/complete)
    - `tool.execution_complete` * (one per tool call)
@@ -402,6 +402,12 @@ For ralphex, `sessionDurationMs` and `codeChanges` may be useful for progress re
 
 This section specifies exactly how a copilot JSONL parser should map events to ralphex's needs.
 
+### Required CLI Flags
+
+- `--output-format json` — emit JSONL to stdout (required for parser)
+- `--no-ask-user` — disable interactive prompts (required for non-interactive/programmatic use; without this, copilot may block waiting for user input)
+- `--allow-all` — auto-approve tool execution (recommended; without this, tools are denied with `error.code: "denied"`)
+
 ### Text Streaming → OutputHandler
 
 Read `assistant.message_delta` events for real-time text output:
@@ -415,13 +421,13 @@ Read `assistant.message_delta` events for real-time text output:
 Scan `assistant.message_delta.data.deltaContent` during streaming for signal patterns.
 Signals pass through verbatim — no escaping or mangling.
 
-For reliable detection, also scan `assistant.message.data.content` (the complete message) as a fallback, since delta boundaries may split a signal across multiple events.
+For reliable detection, also scan `assistant.message.data.content` (the complete message) as a fallback, since delta boundaries may split a signal across multiple events. Note: `assistant.message.data.content` may be empty on tool-only turns (no text output), so signal detection should primarily rely on `message_delta` accumulation.
 
 Signal patterns to detect: `<<<RALPHEX:COMPLETED>>>`, `<<<RALPHEX:FAILED>>>`, `<<<RALPHEX:REVIEW_DONE>>>`, `<<<RALPHEX:QUESTION>>>`, `<<<RALPHEX:PLAN_DRAFT>>>`, `<<<RALPHEX:PLAN_READY>>>`
 
 ### Error/Limit Pattern Detection
 
-Scan `assistant.message.data.content` for configured error and limit patterns (e.g. "Rate limit", "quota exceeded"). These surface as regular text in assistant messages, not as dedicated error events.
+Scan `assistant.message.data.content` for configured error and limit patterns (e.g. "Rate limit", "quota exceeded"). These are expected to surface as regular text in assistant messages, not as dedicated error events (UNVERIFIED — no rate limit was triggered during discovery; actual behavior should be verified during migration implementation).
 
 Also check `tool.execution_complete.data.error.message` for tool-level errors.
 
