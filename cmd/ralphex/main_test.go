@@ -46,12 +46,12 @@ func skipIfClaudeNotAvailable(t *testing.T) {
 	if err != nil {
 		t.Skipf("failed to load config: %v", err)
 	}
-	claudeCmd := cfg.ClaudeCommand
-	if claudeCmd == "" {
-		claudeCmd = "claude"
+	copilotCmd := cfg.CopilotCommand
+	if copilotCmd == "" {
+		copilotCmd = "copilot"
 	}
-	if _, err := exec.LookPath(claudeCmd); err != nil {
-		t.Skipf("%s not installed", claudeCmd)
+	if _, err := exec.LookPath(copilotCmd); err != nil {
+		t.Skipf("%s not installed", copilotCmd)
 	}
 }
 
@@ -367,17 +367,17 @@ func TestAutoPlanModeDetection(t *testing.T) {
 
 func TestCheckClaudeDep(t *testing.T) {
 	t.Run("uses_configured_command", func(t *testing.T) {
-		cfg := &config.Config{ClaudeCommand: "nonexistent-command-12345"}
+		cfg := &config.Config{CopilotCommand: "nonexistent-command-12345"}
 		err := checkClaudeDep(cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nonexistent-command-12345")
 	})
 
 	t.Run("falls_back_to_claude_when_empty", func(t *testing.T) {
-		cfg := &config.Config{ClaudeCommand: ""}
+		cfg := &config.Config{CopilotCommand: ""}
 		err := checkClaudeDep(cfg)
-		// may pass or fail depending on whether claude is installed
-		// but error message should reference "claude" not empty string
+		// may pass or fail depending on whether copilot is installed
+		// but error message should reference "copilot" not empty string
 		if err != nil {
 			assert.Contains(t, err.Error(), "claude")
 		}
@@ -392,7 +392,7 @@ func TestCreateRunner(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 		t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-		cfg := &config.Config{IterationDelayMs: 5000, TaskRetryCount: 3, CodexEnabled: false}
+		cfg := &config.Config{IterationDelayMs: 5000, TaskRetryCount: 3, ExternalReviewTool: "none"}
 		o := opts{MaxIterations: 100, Debug: true, NoColor: true}
 
 		colors := testColors()
@@ -413,7 +413,7 @@ func TestCreateRunner(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 		t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-		cfg := &config.Config{CodexEnabled: false} // explicitly disabled in config
+		cfg := &config.Config{ExternalReviewTool: "none"} // explicitly disabled in config
 		o := opts{MaxIterations: 50}
 
 		colors := testColors()
@@ -1141,7 +1141,7 @@ func TestDumpDefaults(t *testing.T) {
 
 		data, err := os.ReadFile(filepath.Join(tmpDir, "config")) //nolint:gosec // test
 		require.NoError(t, err)
-		assert.Contains(t, string(data), "claude_command")
+		assert.Contains(t, string(data), "copilot_command")
 		// raw content should have uncommented lines
 		hasUncommented := false
 		for line := range strings.SplitSeq(string(data), "\n") {

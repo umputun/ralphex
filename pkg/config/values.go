@@ -11,28 +11,20 @@ import (
 )
 
 // Values holds scalar configuration values.
-// Fields ending in *Set (e.g., CodexEnabledSet) track whether that field was explicitly
+// Fields ending in *Set track whether that field was explicitly
 // set in config. This allows distinguishing explicit false/0 from "not set", enabling
 // proper merge behavior where local config can override global config with zero values.
 type Values struct {
-	ClaudeCommand         string
-	ClaudeArgs            string
-	ClaudeErrorPatterns   []string // patterns to detect in claude output (e.g., rate limit messages)
-	CodexEnabled          bool
-	CodexEnabledSet       bool // tracks if codex_enabled was explicitly set
-	CodexCommand          string
-	CodexModel            string
-	CodexReasoningEffort  string
-	CodexTimeoutMs        int
-	CodexTimeoutMsSet     bool // tracks if codex_timeout_ms was explicitly set
-	CodexSandbox          string
-	CodexErrorPatterns    []string // patterns to detect in codex output (e.g., rate limit messages)
-	ClaudeLimitPatterns   []string // patterns to detect rate limits in claude output (for wait+retry)
-	CodexLimitPatterns    []string // patterns to detect rate limits in codex output (for wait+retry)
-	WaitOnLimit           time.Duration
-	WaitOnLimitSet        bool   // tracks if wait_on_limit was explicitly set
-	ExternalReviewTool    string // "codex", "custom", or "none"
-	CustomReviewScript    string // path to custom review script (when ExternalReviewTool = "custom")
+	CopilotCommand       string
+	CopilotArgs          string
+	CopilotCodingModel   string
+	CopilotReviewModel   string
+	CopilotErrorPatterns []string // patterns to detect in copilot output (e.g., rate limit messages)
+	CopilotLimitPatterns []string // patterns to detect rate limits in copilot output (for wait+retry)
+	WaitOnLimit          time.Duration
+	WaitOnLimitSet       bool   // tracks if wait_on_limit was explicitly set
+	ExternalReviewTool   string // "copilot", "custom", or "none"
+	CustomReviewScript   string // path to custom review script (when ExternalReviewTool = "custom")
 	IterationDelayMs      int
 	IterationDelayMsSet   bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount        int
@@ -167,45 +159,18 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	var values Values
 	section := cfg.Section("") // default section (no section header)
 
-	// claude settings
-	if key, err := section.GetKey("claude_command"); err == nil {
-		values.ClaudeCommand = key.String()
+	// copilot settings
+	if key, err := section.GetKey("copilot_command"); err == nil {
+		values.CopilotCommand = key.String()
 	}
-	if key, err := section.GetKey("claude_args"); err == nil {
-		values.ClaudeArgs = key.String()
+	if key, err := section.GetKey("copilot_args"); err == nil {
+		values.CopilotArgs = key.String()
 	}
-
-	// codex settings
-	if key, err := section.GetKey("codex_enabled"); err == nil {
-		val, boolErr := key.Bool()
-		if boolErr != nil {
-			return Values{}, fmt.Errorf("invalid codex_enabled: %w", boolErr)
-		}
-		values.CodexEnabled = val
-		values.CodexEnabledSet = true
+	if key, err := section.GetKey("copilot_coding_model"); err == nil {
+		values.CopilotCodingModel = key.String()
 	}
-	if key, err := section.GetKey("codex_command"); err == nil {
-		values.CodexCommand = key.String()
-	}
-	if key, err := section.GetKey("codex_model"); err == nil {
-		values.CodexModel = key.String()
-	}
-	if key, err := section.GetKey("codex_reasoning_effort"); err == nil {
-		values.CodexReasoningEffort = key.String()
-	}
-	if key, err := section.GetKey("codex_timeout_ms"); err == nil {
-		val, intErr := key.Int()
-		if intErr != nil {
-			return Values{}, fmt.Errorf("invalid codex_timeout_ms: %w", intErr)
-		}
-		if val < 0 {
-			return Values{}, fmt.Errorf("invalid codex_timeout_ms: must be non-negative, got %d", val)
-		}
-		values.CodexTimeoutMs = val
-		values.CodexTimeoutMsSet = true
-	}
-	if key, err := section.GetKey("codex_sandbox"); err == nil {
-		values.CodexSandbox = key.String()
+	if key, err := section.GetKey("copilot_review_model"); err == nil {
+		values.CopilotReviewModel = key.String()
 	}
 
 	// external review settings
@@ -320,44 +285,24 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	}
 
 	// error patterns (comma-separated)
-	if key, err := section.GetKey("claude_error_patterns"); err == nil {
+	if key, err := section.GetKey("copilot_error_patterns"); err == nil {
 		val := strings.TrimSpace(key.String())
 		if val != "" {
 			for p := range strings.SplitSeq(val, ",") {
 				if t := strings.TrimSpace(p); t != "" {
-					values.ClaudeErrorPatterns = append(values.ClaudeErrorPatterns, t)
-				}
-			}
-		}
-	}
-	if key, err := section.GetKey("codex_error_patterns"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.CodexErrorPatterns = append(values.CodexErrorPatterns, t)
+					values.CopilotErrorPatterns = append(values.CopilotErrorPatterns, t)
 				}
 			}
 		}
 	}
 
 	// limit patterns (comma-separated, same format as error patterns)
-	if key, err := section.GetKey("claude_limit_patterns"); err == nil {
+	if key, err := section.GetKey("copilot_limit_patterns"); err == nil {
 		val := strings.TrimSpace(key.String())
 		if val != "" {
 			for p := range strings.SplitSeq(val, ",") {
 				if t := strings.TrimSpace(p); t != "" {
-					values.ClaudeLimitPatterns = append(values.ClaudeLimitPatterns, t)
-				}
-			}
-		}
-	}
-	if key, err := section.GetKey("codex_limit_patterns"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.CodexLimitPatterns = append(values.CodexLimitPatterns, t)
+					values.CopilotLimitPatterns = append(values.CopilotLimitPatterns, t)
 				}
 			}
 		}
@@ -394,31 +339,17 @@ func parseWaitOnLimit(section *ini.Section, values *Values) error {
 
 // mergeFrom merges non-empty values from src into dst.
 func (dst *Values) mergeFrom(src *Values) {
-	if src.ClaudeCommand != "" {
-		dst.ClaudeCommand = src.ClaudeCommand
+	if src.CopilotCommand != "" {
+		dst.CopilotCommand = src.CopilotCommand
 	}
-	if src.ClaudeArgs != "" {
-		dst.ClaudeArgs = src.ClaudeArgs
+	if src.CopilotArgs != "" {
+		dst.CopilotArgs = src.CopilotArgs
 	}
-	if src.CodexEnabledSet {
-		dst.CodexEnabled = src.CodexEnabled
-		dst.CodexEnabledSet = true
+	if src.CopilotCodingModel != "" {
+		dst.CopilotCodingModel = src.CopilotCodingModel
 	}
-	if src.CodexCommand != "" {
-		dst.CodexCommand = src.CodexCommand
-	}
-	if src.CodexModel != "" {
-		dst.CodexModel = src.CodexModel
-	}
-	if src.CodexReasoningEffort != "" {
-		dst.CodexReasoningEffort = src.CodexReasoningEffort
-	}
-	if src.CodexTimeoutMsSet {
-		dst.CodexTimeoutMs = src.CodexTimeoutMs
-		dst.CodexTimeoutMsSet = true
-	}
-	if src.CodexSandbox != "" {
-		dst.CodexSandbox = src.CodexSandbox
+	if src.CopilotReviewModel != "" {
+		dst.CopilotReviewModel = src.CopilotReviewModel
 	}
 	if src.ExternalReviewTool != "" {
 		dst.ExternalReviewTool = src.ExternalReviewTool
@@ -477,17 +408,11 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	if len(src.WatchDirs) > 0 {
 		dst.WatchDirs = src.WatchDirs
 	}
-	if len(src.ClaudeErrorPatterns) > 0 {
-		dst.ClaudeErrorPatterns = src.ClaudeErrorPatterns
+	if len(src.CopilotErrorPatterns) > 0 {
+		dst.CopilotErrorPatterns = src.CopilotErrorPatterns
 	}
-	if len(src.CodexErrorPatterns) > 0 {
-		dst.CodexErrorPatterns = src.CodexErrorPatterns
-	}
-	if len(src.ClaudeLimitPatterns) > 0 {
-		dst.ClaudeLimitPatterns = src.ClaudeLimitPatterns
-	}
-	if len(src.CodexLimitPatterns) > 0 {
-		dst.CodexLimitPatterns = src.CodexLimitPatterns
+	if len(src.CopilotLimitPatterns) > 0 {
+		dst.CopilotLimitPatterns = src.CopilotLimitPatterns
 	}
 	if src.WaitOnLimitSet {
 		dst.WaitOnLimit = src.WaitOnLimit

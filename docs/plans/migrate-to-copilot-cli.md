@@ -92,19 +92,19 @@ Replace Claude Code and OpenAI Codex CLI with GitHub Copilot CLI as the sole exe
 - Modify: `pkg/config/values_test.go` (if exists)
 - Modify: `pkg/config/frontmatter_test.go` (if exists)
 
-- [ ] In `config.go`: replace `ClaudeCommand`, `ClaudeArgs` with `CopilotCommand` (default: `"copilot"`), `CopilotArgs` (default: `"--allow-all --no-ask-user --output-format json"`)
-- [ ] Replace `CodexEnabled`, `CodexCommand`, `CodexModel`, `CodexReasoningEffort`, `CodexTimeoutMs`, `CodexSandbox` with `CopilotCodingModel` (default: `"claude-opus-4-6"`), `CopilotReviewModel` (default: `"gpt-5.2-codex"`)
-- [ ] Remove all `Codex*Set` tracking fields (`CodexEnabledSet`, `CodexTimeoutMsSet`)
-- [ ] Replace `ClaudeErrorPatterns`, `CodexErrorPatterns` with unified `CopilotErrorPatterns` (default: `"Rate limit,quota exceeded,API Error"`)
-- [ ] Replace `ClaudeLimitPatterns`, `CodexLimitPatterns` with unified `CopilotLimitPatterns` (default: `"Rate limit,quota exceeded"`)
-- [ ] Update `ExternalReviewTool` default value from `"codex"` to `"copilot"` and valid values: `"copilot"`, `"custom"`, `"none"`
-- [ ] Rename `CodexPrompt` field to `CopilotReviewPrompt` (or similar)
-- [ ] In `values.go`: update INI field mappings — parse `copilot_command`, `copilot_args`, `copilot_coding_model`, `copilot_review_model`, `copilot_error_patterns`, `copilot_limit_patterns` instead of old field names
-- [ ] In `defaults/config`: replace all commented `claude_*` and `codex_*` lines with new `copilot_*` equivalents
-- [ ] In `frontmatter.go`: update `parseOptions()` and `Validate()` — accept full Copilot model IDs (`claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.2-codex`, etc.) instead of short keywords; remove short-keyword normalization
-- [ ] Update all config tests: test new field parsing, default values, merge behavior with `*Set` flags
-- [ ] Update frontmatter tests: test new model ID validation, rejection of old short keywords
-- [ ] Run project test suite: `make test` — must pass before task 3
+- [x] In `config.go`: replace `ClaudeCommand`, `ClaudeArgs` with `CopilotCommand` (default: `"copilot"`), `CopilotArgs` (default: `"--allow-all --no-ask-user --output-format json"`)
+- [x] Replace `CodexEnabled`, `CodexCommand`, `CodexModel`, `CodexReasoningEffort`, `CodexTimeoutMs`, `CodexSandbox` with `CopilotCodingModel` (default: `"claude-opus-4-6"`), `CopilotReviewModel` (default: `"gpt-5.2-codex"`)
+- [x] Remove all `Codex*Set` tracking fields (`CodexEnabledSet`, `CodexTimeoutMsSet`)
+- [x] Replace `ClaudeErrorPatterns`, `CodexErrorPatterns` with unified `CopilotErrorPatterns` (default: `"Rate limit,quota exceeded,API Error"`)
+- [x] Replace `ClaudeLimitPatterns`, `CodexLimitPatterns` with unified `CopilotLimitPatterns` (default: `"Rate limit,quota exceeded"`)
+- [x] Update `ExternalReviewTool` default value from `"codex"` to `"copilot"` and valid values: `"copilot"`, `"custom"`, `"none"`
+- [x] Rename `CodexPrompt` field to `CopilotReviewPrompt` (or similar)
+- [x] In `values.go`: update INI field mappings — parse `copilot_command`, `copilot_args`, `copilot_coding_model`, `copilot_review_model`, `copilot_error_patterns`, `copilot_limit_patterns` instead of old field names
+- [x] In `defaults/config`: replace all commented `claude_*` and `codex_*` lines with new `copilot_*` equivalents
+- [x] In `frontmatter.go`: update `parseOptions()` and `Validate()` — accept full Copilot model IDs (`claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.2-codex`, etc.) instead of short keywords; remove short-keyword normalization
+- [x] Update all config tests: test new field parsing, default values, merge behavior with `*Set` flags
+- [x] Update frontmatter tests: test new model ID validation, rejection of old short keywords
+- [x] Run project test suite: `make test` — must pass before task 3
 
 ### Task 3: Wire CopilotExecutor into Runner and update prompts
 

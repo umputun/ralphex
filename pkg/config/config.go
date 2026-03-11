@@ -32,8 +32,6 @@ const (
 // merge behavior where local config can override global config with zero values.
 //
 // *Set fields:
-//   - CodexEnabledSet: tracks if codex_enabled was explicitly set
-//   - CodexTimeoutMsSet: tracks if codex_timeout_ms was explicitly set
 //   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
 //   - TaskRetryCountSet: tracks if task_retry_count was explicitly set
 //   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
@@ -41,19 +39,12 @@ const (
 //   - MaxIterationsSet: tracks if max_iterations was explicitly set
 //   - WaitOnLimitSet: tracks if wait_on_limit was explicitly set
 type Config struct {
-	ClaudeCommand string `json:"claude_command"`
-	ClaudeArgs    string `json:"claude_args"`
+	CopilotCommand    string `json:"copilot_command"`
+	CopilotArgs       string `json:"copilot_args"`
+	CopilotCodingModel string `json:"copilot_coding_model"`
+	CopilotReviewModel string `json:"copilot_review_model"`
 
-	CodexEnabled         bool   `json:"codex_enabled"`
-	CodexEnabledSet      bool   `json:"-"` // tracks if codex_enabled was explicitly set in config
-	CodexCommand         string `json:"codex_command"`
-	CodexModel           string `json:"codex_model"`
-	CodexReasoningEffort string `json:"codex_reasoning_effort"`
-	CodexTimeoutMs       int    `json:"codex_timeout_ms"`
-	CodexTimeoutMsSet    bool   `json:"-"` // tracks if codex_timeout_ms was explicitly set in config
-	CodexSandbox         string `json:"codex_sandbox"`
-
-	ExternalReviewTool string `json:"external_review_tool"` // "codex", "custom", or "none"
+	ExternalReviewTool string `json:"external_review_tool"` // "copilot", "custom", or "none"
 	CustomReviewScript string `json:"custom_review_script"` // path to custom review script
 
 	IterationDelayMs      int  `json:"iteration_delay_ms"`
@@ -77,14 +68,12 @@ type Config struct {
 	VcsCommand    string   `json:"vcs_command"`    // custom VCS command (default: "git")
 
 	// error patterns to detect in executor output (e.g., rate limit messages)
-	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
-	CodexErrorPatterns  []string `json:"codex_error_patterns"`
+	CopilotErrorPatterns []string `json:"copilot_error_patterns"`
 
 	// limit patterns for wait+retry behavior (overlap with error patterns is intentional)
-	ClaudeLimitPatterns []string      `json:"claude_limit_patterns"`
-	CodexLimitPatterns  []string      `json:"codex_limit_patterns"`
-	WaitOnLimit         time.Duration `json:"wait_on_limit"`
-	WaitOnLimitSet      bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
+	CopilotLimitPatterns []string      `json:"copilot_limit_patterns"`
+	WaitOnLimit          time.Duration `json:"wait_on_limit"`
+	WaitOnLimitSet       bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
 
 	// notification parameters
 	NotifyParams notify.Params `json:"-"`
@@ -93,14 +82,14 @@ type Config struct {
 	Colors ColorConfig `json:"-"`
 
 	// prompts (loaded separately from files)
-	TaskPrompt         string `json:"-"`
-	ReviewFirstPrompt  string `json:"-"`
-	ReviewSecondPrompt string `json:"-"`
-	CodexPrompt        string `json:"-"`
-	MakePlanPrompt     string `json:"-"`
-	FinalizePrompt     string `json:"-"`
-	CustomReviewPrompt string `json:"-"`
-	CustomEvalPrompt   string `json:"-"`
+	TaskPrompt          string `json:"-"`
+	ReviewFirstPrompt   string `json:"-"`
+	ReviewSecondPrompt  string `json:"-"`
+	CopilotReviewPrompt string `json:"-"`
+	MakePlanPrompt      string `json:"-"`
+	FinalizePrompt      string `json:"-"`
+	CustomReviewPrompt  string `json:"-"`
+	CustomEvalPrompt    string `json:"-"`
 
 	// custom agents (loaded separately from files)
 	CustomAgents []CustomAgent `json:"-"`
@@ -240,16 +229,10 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 
 	// assemble config
 	c := &Config{
-		ClaudeCommand:         values.ClaudeCommand,
-		ClaudeArgs:            values.ClaudeArgs,
-		CodexEnabled:          values.CodexEnabled,
-		CodexEnabledSet:       values.CodexEnabledSet,
-		CodexCommand:          values.CodexCommand,
-		CodexModel:            values.CodexModel,
-		CodexReasoningEffort:  values.CodexReasoningEffort,
-		CodexTimeoutMs:        values.CodexTimeoutMs,
-		CodexTimeoutMsSet:     values.CodexTimeoutMsSet,
-		CodexSandbox:          values.CodexSandbox,
+		CopilotCommand:        values.CopilotCommand,
+		CopilotArgs:           values.CopilotArgs,
+		CopilotCodingModel:    values.CopilotCodingModel,
+		CopilotReviewModel:    values.CopilotReviewModel,
 		ExternalReviewTool:    values.ExternalReviewTool,
 		CustomReviewScript:    values.CustomReviewScript,
 		IterationDelayMs:      values.IterationDelayMs,
@@ -268,10 +251,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		DefaultBranch:         values.DefaultBranch,
 		VcsCommand:            values.VcsCommand,
 		WatchDirs:             values.WatchDirs,
-		ClaudeErrorPatterns:   values.ClaudeErrorPatterns,
-		CodexErrorPatterns:    values.CodexErrorPatterns,
-		ClaudeLimitPatterns:   values.ClaudeLimitPatterns,
-		CodexLimitPatterns:    values.CodexLimitPatterns,
+		CopilotErrorPatterns:  values.CopilotErrorPatterns,
+		CopilotLimitPatterns:  values.CopilotLimitPatterns,
 		WaitOnLimit:           values.WaitOnLimit,
 		WaitOnLimitSet:        values.WaitOnLimitSet,
 		NotifyParams: notify.Params{
@@ -293,18 +274,18 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 			WebhookURLs:   values.NotifyWebhookURLs,
 			CustomScript:  values.NotifyCustomScript,
 		},
-		Colors:             colors,
-		TaskPrompt:         prompts.Task,
-		ReviewFirstPrompt:  prompts.ReviewFirst,
-		ReviewSecondPrompt: prompts.ReviewSecond,
-		CodexPrompt:        prompts.Codex,
-		MakePlanPrompt:     prompts.MakePlan,
-		FinalizePrompt:     prompts.Finalize,
-		CustomReviewPrompt: prompts.CustomReview,
-		CustomEvalPrompt:   prompts.CustomEval,
-		CustomAgents:       agents,
-		configDir:          globalDir,
-		localDir:           localDir,
+		Colors:              colors,
+		TaskPrompt:          prompts.Task,
+		ReviewFirstPrompt:   prompts.ReviewFirst,
+		ReviewSecondPrompt:  prompts.ReviewSecond,
+		CopilotReviewPrompt: prompts.CopilotReview,
+		MakePlanPrompt:      prompts.MakePlan,
+		FinalizePrompt:      prompts.Finalize,
+		CustomReviewPrompt:  prompts.CustomReview,
+		CustomEvalPrompt:    prompts.CustomEval,
+		CustomAgents:        agents,
+		configDir:           globalDir,
+		localDir:            localDir,
 	}
 
 	// notify_on_error and notify_on_complete default to true when not explicitly set

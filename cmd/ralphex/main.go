@@ -675,14 +675,14 @@ func ensureGitIgnored(gitSvc *git.Service, patternPairs ...string) error {
 	return nil
 }
 
-// checkClaudeDep checks that the claude command is available in PATH.
+// checkClaudeDep checks that the copilot command is available in PATH.
 func checkClaudeDep(cfg *config.Config) error {
-	claudeCmd := cfg.ClaudeCommand
-	if claudeCmd == "" {
-		claudeCmd = "claude"
+	copilotCmd := cfg.CopilotCommand
+	if copilotCmd == "" {
+		copilotCmd = "copilot"
 	}
-	if _, err := exec.LookPath(claudeCmd); err != nil {
-		return fmt.Errorf("%s not found in PATH", claudeCmd)
+	if _, err := exec.LookPath(copilotCmd); err != nil {
+		return fmt.Errorf("%s not found in PATH", copilotCmd)
 	}
 	return nil
 }
@@ -742,8 +742,9 @@ func validateFlags(o opts) error {
 
 // createRunner creates a processor.Runner with the given configuration.
 func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *status.PhaseHolder) *processor.Runner {
-	// --codex-only mode forces codex enabled regardless of config
-	codexEnabled := req.Config.CodexEnabled
+	// derive external review enabled state from external_review_tool config
+	// --codex-only mode forces external review enabled regardless of config
+	codexEnabled := req.Config.ExternalReviewTool != "none"
 	if req.Mode == processor.ModeCodexOnly {
 		codexEnabled = true
 	}

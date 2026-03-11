@@ -181,7 +181,7 @@ func (r *Runner) getPlansDir() string {
 // uses the codex prompt loaded from config (either user-provided or embedded default).
 // agent references ({{agent:name}}) are expanded via replacePromptVariables.
 func (r *Runner) buildCodexEvaluationPrompt(codexOutput string) string {
-	prompt := r.replacePromptVariables(r.cfg.AppConfig.CodexPrompt)
+	prompt := r.replacePromptVariables(r.cfg.AppConfig.CopilotReviewPrompt)
 	return strings.ReplaceAll(prompt, "{{CODEX_OUTPUT}}", codexOutput)
 }
 

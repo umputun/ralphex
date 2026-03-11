@@ -119,10 +119,12 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		},
 	}
 	if cfg.AppConfig != nil {
-		copilotExec.Command = cfg.AppConfig.ClaudeCommand
-		copilotExec.Args = cfg.AppConfig.ClaudeArgs
-		copilotExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
-		copilotExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
+		copilotExec.Command = cfg.AppConfig.CopilotCommand
+		copilotExec.Args = cfg.AppConfig.CopilotArgs
+		copilotExec.CodingModel = cfg.AppConfig.CopilotCodingModel
+		copilotExec.ReviewModel = cfg.AppConfig.CopilotReviewModel
+		copilotExec.ErrorPatterns = cfg.AppConfig.CopilotErrorPatterns
+		copilotExec.LimitPatterns = cfg.AppConfig.CopilotLimitPatterns
 	}
 
 	// copilot executor for external review (uses ReviewModel)
@@ -137,8 +139,8 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 			OutputHandler: func(text string) {
 				log.PrintAligned(text)
 			},
-			ErrorPatterns: cfg.AppConfig.CodexErrorPatterns,
-			LimitPatterns: cfg.AppConfig.CodexLimitPatterns,
+			ErrorPatterns: cfg.AppConfig.CopilotErrorPatterns,
+			LimitPatterns: cfg.AppConfig.CopilotLimitPatterns,
 		}
 	}
 

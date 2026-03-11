@@ -9,65 +9,40 @@
 # this is required to support hex color values like #00ff00.
 
 # ------------------------------------------------------------------------------
-# claude executor
+# copilot executor
 # ------------------------------------------------------------------------------
 
-# claude_command: the command to run claude code
-# default: "claude"
-claude_command = claude
+# copilot_command: the command to run GitHub Copilot CLI
+# default: "copilot"
+copilot_command = copilot
 
-# claude_args: arguments passed to claude command
-# --dangerously-skip-permissions: bypass permission prompts for autonomous execution
-# --output-format stream-json: output JSON events for progress tracking
-# --verbose: enable detailed logging
-claude_args = --dangerously-skip-permissions --output-format stream-json --verbose
+# copilot_args: arguments passed to copilot command
+# --allow-all: bypass permission prompts for autonomous execution
+# --no-ask-user: disable interactive prompts
+# --output-format json: output JSONL events for progress tracking
+copilot_args = --allow-all --no-ask-user --output-format json
 
-# ------------------------------------------------------------------------------
-# codex executor
-# ------------------------------------------------------------------------------
+# copilot_coding_model: model ID for coding/task phases
+# available: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5
+# default: claude-opus-4-6
+copilot_coding_model = claude-opus-4-6
 
-# codex_enabled: whether to run codex external review phase
-# set to false to skip codex review entirely
-# default: true
-codex_enabled = true
-
-# codex_command: the command to run openai codex
-# default: "codex"
-codex_command = codex
-
-# codex_model: model ID for codex
-# available models: gpt-5.4, gpt-5.3-codex, gpt-5.3-codex-mini
-# default: gpt-5.4
-codex_model = gpt-5.4
-
-# codex_reasoning_effort: reasoning effort level for codex
-# available: low, medium, high, xhigh
-# default: xhigh
-codex_reasoning_effort = xhigh
-
-# codex_timeout_ms: timeout for codex execution in milliseconds
-# default: 3600000 (1 hour)
-codex_timeout_ms = 3600000
-
-# codex_sandbox: sandbox mode for codex execution
-# available: read-only, workspace-write, danger-full-access
-# read-only: codex can read files but not write (safest for code review)
-# note: in docker, sandbox is auto-disabled (landlock doesn't work in containers)
-# default: read-only
-codex_sandbox = read-only
+# copilot_review_model: model ID for external review phase
+# available: gpt-5.2-codex, claude-opus-4-6, claude-sonnet-4-6
+# default: gpt-5.2-codex
+copilot_review_model = gpt-5.2-codex
 
 # ------------------------------------------------------------------------------
 # external review
 # ------------------------------------------------------------------------------
 
 # external_review_tool: which tool to use for external code review
-# available: codex, custom, none
-# codex: use OpenAI Codex for external review (default)
+# available: copilot, custom, none
+# copilot: use Copilot CLI with review model for external review (default)
 # custom: use a custom script specified by custom_review_script
 # none: skip external review entirely
-# note: codex_enabled = false is treated as external_review_tool = none for backward compat
-# default: codex
-external_review_tool = codex
+# default: copilot
+external_review_tool = copilot
 
 # custom_review_script: path to custom review script
 # only used when external_review_tool = custom
@@ -161,34 +136,22 @@ vcs_command = git
 # error pattern detection
 # ------------------------------------------------------------------------------
 
-# claude_error_patterns: patterns to detect in claude output indicating errors
+# copilot_error_patterns: patterns to detect in copilot output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
 # when detected, ralphex exits gracefully with an informative message
-# default: You've hit your limit,API Error:,cannot be launched inside another Claude Code session
-claude_error_patterns = You've hit your limit,API Error:,cannot be launched inside another Claude Code session
-
-# codex_error_patterns: patterns to detect in codex output indicating errors
-# comma-separated list of substrings (case-insensitive matching)
-# when detected, ralphex exits gracefully with an informative message
-# default: Rate limit,quota exceeded
-codex_error_patterns = Rate limit,quota exceeded
+# default: Rate limit,quota exceeded,API Error
+copilot_error_patterns = Rate limit,quota exceeded,API Error
 
 # ------------------------------------------------------------------------------
 # rate limit wait and retry
 # ------------------------------------------------------------------------------
 
-# claude_limit_patterns: patterns to detect rate limits in claude output
+# copilot_limit_patterns: patterns to detect rate limits in copilot output
 # comma-separated list of substrings (case-insensitive matching)
 # when detected AND wait_on_limit is set, ralphex waits and retries
 # when detected WITHOUT wait_on_limit, falls through to error pattern behavior
-# default: You've hit your limit
-claude_limit_patterns = You've hit your limit
-
-# codex_limit_patterns: patterns to detect rate limits in codex/external output
-# comma-separated list of substrings (case-insensitive matching)
-# same retry behavior as claude_limit_patterns
 # default: Rate limit,quota exceeded
-codex_limit_patterns = Rate limit,quota exceeded
+copilot_limit_patterns = Rate limit,quota exceeded
 
 # wait_on_limit: duration to wait before retrying after a rate limit is detected
 # uses Go duration format (e.g., "1h", "30m", "1h30m", "90s")

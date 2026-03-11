@@ -16,8 +16,8 @@ func Test_defaultsFS(t *testing.T) {
 
 	data, err := fs.ReadFile("defaults/config")
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "claude_command")
-	assert.Contains(t, string(data), "codex_enabled")
+	assert.Contains(t, string(data), "copilot_command")
+	assert.Contains(t, string(data), "copilot_coding_model")
 	assert.Contains(t, string(data), "iteration_delay_ms")
 }
 
@@ -113,15 +113,15 @@ func TestLoad_PopulatesAllFields(t *testing.T) {
 	require.NoError(t, err)
 
 	// should have config values from defaults
-	assert.NotEmpty(t, cfg.ClaudeCommand)
-	assert.NotEmpty(t, cfg.ClaudeArgs)
-	assert.NotEmpty(t, cfg.CodexCommand)
+	assert.NotEmpty(t, cfg.CopilotCommand)
+	assert.NotEmpty(t, cfg.CopilotArgs)
+	assert.NotEmpty(t, cfg.CopilotReviewModel)
 
 	// should have prompts loaded
 	assert.NotEmpty(t, cfg.TaskPrompt)
 	assert.NotEmpty(t, cfg.ReviewFirstPrompt)
 	assert.NotEmpty(t, cfg.ReviewSecondPrompt)
-	assert.NotEmpty(t, cfg.CodexPrompt)
+	assert.NotEmpty(t, cfg.CopilotReviewPrompt)
 }
 
 func TestLoad_WithUserConfig(t *testing.T) {
@@ -132,7 +132,7 @@ func TestLoad_WithUserConfig(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
 
 	userConfig := `
-claude_command = /custom/claude
+copilot_command = /custom/copilot
 iteration_delay_ms = 9999
 `
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(userConfig), 0o600))
@@ -140,7 +140,7 @@ iteration_delay_ms = 9999
 	cfg, err := Load(configDir)
 	require.NoError(t, err)
 
-	assert.Equal(t, "/custom/claude", cfg.ClaudeCommand)
+	assert.Equal(t, "/custom/copilot", cfg.CopilotCommand)
 	assert.Equal(t, 9999, cfg.IterationDelayMs)
 	// prompts should fall back to embedded defaults
 	assert.NotEmpty(t, cfg.TaskPrompt)
@@ -191,15 +191,12 @@ func TestLoad_PartialConfig(t *testing.T) {
 	assert.Equal(t, "custom/plans", cfg.PlansDir)
 
 	// missing values filled from embedded defaults
-	assert.Equal(t, "claude", cfg.ClaudeCommand)
-	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
-	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Equal(t, "gpt-5.4", cfg.CodexModel)
-	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
-	assert.Equal(t, "read-only", cfg.CodexSandbox)
+	assert.Equal(t, "copilot", cfg.CopilotCommand)
+	assert.Equal(t, "--allow-all --no-ask-user --output-format json", cfg.CopilotArgs)
+	assert.Equal(t, "claude-opus-4-6", cfg.CopilotCodingModel)
+	assert.Equal(t, "gpt-5.2-codex", cfg.CopilotReviewModel)
 	assert.Equal(t, 2000, cfg.IterationDelayMs)
-	assert.Equal(t, 3600000, cfg.CodexTimeoutMs)
-	assert.True(t, cfg.CodexEnabled)
+	assert.Equal(t, "copilot", cfg.ExternalReviewTool)
 	assert.Equal(t, 1, cfg.TaskRetryCount)
 }
 
@@ -217,16 +214,13 @@ func TestLoad_EmptyConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	// all values should come from embedded defaults
-	assert.Equal(t, "claude", cfg.ClaudeCommand)
-	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
-	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Equal(t, "gpt-5.4", cfg.CodexModel)
-	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
-	assert.Equal(t, "read-only", cfg.CodexSandbox)
+	assert.Equal(t, "copilot", cfg.CopilotCommand)
+	assert.Equal(t, "--allow-all --no-ask-user --output-format json", cfg.CopilotArgs)
+	assert.Equal(t, "claude-opus-4-6", cfg.CopilotCodingModel)
+	assert.Equal(t, "gpt-5.2-codex", cfg.CopilotReviewModel)
 	assert.Equal(t, "docs/plans", cfg.PlansDir)
 	assert.Equal(t, 2000, cfg.IterationDelayMs)
-	assert.Equal(t, 3600000, cfg.CodexTimeoutMs)
-	assert.True(t, cfg.CodexEnabled)
+	assert.Equal(t, "copilot", cfg.ExternalReviewTool)
 	assert.Equal(t, 1, cfg.TaskRetryCount)
 }
 
@@ -283,23 +277,22 @@ func TestLoad_MaxIterationsDefaultNotSet(t *testing.T) {
 	assert.False(t, cfg.MaxIterationsSet)
 }
 
-func TestLoad_ExplicitFalseCodexEnabled(t *testing.T) {
+func TestLoad_ExternalReviewToolNone(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")
 	require.NoError(t, os.MkdirAll(configDir, 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
 
-	// explicitly set codex_enabled to false
-	configContent := `codex_enabled = false`
+	// explicitly set external_review_tool to none
+	configContent := `external_review_tool = none`
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
 
 	cfg, err := Load(configDir)
 	require.NoError(t, err)
 
-	// explicit false should be preserved (not overwritten by default true)
-	assert.False(t, cfg.CodexEnabled)
-	assert.True(t, cfg.CodexEnabledSet)
+	// explicit "none" should be preserved (not overwritten by default "copilot")
+	assert.Equal(t, "none", cfg.ExternalReviewTool)
 }
 
 func TestLoad_ExplicitTrueFinalizeEnabled(t *testing.T) {
@@ -348,14 +341,11 @@ func TestLoad_AllUserValues(t *testing.T) {
 
 	// set all values to custom values
 	configContent := `
-claude_command = /custom/claude
-claude_args = --custom
-codex_enabled = false
-codex_command = /custom/codex
-codex_model = custom-model
-codex_reasoning_effort = low
-codex_timeout_ms = 1000
-codex_sandbox = none
+copilot_command = /custom/copilot
+copilot_args = --custom
+copilot_coding_model = custom-coding-model
+copilot_review_model = custom-review-model
+external_review_tool = none
 iteration_delay_ms = 500
 task_retry_count = 5
 plans_dir = my/plans
@@ -366,14 +356,11 @@ plans_dir = my/plans
 	require.NoError(t, err)
 
 	// all values should be user-specified, not defaults
-	assert.Equal(t, "/custom/claude", cfg.ClaudeCommand)
-	assert.Equal(t, "--custom", cfg.ClaudeArgs)
-	assert.False(t, cfg.CodexEnabled)
-	assert.Equal(t, "/custom/codex", cfg.CodexCommand)
-	assert.Equal(t, "custom-model", cfg.CodexModel)
-	assert.Equal(t, "low", cfg.CodexReasoningEffort)
-	assert.Equal(t, 1000, cfg.CodexTimeoutMs)
-	assert.Equal(t, "none", cfg.CodexSandbox)
+	assert.Equal(t, "/custom/copilot", cfg.CopilotCommand)
+	assert.Equal(t, "--custom", cfg.CopilotArgs)
+	assert.Equal(t, "custom-coding-model", cfg.CopilotCodingModel)
+	assert.Equal(t, "custom-review-model", cfg.CopilotReviewModel)
+	assert.Equal(t, "none", cfg.ExternalReviewTool)
 	assert.Equal(t, 500, cfg.IterationDelayMs)
 	assert.Equal(t, 5, cfg.TaskRetryCount)
 	assert.Equal(t, "my/plans", cfg.PlansDir)
@@ -417,8 +404,8 @@ func TestLocalConfig_LocalOverridesGlobal(t *testing.T) {
 
 	// global config
 	globalConfig := `
-claude_command = global-claude
-claude_args = --global-args
+copilot_command = global-copilot
+copilot_args = --global-args
 iteration_delay_ms = 1000
 plans_dir = global/plans
 `
@@ -426,7 +413,7 @@ plans_dir = global/plans
 
 	// local config overrides some values
 	localConfig := `
-claude_command = local-claude
+copilot_command = local-copilot
 plans_dir = local/plans
 `
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
@@ -435,11 +422,11 @@ plans_dir = local/plans
 	require.NoError(t, err)
 
 	// local values override global
-	assert.Equal(t, "local-claude", cfg.ClaudeCommand)
+	assert.Equal(t, "local-copilot", cfg.CopilotCommand)
 	assert.Equal(t, "local/plans", cfg.PlansDir)
 
 	// global values preserved when not overridden in local
-	assert.Equal(t, "--global-args", cfg.ClaudeArgs)
+	assert.Equal(t, "--global-args", cfg.CopilotArgs)
 	assert.Equal(t, 1000, cfg.IterationDelayMs)
 }
 
@@ -476,7 +463,7 @@ color_task = #0000ff
 	assert.Equal(t, "0,255,0", cfg.Colors.Error)
 }
 
-func TestLocalConfig_LocalOverridesCodexEnabled(t *testing.T) {
+func TestLocalConfig_LocalOverridesExternalReviewTool(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalDir := filepath.Join(tmpDir, "global")
 	localDir := filepath.Join(tmpDir, ".ralphex")
@@ -486,19 +473,18 @@ func TestLocalConfig_LocalOverridesCodexEnabled(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
 	require.NoError(t, os.MkdirAll(localDir, 0o700))
 
-	// global config with codex_enabled = true
-	globalConfig := `codex_enabled = true`
+	// global config with external_review_tool = copilot
+	globalConfig := `external_review_tool = copilot`
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
 
-	// local config disables codex
-	localConfig := `codex_enabled = false`
+	// local config disables external review
+	localConfig := `external_review_tool = none`
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
 
 	cfg, err := loadWithLocal(globalDir, localDir)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.CodexEnabled)
-	assert.True(t, cfg.CodexEnabledSet)
+	assert.Equal(t, "none", cfg.ExternalReviewTool)
 }
 
 func TestLocalConfig_LocalOverridesTaskRetryCount(t *testing.T) {
@@ -536,14 +522,14 @@ func TestLocalConfig_NoLocalConfigFile(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
 	require.NoError(t, os.MkdirAll(localDir, 0o700)) // local dir exists but no config file
 
-	globalConfig := `claude_command = global-claude`
+	globalConfig := `copilot_command = global-copilot`
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
 
 	cfg, err := loadWithLocal(globalDir, localDir)
 	require.NoError(t, err)
 
 	// global values used since no local config file
-	assert.Equal(t, "global-claude", cfg.ClaudeCommand)
+	assert.Equal(t, "global-copilot", cfg.CopilotCommand)
 	assert.Equal(t, localDir, cfg.LocalDir())
 }
 
@@ -635,7 +621,7 @@ func TestLoad_PartialOverridesAllComponents(t *testing.T) {
 
 	// global config: partial values + partial colors
 	globalConfig := `
-claude_command = global-claude
+copilot_command = global-copilot
 iteration_delay_ms = 5000
 task_retry_count = 3
 color_task = #ff0000
@@ -657,8 +643,8 @@ color_error = #00ff00
 
 	// local config: override some values + different color
 	localConfig := `
-claude_command = local-claude
-codex_enabled = false
+copilot_command = local-copilot
+external_review_tool = none
 color_task = #0000ff
 `
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
@@ -674,18 +660,17 @@ color_task = #0000ff
 
 	// --- verify values merge chain: embedded → global → local ---
 	// local override
-	assert.Equal(t, "local-claude", cfg.ClaudeCommand)
-	assert.False(t, cfg.CodexEnabled, "local codex_enabled=false should override")
-	assert.True(t, cfg.CodexEnabledSet)
+	assert.Equal(t, "local-copilot", cfg.CopilotCommand)
+	assert.Equal(t, "none", cfg.ExternalReviewTool, "local external_review_tool=none should override")
 
 	// global preserved (not in local)
 	assert.Equal(t, 5000, cfg.IterationDelayMs)
 	assert.Equal(t, 3, cfg.TaskRetryCount)
 
 	// embedded defaults (not in global or local)
-	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
-	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Equal(t, "gpt-5.4", cfg.CodexModel)
+	assert.Equal(t, "--allow-all --no-ask-user --output-format json", cfg.CopilotArgs)
+	assert.Equal(t, "claude-opus-4-6", cfg.CopilotCodingModel)
+	assert.Equal(t, "gpt-5.2-codex", cfg.CopilotReviewModel)
 
 	// --- verify colors merge chain ---
 	// local override
@@ -702,7 +687,7 @@ color_task = #0000ff
 	assert.Equal(t, "global review first", cfg.ReviewFirstPrompt)
 	// embedded defaults (not in local or global)
 	assert.Contains(t, cfg.ReviewSecondPrompt, "{{GOAL}}", "embedded review_second should be used")
-	assert.Contains(t, cfg.CodexPrompt, "{{CODEX_OUTPUT}}", "embedded codex should be used")
+	assert.Contains(t, cfg.CopilotReviewPrompt, "{{CODEX_OUTPUT}}", "embedded codex should be used")
 
 	// --- verify agents replace behavior (local agents completely replace global) ---
 	require.Len(t, cfg.CustomAgents, 1, "local agents should replace global entirely")
@@ -720,7 +705,7 @@ func TestLoad_SymlinkedConfigDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(realDir, "agents"), 0o700))
 
 	configContent := `
-claude_command = symlink-claude
+copilot_command = symlink-copilot
 iteration_delay_ms = 2500
 color_task = #123456
 `
@@ -737,7 +722,7 @@ color_task = #123456
 	require.NoError(t, err)
 
 	// verify values loaded correctly through symlink
-	assert.Equal(t, "symlink-claude", cfg.ClaudeCommand)
+	assert.Equal(t, "symlink-copilot", cfg.CopilotCommand)
 	assert.Equal(t, 2500, cfg.IterationDelayMs)
 	assert.Equal(t, "18,52,86", cfg.Colors.Task) // #123456 converted to RGB
 
@@ -787,8 +772,8 @@ func TestLoad_ExternalReviewToolDefaults(t *testing.T) {
 	cfg, err := Load(configDir)
 	require.NoError(t, err)
 
-	// external_review_tool should default to "codex"
-	assert.Equal(t, "codex", cfg.ExternalReviewTool)
+	// external_review_tool should default to "copilot"
+	assert.Equal(t, "copilot", cfg.ExternalReviewTool)
 	assert.Empty(t, cfg.CustomReviewScript)
 }
 
@@ -854,30 +839,6 @@ func TestLoad_ReviewPatience_DefaultZero(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 0, cfg.ReviewPatience)
-}
-
-func TestLocalConfig_LocalOverridesExternalReviewTool(t *testing.T) {
-	tmpDir := t.TempDir()
-	globalDir := filepath.Join(tmpDir, "global")
-	localDir := filepath.Join(tmpDir, ".ralphex")
-
-	require.NoError(t, os.MkdirAll(globalDir, 0o700))
-	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
-	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
-	require.NoError(t, os.MkdirAll(localDir, 0o700))
-
-	// global config with external_review_tool = codex
-	globalConfig := `external_review_tool = codex`
-	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
-
-	// local config disables external review
-	localConfig := `external_review_tool = none`
-	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
-
-	cfg, err := loadWithLocal(globalDir, localDir)
-	require.NoError(t, err)
-
-	assert.Equal(t, "none", cfg.ExternalReviewTool)
 }
 
 func TestLoad_NotifyParamsPopulated(t *testing.T) {
@@ -973,7 +934,7 @@ func TestLoad_SymlinkedLocalDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
 	globalConfig := `
-claude_command = global-claude
+copilot_command = global-copilot
 iteration_delay_ms = 1000
 `
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
@@ -982,7 +943,7 @@ iteration_delay_ms = 1000
 	realLocalDir := filepath.Join(tmpDir, "shared-configs", "project-a")
 	require.NoError(t, os.MkdirAll(realLocalDir, 0o700))
 	localConfig := `
-claude_command = local-symlinked-claude
+copilot_command = local-symlinked-copilot
 `
 	require.NoError(t, os.WriteFile(filepath.Join(realLocalDir, "config"), []byte(localConfig), 0o600))
 
@@ -995,7 +956,7 @@ claude_command = local-symlinked-claude
 	require.NoError(t, err)
 
 	// verify local override works through symlink
-	assert.Equal(t, "local-symlinked-claude", cfg.ClaudeCommand)
+	assert.Equal(t, "local-symlinked-copilot", cfg.CopilotCommand)
 
 	// verify global fallback still works
 	assert.Equal(t, 1000, cfg.IterationDelayMs)

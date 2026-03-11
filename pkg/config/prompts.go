@@ -13,14 +13,14 @@ import (
 // Prompts holds all loaded prompt templates for different phases of execution.
 // Each prompt can be customized by placing a .txt file in the prompts directory.
 type Prompts struct {
-	Task         string
-	ReviewFirst  string
-	ReviewSecond string
-	Codex        string
-	MakePlan     string
-	Finalize     string
-	CustomReview string
-	CustomEval   string
+	Task          string
+	ReviewFirst   string
+	ReviewSecond  string
+	CopilotReview string
+	MakePlan      string
+	Finalize      string
+	CustomReview  string
+	CustomEval    string
 }
 
 // promptLoader implements PromptLoader with embedded filesystem fallback.
@@ -53,9 +53,9 @@ func (p *promptLoader) Load(localDir, globalDir string) (Prompts, error) {
 		return Prompts{}, fmt.Errorf("load review_second prompt: %w", err)
 	}
 
-	prompts.Codex, err = p.loadPromptWithLocalFallback(localDir, globalDir, codexPromptFile)
+	prompts.CopilotReview, err = p.loadPromptWithLocalFallback(localDir, globalDir, codexPromptFile)
 	if err != nil {
-		return Prompts{}, fmt.Errorf("load codex prompt: %w", err)
+		return Prompts{}, fmt.Errorf("load copilot review prompt: %w", err)
 	}
 
 	prompts.MakePlan, err = p.loadPromptWithLocalFallback(localDir, globalDir, makePlanPromptFile)

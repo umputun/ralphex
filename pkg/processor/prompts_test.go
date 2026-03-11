@@ -175,7 +175,7 @@ func TestRunner_replacePromptVariables_CustomReviewSecondPrompt(t *testing.T) {
 
 func TestRunner_buildCodexEvaluationPrompt_CustomPrompt(t *testing.T) {
 	appCfg := &config.Config{
-		CodexPrompt: "Custom codex evaluation with output: {{CODEX_OUTPUT}} for {{GOAL}}",
+		CopilotReviewPrompt: "Custom codex evaluation with output: {{CODEX_OUTPUT}} for {{GOAL}}",
 	}
 	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
 	prompt := r.buildCodexEvaluationPrompt("found bug in main.go")

@@ -21,26 +21,19 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	// all values should come from embedded defaults
-	assert.Equal(t, "claude", values.ClaudeCommand)
-	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
-	assert.True(t, values.CodexEnabled)
-	assert.True(t, values.CodexEnabledSet)
-	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.4", values.CodexModel)
-	assert.Equal(t, "xhigh", values.CodexReasoningEffort)
-	assert.Equal(t, 3600000, values.CodexTimeoutMs)
-	assert.Equal(t, "read-only", values.CodexSandbox)
-	assert.Equal(t, "codex", values.ExternalReviewTool)
+	assert.Equal(t, "copilot", values.CopilotCommand)
+	assert.Equal(t, "--allow-all --no-ask-user --output-format json", values.CopilotArgs)
+	assert.Equal(t, "claude-opus-4-6", values.CopilotCodingModel)
+	assert.Equal(t, "gpt-5.2-codex", values.CopilotReviewModel)
+	assert.Equal(t, "copilot", values.ExternalReviewTool)
 	assert.Empty(t, values.CustomReviewScript)
 	assert.Equal(t, 2000, values.IterationDelayMs)
 	assert.Equal(t, 1, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
 	assert.Equal(t, "docs/plans", values.PlansDir)
 	assert.Equal(t, "git", values.VcsCommand)
-	assert.Equal(t, []string{"You've hit your limit", "API Error:", "cannot be launched inside another Claude Code session"}, values.ClaudeErrorPatterns)
-	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexErrorPatterns)
-	assert.Equal(t, []string{"You've hit your limit"}, values.ClaudeLimitPatterns)
-	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexLimitPatterns)
+	assert.Equal(t, []string{"Rate limit", "quota exceeded", "API Error"}, values.CopilotErrorPatterns)
+	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CopilotLimitPatterns)
 	assert.Zero(t, values.WaitOnLimit)
 	assert.False(t, values.WaitOnLimitSet)
 }
@@ -50,8 +43,8 @@ func TestValuesLoader_Load_GlobalOnly(t *testing.T) {
 	globalConfig := filepath.Join(tmpDir, "config")
 
 	configContent := `
-claude_command = /global/claude
-claude_args = --global-args
+copilot_command = /global/copilot
+copilot_args = --global-args
 iteration_delay_ms = 5000
 `
 	require.NoError(t, os.WriteFile(globalConfig, []byte(configContent), 0o600))
@@ -61,14 +54,13 @@ iteration_delay_ms = 5000
 	require.NoError(t, err)
 
 	// values from global config
-	assert.Equal(t, "/global/claude", values.ClaudeCommand)
-	assert.Equal(t, "--global-args", values.ClaudeArgs)
+	assert.Equal(t, "/global/copilot", values.CopilotCommand)
+	assert.Equal(t, "--global-args", values.CopilotArgs)
 	assert.Equal(t, 5000, values.IterationDelayMs)
 
 	// values from embedded (not set in global)
-	assert.True(t, values.CodexEnabled)
-	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.4", values.CodexModel)
+	assert.Equal(t, "claude-opus-4-6", values.CopilotCodingModel)
+	assert.Equal(t, "gpt-5.2-codex", values.CopilotReviewModel)
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
@@ -78,15 +70,15 @@ func TestValuesLoader_Load_LocalOverridesGlobal(t *testing.T) {
 	localConfig := filepath.Join(tmpDir, "local-config")
 
 	globalContent := `
-claude_command = /global/claude
-claude_args = --global-args
+copilot_command = /global/copilot
+copilot_args = --global-args
 iteration_delay_ms = 5000
 plans_dir = global/plans
 `
 	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
 
 	localContent := `
-claude_command = /local/claude
+copilot_command = /local/copilot
 plans_dir = local/plans
 `
 	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
@@ -96,11 +88,11 @@ plans_dir = local/plans
 	require.NoError(t, err)
 
 	// local values override global
-	assert.Equal(t, "/local/claude", values.ClaudeCommand)
+	assert.Equal(t, "/local/copilot", values.CopilotCommand)
 	assert.Equal(t, "local/plans", values.PlansDir)
 
 	// global values preserved when not overridden
-	assert.Equal(t, "--global-args", values.ClaudeArgs)
+	assert.Equal(t, "--global-args", values.CopilotArgs)
 	assert.Equal(t, 5000, values.IterationDelayMs)
 }
 
@@ -120,9 +112,9 @@ func TestValuesLoader_Load_PartialConfigs(t *testing.T) {
 	assert.Equal(t, "custom/plans", values.PlansDir)
 
 	// missing values filled from embedded defaults
-	assert.Equal(t, "claude", values.ClaudeCommand)
-	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
-	assert.Equal(t, "codex", values.CodexCommand)
+	assert.Equal(t, "copilot", values.CopilotCommand)
+	assert.Equal(t, "--allow-all --no-ask-user --output-format json", values.CopilotArgs)
+	assert.Equal(t, "claude-opus-4-6", values.CopilotCodingModel)
 	assert.Equal(t, 2000, values.IterationDelayMs)
 }
 
@@ -133,11 +125,8 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 		errPart string
 	}{
 		{name: "invalid iteration_delay_ms", config: "iteration_delay_ms = not_a_number", errPart: "iteration_delay_ms"},
-		{name: "invalid codex_timeout_ms", config: "codex_timeout_ms = abc", errPart: "codex_timeout_ms"},
-		{name: "invalid codex_enabled", config: "codex_enabled = maybe", errPart: "codex_enabled"},
 		{name: "invalid finalize_enabled", config: "finalize_enabled = maybe", errPart: "finalize_enabled"},
 		{name: "negative task_retry_count", config: "task_retry_count = -1", errPart: "task_retry_count"},
-		{name: "negative codex_timeout_ms", config: "codex_timeout_ms = -100", errPart: "codex_timeout_ms"},
 		{name: "negative iteration_delay_ms", config: "iteration_delay_ms = -50", errPart: "iteration_delay_ms"},
 		{name: "invalid max_iterations", config: "max_iterations = abc", errPart: "max_iterations"},
 		{name: "zero max_iterations", config: "max_iterations = 0", errPart: "max_iterations"},
@@ -170,24 +159,23 @@ func TestValuesLoader_Load_NonExistentFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// should fall back to embedded defaults
-	assert.Equal(t, "claude", values.ClaudeCommand)
-	assert.True(t, values.CodexEnabled)
+	assert.Equal(t, "copilot", values.CopilotCommand)
+	assert.Equal(t, "copilot", values.ExternalReviewTool)
 }
 
-func TestValuesLoader_Load_ExplicitFalseCodexEnabled(t *testing.T) {
+func TestValuesLoader_Load_ExternalReviewToolNone(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	configContent := `codex_enabled = false`
+	configContent := `external_review_tool = none`
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
 	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
-	// explicit false should be preserved (not overwritten by embedded default true)
-	assert.False(t, values.CodexEnabled)
-	assert.True(t, values.CodexEnabledSet)
+	// explicit "none" should be preserved (not overwritten by embedded default "copilot")
+	assert.Equal(t, "none", values.ExternalReviewTool)
 }
 
 func TestValuesLoader_Load_ExplicitZeroTaskRetryCount(t *testing.T) {
@@ -206,20 +194,21 @@ func TestValuesLoader_Load_ExplicitZeroTaskRetryCount(t *testing.T) {
 	assert.True(t, values.TaskRetryCountSet)
 }
 
-func TestValuesLoader_Load_ExplicitZeroCodexTimeoutMs(t *testing.T) {
+func TestValuesLoader_Load_CopilotReviewModel(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	configContent := `codex_timeout_ms = 0`
+	configContent := `copilot_review_model = custom-review-model`
 	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
 
 	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
-	// explicit zero should be preserved (not overwritten by embedded default)
-	assert.Equal(t, 0, values.CodexTimeoutMs)
-	assert.True(t, values.CodexTimeoutMsSet)
+	// custom model should be preserved
+	assert.Equal(t, "custom-review-model", values.CopilotReviewModel)
+	// coding model should still be the embedded default
+	assert.Equal(t, "claude-opus-4-6", values.CopilotCodingModel)
 }
 
 func TestValuesLoader_Load_ExplicitZeroIterationDelayMs(t *testing.T) {
@@ -238,20 +227,19 @@ func TestValuesLoader_Load_ExplicitZeroIterationDelayMs(t *testing.T) {
 	assert.True(t, values.IterationDelayMsSet)
 }
 
-func TestValuesLoader_Load_LocalOverridesCodexEnabled(t *testing.T) {
+func TestValuesLoader_Load_LocalOverridesCopilotCodingModel(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "global")
 	localConfig := filepath.Join(tmpDir, "local")
 
-	require.NoError(t, os.WriteFile(globalConfig, []byte(`codex_enabled = true`), 0o600))
-	require.NoError(t, os.WriteFile(localConfig, []byte(`codex_enabled = false`), 0o600))
+	require.NoError(t, os.WriteFile(globalConfig, []byte(`copilot_coding_model = claude-sonnet-4-6`), 0o600))
+	require.NoError(t, os.WriteFile(localConfig, []byte(`copilot_coding_model = claude-haiku-4-5`), 0o600))
 
 	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load(localConfig, globalConfig)
 	require.NoError(t, err)
 
-	assert.False(t, values.CodexEnabled)
-	assert.True(t, values.CodexEnabledSet)
+	assert.Equal(t, "claude-haiku-4-5", values.CopilotCodingModel)
 }
 
 func TestValuesLoader_Load_LocalOverridesTaskRetryCount(t *testing.T) {
@@ -443,14 +431,11 @@ func TestValuesLoader_Load_AllValuesFromUserConfig(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config")
 
 	configContent := `
-claude_command = /custom/claude
-claude_args = --custom
-codex_enabled = false
-codex_command = /custom/codex
-codex_model = custom-model
-codex_reasoning_effort = low
-codex_timeout_ms = 1000
-codex_sandbox = none
+copilot_command = /custom/copilot
+copilot_args = --custom
+copilot_coding_model = claude-sonnet-4-6
+copilot_review_model = custom-model
+external_review_tool = none
 iteration_delay_ms = 500
 task_retry_count = 5
 max_iterations = 75
@@ -462,15 +447,11 @@ plans_dir = my/plans
 	values, err := loader.Load("", configPath)
 	require.NoError(t, err)
 
-	assert.Equal(t, "/custom/claude", values.ClaudeCommand)
-	assert.Equal(t, "--custom", values.ClaudeArgs)
-	assert.False(t, values.CodexEnabled)
-	assert.True(t, values.CodexEnabledSet)
-	assert.Equal(t, "/custom/codex", values.CodexCommand)
-	assert.Equal(t, "custom-model", values.CodexModel)
-	assert.Equal(t, "low", values.CodexReasoningEffort)
-	assert.Equal(t, 1000, values.CodexTimeoutMs)
-	assert.Equal(t, "none", values.CodexSandbox)
+	assert.Equal(t, "/custom/copilot", values.CopilotCommand)
+	assert.Equal(t, "--custom", values.CopilotArgs)
+	assert.Equal(t, "claude-sonnet-4-6", values.CopilotCodingModel)
+	assert.Equal(t, "custom-model", values.CopilotReviewModel)
+	assert.Equal(t, "none", values.ExternalReviewTool)
 	assert.Equal(t, 500, values.IterationDelayMs)
 	assert.Equal(t, 5, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
@@ -482,90 +463,82 @@ plans_dir = my/plans
 func TestValues_mergeFrom(t *testing.T) {
 	t.Run("merge non-empty values", func(t *testing.T) {
 		dst := Values{
-			ClaudeCommand: "dst-claude",
-			PlansDir:      "dst-plans",
+			CopilotCommand: "dst-copilot",
+			PlansDir:       "dst-plans",
 		}
 		src := Values{
-			ClaudeCommand: "src-claude",
-			ClaudeArgs:    "src-args",
+			CopilotCommand: "src-copilot",
+			CopilotArgs:    "src-args",
 		}
 		dst.mergeFrom(&src)
 
-		assert.Equal(t, "src-claude", dst.ClaudeCommand)
-		assert.Equal(t, "src-args", dst.ClaudeArgs)
+		assert.Equal(t, "src-copilot", dst.CopilotCommand)
+		assert.Equal(t, "src-args", dst.CopilotArgs)
 		assert.Equal(t, "dst-plans", dst.PlansDir)
 	})
 
 	t.Run("empty source doesn't overwrite", func(t *testing.T) {
 		dst := Values{
-			ClaudeCommand: "dst-claude",
-			PlansDir:      "dst-plans",
+			CopilotCommand: "dst-copilot",
+			PlansDir:       "dst-plans",
 		}
 		src := Values{
-			ClaudeCommand: "", // empty, shouldn't overwrite
+			CopilotCommand: "", // empty, shouldn't overwrite
 		}
 		dst.mergeFrom(&src)
 
-		assert.Equal(t, "dst-claude", dst.ClaudeCommand)
+		assert.Equal(t, "dst-copilot", dst.CopilotCommand)
 		assert.Equal(t, "dst-plans", dst.PlansDir)
 	})
 
-	t.Run("set flags control bool and int merging", func(t *testing.T) {
+	t.Run("set flags control int merging", func(t *testing.T) {
 		dst := Values{
-			CodexEnabled:        true,
-			CodexEnabledSet:     true,
-			CodexTimeoutMs:      3600000,
-			CodexTimeoutMsSet:   true,
 			IterationDelayMs:    2000,
 			IterationDelayMsSet: true,
 			TaskRetryCount:      5,
 			TaskRetryCountSet:   true,
+			CopilotCodingModel:  "claude-opus-4-6",
+			CopilotReviewModel:  "gpt-5.2-codex",
 		}
 		src := Values{
-			CodexEnabled:        false,
-			CodexEnabledSet:     true,
-			CodexTimeoutMs:      0,
-			CodexTimeoutMsSet:   true,
 			IterationDelayMs:    0,
 			IterationDelayMsSet: true,
 			TaskRetryCount:      0,
 			TaskRetryCountSet:   true,
+			CopilotCodingModel:  "claude-sonnet-4-6",
+			CopilotReviewModel:  "custom-model",
 		}
 		dst.mergeFrom(&src)
 
-		assert.False(t, dst.CodexEnabled)
-		assert.Equal(t, 0, dst.CodexTimeoutMs)
 		assert.Equal(t, 0, dst.IterationDelayMs)
 		assert.Equal(t, 0, dst.TaskRetryCount)
+		assert.Equal(t, "claude-sonnet-4-6", dst.CopilotCodingModel)
+		assert.Equal(t, "custom-model", dst.CopilotReviewModel)
 	})
 
 	t.Run("unset flags don't merge", func(t *testing.T) {
 		dst := Values{
-			CodexEnabled:        true,
-			CodexEnabledSet:     true,
-			CodexTimeoutMs:      3600000,
-			CodexTimeoutMsSet:   true,
 			IterationDelayMs:    2000,
 			IterationDelayMsSet: true,
 			TaskRetryCount:      5,
 			TaskRetryCountSet:   true,
+			CopilotCodingModel:  "claude-opus-4-6",
+			CopilotReviewModel:  "gpt-5.2-codex",
 		}
 		src := Values{
-			CodexEnabled:        false,
-			CodexEnabledSet:     false, // not explicitly set
-			CodexTimeoutMs:      0,
-			CodexTimeoutMsSet:   false, // not explicitly set
 			IterationDelayMs:    0,
 			IterationDelayMsSet: false, // not explicitly set
 			TaskRetryCount:      0,
 			TaskRetryCountSet:   false, // not explicitly set
+			CopilotCodingModel:  "",    // empty, shouldn't overwrite
+			CopilotReviewModel:  "",    // empty, shouldn't overwrite
 		}
 		dst.mergeFrom(&src)
 
-		assert.True(t, dst.CodexEnabled)
-		assert.Equal(t, 3600000, dst.CodexTimeoutMs)
 		assert.Equal(t, 2000, dst.IterationDelayMs)
 		assert.Equal(t, 5, dst.TaskRetryCount)
+		assert.Equal(t, "claude-opus-4-6", dst.CopilotCodingModel)
+		assert.Equal(t, "gpt-5.2-codex", dst.CopilotReviewModel)
 	})
 }
 
@@ -574,14 +547,11 @@ func TestValuesLoader_parseValuesFromBytes(t *testing.T) {
 
 	t.Run("full config", func(t *testing.T) {
 		data := []byte(`
-claude_command = /custom/claude
-claude_args = --custom-arg
-codex_enabled = false
-codex_command = /custom/codex
-codex_model = gpt-5
-codex_reasoning_effort = high
-codex_timeout_ms = 7200000
-codex_sandbox = none
+copilot_command = /custom/copilot
+copilot_args = --custom-arg
+copilot_coding_model = claude-sonnet-4-6
+copilot_review_model = gpt-5
+external_review_tool = none
 iteration_delay_ms = 5000
 task_retry_count = 3
 plans_dir = custom/plans
@@ -589,15 +559,11 @@ plans_dir = custom/plans
 		values, err := vl.parseValuesFromBytes(data)
 		require.NoError(t, err)
 
-		assert.Equal(t, "/custom/claude", values.ClaudeCommand)
-		assert.Equal(t, "--custom-arg", values.ClaudeArgs)
-		assert.False(t, values.CodexEnabled)
-		assert.True(t, values.CodexEnabledSet)
-		assert.Equal(t, "/custom/codex", values.CodexCommand)
-		assert.Equal(t, "gpt-5", values.CodexModel)
-		assert.Equal(t, "high", values.CodexReasoningEffort)
-		assert.Equal(t, 7200000, values.CodexTimeoutMs)
-		assert.Equal(t, "none", values.CodexSandbox)
+		assert.Equal(t, "/custom/copilot", values.CopilotCommand)
+		assert.Equal(t, "--custom-arg", values.CopilotArgs)
+		assert.Equal(t, "claude-sonnet-4-6", values.CopilotCodingModel)
+		assert.Equal(t, "gpt-5", values.CopilotReviewModel)
+		assert.Equal(t, "none", values.ExternalReviewTool)
 		assert.Equal(t, 5000, values.IterationDelayMs)
 		assert.Equal(t, 3, values.TaskRetryCount)
 		assert.True(t, values.TaskRetryCountSet)
@@ -609,32 +575,32 @@ plans_dir = custom/plans
 		values, err := vl.parseValuesFromBytes(data)
 		require.NoError(t, err)
 
-		assert.Empty(t, values.ClaudeCommand)
-		assert.False(t, values.CodexEnabled)
-		assert.False(t, values.CodexEnabledSet)
+		assert.Empty(t, values.CopilotCommand)
+		assert.Empty(t, values.CopilotCodingModel)
+		assert.Empty(t, values.CopilotReviewModel)
 	})
 
-	t.Run("bool values", func(t *testing.T) {
+	t.Run("bool values for finalize_enabled", func(t *testing.T) {
 		tests := []struct {
 			name     string
 			input    string
 			expected bool
 		}{
-			{"true lowercase", "codex_enabled = true", true},
-			{"TRUE uppercase", "codex_enabled = TRUE", true},
-			{"false lowercase", "codex_enabled = false", false},
-			{"yes", "codex_enabled = yes", true},
-			{"no", "codex_enabled = no", false},
-			{"1", "codex_enabled = 1", true},
-			{"0", "codex_enabled = 0", false},
+			{"true lowercase", "finalize_enabled = true", true},
+			{"TRUE uppercase", "finalize_enabled = TRUE", true},
+			{"false lowercase", "finalize_enabled = false", false},
+			{"yes", "finalize_enabled = yes", true},
+			{"no", "finalize_enabled = no", false},
+			{"1", "finalize_enabled = 1", true},
+			{"0", "finalize_enabled = 0", false},
 		}
 
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				values, err := vl.parseValuesFromBytes([]byte(tc.input))
 				require.NoError(t, err)
-				assert.Equal(t, tc.expected, values.CodexEnabled)
-				assert.True(t, values.CodexEnabledSet)
+				assert.Equal(t, tc.expected, values.FinalizeEnabled)
+				assert.True(t, values.FinalizeEnabledSet)
 			})
 		}
 	})
@@ -643,7 +609,7 @@ plans_dir = custom/plans
 func TestValuesLoader_parseValuesFromFile_PermissionDenied(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
-	require.NoError(t, os.WriteFile(configPath, []byte("claude_command = test"), 0o600))
+	require.NoError(t, os.WriteFile(configPath, []byte("copilot_command = test"), 0o600))
 
 	// remove read permission
 	require.NoError(t, os.Chmod(configPath, 0o000))
@@ -668,46 +634,34 @@ func TestValuesLoader_parseValuesFromBytes_ErrorPatterns(t *testing.T) {
 	vl := &valuesLoader{embedFS: defaultsFS}
 
 	tests := []struct {
-		name           string
-		input          string
-		expectedClaude []string
-		expectedCodex  []string
+		name     string
+		input    string
+		expected []string
 	}{
 		{
-			name:           "single pattern",
-			input:          "claude_error_patterns = rate limit",
-			expectedClaude: []string{"rate limit"},
-			expectedCodex:  nil,
+			name:     "single pattern",
+			input:    "copilot_error_patterns = rate limit",
+			expected: []string{"rate limit"},
 		},
 		{
-			name:           "multiple patterns comma-separated",
-			input:          "codex_error_patterns = rate limit,quota exceeded,too many requests",
-			expectedClaude: nil,
-			expectedCodex:  []string{"rate limit", "quota exceeded", "too many requests"},
+			name:     "multiple patterns comma-separated",
+			input:    "copilot_error_patterns = rate limit,quota exceeded,too many requests",
+			expected: []string{"rate limit", "quota exceeded", "too many requests"},
 		},
 		{
-			name:           "whitespace trimming around commas",
-			input:          "claude_error_patterns =  pattern1 ,  pattern2  , pattern3 ",
-			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
-			expectedCodex:  nil,
+			name:     "whitespace trimming around commas",
+			input:    "copilot_error_patterns =  pattern1 ,  pattern2  , pattern3 ",
+			expected: []string{"pattern1", "pattern2", "pattern3"},
 		},
 		{
-			name:           "empty patterns filtered out",
-			input:          "claude_error_patterns = pattern1,,pattern2,  ,pattern3",
-			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
-			expectedCodex:  nil,
+			name:     "empty patterns filtered out",
+			input:    "copilot_error_patterns = pattern1,,pattern2,  ,pattern3",
+			expected: []string{"pattern1", "pattern2", "pattern3"},
 		},
 		{
-			name:           "both claude and codex patterns",
-			input:          "claude_error_patterns = hit limit\ncodex_error_patterns = rate exceeded",
-			expectedClaude: []string{"hit limit"},
-			expectedCodex:  []string{"rate exceeded"},
-		},
-		{
-			name:           "empty value",
-			input:          "claude_error_patterns = ",
-			expectedClaude: nil,
-			expectedCodex:  nil,
+			name:     "empty value",
+			input:    "copilot_error_patterns = ",
+			expected: nil,
 		},
 	}
 
@@ -715,8 +669,7 @@ func TestValuesLoader_parseValuesFromBytes_ErrorPatterns(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			values, err := vl.parseValuesFromBytes([]byte(tc.input))
 			require.NoError(t, err)
-			assert.Equal(t, tc.expectedClaude, values.ClaudeErrorPatterns)
-			assert.Equal(t, tc.expectedCodex, values.CodexErrorPatterns)
+			assert.Equal(t, tc.expected, values.CopilotErrorPatterns)
 		})
 	}
 }
@@ -724,32 +677,26 @@ func TestValuesLoader_parseValuesFromBytes_ErrorPatterns(t *testing.T) {
 func TestValues_mergeFrom_ErrorPatterns(t *testing.T) {
 	t.Run("merge error patterns when src has values", func(t *testing.T) {
 		dst := Values{
-			ClaudeErrorPatterns: []string{"dst pattern"},
-			CodexErrorPatterns:  []string{"dst codex"},
+			CopilotErrorPatterns: []string{"dst pattern"},
 		}
 		src := Values{
-			ClaudeErrorPatterns: []string{"src pattern 1", "src pattern 2"},
-			CodexErrorPatterns:  []string{"src codex"},
+			CopilotErrorPatterns: []string{"src pattern 1", "src pattern 2"},
 		}
 		dst.mergeFrom(&src)
 
-		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.ClaudeErrorPatterns)
-		assert.Equal(t, []string{"src codex"}, dst.CodexErrorPatterns)
+		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.CopilotErrorPatterns)
 	})
 
 	t.Run("preserve dst when src is empty", func(t *testing.T) {
 		dst := Values{
-			ClaudeErrorPatterns: []string{"dst pattern"},
-			CodexErrorPatterns:  []string{"dst codex"},
+			CopilotErrorPatterns: []string{"dst pattern"},
 		}
 		src := Values{
-			ClaudeErrorPatterns: nil,
-			CodexErrorPatterns:  nil,
+			CopilotErrorPatterns: nil,
 		}
 		dst.mergeFrom(&src)
 
-		assert.Equal(t, []string{"dst pattern"}, dst.ClaudeErrorPatterns)
-		assert.Equal(t, []string{"dst codex"}, dst.CodexErrorPatterns)
+		assert.Equal(t, []string{"dst pattern"}, dst.CopilotErrorPatterns)
 	})
 }
 
@@ -759,11 +706,11 @@ func TestValuesLoader_Load_ErrorPatternsOverride(t *testing.T) {
 	localConfig := filepath.Join(tmpDir, "local")
 
 	// global has one set of patterns
-	globalContent := `claude_error_patterns = global pattern 1, global pattern 2`
+	globalContent := `copilot_error_patterns = global pattern 1, global pattern 2`
 	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
 
 	// local overrides with different patterns
-	localContent := `claude_error_patterns = local pattern`
+	localContent := `copilot_error_patterns = local pattern`
 	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
 
 	loader := newValuesLoader(defaultsFS)
@@ -771,7 +718,7 @@ func TestValuesLoader_Load_ErrorPatternsOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	// local should override global completely (not merge)
-	assert.Equal(t, []string{"local pattern"}, values.ClaudeErrorPatterns)
+	assert.Equal(t, []string{"local pattern"}, values.CopilotErrorPatterns)
 }
 
 func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
@@ -781,7 +728,7 @@ func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	// config with only comments and whitespace - should fall back to embedded
 	commentedConfig := `# this is a commented config file
 # all lines are comments
-# claude_command = /custom/claude
+# copilot_command = /custom/copilot
 
 # empty lines below
 
@@ -793,11 +740,10 @@ func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	require.NoError(t, err)
 
 	// should fall back to embedded defaults since file has no actual content
-	assert.Equal(t, "claude", values.ClaudeCommand)
-	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
-	assert.True(t, values.CodexEnabled)
-	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.4", values.CodexModel)
+	assert.Equal(t, "copilot", values.CopilotCommand)
+	assert.Equal(t, "--allow-all --no-ask-user --output-format json", values.CopilotArgs)
+	assert.Equal(t, "claude-opus-4-6", values.CopilotCodingModel)
+	assert.Equal(t, "gpt-5.2-codex", values.CopilotReviewModel)
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
@@ -807,9 +753,9 @@ func TestValuesLoader_Load_PartiallyCommentedConfigUsesUncommentedValues(t *test
 
 	// config with some commented and some uncommented lines
 	partialConfig := `# this line is a comment
-claude_command = /custom/claude
-# claude_args is commented out
-# claude_args = --some-args
+copilot_command = /custom/copilot
+# copilot_args is commented out
+# copilot_args = --some-args
 plans_dir = custom/plans
 `
 	require.NoError(t, os.WriteFile(globalConfig, []byte(partialConfig), 0o600))
@@ -819,11 +765,11 @@ plans_dir = custom/plans
 	require.NoError(t, err)
 
 	// uncommented values should be used
-	assert.Equal(t, "/custom/claude", values.ClaudeCommand)
+	assert.Equal(t, "/custom/copilot", values.CopilotCommand)
 	assert.Equal(t, "custom/plans", values.PlansDir)
 
 	// commented-out values should fall back to embedded defaults
-	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
+	assert.Equal(t, "--allow-all --no-ask-user --output-format json", values.CopilotArgs)
 }
 
 func TestValuesLoader_Load_LocalAllCommentedGlobalHasContent(t *testing.T) {
@@ -832,7 +778,7 @@ func TestValuesLoader_Load_LocalAllCommentedGlobalHasContent(t *testing.T) {
 	localConfig := filepath.Join(tmpDir, "local-config")
 
 	// global has actual content
-	globalContent := `claude_command = /global/claude
+	globalContent := `copilot_command = /global/copilot
 plans_dir = global/plans
 `
 	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
@@ -840,7 +786,7 @@ plans_dir = global/plans
 	// local is all-commented (installed template)
 	localCommented := `# local config template
 # uncomment values to customize
-# claude_command = /local/claude
+# copilot_command = /local/copilot
 `
 	require.NoError(t, os.WriteFile(localConfig, []byte(localCommented), 0o600))
 
@@ -849,7 +795,7 @@ plans_dir = global/plans
 	require.NoError(t, err)
 
 	// local all-commented falls back, so global values should be used
-	assert.Equal(t, "/global/claude", values.ClaudeCommand)
+	assert.Equal(t, "/global/copilot", values.CopilotCommand)
 	assert.Equal(t, "global/plans", values.PlansDir)
 }
 
@@ -861,7 +807,7 @@ func TestValuesLoader_Load_BothAllCommentedFallsBackToEmbedded(t *testing.T) {
 	// both files are all-commented templates
 	commentedTemplate := `# config template
 # uncomment values to customize
-# claude_command = /custom/claude
+# copilot_command = /custom/copilot
 # plans_dir = custom/plans
 `
 	require.NoError(t, os.WriteFile(globalConfig, []byte(commentedTemplate), 0o600))
@@ -872,9 +818,9 @@ func TestValuesLoader_Load_BothAllCommentedFallsBackToEmbedded(t *testing.T) {
 	require.NoError(t, err)
 
 	// both all-commented, should fall back to embedded defaults
-	assert.Equal(t, "claude", values.ClaudeCommand)
+	assert.Equal(t, "copilot", values.CopilotCommand)
 	assert.Equal(t, "docs/plans", values.PlansDir)
-	assert.True(t, values.CodexEnabled)
+	assert.Equal(t, "copilot", values.ExternalReviewTool)
 }
 
 func TestValuesLoader_Load_ExternalReviewTool(t *testing.T) {
@@ -883,7 +829,7 @@ func TestValuesLoader_Load_ExternalReviewTool(t *testing.T) {
 		config       string
 		expectedTool string
 	}{
-		{name: "codex tool", config: "external_review_tool = codex", expectedTool: "codex"},
+		{name: "copilot tool", config: "external_review_tool = copilot", expectedTool: "copilot"},
 		{name: "custom tool", config: "external_review_tool = custom", expectedTool: "custom"},
 		{name: "none tool", config: "external_review_tool = none", expectedTool: "none"},
 	}
@@ -1297,7 +1243,7 @@ func TestValuesLoader_Load_LocalOverridesExternalReviewTool(t *testing.T) {
 	globalConfig := filepath.Join(tmpDir, "global")
 	localConfig := filepath.Join(tmpDir, "local")
 
-	require.NoError(t, os.WriteFile(globalConfig, []byte(`external_review_tool = codex`), 0o600))
+	require.NoError(t, os.WriteFile(globalConfig, []byte(`external_review_tool = copilot`), 0o600))
 	require.NoError(t, os.WriteFile(localConfig, []byte(`external_review_tool = none`), 0o600))
 
 	loader := newValuesLoader(defaultsFS)
@@ -1369,17 +1315,17 @@ func TestValues_mergeFrom_DefaultBranch(t *testing.T) {
 
 func TestValues_mergeFrom_ExternalReviewFields(t *testing.T) {
 	t.Run("merge external review tool", func(t *testing.T) {
-		dst := Values{ExternalReviewTool: "codex"}
+		dst := Values{ExternalReviewTool: "copilot"}
 		src := Values{ExternalReviewTool: "custom"}
 		dst.mergeFrom(&src)
 		assert.Equal(t, "custom", dst.ExternalReviewTool)
 	})
 
 	t.Run("empty source doesn't overwrite external review tool", func(t *testing.T) {
-		dst := Values{ExternalReviewTool: "codex"}
+		dst := Values{ExternalReviewTool: "copilot"}
 		src := Values{ExternalReviewTool: ""}
 		dst.mergeFrom(&src)
-		assert.Equal(t, "codex", dst.ExternalReviewTool)
+		assert.Equal(t, "copilot", dst.ExternalReviewTool)
 	})
 
 	t.Run("merge custom review script", func(t *testing.T) {
@@ -1654,46 +1600,34 @@ func TestValuesLoader_parseValuesFromBytes_LimitPatterns(t *testing.T) {
 	vl := &valuesLoader{embedFS: defaultsFS}
 
 	tests := []struct {
-		name           string
-		input          string
-		expectedClaude []string
-		expectedCodex  []string
+		name     string
+		input    string
+		expected []string
 	}{
 		{
-			name:           "single claude limit pattern",
-			input:          "claude_limit_patterns = rate limit hit",
-			expectedClaude: []string{"rate limit hit"},
-			expectedCodex:  nil,
+			name:     "single limit pattern",
+			input:    "copilot_limit_patterns = rate limit hit",
+			expected: []string{"rate limit hit"},
 		},
 		{
-			name:           "multiple codex limit patterns",
-			input:          "codex_limit_patterns = Rate limit,quota exceeded,too many requests",
-			expectedClaude: nil,
-			expectedCodex:  []string{"Rate limit", "quota exceeded", "too many requests"},
+			name:     "multiple limit patterns",
+			input:    "copilot_limit_patterns = Rate limit,quota exceeded,too many requests",
+			expected: []string{"Rate limit", "quota exceeded", "too many requests"},
 		},
 		{
-			name:           "whitespace trimming around commas",
-			input:          "claude_limit_patterns =  pattern1 ,  pattern2  , pattern3 ",
-			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
-			expectedCodex:  nil,
+			name:     "whitespace trimming around commas",
+			input:    "copilot_limit_patterns =  pattern1 ,  pattern2  , pattern3 ",
+			expected: []string{"pattern1", "pattern2", "pattern3"},
 		},
 		{
-			name:           "empty patterns filtered out",
-			input:          "claude_limit_patterns = pattern1,,pattern2,  ,pattern3",
-			expectedClaude: []string{"pattern1", "pattern2", "pattern3"},
-			expectedCodex:  nil,
+			name:     "empty patterns filtered out",
+			input:    "copilot_limit_patterns = pattern1,,pattern2,  ,pattern3",
+			expected: []string{"pattern1", "pattern2", "pattern3"},
 		},
 		{
-			name:           "both claude and codex limit patterns",
-			input:          "claude_limit_patterns = hit limit\ncodex_limit_patterns = rate exceeded",
-			expectedClaude: []string{"hit limit"},
-			expectedCodex:  []string{"rate exceeded"},
-		},
-		{
-			name:           "empty value",
-			input:          "claude_limit_patterns = ",
-			expectedClaude: nil,
-			expectedCodex:  nil,
+			name:     "empty value",
+			input:    "copilot_limit_patterns = ",
+			expected: nil,
 		},
 	}
 
@@ -1701,8 +1635,7 @@ func TestValuesLoader_parseValuesFromBytes_LimitPatterns(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			values, err := vl.parseValuesFromBytes([]byte(tc.input))
 			require.NoError(t, err)
-			assert.Equal(t, tc.expectedClaude, values.ClaudeLimitPatterns)
-			assert.Equal(t, tc.expectedCodex, values.CodexLimitPatterns)
+			assert.Equal(t, tc.expected, values.CopilotLimitPatterns)
 		})
 	}
 }
@@ -1813,21 +1746,19 @@ func TestValues_mergeFrom_WaitOnLimit(t *testing.T) {
 
 func TestValues_mergeFrom_LimitPatterns(t *testing.T) {
 	t.Run("merge limit patterns when src has values", func(t *testing.T) {
-		dst := Values{ClaudeLimitPatterns: []string{"dst pattern"}, CodexLimitPatterns: []string{"dst codex"}}
-		src := Values{ClaudeLimitPatterns: []string{"src pattern 1", "src pattern 2"}, CodexLimitPatterns: []string{"src codex"}}
+		dst := Values{CopilotLimitPatterns: []string{"dst pattern"}}
+		src := Values{CopilotLimitPatterns: []string{"src pattern 1", "src pattern 2"}}
 		dst.mergeFrom(&src)
 
-		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.ClaudeLimitPatterns)
-		assert.Equal(t, []string{"src codex"}, dst.CodexLimitPatterns)
+		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.CopilotLimitPatterns)
 	})
 
 	t.Run("preserve dst when src is empty", func(t *testing.T) {
-		dst := Values{ClaudeLimitPatterns: []string{"dst pattern"}, CodexLimitPatterns: []string{"dst codex"}}
-		src := Values{ClaudeLimitPatterns: nil, CodexLimitPatterns: nil}
+		dst := Values{CopilotLimitPatterns: []string{"dst pattern"}}
+		src := Values{CopilotLimitPatterns: nil}
 		dst.mergeFrom(&src)
 
-		assert.Equal(t, []string{"dst pattern"}, dst.ClaudeLimitPatterns)
-		assert.Equal(t, []string{"dst codex"}, dst.CodexLimitPatterns)
+		assert.Equal(t, []string{"dst pattern"}, dst.CopilotLimitPatterns)
 	})
 }
 
@@ -1837,11 +1768,11 @@ func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {
 	localConfig := filepath.Join(tmpDir, "local")
 
 	// global has one set of patterns
-	globalContent := `claude_limit_patterns = global pattern 1, global pattern 2`
+	globalContent := `copilot_limit_patterns = global pattern 1, global pattern 2`
 	require.NoError(t, os.WriteFile(globalConfig, []byte(globalContent), 0o600))
 
 	// local overrides with different patterns
-	localContent := `claude_limit_patterns = local pattern`
+	localContent := `copilot_limit_patterns = local pattern`
 	require.NoError(t, os.WriteFile(localConfig, []byte(localContent), 0o600))
 
 	loader := newValuesLoader(defaultsFS)
@@ -1849,5 +1780,5 @@ func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	// local should override global completely (not merge)
-	assert.Equal(t, []string{"local pattern"}, values.ClaudeLimitPatterns)
+	assert.Equal(t, []string{"local pattern"}, values.CopilotLimitPatterns)
 }

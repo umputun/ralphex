@@ -37,7 +37,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	assert.Equal(t, "custom task prompt", prompts.Task)
 	assert.Equal(t, "custom first review", prompts.ReviewFirst)
 	assert.Equal(t, "custom second review", prompts.ReviewSecond)
-	assert.Equal(t, "custom codex prompt", prompts.Codex)
+	assert.Equal(t, "custom codex prompt", prompts.CopilotReview)
 	assert.Equal(t, "custom make plan prompt", prompts.MakePlan)
 	assert.Equal(t, "custom finalize prompt", prompts.Finalize)
 	assert.Equal(t, "custom review prompt", prompts.CustomReview)
@@ -136,7 +136,7 @@ func TestPromptLoader_Load_LocalFallbackToEmbedded(t *testing.T) {
 	// embedded defaults used for missing prompts (both local and global)
 	assert.Contains(t, prompts.ReviewFirst, "{{GOAL}}")
 	assert.Contains(t, prompts.ReviewSecond, "{{GOAL}}")
-	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}")
+	assert.Contains(t, prompts.CopilotReview, "{{CODEX_OUTPUT}}")
 }
 
 func TestPromptLoader_Load_PartialLocalPrompts(t *testing.T) {
@@ -164,7 +164,7 @@ func TestPromptLoader_Load_PartialLocalPrompts(t *testing.T) {
 
 	// global prompts used
 	assert.Equal(t, "global review first", prompts.ReviewFirst)
-	assert.Equal(t, "global codex", prompts.Codex)
+	assert.Equal(t, "global codex", prompts.CopilotReview)
 }
 
 func TestPromptLoader_Load_NoLocalPromptsDir(t *testing.T) {
@@ -300,7 +300,7 @@ func TestPromptLoader_loadPromptFromEmbedFS(t *testing.T) {
 	pl := &promptLoader{embedFS: defaultsFS}
 	content, err := pl.loadPromptFromEmbedFS("defaults/config")
 	require.NoError(t, err)
-	assert.Contains(t, content, "claude_command")
+	assert.Contains(t, content, "copilot_command")
 }
 
 func TestPromptLoader_loadPromptFromEmbedFS_StripsLeadingCommentsPreservesBodyHeaders(t *testing.T) {
@@ -567,7 +567,7 @@ func TestPromptLoader_Load_AllCommentedPromptsFallbackToEmbedded(t *testing.T) {
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "task prompt should fall back to embedded")
 	assert.Contains(t, prompts.ReviewFirst, "{{GOAL}}", "review_first prompt should fall back to embedded")
 	assert.Contains(t, prompts.ReviewSecond, "{{GOAL}}", "review_second prompt should fall back to embedded")
-	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "codex prompt should fall back to embedded")
+	assert.Contains(t, prompts.CopilotReview, "{{CODEX_OUTPUT}}", "codex prompt should fall back to embedded")
 	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}", "make_plan prompt should fall back to embedded")
 	assert.Contains(t, prompts.CustomReview, "{{DIFF_INSTRUCTION}}", "custom_review prompt should fall back to embedded")
 	assert.Contains(t, prompts.CustomEval, "{{CUSTOM_OUTPUT}}", "custom_eval prompt should fall back to embedded")
@@ -595,7 +595,7 @@ func TestPromptLoader_Load_MixedCommentedAndCustomPrompts(t *testing.T) {
 
 	// all-commented prompts fall back to embedded
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}", "all-commented task should fall back")
-	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "all-commented codex should fall back")
+	assert.Contains(t, prompts.CopilotReview, "{{CODEX_OUTPUT}}", "all-commented codex should fall back")
 
 	// custom prompts used as-is (single leading comment preserved, not a meta-block)
 	assert.Equal(t, "custom review first prompt", prompts.ReviewFirst)
