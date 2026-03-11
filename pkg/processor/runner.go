@@ -600,7 +600,7 @@ func (r *Runner) runCodexLoop(ctx context.Context) error {
 			runReview:       func(ctx context.Context, prompt string) executor.Result { return r.custom.Run(ctx, prompt) },
 			buildPrompt:     r.buildCustomReviewPrompt,
 			buildEvalPrompt: r.buildCustomEvaluationPrompt,
-			showSummary:     r.showCustomSummary,
+			showSummary:     func(string) {}, // no-op: custom output already streamed via OutputHandler
 			makeSection:     status.NewCustomIterationSection,
 		})
 	}
@@ -853,11 +853,6 @@ func (r *Runner) nextPlanTaskPosition() int {
 // extracts text until first code block or maxCodexSummaryLen chars, whichever is shorter.
 func (r *Runner) showCodexSummary(output string) {
 	r.showExternalReviewSummary("codex", output)
-}
-
-// showCustomSummary displays a condensed summary of custom review output before Claude evaluation.
-func (r *Runner) showCustomSummary(output string) {
-	r.showExternalReviewSummary("custom", output)
 }
 
 // showExternalReviewSummary displays a condensed summary of external review output.

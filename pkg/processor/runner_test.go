@@ -1839,6 +1839,47 @@ func TestRunner_ExternalReviewTool_Custom_Success(t *testing.T) {
 	assert.Len(t, claude.RunCalls(), 2, "claude should be called for evaluation and post-review")
 }
 
+func TestRunner_ExternalReviewTool_Custom_NoDuplicateOutput(t *testing.T) {
+	var printAlignedCalls []string
+	log := newMockLogger("progress.txt")
+	log.PrintAlignedFunc = func(text string) { printAlignedCalls = append(printAlignedCalls, text) }
+
+	claude := newMockExecutor([]executor.Result{
+		{Output: "done", Signal: processor.SignalCodexDone},
+		{Output: "review done", Signal: processor.SignalReviewDone},
+	})
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewTool = "custom"
+	appCfg.CustomReviewScript = "/path/to/script.sh"
+
+	customExec := &executor.CustomExecutor{
+		Script:        appCfg.CustomReviewScript,
+		OutputHandler: func(text string) { log.PrintAligned(text) },
+	}
+	customResultIdx := 0
+	mockCustomRunner := &mockCustomRunnerImpl{
+		results: []executor.Result{{Output: "issue in foo.go:10\n"}},
+		idx:     &customResultIdx,
+	}
+	customExec.SetRunner(mockCustomRunner)
+
+	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, claude, codex, customExec, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+	require.NoError(t, err)
+
+	// count how many times the custom output line appears in PrintAligned calls
+	count := 0
+	for _, call := range printAlignedCalls {
+		if strings.Contains(call, "issue in foo.go:10") {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "custom review output should appear exactly once (streamed), not duplicated by summary")
+}
+
 func TestRunner_ExternalReviewTool_Custom_NotConfigured(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor(nil)
