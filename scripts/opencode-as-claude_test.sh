@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# opencode_wrapper_test.sh — tests for opencode-as-claude.sh wrapper.
+# opencode-as-claude_test.sh — tests for opencode-as-claude.sh wrapper.
 #
 # run from the ralphex directory:
-#   bash scripts/opencode_wrapper_test.sh
+#   bash scripts/opencode-as-claude_test.sh
 #
 # requires: jq, bash
 
