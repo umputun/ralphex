@@ -78,6 +78,50 @@ Command execution events are skipped by default because codex reads many files o
 
 The script uses `jq` for JSON parsing, which is included in ralphex Docker images and available on most systems.
 
+## OpenCode wrapper (included example)
+
+The repository includes a wrapper at `scripts/opencode-as-claude.sh` that translates OpenCode JSONL events to Claude stream-json format. It uses `jq` for JSON parsing and auto-sets permission auto-allow (`{"permission":{"*":"allow"}}`) for autonomous execution.
+
+### Setup
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /path/to/scripts/opencode-as-claude.sh
+claude_args =
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENCODE_MODEL` | (opencode default) | Model in provider/model format, e.g. `github-copilot/claude-opus-4.6` |
+| `OPENCODE_VERBOSE` | `0` | Set to `1` to include step start events in output |
+| `OPENCODE_CONFIG_CONTENT` | `{"permission":{"*":"allow"}}` | JSON config merged with auto-allow permissions via `jq` deep merge |
+
+If `OPENCODE_CONFIG_CONTENT` is already set, the wrapper merges `{"permission":{"*":"allow"}}` into it, preserving existing settings. Invalid JSON in this variable causes the wrapper to exit with an error.
+
+### Event translation
+
+| OpenCode event | Claude event |
+|---|---|
+| `text` | `content_block_delta` with `.part.text` |
+| `step_finish` | `result` (end of execution) |
+| `step_start` | skipped by default (set `OPENCODE_VERBOSE=1` to include) |
+
+Text content is passed verbatim — no truncation or escaping — preserving signal strings like `<<<RALPHEX:...>>>`. Non-JSON lines are passed through for the executor's non-JSON fallback. Stderr is captured and emitted as `content_block_delta` events after the main stream for error/limit pattern detection.
+
+### How it works
+
+```bash
+# opencode emits JSONL like:
+{"type":"text","part":{"text":"fixed the bug\n"}}
+
+# wrapper translates to:
+{"type":"content_block_delta","delta":{"type":"text_delta","text":"fixed the bug\n"}}
+```
+
+For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text), the wrapper prepends adapter instructions telling the model to execute review agent tasks sequentially, since OpenCode does not support parallel sub-agents.
+
 ## Writing your own wrapper
 
 A wrapper script must:

@@ -630,9 +630,10 @@ create_mock_opencode > /dev/null
 echo "test: opencode not found"
 
 set +e
-# use a minimal PATH containing only jq's directory (no opencode)
+# use a minimal PATH containing only jq's and bash's directories (no opencode)
 jq_dir=$(dirname "$(command -v jq)")
-PATH="$jq_dir" bash "$WRAPPER" -p "test prompt" 2>"$TMPDIR_TEST/no_opencode_err"
+bash_dir=$(dirname "$(command -v bash)")
+PATH="$jq_dir:$bash_dir" bash "$WRAPPER" -p "test prompt" 2>"$TMPDIR_TEST/no_opencode_err"
 no_opencode_exit=$?
 set -e
 

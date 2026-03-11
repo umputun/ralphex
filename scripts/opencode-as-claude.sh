@@ -46,8 +46,13 @@ OPENCODE_VERBOSE="${OPENCODE_VERBOSE:-0}"
 if [[ -z "${OPENCODE_CONFIG_CONTENT:-}" ]]; then
     export OPENCODE_CONFIG_CONTENT='{"permission":{"*":"allow"}}'
 else
+    # validate existing content is valid JSON before merging
+    if ! printf '%s\n' "$OPENCODE_CONFIG_CONTENT" | jq empty 2>/dev/null; then
+        echo "error: OPENCODE_CONFIG_CONTENT is not valid JSON" >&2
+        exit 1
+    fi
     # merge allow-all into existing OPENCODE_CONFIG_CONTENT via jq
-    OPENCODE_CONFIG_CONTENT=$(echo "$OPENCODE_CONFIG_CONTENT" | jq -c '. * {"permission":{"*":"allow"}}')
+    OPENCODE_CONFIG_CONTENT=$(printf '%s\n' "$OPENCODE_CONFIG_CONTENT" | jq -c '. * {"permission":{"*":"allow"}}')
     export OPENCODE_CONFIG_CONTENT
 fi
 
@@ -92,7 +97,7 @@ cat > "$instructions_file" <<'INSTREOF'
 INSTREOF
 
 # append instructions file path to OPENCODE_CONFIG_CONTENT (preserve existing instructions)
-OPENCODE_CONFIG_CONTENT=$(echo "$OPENCODE_CONFIG_CONTENT" | jq -c --arg f "$instructions_file" '.instructions = ((.instructions // []) + [$f])')
+OPENCODE_CONFIG_CONTENT=$(printf '%s\n' "$OPENCODE_CONFIG_CONTENT" | jq -c --arg f "$instructions_file" '.instructions = ((.instructions // []) + [$f])')
 export OPENCODE_CONFIG_CONTENT
 
 # cleanup temp files on exit
@@ -109,7 +114,7 @@ forward_signal() {
         kill -TERM "$opencode_pid" 2>/dev/null || true
     fi
 }
-trap forward_signal TERM
+trap 'forward_signal; cleanup' TERM
 
 # run opencode in background, capturing stderr and piping stdout through named pipe.
 # this allows us to capture the PID for SIGTERM forwarding while still streaming output.
@@ -128,7 +133,7 @@ opencode_pid=$!
 # text content is passed verbatim through jq's .part.text — no truncation
 # or escaping changes, preserving signal strings like <<<RALPHEX:...>>> (R4).
 while IFS= read -r line || [[ -n "$line" ]]; do
-    translated=$(echo "$line" | jq -c --argjson verbose "$OPENCODE_VERBOSE" '
+    translated=$(printf '%s\n' "$line" | jq -c --argjson verbose "$OPENCODE_VERBOSE" '
         if .type == "text" then
             {type: "content_block_delta", delta: {type: "text_delta", text: .part.text}}
         elif .type == "step_finish" then
@@ -139,11 +144,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         end
     ' 2>/dev/null) || true
     if [[ -n "$translated" ]]; then
-        echo "$translated"
-    elif ! echo "$line" | jq -e . >/dev/null 2>&1; then
+        printf '%s\n' "$translated"
+    elif ! printf '%s\n' "$line" | jq -e . >/dev/null 2>&1; then
         # pass non-JSON lines through so the executor's non-JSON fallback can see them;
         # valid JSON mapped to empty (e.g. step_start) is intentionally suppressed
-        echo "$line"
+        printf '%s\n' "$line"
     fi
 done < "$stdout_pipe"
 
@@ -156,7 +161,7 @@ opencode_pid=""
 if [[ -s "$stderr_file" ]]; then
     while IFS= read -r err_line || [[ -n "$err_line" ]]; do
         [[ -z "$err_line" ]] && continue
-        echo "$err_line" | jq -Rc '{type: "content_block_delta", delta: {type: "text_delta", text: .}}'
+        printf '%s\n' "$err_line" | jq -Rc '{type: "content_block_delta", delta: {type: "text_delta", text: .}}'
     done < "$stderr_file"
 fi
 
