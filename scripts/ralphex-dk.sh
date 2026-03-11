@@ -2570,11 +2570,19 @@ def run_tests() -> None:
 
             import io
             captured_stderr = io.StringIO()
-            with unittest.mock.patch("sys.stderr", captured_stderr):
-                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
-                    with unittest.mock.patch("__main__.extract_macos_credentials", side_effect=fake_extract):
-                        sys.argv = ["ralphex-dk", "plan.md"]
-                        result = main()
+            fake_claude_dir = tempfile.mkdtemp()
+            try:
+                with unittest.mock.patch("sys.stderr", captured_stderr):
+                    with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                        with unittest.mock.patch("__main__.extract_macos_credentials", side_effect=fake_extract):
+                            sys.argv = ["ralphex-dk", "plan.md"]
+                            os.environ["CLAUDE_CONFIG_DIR"] = fake_claude_dir
+                            try:
+                                result = main()
+                            finally:
+                                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            finally:
+                shutil.rmtree(fake_claude_dir, ignore_errors=True)
 
             self.assertEqual(result, 0)
             # extract_macos_credentials SHOULD be called for default provider

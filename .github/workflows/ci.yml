@@ -25,6 +25,9 @@ jobs:
           go test -race -timeout=100s -covermode=atomic -coverprofile=$GITHUB_WORKSPACE/profile.cov_tmp ./...
           grep -v -E "_mock.go|/mocks/" $GITHUB_WORKSPACE/profile.cov_tmp > $GITHUB_WORKSPACE/profile.cov
 
+      - name: test docker wrapper script
+        run: python3 scripts/ralphex-dk.sh --test
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
