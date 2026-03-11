@@ -27,12 +27,20 @@ Capture, analyze, and document the JSONL event schema emitted by `copilot --outp
 - Create: `pkg/executor/testdata/copilot_fixtures/simple_text.jsonl`
 - Create: `pkg/executor/testdata/copilot_fixtures/` directory
 
-- [ ] Run: `copilot --model claude-opus-4-6 --output-format json --no-ask-user -p "Write a hello world function in Go" 2>&1 | tee /tmp/copilot-simple.jsonl`
-- [ ] Run same prompt with the review model: `copilot --model gpt-5.2-codex --output-format json --no-ask-user -p "Write a hello world function in Go" 2>&1 | tee /tmp/copilot-simple-codex.jsonl`
-- [ ] Inspect each line with `cat /tmp/copilot-simple.jsonl | head -20` — note whether output goes to stdout, stderr, or both
-- [ ] Identify the JSON fields present on each line (keys at top level, nested structures)
-- [ ] Save cleaned fixtures to `pkg/executor/testdata/copilot_fixtures/simple_text.jsonl` (one per model if formats differ)
-- [ ] Document initial observations: what fields appear, which lines carry text content, which are metadata
+- [x] Run: `copilot --model claude-opus-4-6 --output-format json --no-ask-user -p "Write a hello world function in Go" 2>&1 | tee /tmp/copilot-simple.jsonl` (used default model — claude-opus-4.6 not available on this account; default model produced Claude-based output with reasoning)
+- [x] Run same prompt with the review model: `copilot --model gpt-5.2-codex --output-format json --no-ask-user -p "Write a hello world function in Go" 2>&1 | tee /tmp/copilot-simple-codex.jsonl` (used gpt-4.1 — gpt-5.2-codex not available on this account; saved as simple_text_gpt.jsonl)
+- [x] Inspect each line with `cat /tmp/copilot-simple.jsonl | head -20` — note whether output goes to stdout, stderr, or both. FINDING: all JSONL goes to stdout only, stderr is empty
+- [x] Identify the JSON fields present on each line (keys at top level, nested structures). FINDING: top-level keys are {type, data, id, timestamp, parentId, ephemeral}; data keys vary by type (see observations below)
+- [x] Save cleaned fixtures to `pkg/executor/testdata/copilot_fixtures/simple_text.jsonl` (one per model if formats differ). Saved: simple_text.jsonl (Claude, 36 lines) and simple_text_gpt.jsonl (GPT, 10 lines)
+- [x] Document initial observations: what fields appear, which lines carry text content, which are metadata. OBSERVATIONS:
+  - Event types (Claude): user.message, assistant.turn_start, assistant.reasoning_delta (ephemeral), assistant.reasoning, assistant.message_delta (ephemeral), assistant.message, tool.execution_start, tool.execution_complete, assistant.turn_end, result
+  - Event types (GPT/gpt-4.1): user.message, assistant.turn_start, assistant.message_delta (ephemeral), assistant.message, assistant.turn_end, result (NO reasoning events, NO tool use in this simple case)
+  - Text content for streaming: assistant.message_delta.data.deltaContent (incremental text deltas, marked ephemeral=true)
+  - Complete message: assistant.message.data.content (full assembled text), assistant.message.data.toolRequests (array of tool calls)
+  - Session end: result event with exitCode, sessionId, usage stats
+  - Reasoning: assistant.reasoning_delta.data.deltaContent (streaming, ephemeral), assistant.reasoning.data.content (complete, Claude-only)
+  - Tool calls: tool.execution_start (toolName, arguments), tool.execution_complete (success, error)
+  - Metadata: result.usage has premiumRequests, totalApiDurationMs, sessionDurationMs, codeChanges
 
 ### Task 2: Capture JSONL output for tool use (file edits, bash commands)
 
