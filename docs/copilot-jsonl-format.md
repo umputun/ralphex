@@ -369,7 +369,7 @@ Multiple tool calls can execute in parallel within the same turn (multiple `tool
 | Tool use | Full (create, edit, view, bash, report_intent) | Observed: text-only responses (no tool use in simple prompts) |
 | Typical event count | 10-120 lines per session (varies by task complexity) | 8-12 lines per session |
 
-Both models share the same event types for messages, turns, and results. The JSONL structure is identical — GPT simply omits reasoning-related events and fields.
+Both models share the same event types for messages, turns, and results. The JSONL structure is identical — GPT simply omits reasoning-related events and fields. Tool-use event structure for GPT models is unverified (no GPT tool-use fixture was captured).
 
 Note: The GPT fixture (`simple_text_gpt.jsonl`) was captured with `gpt-4.1` — `gpt-5.2-codex` was not available at discovery time. Tool-use behavior for `gpt-5.2-codex` may differ. The GPT fixture also has truncated streaming deltas (only the first few `assistant.message_delta` events were captured; the complete `assistant.message` is present).
 
@@ -390,7 +390,7 @@ error: option '--model <model>' argument 'nonexistent-model' is invalid. Allowed
 
 The `result` event provides useful session metadata:
 
-- `usage.premiumRequests` — tracks API usage (1 per session typically)
+- `usage.premiumRequests` — tracks API usage (observed as 1 in all test fixtures; may differ for longer sessions)
 - `usage.totalApiDurationMs` — API latency for cost/performance monitoring
 - `usage.sessionDurationMs` — total wall time including tool execution
 - `usage.codeChanges` — summary of file changes (linesAdded, linesRemoved, filesModified[])
@@ -414,7 +414,7 @@ Read `assistant.message_delta` events for real-time text output:
 - Field: `data.deltaContent`
 - Accumulate deltas with matching `data.messageId` for the current message
 - Ignore `assistant.reasoning_delta` (ephemeral internal reasoning, not user-facing output)
-- IMPORTANT: `assistant.message_delta` events may be absent even when the turn has text content (observed in tool-heavy turns where the model proceeds directly to tool calls — see `simple_text.jsonl` turns 3-5). Always read `assistant.message.data.content` as the authoritative source for complete turn text, not just a fallback
+- IMPORTANT: `assistant.message_delta` events may be absent even when the turn has text content (observed in tool-heavy turns where the model proceeds directly to tool calls — see `simple_text.jsonl` turnIds 2-4). Always read `assistant.message.data.content` as the authoritative source for complete turn text, not just a fallback
 
 ### Signal Detection → scan for <<<RALPHEX:...>>>
 
@@ -474,7 +474,7 @@ Unicode characters (emoji, CJK, mathematical symbols) pass through JSONL correct
 
 When the model produces minimal output, the event sequence remains structurally identical:
 - `user.message` → `assistant.turn_start` → (optional reasoning) → (optional `assistant.message_delta`(s)) → `assistant.message` → `assistant.turn_end` → `result`
-- `assistant.message_delta` events may be absent even when `assistant.message.data.content` is non-empty (observed in tool-heavy turns where the model proceeds directly to tool calls without streaming deltas — see `simple_text.jsonl` turns 3-5)
+- `assistant.message_delta` events may be absent even when `assistant.message.data.content` is non-empty (observed in tool-heavy turns where the model proceeds directly to tool calls without streaming deltas — see `simple_text.jsonl` turnIds 2-4)
 - The `assistant.message.data.content` may be an empty string `""` (observed when only tool calls are made with no text)
 - Zero-delta messages are valid — `assistant.message` is always emitted even with empty content
 - For parsing: treat `assistant.message.data.content` as the authoritative text source, not just a fallback for deltas
