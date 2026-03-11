@@ -850,7 +850,7 @@ func TestRunner_New_CodexNotInstalled_AutoDisables(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
 	appCfg := testAppConfig(t)
-	appCfg.CodexCommand = "/nonexistent/path/to/codex" // command that doesn't exist
+	appCfg.ClaudeCommand = "/nonexistent/path/to/copilot" // command that doesn't exist
 
 	cfg := processor.Config{
 		Mode:          processor.ModeCodexOnly,
@@ -866,12 +866,12 @@ func TestRunner_New_CodexNotInstalled_AutoDisables(t *testing.T) {
 	var foundWarning bool
 	for _, call := range log.PrintCalls() {
 		// format includes %v for error, so check format string
-		if strings.Contains(call.Format, "codex not found") && strings.Contains(call.Format, "%v") {
+		if strings.Contains(call.Format, "copilot not found") && strings.Contains(call.Format, "%v") {
 			foundWarning = true
 			break
 		}
 	}
-	assert.True(t, foundWarning, "should log warning about codex not found with error details")
+	assert.True(t, foundWarning, "should log warning about copilot not found with error details")
 
 	// verify runner was created (auto-disable happens at construction time)
 	assert.NotNil(t, r, "runner should be created even when codex not found")
@@ -898,7 +898,7 @@ func TestRunner_New_CodexNotInstalled_CustomReviewStillWorks(t *testing.T) {
 	// verify NO warning was logged (custom reviews don't need codex binary)
 	var foundWarning bool
 	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "codex not found") {
+		if strings.Contains(call.Format, "copilot not found") {
 			foundWarning = true
 			break
 		}
@@ -929,7 +929,7 @@ func TestRunner_New_CodexNotInstalled_NoneReviewStillWorks(t *testing.T) {
 	// verify NO warning was logged (no external review means no codex needed)
 	var foundWarning bool
 	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "codex not found") {
+		if strings.Contains(call.Format, "copilot not found") {
 			foundWarning = true
 			break
 		}

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExecClaudeRunner_KillsProcessGroup(t *testing.T) {
+func TestExecRunner_KillsProcessGroup(t *testing.T) {
 	// this test verifies that when context is canceled, the entire process group
 	// is killed (including child processes), not just the direct child.
 	// this prevents orphaned processes when ralphex exits.
@@ -24,7 +24,7 @@ func TestExecClaudeRunner_KillsProcessGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	runner := &execClaudeRunner{}
+	runner := &execRunner{}
 
 	// bash spawns a background sleep, prints its PID, then waits forever.
 	// the "wait" keeps parent alive until we cancel.
@@ -58,7 +58,7 @@ func TestProcessGroupCleanup_Idempotent(t *testing.T) {
 
 	ctx := t.Context()
 
-	runner := &execClaudeRunner{}
+	runner := &execRunner{}
 
 	stdout, wait, err := runner.Run(ctx, "echo", "hello")
 	require.NoError(t, err)

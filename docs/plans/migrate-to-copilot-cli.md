@@ -59,13 +59,13 @@ Replace Claude Code and OpenAI Codex CLI with GitHub Copilot CLI as the sole exe
 - Remove: `pkg/executor/codex_test.go`
 - Modify: `pkg/executor/executor_test.go` (remove ClaudeExecutor tests, keep shared type tests)
 
-- [ ] In `executor.go`: remove `ClaudeExecutor` struct and all its methods (`Run`, `processStream`, `extractText`, etc.); keep `Result`, `PatternMatchError`, `LimitPatternError`, `CommandRunner`, `execClaudeRunner` (rename to `execRunner`), `detectSignal`, `matchPattern`, `filterEnv`
-- [ ] Update `filterEnv` to strip `GITHUB_TOKEN`-related vars if needed (or simplify — no env stripping needed for Copilot CLI since it uses its own auth)
-- [ ] Create `copilot.go` with `CopilotExecutor` struct: `Command` (string), `Args` ([]string), `CodingModel` (string), `ReviewModel` (string), `ErrorPatterns`/`LimitPatterns` ([]string), `OutputHandler` (func(string))
-- [ ] Implement `Run(ctx, prompt) Result` — invokes copilot with `CodingModel`
-- [ ] Implement `RunReview(ctx, prompt) Result` — invokes copilot with `ReviewModel`
-- [ ] Implement shared `run(ctx, prompt, model) Result` — builds command (`copilot --model <model> [args...] -p <prompt>`), streams JSONL line-by-line from stdout, parses each line, calls `OutputHandler` with extracted text, detects signals and error/limit patterns. Handle stderr separately for CLI-level errors (no JSONL on exit code 1)
-- [ ] Implement JSONL parsing logic (see `docs/copilot-jsonl-format.md` for full schema):
+- [x] In `executor.go`: remove `ClaudeExecutor` struct and all its methods (`Run`, `processStream`, `extractText`, etc.); keep `Result`, `PatternMatchError`, `LimitPatternError`, `CommandRunner`, `execClaudeRunner` (rename to `execRunner`), `detectSignal`, `matchPattern`, `filterEnv`
+- [x] Update `filterEnv` to strip `GITHUB_TOKEN`-related vars if needed (or simplify — no env stripping needed for Copilot CLI since it uses its own auth)
+- [x] Create `copilot.go` with `CopilotExecutor` struct: `Command` (string), `Args` ([]string), `CodingModel` (string), `ReviewModel` (string), `ErrorPatterns`/`LimitPatterns` ([]string), `OutputHandler` (func(string))
+- [x] Implement `Run(ctx, prompt) Result` — invokes copilot with `CodingModel`
+- [x] Implement `RunReview(ctx, prompt) Result` — invokes copilot with `ReviewModel`
+- [x] Implement shared `run(ctx, prompt, model) Result` — builds command (`copilot --model <model> [args...] -p <prompt>`), streams JSONL line-by-line from stdout, parses each line, calls `OutputHandler` with extracted text, detects signals and error/limit patterns. Handle stderr separately for CLI-level errors (no JSONL on exit code 1)
+- [x] Implement JSONL parsing logic (see `docs/copilot-jsonl-format.md` for full schema):
   - Parse each line as JSON, dispatch on `type` field
   - `assistant.message_delta`: extract `data.deltaContent`, pass to `OutputHandler` for real-time streaming
   - `assistant.message`: extract `data.content` as authoritative text (accumulate into Result.Output), scan for signals. Note: `data.content` may be empty string on tool-only turns
@@ -75,11 +75,11 @@ Replace Claude Code and OpenAI Codex CLI with GitHub Copilot CLI as the sole exe
   - Skip: `user.message`, `assistant.turn_start`, `assistant.turn_end`, `assistant.reasoning_delta`, `assistant.reasoning`, `session.info`
   - Tolerate JSON parse errors on final line (process may be killed mid-stream, truncating JSONL)
   - Detect abnormal termination: non-zero exit code + no `result` event received
-- [ ] Delete `codex.go` and `codex_test.go` entirely
-- [ ] Write table-driven tests for `CopilotExecutor` with mock CommandRunner: test streaming output, signal detection, error pattern matching, model switching between Run/RunReview, CLI error handling (no JSONL + stderr)
-- [ ] Write table-driven tests for JSONL parsing using fixtures from `pkg/executor/testdata/copilot_fixtures/`: `simple_text.jsonl` (Claude with tools), `simple_text_gpt.jsonl` (GPT text-only), `tool_use.jsonl` (multi-turn tool chain), `with_signal.jsonl` (signal passthrough)
-- [ ] Update `executor_test.go`: remove ClaudeExecutor tests, keep tests for shared types (detectSignal, matchPattern, filterEnv)
-- [ ] Run project test suite: `make test` — must pass before task 2
+- [x] Delete `codex.go` and `codex_test.go` entirely
+- [x] Write table-driven tests for `CopilotExecutor` with mock CommandRunner: test streaming output, signal detection, error pattern matching, model switching between Run/RunReview, CLI error handling (no JSONL + stderr)
+- [x] Write table-driven tests for JSONL parsing using fixtures from `pkg/executor/testdata/copilot_fixtures/`: `simple_text.jsonl` (Claude with tools), `simple_text_gpt.jsonl` (GPT text-only), `tool_use.jsonl` (multi-turn tool chain), `with_signal.jsonl` (signal passthrough)
+- [x] Update `executor_test.go`: remove ClaudeExecutor tests, keep tests for shared types (detectSignal, matchPattern, filterEnv)
+- [x] Run project test suite: `make test` — must pass before task 2
 
 ### Task 2: Replace config fields (claude_*/codex_* → copilot_*)
 

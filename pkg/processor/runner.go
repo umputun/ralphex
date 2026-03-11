@@ -112,36 +112,22 @@ type Runner struct {
 // New creates a new Runner with the given configuration and shared phase holder.
 // If codex is enabled but the binary is not found in PATH, it is automatically disabled with a warning.
 func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
-	// build claude executor with config values
-	claudeExec := &executor.ClaudeExecutor{
+	// build copilot executor with config values (used for both coding and review phases)
+	copilotExec := &executor.CopilotExecutor{
 		OutputHandler: func(text string) {
 			log.PrintAligned(text)
 		},
-		Debug: cfg.Debug,
 	}
 	if cfg.AppConfig != nil {
-		claudeExec.Command = cfg.AppConfig.ClaudeCommand
-		claudeExec.Args = cfg.AppConfig.ClaudeArgs
-		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
-		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
+		copilotExec.Command = cfg.AppConfig.ClaudeCommand
+		copilotExec.Args = cfg.AppConfig.ClaudeArgs
+		copilotExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
+		copilotExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
 	}
 
-	// build codex executor with config values
-	codexExec := &executor.CodexExecutor{
-		OutputHandler: func(text string) {
-			log.PrintAligned(text)
-		},
-		Debug: cfg.Debug,
-	}
-	if cfg.AppConfig != nil {
-		codexExec.Command = cfg.AppConfig.CodexCommand
-		codexExec.Model = cfg.AppConfig.CodexModel
-		codexExec.ReasoningEffort = cfg.AppConfig.CodexReasoningEffort
-		codexExec.TimeoutMs = cfg.AppConfig.CodexTimeoutMs
-		codexExec.Sandbox = cfg.AppConfig.CodexSandbox
-		codexExec.ErrorPatterns = cfg.AppConfig.CodexErrorPatterns
-		codexExec.LimitPatterns = cfg.AppConfig.CodexLimitPatterns
-	}
+	// copilot executor for external review (uses ReviewModel)
+	// wraps RunReview to satisfy the Executor interface
+	copilotReviewExec := &copilotReviewAdapter{exec: copilotExec}
 
 	// build custom executor if custom review script is configured
 	var customExec *executor.CustomExecutor
@@ -151,25 +137,25 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 			OutputHandler: func(text string) {
 				log.PrintAligned(text)
 			},
-			ErrorPatterns: cfg.AppConfig.CodexErrorPatterns, // reuse codex error patterns
-			LimitPatterns: cfg.AppConfig.CodexLimitPatterns, // reuse codex limit patterns
+			ErrorPatterns: cfg.AppConfig.CodexErrorPatterns,
+			LimitPatterns: cfg.AppConfig.CodexLimitPatterns,
 		}
 	}
 
-	// auto-disable codex if the binary is not installed AND we need codex
+	// auto-disable codex if the copilot binary is not installed AND we need it
 	// (skip this check if using custom external review tool or external review is disabled)
 	if cfg.CodexEnabled && needsCodexBinary(cfg.AppConfig) {
-		codexCmd := codexExec.Command
-		if codexCmd == "" {
-			codexCmd = "codex"
+		copilotCmd := copilotExec.Command
+		if copilotCmd == "" {
+			copilotCmd = "copilot"
 		}
-		if _, err := exec.LookPath(codexCmd); err != nil {
-			log.Print("warning: codex not found (%s: %v), disabling codex review phase", codexCmd, err)
+		if _, err := exec.LookPath(copilotCmd); err != nil {
+			log.Print("warning: copilot not found (%s: %v), disabling external review phase", copilotCmd, err)
 			cfg.CodexEnabled = false
 		}
 	}
 
-	return NewWithExecutors(cfg, log, claudeExec, codexExec, customExec, holder)
+	return NewWithExecutors(cfg, log, copilotExec, copilotReviewExec, customExec, holder)
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
@@ -1146,6 +1132,15 @@ func (r *Runner) sleepWithContext(ctx context.Context, d time.Duration) error {
 	case <-ctx.Done():
 		return fmt.Errorf("sleep interrupted: %w", ctx.Err())
 	}
+}
+
+// copilotReviewAdapter wraps CopilotExecutor.RunReview to satisfy the Executor interface.
+type copilotReviewAdapter struct {
+	exec *executor.CopilotExecutor
+}
+
+func (a *copilotReviewAdapter) Run(ctx context.Context, prompt string) executor.Result {
+	return a.exec.RunReview(ctx, prompt)
 }
 
 // needsCodexBinary returns true if the current configuration requires the codex binary.
