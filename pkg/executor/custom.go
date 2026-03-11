@@ -115,21 +115,25 @@ func (e *CustomExecutor) Run(ctx context.Context, promptContent string) Result {
 		}
 	}
 
-	// check limit patterns first (higher priority)
-	if pattern := matchPattern(output, e.LimitPatterns); pattern != "" {
-		return Result{
-			Output: output,
-			Signal: signal,
-			Error:  &LimitPatternError{Pattern: pattern, HelpCmd: e.Script + " --help"},
+	// only check error/limit patterns when the process failed (non-zero exit or stream error).
+	// when script exits cleanly, pattern matches in output are false positives from findings.
+	if finalErr != nil {
+		// check limit patterns first (higher priority)
+		if pattern := matchPattern(output, e.LimitPatterns); pattern != "" {
+			return Result{
+				Output: output,
+				Signal: signal,
+				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: e.Script + " --help"},
+			}
 		}
-	}
 
-	// check for error patterns in output
-	if pattern := matchPattern(output, e.ErrorPatterns); pattern != "" {
-		return Result{
-			Output: output,
-			Signal: signal,
-			Error:  &PatternMatchError{Pattern: pattern, HelpCmd: e.Script + " --help"},
+		// check for error patterns in output
+		if pattern := matchPattern(output, e.ErrorPatterns); pattern != "" {
+			return Result{
+				Output: output,
+				Signal: signal,
+				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: e.Script + " --help"},
+			}
 		}
 	}
 

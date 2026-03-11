@@ -168,48 +168,45 @@ func TestCustomExecutor_Run_AllSignals(t *testing.T) {
 }
 
 func TestCustomExecutor_Run_ErrorPatterns(t *testing.T) {
+	exitErr := errors.New("exit status 1")
 	tests := []struct {
 		name        string
 		output      string
 		patterns    []string
+		waitErr     error
 		wantError   bool
 		wantPattern string
 	}{
 		{
-			name:        "no patterns configured",
-			output:      "Rate limit exceeded",
-			patterns:    nil,
-			wantError:   false,
-			wantPattern: "",
+			name: "no patterns configured", output: "Rate limit exceeded",
+			patterns: nil, waitErr: exitErr, wantError: true,
 		},
 		{
-			name:        "pattern not matched",
-			output:      "Analysis complete: no issues found",
-			patterns:    []string{"rate limit", "quota exceeded"},
-			wantError:   false,
-			wantPattern: "",
+			name: "pattern not matched", output: "Analysis complete: no issues found",
+			patterns: []string{"rate limit", "quota exceeded"}, waitErr: exitErr, wantError: true,
 		},
 		{
-			name:        "pattern matched",
-			output:      "Error: Rate limit exceeded, please try again later",
-			patterns:    []string{"rate limit"},
-			wantError:   true,
-			wantPattern: "rate limit",
+			name: "pattern matched on non-zero exit", output: "Error: Rate limit exceeded, please try again later",
+			patterns: []string{"rate limit"}, waitErr: exitErr,
+			wantError: true, wantPattern: "rate limit",
 		},
 		{
-			name:        "case insensitive match",
-			output:      "QUOTA EXCEEDED for your account",
-			patterns:    []string{"quota exceeded"},
-			wantError:   true,
-			wantPattern: "quota exceeded",
+			name: "case insensitive match", output: "QUOTA EXCEEDED for your account",
+			patterns: []string{"quota exceeded"}, waitErr: exitErr,
+			wantError: true, wantPattern: "quota exceeded",
+		},
+		{
+			name: "pattern ignored on clean exit", output: "found Rate limit handling in code",
+			patterns: []string{"rate limit"}, wantError: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			waitFn := func() error { return tc.waitErr }
 			mock := &mockCustomRunner{
 				runFunc: func(_ context.Context, _, _ string) (io.Reader, func() error, error) {
-					return strings.NewReader(tc.output), func() error { return nil }, nil
+					return strings.NewReader(tc.output), waitFn, nil
 				},
 			}
 			e := &CustomExecutor{
@@ -222,10 +219,12 @@ func TestCustomExecutor_Run_ErrorPatterns(t *testing.T) {
 
 			if tc.wantError {
 				require.Error(t, result.Error)
-				var patternErr *PatternMatchError
-				require.ErrorAs(t, result.Error, &patternErr)
-				assert.Equal(t, tc.wantPattern, patternErr.Pattern)
-				assert.Contains(t, patternErr.HelpCmd, "/path/to/script.sh")
+				if tc.wantPattern != "" {
+					var patternErr *PatternMatchError
+					require.ErrorAs(t, result.Error, &patternErr)
+					assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+					assert.Contains(t, patternErr.HelpCmd, "/path/to/script.sh")
+				}
 			} else {
 				require.NoError(t, result.Error)
 			}
@@ -371,41 +370,49 @@ func TestExecCustomRunner_Run_ContextAlreadyCanceled(t *testing.T) {
 }
 
 func TestCustomExecutor_Run_LimitPattern(t *testing.T) {
+	exitErr := errors.New("exit status 1")
 	tests := []struct {
 		name        string
 		output      string
 		limitPat    []string
 		errorPat    []string
+		waitErr     error
 		wantLimit   bool
 		wantError   bool
 		wantPattern string
 	}{
 		{
 			name: "limit pattern matched", output: "Rate limit exceeded",
-			limitPat: []string{"rate limit"}, errorPat: nil,
+			limitPat: []string{"rate limit"}, errorPat: nil, waitErr: exitErr,
 			wantLimit: true, wantPattern: "rate limit",
 		},
 		{
 			name: "limit takes precedence over error", output: "Rate limit exceeded",
-			limitPat: []string{"rate limit"}, errorPat: []string{"rate limit"},
+			limitPat: []string{"rate limit"}, errorPat: []string{"rate limit"}, waitErr: exitErr,
 			wantLimit: true, wantPattern: "rate limit",
 		},
 		{
 			name: "error pattern when limit does not match", output: "quota exceeded for account",
-			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"},
+			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"}, waitErr: exitErr,
 			wantError: true, wantPattern: "quota exceeded",
 		},
 		{
-			name: "no match", output: "Review complete",
+			name: "no match on non-zero exit", output: "Review complete",
+			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"}, waitErr: exitErr,
+			wantError: true,
+		},
+		{
+			name: "patterns ignored on clean exit", output: "Rate limit handling code reviewed",
 			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			waitFn := func() error { return tc.waitErr }
 			mock := &mockCustomRunner{
 				runFunc: func(_ context.Context, _, _ string) (io.Reader, func() error, error) {
-					return strings.NewReader(tc.output), func() error { return nil }, nil
+					return strings.NewReader(tc.output), waitFn, nil
 				},
 			}
 			e := &CustomExecutor{
@@ -426,9 +433,11 @@ func TestCustomExecutor_Run_LimitPattern(t *testing.T) {
 				assert.Contains(t, limitErr.HelpCmd, "/path/to/script.sh")
 			case tc.wantError:
 				require.Error(t, result.Error)
-				var patternErr *PatternMatchError
-				require.ErrorAs(t, result.Error, &patternErr)
-				assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+				if tc.wantPattern != "" {
+					var patternErr *PatternMatchError
+					require.ErrorAs(t, result.Error, &patternErr)
+					assert.Equal(t, tc.wantPattern, patternErr.Pattern)
+				}
 			default:
 				require.NoError(t, result.Error)
 			}

@@ -176,21 +176,26 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// detect signal in stdout (the actual response)
 	signal := detectSignal(stdoutContent)
 
-	// check limit patterns first (higher priority)
-	if pattern := matchPattern(stdoutContent, e.LimitPatterns); pattern != "" {
-		return Result{
-			Output: stdoutContent,
-			Signal: signal,
-			Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "codex /status"},
+	// only check error/limit patterns when the process failed (non-zero exit or stream error).
+	// when codex exits cleanly, pattern matches in output are false positives from findings
+	// (e.g., reviewing code that handles rate limits).
+	if finalErr != nil {
+		// check limit patterns first (higher priority)
+		if pattern := matchPattern(stdoutContent, e.LimitPatterns); pattern != "" {
+			return Result{
+				Output: stdoutContent,
+				Signal: signal,
+				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "codex /status"},
+			}
 		}
-	}
 
-	// check for error patterns in output
-	if pattern := matchPattern(stdoutContent, e.ErrorPatterns); pattern != "" {
-		return Result{
-			Output: stdoutContent,
-			Signal: signal,
-			Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "codex /status"},
+		// check for error patterns in output
+		if pattern := matchPattern(stdoutContent, e.ErrorPatterns); pattern != "" {
+			return Result{
+				Output: stdoutContent,
+				Signal: signal,
+				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "codex /status"},
+			}
 		}
 	}
 
