@@ -117,7 +117,8 @@ func (e *CustomExecutor) Run(ctx context.Context, promptContent string) Result {
 
 	// only check error/limit patterns when the process failed (non-zero exit or stream error).
 	// when script exits cleanly, pattern matches in output are false positives from findings.
-	if finalErr != nil {
+	// skip pattern checks on context cancellation — cancellation must propagate as-is.
+	if finalErr != nil && ctx.Err() == nil {
 		// check limit patterns first (higher priority)
 		if pattern := matchPattern(output, e.LimitPatterns); pattern != "" {
 			return Result{

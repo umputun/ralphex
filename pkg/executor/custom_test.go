@@ -444,3 +444,29 @@ func TestCustomExecutor_Run_LimitPattern(t *testing.T) {
 		})
 	}
 }
+
+func TestCustomExecutor_Run_LimitPattern_ContextCanceled(t *testing.T) {
+	// context cancellation must not be masked by pattern matching
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mock := &mockCustomRunner{
+		runFunc: func(_ context.Context, _, _ string) (io.Reader, func() error, error) {
+			return strings.NewReader("Rate limit exceeded"), func() error { return context.Canceled }, nil
+		},
+	}
+	e := &CustomExecutor{
+		Script:        "/path/to/script.sh",
+		runner:        mock,
+		LimitPatterns: []string{"rate limit"},
+		ErrorPatterns: []string{"rate limit"},
+	}
+
+	result := e.Run(ctx, "prompt")
+
+	require.ErrorIs(t, result.Error, context.Canceled, "cancellation must not be masked by pattern match")
+	var limitErr *LimitPatternError
+	assert.NotErrorAs(t, result.Error, &limitErr, "should not return LimitPatternError on cancellation")
+	var patternErr *PatternMatchError
+	assert.NotErrorAs(t, result.Error, &patternErr, "should not return PatternMatchError on cancellation")
+}

@@ -274,8 +274,8 @@ Configurable patterns detect rate limit and quota errors in claude/codex output:
 - `codex_error_patterns`: comma-separated patterns for codex (default: "Rate limit,quota exceeded")
 - Matching is case-insensitive substring search
 - Whitespace is trimmed from each pattern
-- For claude: patterns checked unconditionally on all output
-- For codex and custom executors: patterns checked only when process exits with non-zero status (avoids false positives from review findings mentioning rate limits)
+- For claude: patterns checked on all output during normal execution (context cancellation paths bypass pattern checks)
+- For codex and custom executors: patterns checked only when process exits with non-zero status and context is not canceled (avoids false positives from review findings and cancellation masking)
 - On match, ralphex exits gracefully with pattern info and help command suggestion
 
 Limit patterns for wait+retry behavior:

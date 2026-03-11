@@ -179,7 +179,8 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// only check error/limit patterns when the process failed (non-zero exit or stream error).
 	// when codex exits cleanly, pattern matches in output are false positives from findings
 	// (e.g., reviewing code that handles rate limits).
-	if finalErr != nil {
+	// skip pattern checks on context cancellation — cancellation must propagate as-is.
+	if finalErr != nil && ctx.Err() == nil {
 		// check limit patterns first (higher priority)
 		if pattern := matchPattern(stdoutContent, e.LimitPatterns); pattern != "" {
 			return Result{

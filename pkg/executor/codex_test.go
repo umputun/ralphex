@@ -917,3 +917,28 @@ func TestCodexExecutor_Run_LimitPattern(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexExecutor_Run_LimitPattern_ContextCanceled(t *testing.T) {
+	// context cancellation must not be masked by pattern matching
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams("", "Rate limit exceeded"), mockWaitError(context.Canceled), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"rate limit"},
+		ErrorPatterns: []string{"rate limit"},
+	}
+
+	result := e.Run(ctx, "analyze code")
+
+	require.ErrorIs(t, result.Error, context.Canceled, "cancellation must not be masked by pattern match")
+	var limitErr *LimitPatternError
+	assert.NotErrorAs(t, result.Error, &limitErr, "should not return LimitPatternError on cancellation")
+	var patternErr *PatternMatchError
+	assert.NotErrorAs(t, result.Error, &patternErr, "should not return PatternMatchError on cancellation")
+}
