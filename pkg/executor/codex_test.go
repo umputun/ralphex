@@ -744,12 +744,12 @@ func TestCodexExecutor_Run_ErrorPattern(t *testing.T) {
 		wantOutput  string
 	}{
 		{
-			name: "no patterns configured", stdout: "Rate limit exceeded",
+			name: "no patterns configured, exit error only", stdout: "Rate limit exceeded",
 			patterns: nil, waitErr: exitErr, wantOutput: "Rate limit exceeded",
-			wantError: true, // error from exit code, not pattern
+			wantError: true,
 		},
 		{
-			name: "pattern not matched", stdout: "Analysis complete: no issues found",
+			name: "pattern not matched, exit error only", stdout: "Analysis complete: no issues found",
 			patterns: []string{"rate limit", "quota exceeded"}, waitErr: exitErr,
 			wantOutput: "Analysis complete: no issues found", wantError: true,
 		},
@@ -868,7 +868,7 @@ func TestCodexExecutor_Run_LimitPattern(t *testing.T) {
 			wantError: true, wantPattern: "quota exceeded",
 		},
 		{
-			name: "no match on non-zero exit", stdout: "Analysis complete",
+			name: "no pattern match, exit error only", stdout: "Analysis complete",
 			limitPat: []string{"rate limit"}, errorPat: []string{"quota exceeded"}, waitErr: exitErr,
 			wantError: true, // error from exit code, not pattern
 		},
