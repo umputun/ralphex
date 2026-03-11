@@ -443,15 +443,34 @@ func TestCopilotExecutor_parseJSONL(t *testing.T) {
 			wantSignal: "",
 		},
 		{
-			name:       "result event recognized",
+			name:       "result event with exitCode 0",
 			input:      `{"type":"result","timestamp":"2026-01-01T00:00:00Z","sessionId":"s1","exitCode":0}`,
 			wantOutput: "",
 			wantSignal: "",
 		},
 		{
+			name:       "result event with non-zero exitCode sets failed signal",
+			input:      `{"type":"result","timestamp":"2026-01-01T00:00:00Z","sessionId":"s1","exitCode":1}`,
+			wantOutput: "",
+			wantSignal: status.Failed,
+		},
+		{
+			name: "result exitCode does not override existing signal",
+			input: `{"type":"assistant.message","data":{"messageId":"m1","content":"done <<<RALPHEX:ALL_TASKS_DONE>>>"},"id":"e1","timestamp":"2026-01-01T00:00:00Z","parentId":"p1"}
+{"type":"result","timestamp":"2026-01-01T00:00:01Z","sessionId":"s1","exitCode":1}`,
+			wantOutput: "done <<<RALPHEX:ALL_TASKS_DONE>>>",
+			wantSignal: status.Completed,
+		},
+		{
 			name: "tool execution events logged",
 			input: `{"type":"tool.execution_start","data":{"toolCallId":"t1","toolName":"bash","arguments":{"command":"go test"}},"id":"e1","timestamp":"2026-01-01T00:00:00Z","parentId":"p1"}
 {"type":"tool.execution_complete","data":{"toolCallId":"t1","success":true},"id":"e2","timestamp":"2026-01-01T00:00:01Z","parentId":"p2"}`,
+			wantOutput: "",
+			wantSignal: "",
+		},
+		{
+			name:       "tool execution failure surfaced",
+			input:      `{"type":"tool.execution_complete","data":{"toolCallId":"t1","success":false,"error":{"message":"permission denied"}},"id":"e1","timestamp":"2026-01-01T00:00:00Z","parentId":"p1"}`,
 			wantOutput: "",
 			wantSignal: "",
 		},
@@ -485,6 +504,56 @@ func TestCopilotExecutor_parseJSONL_withHandler(t *testing.T) {
 	assert.Equal(t, "chunk1chunk2", result.Output)
 	assert.Contains(t, chunks, "chunk1")
 	assert.Contains(t, chunks, "chunk2")
+}
+
+func TestCopilotExecutor_parseJSONL_resultExitCodeLogged(t *testing.T) {
+	input := `{"type":"result","timestamp":"2026-01-01T00:00:00Z","sessionId":"s1","exitCode":1}`
+
+	var logged []string
+	e := &CopilotExecutor{
+		OutputHandler: func(text string) {
+			logged = append(logged, text)
+		},
+	}
+
+	result := e.parseJSONL(context.Background(), strings.NewReader(input))
+
+	assert.Equal(t, status.Failed, result.Signal)
+	require.Len(t, logged, 1)
+	assert.Contains(t, logged[0], "exit code: 1")
+}
+
+func TestCopilotExecutor_parseJSONL_toolFailureLogged(t *testing.T) {
+	input := `{"type":"tool.execution_complete","data":{"toolCallId":"t1","success":false,"error":{"message":"permission denied"}},"id":"e1","timestamp":"2026-01-01T00:00:00Z","parentId":"p1"}`
+
+	var logged []string
+	e := &CopilotExecutor{
+		OutputHandler: func(text string) {
+			logged = append(logged, text)
+		},
+	}
+
+	e.parseJSONL(context.Background(), strings.NewReader(input))
+
+	require.Len(t, logged, 1)
+	assert.Contains(t, logged[0], "tool failed")
+	assert.Contains(t, logged[0], "permission denied")
+}
+
+func TestCopilotExecutor_parseJSONL_toolFailureNoMessage(t *testing.T) {
+	input := `{"type":"tool.execution_complete","data":{"toolCallId":"t1","success":false,"error":{}},"id":"e1","timestamp":"2026-01-01T00:00:00Z","parentId":"p1"}`
+
+	var logged []string
+	e := &CopilotExecutor{
+		OutputHandler: func(text string) {
+			logged = append(logged, text)
+		},
+	}
+
+	e.parseJSONL(context.Background(), strings.NewReader(input))
+
+	require.Len(t, logged, 1)
+	assert.Contains(t, logged[0], "unknown error")
 }
 
 func TestCopilotExecutor_parseJSONL_toolActivityLogged(t *testing.T) {

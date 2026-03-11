@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // copilotEvent represents a JSONL event from copilot CLI output.
@@ -166,23 +168,29 @@ func (e *CopilotExecutor) parseJSONL(ctx context.Context, r io.Reader) Result {
 			}
 
 		case "result":
-			// result event has exitCode at top level (no data wrapper); session end marker
-
-		case "tool.execution_start":
-			// optionally log tool activity for progress display
-			var toolStart struct {
-				ToolName string `json:"toolName"`
-			}
-			if err := json.Unmarshal(event.Data, &toolStart); err == nil && toolStart.ToolName != "" {
+			// result event has exitCode at top level (no data wrapper); session end marker.
+			// non-zero exitCode means copilot reported a structured failure.
+			if event.ExitCode != 0 {
 				if e.OutputHandler != nil {
-					e.OutputHandler(fmt.Sprintf("[tool: %s]\n", toolStart.ToolName))
+					e.OutputHandler(fmt.Sprintf("[copilot exit code: %d]\n", event.ExitCode))
+				}
+				// only set failed signal if no other signal was already detected
+				// (e.g., signal from assistant.message takes priority)
+				if signal == "" {
+					signal = status.Failed
 				}
 			}
+
+		case "tool.execution_complete":
+			e.handleToolComplete(event.Data)
+
+		case "tool.execution_start":
+			e.handleToolStart(event.Data)
 
 		default:
 			// skip: user.message, assistant.turn_start, assistant.turn_end,
 			// assistant.reasoning_delta, assistant.reasoning, session.info,
-			// tool.execution_complete, and unknown types
+			// and unknown types
 		}
 	})
 
@@ -191,4 +199,35 @@ func (e *CopilotExecutor) parseJSONL(ctx context.Context, r io.Reader) Result {
 	}
 
 	return Result{Output: output.String(), Signal: signal}
+}
+
+// handleToolStart logs tool activity for progress display.
+func (e *CopilotExecutor) handleToolStart(data json.RawMessage) {
+	var toolStart struct {
+		ToolName string `json:"toolName"`
+	}
+	if err := json.Unmarshal(data, &toolStart); err == nil && toolStart.ToolName != "" {
+		if e.OutputHandler != nil {
+			e.OutputHandler(fmt.Sprintf("[tool: %s]\n", toolStart.ToolName))
+		}
+	}
+}
+
+// handleToolComplete surfaces tool-level failures for progress display.
+func (e *CopilotExecutor) handleToolComplete(data json.RawMessage) {
+	var toolComplete struct {
+		Success bool `json:"success"`
+		Error   struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(data, &toolComplete); err == nil && !toolComplete.Success {
+		msg := toolComplete.Error.Message
+		if msg == "" {
+			msg = "unknown error"
+		}
+		if e.OutputHandler != nil {
+			e.OutputHandler(fmt.Sprintf("[tool failed: %s]\n", msg))
+		}
+	}
 }

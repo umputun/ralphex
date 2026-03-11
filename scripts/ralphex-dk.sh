@@ -551,9 +551,10 @@ def main() -> int:
     # merge env var entries with CLI -E/--env flags (env first, CLI appends)
     extra_env = merge_env_flags(parsed.env)
 
-    # pass GITHUB_TOKEN to container if set in host environment
+    # pass GITHUB_TOKEN to container if set in host environment,
+    # but only if user hasn't already specified it via -E/RALPHEX_EXTRA_ENV
     github_token = os.environ.get("GITHUB_TOKEN", "")
-    if github_token:
+    if github_token and not any(e == "GITHUB_TOKEN" or e.startswith("GITHUB_TOKEN=") for e in extra_env if e != "-e"):
         extra_env.extend(["-e", "GITHUB_TOKEN"])
 
     # merge env var entries with CLI -v/--volume flags (env first, CLI appends)
@@ -1261,7 +1262,7 @@ def run_tests() -> None:
     class TestMainArgparse(EnvTestCase):
         """tests for main() argparse integration."""
         env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
-                    "RALPHEX_EXTRA_VOLUMES", "GITHUB_TOKEN"]
+                    "RALPHEX_EXTRA_VOLUMES", "GITHUB_TOKEN", "GITHUB_TOKEN_FILE"]
         save_argv = True
 
         def test_update_flag_triggers_handle_update(self) -> None:
@@ -1459,6 +1460,26 @@ def run_tests() -> None:
 
             self.assertEqual(result, 0)
             self.assertNotIn("GITHUB_TOKEN", captured_env)
+
+        def test_github_token_prefix_not_passed(self) -> None:
+            """GITHUB_TOKEN_FILE in host env is NOT treated as GITHUB_TOKEN."""
+            os.environ.pop("GITHUB_TOKEN", None)
+            os.environ["GITHUB_TOKEN_FILE"] = "/run/secrets/gh_token"
+            captured_env: list[str] = []
+
+            def fake_run_docker(image: str, port: str, volumes: list[str],
+                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                captured_env.extend(env_vars)
+                return 0
+
+            with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                sys.argv = ["ralphex-dk", "plan.md"]
+                result = main()
+
+            self.assertEqual(result, 0)
+            # GITHUB_TOKEN_FILE should NOT cause GITHUB_TOKEN to be passed
+            self.assertNotIn("GITHUB_TOKEN", captured_env)
+            self.assertNotIn("GITHUB_TOKEN_FILE", captured_env)
 
     class TestHelpFlag(EnvTestCase):
         """tests for --help flag handling."""
