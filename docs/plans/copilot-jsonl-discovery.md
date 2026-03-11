@@ -93,23 +93,23 @@ Capture, analyze, and document the JSONL event schema emitted by `copilot --outp
 **Files:**
 - Create: `docs/copilot-jsonl-format.md`
 
-- [ ] Compile all observed event types into a taxonomy (e.g., `assistant_message`, `tool_call`, `tool_result`, `session_end`, `error`, etc.)
-- [ ] For each event type, document:
+- [x] Compile all observed event types into a taxonomy (e.g., `assistant_message`, `tool_call`, `tool_result`, `session_end`, `error`, etc.)
+- [x] For each event type, document:
   - Top-level JSON keys and their types
   - Which field(s) contain text content that ralphex should stream to `OutputHandler`
   - Which field(s) indicate completion/end of session
   - Which field(s) carry error information
-- [ ] Document the streaming model: does copilot emit incremental text deltas (like Claude's `content_block_delta`) or complete messages?
-- [ ] Document differences between models (claude-opus vs gpt-5.2-codex) if any
-- [ ] Document exit code behavior: what exit codes mean success, failure, rate limit
-- [ ] Document any session metadata events (token counts, session ID, cost) and whether they're useful for ralphex
-- [ ] Map each event type to the ralphex parsing need:
+- [x] Document the streaming model: does copilot emit incremental text deltas (like Claude's `content_block_delta`) or complete messages?
+- [x] Document differences between models (claude-opus vs gpt-5.2-codex) if any
+- [x] Document exit code behavior: what exit codes mean success, failure, rate limit
+- [x] Document any session metadata events (token counts, session ID, cost) and whether they're useful for ralphex
+- [x] Map each event type to the ralphex parsing need:
   - Text streaming → `OutputHandler` callback
   - Signal detection → scan text content for `<<<RALPHEX:...>>>` patterns
   - Error/limit patterns → scan text content for configured patterns
   - Completion → detect session end event
-- [ ] Write `docs/copilot-jsonl-format.md` with the full schema reference, including example JSON for each event type
-- [ ] Add a "Mapping to ralphex" section that explicitly specifies: which event type field to read for text, how to detect end-of-stream, how to detect errors
+- [x] Write `docs/copilot-jsonl-format.md` with the full schema reference, including example JSON for each event type
+- [x] Add a "Mapping to ralphex" section that explicitly specifies: which event type field to read for text, how to detect end-of-stream, how to detect errors
 
 ### Task 5: Validate fixtures and document edge cases
 
