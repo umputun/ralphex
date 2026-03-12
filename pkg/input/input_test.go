@@ -419,8 +419,52 @@ func TestTerminalCollector_AskDraftReview(t *testing.T) {
 		assert.Contains(t, err.Error(), "feedback cannot be empty")
 	})
 
-	t.Run("invalid selection returns error", func(t *testing.T) {
+	t.Run("invalid selection retries then accepts", func(t *testing.T) {
 		var stdout bytes.Buffer
+		// first "5" is out of range, then "1" is valid (Accept)
+		reader := &sequentialLineReader{lines: []string{"5", "1"}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noColor: true}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionAccept, action)
+		assert.Empty(t, feedback)
+	})
+
+	t.Run("multiple invalid selections retry then accepts", func(t *testing.T) {
+		var stdout bytes.Buffer
+		// "abc" is not a number, "0" is out of range, "-1" is out of range, then "4" is valid (Reject)
+		reader := &sequentialLineReader{lines: []string{"abc", "0", "-1", "4"}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noColor: true}
+
+		action, feedback, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
+
+		require.NoError(t, err)
+		assert.Equal(t, ActionReject, action)
+		assert.Empty(t, feedback)
+	})
+
+	t.Run("invalid selection then context canceled returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		ctx, cancel := context.WithCancel(context.Background())
+		// "5" is out of range causing retry, then context is canceled before second read
+		reader := &sequentialLineReader{lines: []string{"5"}, afterRead: func(i int) {
+			if i == 0 { // cancel after first (invalid) read
+				cancel()
+			}
+		}}
+		c := &TerminalCollector{stdin: reader, stdout: &stdout, noColor: true}
+
+		_, _, err := c.AskDraftReview(ctx, "Review the plan", planContent)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "select action")
+	})
+
+	t.Run("invalid selection then EOF returns error", func(t *testing.T) {
+		var stdout bytes.Buffer
+		// "5" is out of range, then EOF on retry
 		c := &TerminalCollector{stdin: strings.NewReader("5\n"), stdout: &stdout, noColor: true}
 
 		_, _, err := c.AskDraftReview(context.Background(), "Review the plan", planContent)
@@ -560,8 +604,9 @@ func (r *eofAfterReader) Read(p []byte) (n int, err error) {
 // sequentialLineReader returns lines one at a time, each ending with newline.
 // this allows simulating multiple sequential reads (selection + feedback).
 type sequentialLineReader struct {
-	lines []string
-	index int
+	lines     []string
+	index     int
+	afterRead func(i int) // optional callback after each read, receives the line index just read
 }
 
 func (r *sequentialLineReader) Read(p []byte) (n int, err error) {
@@ -569,8 +614,13 @@ func (r *sequentialLineReader) Read(p []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 	line := r.lines[r.index] + "\n"
+	idx := r.index
 	r.index++
-	return copy(p, line), nil
+	n = copy(p, line)
+	if r.afterRead != nil {
+		r.afterRead(idx)
+	}
+	return n, nil
 }
 
 func TestTerminalCollector_computeDiff(t *testing.T) {

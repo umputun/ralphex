@@ -52,11 +52,13 @@ func ReadLineWithContext(ctx context.Context, reader *bufio.Reader) (string, err
 type Collector interface {
 	// AskQuestion presents a question with options and returns the selected answer.
 	// An "Other" option is appended automatically; if chosen, the user types a free-text answer.
-	// Returns the selected or typed text, or error if selection fails.
+	// Returns the selected or typed text, or error if selection fails (including invalid input).
 	AskQuestion(ctx context.Context, question string, options []string) (string, error)
 
 	// AskDraftReview presents a plan draft for review with Accept/Revise/Interactive review/Reject options.
 	// Returns the selected action ("accept", "revise", or "reject") and feedback text (empty for accept/reject).
+	// Invalid selections (bad number, out of range) are retried with a warning;
+	// only fatal errors (EOF, context cancellation) return an error.
 	AskDraftReview(ctx context.Context, question string, planContent string) (action string, feedback string, err error)
 }
 
@@ -285,7 +287,13 @@ func (c *TerminalCollector) AskDraftReview(ctx context.Context, question, planCo
 	for {
 		action, selectErr := c.selectWithNumbers(ctx, question, options, reader)
 		if selectErr != nil {
-			return "", "", fmt.Errorf("select action: %w", selectErr)
+			// fatal errors: EOF or context cancellation can't be retried
+			if errors.Is(selectErr, io.EOF) || ctx.Err() != nil {
+				return "", "", fmt.Errorf("select action: %w", selectErr)
+			}
+			// retriable error (invalid number, out of range, etc.) — warn and reprompt
+			log.Printf("[WARN] invalid selection, please try again: %v", selectErr)
+			continue
 		}
 
 		actionLower := strings.ToLower(action)
