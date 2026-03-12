@@ -606,7 +606,7 @@ def export_aws_profile_credentials(extra_env: list[str] | None = None) -> dict[s
     try:
         import json
         result = subprocess.run(
-            ["aws", "configure", "export-credentials", "--profile", profile, "--format", "json"],
+            ["aws", "configure", "export-credentials", "--profile", profile, "--output", "json"],
             capture_output=True, text=True, check=False,
         )
         if result.returncode != 0:
@@ -2337,7 +2337,10 @@ def run_tests() -> None:
             os.environ["AWS_PROFILE"] = "test-profile"
             json_output = '{"AccessKeyId": "AKIATEST", "SecretAccessKey": "secret123", "SessionToken": "tok123"}'
 
+            captured_cmd: list[list[str]] = []
+
             def fake_run(cmd: list[str], **kwargs: object) -> unittest.mock.Mock:
+                captured_cmd.append(cmd)
                 mock_result = unittest.mock.Mock()
                 mock_result.returncode = 0
                 mock_result.stdout = json_output
@@ -2351,6 +2354,15 @@ def run_tests() -> None:
             self.assertEqual(creds["AWS_ACCESS_KEY_ID"], "AKIATEST")
             self.assertEqual(creds["AWS_SECRET_ACCESS_KEY"], "secret123")
             self.assertEqual(creds["AWS_SESSION_TOKEN"], "tok123")
+
+            # validate the AWS CLI command structure
+            self.assertEqual(len(captured_cmd), 1)
+            cmd = captured_cmd[0]
+            self.assertEqual(cmd, [
+                "aws", "configure", "export-credentials",
+                "--profile", "test-profile",
+                "--output", "json",
+            ])
 
         def test_skips_export_when_explicit_creds(self) -> None:
             """AWS_ACCESS_KEY_ID set → no aws cli call."""
