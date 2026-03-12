@@ -544,6 +544,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
 	}
+	req.Colors.Info().Printf("progress log in %s\n", baseLog.Path())
 
 	displayStats(req, plr.baseLog, stats, elapsed)
 	keepDashboardAlive(ctx, o, req, plr.closeLog)
