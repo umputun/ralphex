@@ -2845,6 +2845,7 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 	assert.False(t, foundBreak, "should not log manual break with nil channel")
 }
 
+<<<<<<< HEAD
 func TestRunner_SessionTimeout_BlockingExecutor(t *testing.T) {
 	log := newMockLogger("")
 	claude := newMockExecutor(nil)
@@ -3388,4 +3389,35 @@ func TestRunner_SessionTimeout_PlanCreationPreservesRevisionFeedback(t *testing.
 	secondPrompt := claude.RunCalls()[1].Prompt
 	assert.Contains(t, secondPrompt, "please add error handling task",
 		"revision feedback should be in the timed-out attempt too")
+}
+
+func TestRunner_SendMessage_WithSessionProvider(t *testing.T) {
+	// ClaudeExecutor implements SessionProvider but has no active session
+	claudeExec := &executor.ClaudeExecutor{}
+
+	log := newMockLogger("")
+	r := processor.NewWithExecutors(processor.Config{
+		Mode:      processor.ModeFull,
+		AppConfig: testAppConfig(t),
+	}, log, processor.Executors{Claude: claudeExec, Codex: newMockExecutor(nil)}, &status.PhaseHolder{})
+
+	// no active session yet — should return error
+	err := r.SendMessage("hello")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no active session")
+}
+
+func TestRunner_SendMessage_WithoutSessionProvider(t *testing.T) {
+	// mock executor does NOT implement SessionProvider
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+
+	r := processor.NewWithExecutors(processor.Config{
+		Mode:      processor.ModeFull,
+		AppConfig: testAppConfig(t),
+	}, log, processor.Executors{Claude: claude, Codex: newMockExecutor(nil)}, &status.PhaseHolder{})
+
+	err := r.SendMessage("hello")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not support sessions")
 }

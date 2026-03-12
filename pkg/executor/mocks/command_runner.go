@@ -15,7 +15,7 @@ import (
 //
 //		// make and configure a mocked executor.CommandRunner
 //		mockedCommandRunner := &CommandRunnerMock{
-//			RunFunc: func(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
+//			RunFunc: func(ctx context.Context, name string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 //				panic("mock out the Run method")
 //			},
 //		}
@@ -26,7 +26,7 @@ import (
 //	}
 type CommandRunnerMock struct {
 	// RunFunc mocks the Run method.
-	RunFunc func(ctx context.Context, name string, args ...string) (io.Reader, func() error, error)
+	RunFunc func(ctx context.Context, name string, args ...string) (io.WriteCloser, io.Reader, func() error, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -44,7 +44,7 @@ type CommandRunnerMock struct {
 }
 
 // Run calls RunFunc.
-func (mock *CommandRunnerMock) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
+func (mock *CommandRunnerMock) Run(ctx context.Context, name string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 	if mock.RunFunc == nil {
 		panic("CommandRunnerMock.RunFunc: method is nil but CommandRunner.Run was just called")
 	}

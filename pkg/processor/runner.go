@@ -231,6 +231,25 @@ func (r *Runner) SetBreakCh(ch <-chan struct{}) {
 	r.breakCh = ch
 }
 
+// SessionProvider provides access to an active Claude session for message injection.
+type SessionProvider interface {
+	Session() *executor.ClaudeSession
+}
+
+// SendMessage sends a user message to the currently running Claude session.
+// returns error if the executor doesn't support sessions or no session is active.
+func (r *Runner) SendMessage(msg string) error {
+	sp, ok := r.claude.(SessionProvider)
+	if !ok {
+		return fmt.Errorf("executor does not support sessions")
+	}
+	session := sp.Session()
+	if session == nil {
+		return fmt.Errorf("no active session")
+	}
+	return session.Send(msg)
+}
+
 // Run executes the main loop based on configured mode.
 func (r *Runner) Run(ctx context.Context) error {
 	switch r.cfg.Mode {

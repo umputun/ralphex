@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/umputun/ralphex/pkg/status"
 )
@@ -45,22 +46,18 @@ func (e *LimitPatternError) Error() string {
 }
 
 // CommandRunner abstracts command execution for testing.
-// Returns an io.Reader for streaming output and a wait function for completion.
+// Returns stdin pipe, stdout reader, and a wait function for completion.
 type CommandRunner interface {
-	Run(ctx context.Context, name string, args ...string) (output io.Reader, wait func() error, err error)
+	Run(ctx context.Context, name string, args ...string) (stdin io.WriteCloser, output io.Reader, wait func() error, err error)
 }
 
 // execClaudeRunner is the default command runner using os/exec.
-// when stdin is non-nil, it is connected to the child process's stdin (used to pass
-// the prompt via pipe instead of a -p CLI argument to avoid Windows 8191-char cmd limit).
-type execClaudeRunner struct {
-	stdin io.Reader
-}
+type execClaudeRunner struct{}
 
-func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
+func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 	// check context before starting to avoid spawning a process that will be immediately killed
 	if err := ctx.Err(); err != nil {
-		return nil, nil, fmt.Errorf("context already canceled: %w", err)
+		return nil, nil, nil, fmt.Errorf("context already canceled: %w", err)
 	}
 
 	// use exec.Command (not CommandContext) because we handle cancellation ourselves
@@ -70,28 +67,29 @@ func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string)
 	// filter out ANTHROPIC_API_KEY (claude uses different auth) and CLAUDECODE (prevents nested session errors)
 	cmd.Env = filterEnv(os.Environ(), "ANTHROPIC_API_KEY", "CLAUDECODE")
 
-	// pass prompt via stdin when set (avoids Windows 8191-char command-line limit)
-	if r.stdin != nil {
-		cmd.Stdin = r.stdin
-	}
-
 	// create new process group so we can kill all descendants on cleanup
 	setupProcessGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, fmt.Errorf("create stdout pipe: %w", err)
+		return nil, nil, nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
 	// merge stderr into stdout like python's stderr=subprocess.STDOUT
 	cmd.Stderr = cmd.Stdout
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("create stdin pipe: %w", err)
+	}
+
 	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("start command: %w", err)
+		return nil, nil, nil, fmt.Errorf("start command: %w", err)
 	}
 
 	// setup process group cleanup with graceful shutdown on context cancellation
 	cleanup := newProcessGroupCleanup(cmd, ctx.Done())
 
-	return stdout, cleanup.Wait, nil
+	return stdin, stdout, cleanup.Wait, nil
 }
 
 // splitArgs splits a space-separated argument string into a slice.
@@ -191,6 +189,15 @@ type ClaudeExecutor struct {
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
 	cmdRunner     CommandRunner     // for testing, nil uses default
+	session       *ClaudeSession    // active session for message injection
+	sessionMu     sync.Mutex        // protects session field
+}
+
+// Session returns the current active session, or nil if no process is running.
+func (e *ClaudeExecutor) Session() *ClaudeSession {
+	e.sessionMu.Lock()
+	defer e.sessionMu.Unlock()
+	return e.session
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -200,33 +207,53 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		cmd = "claude"
 	}
 
+	useStreamInput := e.Args == "" // default args path uses stream-json input
+
 	// build args from configured string or use defaults
 	var args []string
 	if e.Args != "" {
 		args = splitArgs(e.Args)
+		args = append(args, "-p", prompt)
 	} else {
 		args = []string{
 			"--dangerously-skip-permissions",
 			"--output-format", "stream-json",
+			"--input-format", "stream-json",
 			"--verbose",
 		}
 	}
-	// always append --print to enable non-interactive mode; mirrors old -p flag that was
-	// always appended. wrapper scripts ignore unknown flags via '*) shift ;;' catch-all.
-	args = append(args, "--print")
-	// pass prompt via stdin to avoid Windows 8191-char command-line limit;
-	// if cmdRunner is set (test injection), use it; otherwise use real runner
-	stdinReader := strings.NewReader(prompt)
-	var runner CommandRunner
-	if e.cmdRunner != nil {
-		runner = e.cmdRunner
-	} else {
-		runner = &execClaudeRunner{stdin: stdinReader}
+
+	runner := e.cmdRunner
+	if runner == nil {
+		runner = &execClaudeRunner{}
 	}
 
-	stdout, wait, err := runner.Run(ctx, cmd, args...)
+	stdin, stdout, wait, err := runner.Run(ctx, cmd, args...)
 	if err != nil {
 		return Result{Error: err}
+	}
+
+	if useStreamInput {
+		// create session from stdin pipe for message injection
+		session := newClaudeSession(stdin)
+		e.sessionMu.Lock()
+		e.session = session
+		e.sessionMu.Unlock()
+
+		defer func() {
+			session.Close()
+			e.sessionMu.Lock()
+			e.session = nil
+			e.sessionMu.Unlock()
+		}()
+
+		// send initial prompt via stdin
+		if sendErr := session.Send(prompt); sendErr != nil {
+			return Result{Error: fmt.Errorf("send initial prompt: %w", sendErr)}
+		}
+	} else {
+		// custom args path: close stdin immediately (wrappers may not understand stream-json input)
+		stdin.Close()
 	}
 
 	result := e.parseStream(ctx, stdout)

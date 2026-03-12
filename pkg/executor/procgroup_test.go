@@ -28,7 +28,7 @@ func TestExecClaudeRunner_KillsProcessGroup(t *testing.T) {
 
 	// bash spawns a background sleep, prints its PID, then waits forever.
 	// the "wait" keeps parent alive until we cancel.
-	stdout, wait, err := runner.Run(ctx, "bash", "-c",
+	_, stdout, wait, err := runner.Run(ctx, "bash", "-c",
 		`sleep 300 & echo "CHILD_PID:$!"; wait`)
 	require.NoError(t, err)
 
@@ -98,7 +98,7 @@ func TestProcessGroupCleanup_Idempotent(t *testing.T) {
 
 	runner := &execClaudeRunner{}
 
-	stdout, wait, err := runner.Run(ctx, "echo", "hello")
+	_, stdout, wait, err := runner.Run(ctx, "echo", "hello")
 	require.NoError(t, err)
 
 	// drain stdout

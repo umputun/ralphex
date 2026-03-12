@@ -1,12 +1,11 @@
 package executor
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"flag"
-	"fmt"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
@@ -17,12 +16,20 @@ import (
 	"github.com/umputun/ralphex/pkg/status"
 )
 
+// nopWriteCloser wraps an io.Writer with a no-op Close method.
+type nopWriteCloser struct{ io.Writer }
+
+func (nopWriteCloser) Close() error { return nil }
+
+// newNopWriteCloser returns a WriteCloser that discards writes.
+func newNopWriteCloser() io.WriteCloser { return nopWriteCloser{io.Discard} }
+
 func TestClaudeExecutor_Run_Success(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello world <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
 
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock}
@@ -36,8 +43,8 @@ func TestClaudeExecutor_Run_Success(t *testing.T) {
 
 func TestClaudeExecutor_Run_StartError(t *testing.T) {
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return nil, nil, errors.New("command not found")
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return nil, nil, nil, errors.New("command not found")
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock}
@@ -53,8 +60,8 @@ func TestClaudeExecutor_Run_WaitError_WithOutput(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial output"}}`
 
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock}
@@ -71,8 +78,8 @@ func TestClaudeExecutor_Run_WaitError_WithOutputAndSignal(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"task done <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
 
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock}
@@ -86,8 +93,8 @@ func TestClaudeExecutor_Run_WaitError_WithOutputAndSignal(t *testing.T) {
 
 func TestClaudeExecutor_Run_WaitError_NoOutput(t *testing.T) {
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(""), func() error { return errors.New("exit status 1") }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(""), func() error { return errors.New("exit status 1") }, nil
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock}
@@ -103,8 +110,8 @@ func TestClaudeExecutor_Run_ContextCanceled(t *testing.T) {
 	cancel()
 
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(""), func() error { return context.Canceled }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(""), func() error { return context.Canceled }, nil
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock}
@@ -120,8 +127,8 @@ func TestClaudeExecutor_Run_WithOutputHandler(t *testing.T) {
 
 	var chunks []string
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -368,10 +375,10 @@ func TestClaudeExecutor_Run_WithCustomCommand(t *testing.T) {
 	var capturedCmd string
 	var capturedArgs []string
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, name string, args ...string) (io.Reader, func() error, error) {
+		RunFunc: func(_ context.Context, name string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 			capturedCmd = name
 			capturedArgs = args
-			return strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -383,16 +390,17 @@ func TestClaudeExecutor_Run_WithCustomCommand(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "my-claude", capturedCmd)
-	// should still use default args
+	// should still use default args with stream-json input
 	assert.Contains(t, capturedArgs, "--dangerously-skip-permissions")
+	assert.Contains(t, capturedArgs, "--input-format")
 }
 
 func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 	var capturedArgs []string
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+		RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 			capturedArgs = args
-			return strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -403,18 +411,18 @@ func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	// should use custom args plus --print (non-interactive mode flag, always appended)
-	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "--print"}, capturedArgs)
+	// should use custom args plus prompt args (custom args use -p fallback)
+	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "-p", "test prompt"}, capturedArgs)
 }
 
 func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 	var capturedCmd string
 	var capturedArgs []string
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, name string, args ...string) (io.Reader, func() error, error) {
+		RunFunc: func(_ context.Context, name string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 			capturedCmd = name
 			capturedArgs = args
-			return strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -427,7 +435,7 @@ func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "custom-claude", capturedCmd)
-	assert.Equal(t, []string{"--skip-perms", "--verbose", "--print"}, capturedArgs)
+	assert.Equal(t, []string{"--skip-perms", "--verbose", "-p", "the prompt"}, capturedArgs)
 }
 
 func TestSplitArgs(t *testing.T) {
@@ -650,8 +658,8 @@ func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := &mocks.CommandRunnerMock{
-				RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-					return strings.NewReader(tc.output), func() error { return nil }, nil
+				RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+					return newNopWriteCloser(), strings.NewReader(tc.output), func() error { return nil }, nil
 				},
 			}
 			e := &ClaudeExecutor{
@@ -681,8 +689,8 @@ func TestClaudeExecutor_Run_WaitError_WithOutputAndErrorPattern(t *testing.T) {
 	jsonStream := "Error: Claude Code cannot be launched inside another Claude Code session.\n"
 
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -705,8 +713,8 @@ func TestClaudeExecutor_Run_WaitError_WithSignalAndErrorPattern(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
 
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return errors.New("exit status 1") }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -729,8 +737,8 @@ func TestClaudeExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
 
 	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -756,109 +764,48 @@ func TestLimitPatternError_Error(t *testing.T) {
 	assert.Equal(t, `detected limit pattern: "You've hit your limit"`, err.Error())
 }
 
-// printFlag is registered so the test binary accepts --print without erroring.
-// ClaudeExecutor.Run() always appends --print to the command args; when the test
-// binary is used as the subprocess command, this flag must be registered.
-var _ = flag.Bool("print", false, "consumed by subprocess tests")
-
-// TestHelperProcess is not a real test — it is used as a subprocess by TestExecClaudeRunner_StdinSet.
-// It reads all of stdin and writes it to stdout, then exits.
-func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	data, _ := io.ReadAll(os.Stdin)
-	fmt.Print(string(data))
-	os.Exit(0)
-}
-
-// TestHelperProcessStreamJSON is not a real test — used as a subprocess by
-// TestClaudeExecutor_Run_RealRunner_StdinWired. Reads stdin and emits it as a
-// stream-json content_block_delta event so ClaudeExecutor.parseStream can parse it.
-func TestHelperProcessStreamJSON(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS_JSON") != "1" {
-		return
-	}
-	data, _ := io.ReadAll(os.Stdin)
-	fmt.Printf(`{"type":"content_block_delta","delta":{"type":"text_delta","text":%q}}`, string(data))
-	fmt.Println()
-	fmt.Println(`{"type":"result","result":""}`)
-	os.Exit(0)
-}
-
-func TestClaudeExecutor_Run_RealRunner_StdinWired(t *testing.T) {
-	// verify the full wiring: ClaudeExecutor.Run() with cmdRunner == nil constructs
-	// execClaudeRunner{stdin: stdinReader} and the subprocess receives the prompt via stdin.
-	// if the wiring is broken (e.g. execClaudeRunner{} without stdin), the subprocess reads
-	// empty stdin and result.Output would be empty.
-	t.Setenv("GO_WANT_HELPER_PROCESS_JSON", "1")
-	exe, err := os.Executable()
-	require.NoError(t, err)
-
-	e := &ClaudeExecutor{
-		Command: exe,
-		Args:    "-test.run=TestHelperProcessStreamJSON",
-		// cmdRunner is nil — exercises the real execClaudeRunner construction path
-	}
-
-	result := e.Run(context.Background(), "hello stdin wiring")
-	require.NoError(t, result.Error)
-	assert.Contains(t, result.Output, "hello stdin wiring")
-}
-
-func TestExecClaudeRunner_StdinSet(t *testing.T) {
-	// verify that when execClaudeRunner.stdin is set, it is piped to the child process's stdin.
-	// uses the test binary re-invocation pattern: the subprocess runs TestHelperProcess which
-	// echoes stdin to stdout, letting us confirm the pipe is connected.
-	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
-	exe, err := os.Executable()
-	require.NoError(t, err)
-
-	input := "hello from stdin"
-	r := &execClaudeRunner{stdin: strings.NewReader(input)}
-
-	output, wait, err := r.Run(context.Background(), exe, "-test.run=TestHelperProcess")
-	require.NoError(t, err)
-
-	data, err := io.ReadAll(output)
-	require.NoError(t, err)
-	require.NoError(t, wait())
-	assert.Equal(t, input, string(data))
-}
-
-func TestClaudeExecutor_Run_NoPromptInArgs(t *testing.T) {
-	// verify that args never include -p: prompt is always passed via stdin, not CLI arg.
-	// also verify --print is present for non-interactive mode in both default and custom-args paths.
+func TestClaudeExecutor_Run_DefaultArgs_NoPromptInArgs(t *testing.T) {
+	// default args path uses stream-json; prompt is sent via session, not -p
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
 
-	tests := []struct {
-		name string
-		args string
-	}{
-		{name: "default args", args: ""},
-		{name: "custom args", args: "--dangerously-skip-permissions --output-format stream-json"},
+	var capturedArgs []string
+	e := &ClaudeExecutor{
+		cmdRunner: &mocks.CommandRunnerMock{
+			RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
+				capturedArgs = args
+				return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return nil }, nil
+			},
+		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var capturedArgs []string
-			e := &ClaudeExecutor{
-				Args: tc.args,
-				cmdRunner: &mocks.CommandRunnerMock{
-					RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
-						capturedArgs = args
-						return strings.NewReader(jsonStream), func() error { return nil }, nil
-					},
-				},
-			}
 
-			result := e.Run(context.Background(), "test prompt")
+	result := e.Run(context.Background(), "test prompt")
 
-			require.NoError(t, result.Error)
-			assert.NotContains(t, capturedArgs, "-p")
-			assert.NotContains(t, capturedArgs, "test prompt")
-			assert.Contains(t, capturedArgs, "--print", "non-interactive flag must be present")
-		})
+	require.NoError(t, result.Error)
+	assert.NotContains(t, capturedArgs, "-p")
+	assert.NotContains(t, capturedArgs, "test prompt")
+	assert.Contains(t, capturedArgs, "--input-format")
+}
+
+func TestClaudeExecutor_Run_CustomArgs_HasPromptInArgs(t *testing.T) {
+	// custom args path uses -p for wrapper compatibility
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
+
+	var capturedArgs []string
+	e := &ClaudeExecutor{
+		Args: "--dangerously-skip-permissions --output-format stream-json",
+		cmdRunner: &mocks.CommandRunnerMock{
+			RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
+				capturedArgs = args
+				return newNopWriteCloser(), strings.NewReader(jsonStream), func() error { return nil }, nil
+			},
+		},
 	}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Contains(t, capturedArgs, "-p")
+	assert.Contains(t, capturedArgs, "test prompt")
 }
 
 func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
@@ -911,8 +858,8 @@ func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := &mocks.CommandRunnerMock{
-				RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-					return strings.NewReader(tc.output), func() error { return nil }, nil
+				RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+					return newNopWriteCloser(), strings.NewReader(tc.output), func() error { return nil }, nil
 				},
 			}
 			e := &ClaudeExecutor{
@@ -941,3 +888,203 @@ func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeExecutor_Run_DefaultArgs_StreamJsonInput(t *testing.T) {
+	var capturedArgs []string
+	var stdinBuf bytes.Buffer
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			capturedArgs = args
+			return nopWriteCloser{&stdinBuf}, strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock}
+
+	result := e.Run(context.Background(), "hello world")
+
+	require.NoError(t, result.Error)
+
+	// should use --input-format stream-json and NOT include -p
+	assert.Contains(t, capturedArgs, "--input-format")
+	assert.Contains(t, capturedArgs, "stream-json")
+	assert.NotContains(t, capturedArgs, "-p")
+
+	// verify initial prompt was written to stdin as correct JSON
+	var msg stdinMessage
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(stdinBuf.Bytes()), &msg))
+	assert.Equal(t, "user", msg.Type)
+	assert.Equal(t, "user", msg.Message.Role)
+	require.Len(t, msg.Message.Content, 1)
+	assert.Equal(t, "text", msg.Message.Content[0].Type)
+	assert.Equal(t, "hello world", msg.Message.Content[0].Text)
+}
+
+func TestClaudeExecutor_Run_CustomArgs_UsesDashP(t *testing.T) {
+	var capturedArgs []string
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			capturedArgs = args
+			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, Args: "--custom-flag"}
+
+	result := e.Run(context.Background(), "the prompt")
+
+	require.NoError(t, result.Error)
+	// custom args should use -p, not --input-format
+	assert.Contains(t, capturedArgs, "-p")
+	assert.NotContains(t, capturedArgs, "--input-format")
+}
+
+func TestClaudeExecutor_Session_DuringRun(t *testing.T) {
+	// session should be non-nil during Run and nil after
+	e := &ClaudeExecutor{}
+
+	// before run, session is nil
+	assert.Nil(t, e.Session())
+
+	sessionSeen := false
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error {
+				// check session during wait (still running)
+				if e.Session() != nil {
+					sessionSeen = true
+				}
+				return nil
+			}, nil
+		},
+	}
+	e.cmdRunner = mock
+
+	result := e.Run(context.Background(), "test")
+	require.NoError(t, result.Error)
+
+	// session was available during run
+	assert.True(t, sessionSeen, "session should be non-nil during Run")
+
+	// after run, session is nil
+	assert.Nil(t, e.Session())
+}
+
+func TestClaudeExecutor_Run_SendInitialPromptFailure(t *testing.T) {
+	// when the stdin write fails during initial Send(), Run() should return error
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			// return a writer that always fails
+			failWriter := &failingWriteCloser{writeErr: errors.New("broken pipe")}
+			return failWriter, strings.NewReader(""), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.Error(t, result.Error)
+	assert.Contains(t, result.Error.Error(), "send initial prompt")
+	// session should be nil after failed run
+	assert.Nil(t, e.Session())
+}
+
+func TestClaudeExecutor_Run_CustomArgs_ClosesStdin(t *testing.T) {
+	// when Args is set (custom args path), stdin should be closed immediately
+	closeCalled := false
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return &trackingWriteCloser{closeFn: func() { closeCalled = true }},
+				strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`),
+				func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, Args: "--custom-flag"}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.True(t, closeCalled, "stdin should be closed when using custom args")
+}
+
+func TestClaudeExecutor_Session_NilAfterStartError(t *testing.T) {
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			return nil, nil, nil, errors.New("command not found")
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.Error(t, result.Error)
+	assert.Nil(t, e.Session(), "session should remain nil after start error")
+}
+
+func TestClaudeExecutor_SendMessage_DuringRun(t *testing.T) {
+	// verify that Session().Send() works while Run() is actively streaming output.
+	// this is the happy-path for the interactive messaging feature.
+	stdinBuf := &bytes.Buffer{}
+	streamStarted := make(chan struct{})
+	sendDone := make(chan struct{})
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			// use a pipe so output blocks until we write to it
+			pr, pw := io.Pipe()
+			go func() {
+				// signal that stream is ready (session should be active)
+				close(streamStarted)
+				// wait for test to send message before producing output
+				<-sendDone
+				pw.Write([]byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}` + "\n"))
+				pw.Close()
+			}()
+			return nopWriteCloser{stdinBuf}, pr, func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock}
+
+	// run executor in background
+	done := make(chan Result, 1)
+	go func() { done <- e.Run(context.Background(), "initial prompt") }()
+
+	// wait for stream to start (session is now active)
+	<-streamStarted
+
+	// send a message via the active session
+	session := e.Session()
+	require.NotNil(t, session, "session should be active during Run")
+	require.NoError(t, session.Send("follow-up message"))
+	close(sendDone)
+
+	// wait for Run to complete
+	result := <-done
+	require.NoError(t, result.Error)
+
+	// verify both initial prompt and follow-up were written to stdin
+	written := stdinBuf.String()
+	assert.Contains(t, written, "initial prompt")
+	assert.Contains(t, written, "follow-up message")
+
+	// verify both are valid JSON lines
+	lines := strings.Split(strings.TrimSpace(written), "\n")
+	require.Len(t, lines, 2)
+	for i, line := range lines {
+		var msg stdinMessage
+		require.NoError(t, json.Unmarshal([]byte(line), &msg), "line %d should be valid JSON", i)
+		assert.Equal(t, "user", msg.Type)
+	}
+}
+
+// failingWriteCloser returns an error on every Write call.
+type failingWriteCloser struct{ writeErr error }
+
+func (w *failingWriteCloser) Write([]byte) (int, error) { return 0, w.writeErr }
+func (w *failingWriteCloser) Close() error              { return nil }
+
+// trackingWriteCloser tracks Close() calls.
+type trackingWriteCloser struct {
+	closeFn func()
+}
+
+func (w *trackingWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (w *trackingWriteCloser) Close() error                { w.closeFn(); return nil }
