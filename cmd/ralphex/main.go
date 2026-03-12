@@ -484,6 +484,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
 	}
+	req.Colors.Info().Printf("progress log in %s\n", baseLog.Path())
 
 	// display completion with stats
 	if stats.Files > 0 {
