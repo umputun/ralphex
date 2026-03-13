@@ -73,8 +73,10 @@ forward_signal() {
     if [[ -n "$gemini_pid" ]]; then
         kill -TERM "$gemini_pid" 2>/dev/null || true
     fi
+    cleanup
+    exit 143
 }
-trap 'forward_signal; cleanup' TERM
+trap forward_signal TERM
 
 # run gemini in background, capturing stderr and piping stdout through named pipe.
 # this allows us to capture the PID for SIGTERM forwarding while still streaming output.

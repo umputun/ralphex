@@ -292,6 +292,21 @@ if [[ -f "$TMPDIR_TEST/gemini_pid" ]]; then
     else
         pass "SIGTERM forwarded to gemini child process"
     fi
+
+    # verify the wrapper itself also exited
+    if kill -0 "$wrapper_pid" 2>/dev/null; then
+        fail "wrapper process did not exit after SIGTERM trap" "PID $wrapper_pid still running"
+        kill -9 "$wrapper_pid" 2>/dev/null || true
+    else
+        pass "wrapper process exited promptly on SIGTERM"
+        # check if exit code was 143 (128 + 15)
+        wait "$wrapper_pid" 2>/dev/null || exit_code=$?
+        if [[ "${exit_code:-0}" -eq 143 ]]; then
+            pass "wrapper process exited with code 143"
+        else
+            fail "wrapper process expected to exit with code 143, got ${exit_code:-0}"
+        fi
+    fi
 else
     fail "could not detect gemini child PID" "pid file not created"
 fi
