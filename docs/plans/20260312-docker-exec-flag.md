@@ -57,22 +57,22 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh` (test classes section, add new `TestRunDockerExec` class)
 
-- [ ] create `TestRunDockerExec` test class (mock `subprocess.Popen` to capture cmd)
-- [ ] add `test_exec_cmd_replaces_ralphex` - verify `/srv/ralphex` not in cmd, shlex-split exec_cmd is
-- [ ] add `test_exec_cmd_shlex_splits_args` - verify `"bash -l"` becomes `["bash", "-l"]`
-- [ ] add `test_exec_cmd_none_uses_ralphex` - verify default behavior unchanged when exec_cmd=None
-- [ ] add `test_exec_cmd_nested_quotes` - verify `"echo 'hello world'"` splits correctly
-- [ ] run tests - expect failures (exec_cmd param not implemented yet)
+- [x] create `TestRunDockerExec` test class (mock `subprocess.Popen` to capture cmd)
+- [x] add `test_exec_cmd_replaces_ralphex` - verify `/srv/ralphex` not in cmd, shlex-split exec_cmd is
+- [x] add `test_exec_cmd_shlex_splits_args` - verify `"bash -l"` becomes `["bash", "-l"]`
+- [x] add `test_exec_cmd_none_uses_ralphex` - verify default behavior unchanged when exec_cmd=None
+- [x] add `test_exec_cmd_nested_quotes` - verify `"echo 'hello world'"` splits correctly
+- [x] run tests - expect failures (exec_cmd param not implemented yet)
 
 ### Task 4: Implement run_docker changes
 
 **Files:**
 - Modify: `scripts/ralphex-dk.sh` (run_docker function)
 
-- [ ] add `exec_cmd: str | None = None` parameter to `run_docker()` signature
-- [ ] add `import shlex` if not already present
-- [ ] modify command building: if exec_cmd, use `[image] + shlex.split(exec_cmd)` instead of `[image, "/srv/ralphex"] + args`
-- [ ] run tests - all run_docker tests should pass
+- [x] add `exec_cmd: str | None = None` parameter to `run_docker()` signature
+- [x] add `import shlex` if not already present
+- [x] modify command building: if exec_cmd, use `[image] + shlex.split(exec_cmd)` instead of `[image, "/srv/ralphex"] + args`
+- [x] run tests - all run_docker tests should pass
 
 ### Task 5: Add main() flow tests
 

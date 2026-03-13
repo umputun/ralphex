@@ -42,6 +42,7 @@ import hashlib
 import os
 import platform
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -54,7 +55,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 from types import FrameType
-from typing import Optional
+from typing import Any, Optional
 from urllib.request import urlopen
 
 DEFAULT_IMAGE = "ghcr.io/umputun/ralphex-go:latest"
@@ -786,7 +787,7 @@ def build_base_env_vars() -> list[str]:
     ]
 
 
-def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str], exec_cmd: str | None = None) -> int:
     """build and execute docker run command."""
     cmd = ["docker", "run"]
 
@@ -807,8 +808,11 @@ def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], b
 
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])
-    cmd.extend([image, "/srv/ralphex"])
-    cmd.extend(args)
+    if exec_cmd:
+        cmd.extend([image] + shlex.split(exec_cmd))
+    else:
+        cmd.extend([image, "/srv/ralphex"])
+        cmd.extend(args)
 
     # defer SIGTERM during Popen+assignment to prevent race where handler sees _active_proc unset.
     # using a deferred handler instead of SIG_IGN so the signal is not lost.
@@ -1325,6 +1329,88 @@ def run_tests() -> None:
                 self.assertIn(mount, vols)
             finally:
                 os.unlink(tmp_path)
+
+    class TestRunDockerExec(unittest.TestCase):
+        """tests for run_docker exec_cmd parameter."""
+
+        def test_exec_cmd_replaces_ralphex(self) -> None:
+            """when exec_cmd is set, /srv/ralphex is not in cmd, exec_cmd is."""
+            captured_cmd: list[str] = []
+
+            def fake_popen(cmd: list[str], **kwargs: Any) -> unittest.mock.MagicMock:
+                captured_cmd.extend(cmd)
+                mock_proc = unittest.mock.MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.wait.return_value = 0
+                return mock_proc
+
+            with unittest.mock.patch("subprocess.Popen", side_effect=fake_popen):
+                with unittest.mock.patch("sys.stdin.isatty", return_value=False):
+                    run_docker("test-image", "8080", [], [], bind_port=False, args=[], exec_cmd="bash")
+
+            self.assertNotIn("/srv/ralphex", captured_cmd)
+            self.assertIn("bash", captured_cmd)
+            # image should be at end followed by exec_cmd parts
+            img_idx = captured_cmd.index("test-image")
+            self.assertEqual(captured_cmd[img_idx + 1], "bash")
+
+        def test_exec_cmd_shlex_splits_args(self) -> None:
+            """exec_cmd='bash -l' is split into ['bash', '-l']."""
+            captured_cmd: list[str] = []
+
+            def fake_popen(cmd: list[str], **kwargs: Any) -> unittest.mock.MagicMock:
+                captured_cmd.extend(cmd)
+                mock_proc = unittest.mock.MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.wait.return_value = 0
+                return mock_proc
+
+            with unittest.mock.patch("subprocess.Popen", side_effect=fake_popen):
+                with unittest.mock.patch("sys.stdin.isatty", return_value=False):
+                    run_docker("test-image", "8080", [], [], bind_port=False, args=[], exec_cmd="bash -l")
+
+            img_idx = captured_cmd.index("test-image")
+            self.assertEqual(captured_cmd[img_idx + 1], "bash")
+            self.assertEqual(captured_cmd[img_idx + 2], "-l")
+
+        def test_exec_cmd_none_uses_ralphex(self) -> None:
+            """when exec_cmd is None (default), /srv/ralphex is used."""
+            captured_cmd: list[str] = []
+
+            def fake_popen(cmd: list[str], **kwargs: Any) -> unittest.mock.MagicMock:
+                captured_cmd.extend(cmd)
+                mock_proc = unittest.mock.MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.wait.return_value = 0
+                return mock_proc
+
+            with unittest.mock.patch("subprocess.Popen", side_effect=fake_popen):
+                with unittest.mock.patch("sys.stdin.isatty", return_value=False):
+                    run_docker("test-image", "8080", [], [], bind_port=False, args=["plan.md"], exec_cmd=None)
+
+            self.assertIn("/srv/ralphex", captured_cmd)
+            img_idx = captured_cmd.index("test-image")
+            self.assertEqual(captured_cmd[img_idx + 1], "/srv/ralphex")
+            self.assertEqual(captured_cmd[img_idx + 2], "plan.md")
+
+        def test_exec_cmd_nested_quotes(self) -> None:
+            """exec_cmd="echo 'hello world'" splits correctly."""
+            captured_cmd: list[str] = []
+
+            def fake_popen(cmd: list[str], **kwargs: Any) -> unittest.mock.MagicMock:
+                captured_cmd.extend(cmd)
+                mock_proc = unittest.mock.MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.wait.return_value = 0
+                return mock_proc
+
+            with unittest.mock.patch("subprocess.Popen", side_effect=fake_popen):
+                with unittest.mock.patch("sys.stdin.isatty", return_value=False):
+                    run_docker("test-image", "8080", [], [], bind_port=False, args=[], exec_cmd="echo 'hello world'")
+
+            img_idx = captured_cmd.index("test-image")
+            self.assertEqual(captured_cmd[img_idx + 1], "echo")
+            self.assertEqual(captured_cmd[img_idx + 2], "hello world")
 
     class TestKeychainServiceName(unittest.TestCase):
         def test_default_claude_dir(self) -> None:
@@ -2859,7 +2945,7 @@ def run_tests() -> None:
     for tc in [TestResolvePath, TestSymlinkTargetDirs, TestShouldBindPort, TestBuildVolumes,
                TestBuildVolumesGitignore, TestDetectGitWorktree, TestDetectTimezone,
                TestExtractCredentials, TestScheduleCleanup,
-               TestBuildDockerCmd, TestKeychainServiceName, TestBuildVolumesClaudeHome,
+               TestBuildDockerCmd, TestRunDockerExec, TestKeychainServiceName, TestBuildVolumesClaudeHome,
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
