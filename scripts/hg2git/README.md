@@ -21,7 +21,7 @@ vcs_command = /path/to/scripts/hg2git/hg2git.sh
 
 ## Supported commands
 
-`rev-parse`, `symbolic-ref`, `show-ref`, `status`, `log`, `diff`, `add`, `commit`, `checkout`, `check-ignore`, `stash`, `worktree` (returns error — not supported in hg)
+`rev-parse`, `symbolic-ref`, `show-ref`, `status`, `log`, `diff`, `add`, `commit`, `checkout`, `check-ignore`, `worktree` (returns error - not supported in hg)
 
 ## Testing
 

@@ -11,11 +11,7 @@ Python wrapper script that runs ralphex inside a Docker container, handling cred
 ## Usage
 
 ```bash
-# via symlink (recommended)
 python3 scripts/ralphex-dk.sh [wrapper-flags] [ralphex-args]
-
-# direct
-python3 scripts/ralphex-dk/ralphex_dk.py [wrapper-flags] [ralphex-args]
 ```
 
 ### Wrapper flags
@@ -31,11 +27,7 @@ python3 scripts/ralphex-dk/ralphex_dk.py [wrapper-flags] [ralphex-args]
 ## Running Tests
 
 ```bash
-# via symlink (backward compatible)
 python3 scripts/ralphex-dk.sh --test
-
-# direct execution
-cd scripts/ralphex-dk && python3 ralphex_dk_test.py
 ```
 
 ## Installation (curl)
@@ -45,4 +37,4 @@ curl -sL https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphe
 chmod +x /usr/local/bin/ralphex
 ```
 
-The symlink at `scripts/ralphex-dk.sh` preserves this install URL.
+`scripts/ralphex-dk.sh` is the actual file, keeping this install URL stable. `ralphex_dk.py` is a symlink back to it for Python test imports.
