@@ -29,3 +29,18 @@ bash scripts/gemini-as-claude/gemini-as-claude_test.sh
 
 - `gemini` CLI installed and accessible
 - `jq` for JSON translation
+
+## Troubleshooting
+
+### YOLO mode is disabled
+
+If you see an error like:
+```
+[26-03-13 21:44:54] YOLO mode is disabled by the "disableYolo" setting.
+[26-03-13 21:44:54] YOLO mode is disabled by your administrator. To enable it, please request an update to the settings at: https://goo.gle/manage-gemini-cli
+```
+The right way to fix it is:
+1. Run `gemini` to start the interactive session.
+2. Type `/settings` and press Enter.
+3. Look for a **Security** or **General** section.
+4. Toggle the **"Disable YOLO mode"** setting if it is visible there.
