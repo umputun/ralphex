@@ -133,6 +133,12 @@ chmod +x /usr/local/bin/ralphex
 
 # for non-Go projects, use base image
 export RALPHEX_IMAGE=ghcr.io/umputun/ralphex:latest
+
+# troubleshoot container with interactive shell
+ralphex --exec bash
+
+# run specific command in container
+ralphex --exec "go version"
 ```
 
 **Environment variables:**

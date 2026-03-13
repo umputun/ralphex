@@ -7,6 +7,7 @@ Usage: ralphex-dk.sh [wrapper-flags] [ralphex-args]
 Wrapper-specific flags (parsed by this script):
   -E, --env VAR[=val]        extra env var to pass to container (repeatable)
   -v, --volume src:dst[:opts] extra volume mount (repeatable)
+  --exec CMD                 run CMD instead of ralphex (e.g., --exec bash)
   --update                   pull latest Docker image and exit
   --update-script            update this wrapper script and exit
   --test                     run embedded unit tests and exit
@@ -22,6 +23,8 @@ Examples:
   ralphex-dk.sh -v /data:/mnt/data:ro docs/plans/feature.md
   ralphex-dk.sh -E DEBUG=1 -E API_KEY docs/plans/feature.md
   ralphex-dk.sh -E FOO -- -v /ignored:path plan.md   # -v goes to ralphex
+  ralphex-dk.sh --exec bash                          # launch shell in container
+  ralphex-dk.sh --exec "go version"                  # run specific command
   ralphex-dk.sh --update
   ralphex-dk.sh --update-script
 

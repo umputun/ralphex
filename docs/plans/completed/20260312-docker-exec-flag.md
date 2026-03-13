@@ -102,22 +102,22 @@
 - Modify: `llms.txt` (Docker Images section, lines ~119-185)
 - Modify: `CLAUDE.md` (Docker Wrapper section)
 
-- [ ] add `--exec CMD` to usage block at top of script (after `-v, --volume` line ~11)
-- [ ] add `--exec CMD` to llms.txt "Using Docker wrapper" examples and environment vars table
-- [ ] add `--exec CMD` to CLAUDE.md "AWS Bedrock Provider (Docker Wrapper Only)" section or create subsection
-- [ ] run tests - verify no regressions
+- [x] add `--exec CMD` to usage block at top of script (after `-v, --volume` line ~11)
+- [x] add `--exec CMD` to llms.txt "Using Docker wrapper" examples and environment vars table
+- [x] add `--exec CMD` to CLAUDE.md "AWS Bedrock Provider (Docker Wrapper Only)" section or create subsection
+- [x] run tests - verify no regressions
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] verify `--exec bash` would launch shell (manual test or mock verification)
-- [ ] verify `--exec "bash -l"` correctly splits command
-- [ ] verify `-E`/`-v` flags work with `--exec`
-- [ ] verify auth check still required
-- [ ] run full test suite: `python3 scripts/ralphex-dk.sh --test`
+- [x] verify `--exec bash` would launch shell (manual test or mock verification)
+- [x] verify `--exec "bash -l"` correctly splits command
+- [x] verify `-E`/`-v` flags work with `--exec`
+- [x] verify auth check still required
+- [x] run full test suite: `python3 scripts/ralphex-dk.sh --test`
 
 ### Task 9: [Final] Complete plan
 
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

@@ -142,6 +142,21 @@ Key functions in `scripts/ralphex-dk.sh`:
 
 Documentation: `docs/bedrock-setup.md`
 
+### Docker Wrapper Exec Mode
+
+The `--exec CMD` flag runs an arbitrary command instead of ralphex, useful for troubleshooting:
+
+- Examples: `--exec bash` (interactive shell), `--exec "go version"` (specific command)
+- Auth check still required (verifies Claude credentials available)
+- Port binding skipped (no --serve equivalent needed for exec mode)
+- Extra env/volume flags work normally: `ralphex -E DEBUG=1 --exec bash`
+- Command is shlex-split: `--exec "bash -l"` becomes `["bash", "-l"]`
+
+Key implementation in `scripts/ralphex-dk.sh`:
+- Parser: `--exec` flag sets `exec_cmd` attribute
+- `run_docker()`: `exec_cmd` parameter replaces entrypoint command when set
+- `main()`: passes `exec_cmd` to `run_docker()` with `bind_port=False`
+
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, error)`
