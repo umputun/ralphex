@@ -281,7 +281,10 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		return Result{Error: fmt.Errorf("send initial prompt: %w", sendErr)}
 	}
 
-	result := e.parseStream(ctx, stdout)
+	// close stdin when result event is received so Claude process can exit.
+	// with --input-format stream-json, Claude stays alive waiting for more input;
+	// closing stdin signals "no more messages" and lets the process terminate.
+	result := e.parseStream(ctx, stdout, session.Close)
 
 	if err := wait(); err != nil {
 		// check if it was context cancellation
@@ -322,7 +325,8 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 // parseStream reads and parses the JSON stream from claude CLI.
 // uses readLines internally, so there is no line length limit.
 // checks ctx.Done() between reads so cancellation is not blocked by slow pipe reads.
-func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
+// onResult is called when a result event is received (typically closes stdin to let the process exit).
+func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, onResult func() error) Result {
 	var output strings.Builder
 	var signal string
 
@@ -356,6 +360,12 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
 			if sig := detectSignal(text); sig != "" {
 				signal = sig
 			}
+		}
+
+		// result event marks the end of this conversation turn;
+		// close stdin so the process can exit instead of waiting for more input
+		if event.Type == "result" && onResult != nil {
+			onResult()
 		}
 	})
 

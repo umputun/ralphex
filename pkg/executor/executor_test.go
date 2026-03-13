@@ -228,7 +228,7 @@ func TestClaudeExecutor_parseStream(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &ClaudeExecutor{}
-			result := e.parseStream(context.Background(), strings.NewReader(tc.input))
+			result := e.parseStream(context.Background(), strings.NewReader(tc.input), nil)
 
 			assert.Equal(t, tc.wantOutput, result.Output)
 			assert.Equal(t, tc.wantSignal, result.Signal)
@@ -247,7 +247,7 @@ func TestClaudeExecutor_parseStream_withHandler(t *testing.T) {
 		},
 	}
 
-	result := e.parseStream(context.Background(), strings.NewReader(input))
+	result := e.parseStream(context.Background(), strings.NewReader(input), nil)
 
 	assert.Equal(t, "chunk1chunk2", result.Output)
 	assert.Equal(t, []string{"chunk1", "chunk2"}, chunks)
@@ -258,7 +258,7 @@ func TestClaudeExecutor_parseStream_withDebug(t *testing.T) {
 	input := "not json\n" + `{"type":"content_block_delta","delta":{"type":"text_delta","text":"valid"}}`
 
 	e := &ClaudeExecutor{Debug: true}
-	result := e.parseStream(context.Background(), strings.NewReader(input))
+	result := e.parseStream(context.Background(), strings.NewReader(input), nil)
 
 	assert.Equal(t, "not json\nvalid", result.Output)
 }
@@ -592,7 +592,7 @@ func TestClaudeExecutor_parseStream_largeLines(t *testing.T) {
 			jsonLine := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + largeText + `"}}`
 
 			e := &ClaudeExecutor{}
-			result := e.parseStream(context.Background(), strings.NewReader(jsonLine))
+			result := e.parseStream(context.Background(), strings.NewReader(jsonLine), nil)
 
 			require.NoError(t, result.Error, "should handle %d byte line without error", tc.size)
 			assert.Len(t, result.Output, tc.size, "output should contain full text")
@@ -613,10 +613,34 @@ func TestClaudeExecutor_parseStream_multipleLargeLines(t *testing.T) {
 	input := strings.Join(lines, "\n")
 
 	e := &ClaudeExecutor{}
-	result := e.parseStream(context.Background(), strings.NewReader(input))
+	result := e.parseStream(context.Background(), strings.NewReader(input), nil)
 
 	require.NoError(t, result.Error)
 	assert.Len(t, result.Output, lineSize*numLines, "should contain all output from all lines")
+}
+
+func TestClaudeExecutor_parseStream_onResultCalled(t *testing.T) {
+	input := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}
+{"type":"result","result":"session summary"}`
+
+	var called bool
+	e := &ClaudeExecutor{}
+	result := e.parseStream(context.Background(), strings.NewReader(input), func() error {
+		called = true
+		return nil
+	})
+
+	assert.True(t, called, "onResult should be called when result event is received")
+	assert.Equal(t, "hello", result.Output)
+}
+
+func TestClaudeExecutor_parseStream_onResultNil(t *testing.T) {
+	input := `{"type":"result","result":"summary"}`
+
+	e := &ClaudeExecutor{}
+	result := e.parseStream(context.Background(), strings.NewReader(input), nil)
+
+	assert.NoError(t, result.Error, "nil onResult should not panic")
 }
 
 func TestPatternMatchError_Error(t *testing.T) {
