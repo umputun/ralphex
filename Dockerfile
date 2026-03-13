@@ -49,7 +49,7 @@ COPY --from=build /build/ralphex /srv/ralphex
 RUN chmod +x /srv/ralphex
 
 # copy init script (baseimage runs /srv/init.sh before main command)
-COPY scripts/init-docker.sh /srv/init.sh
+COPY scripts/internal/init-docker.sh /srv/init.sh
 RUN chmod +x /srv/init.sh
 
 # expose web dashboard port

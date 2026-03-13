@@ -33,13 +33,13 @@ When `claude_args` has a value (default: `--dangerously-skip-permissions --outpu
 
 ## Codex wrapper (included example)
 
-The repository includes a working wrapper at `scripts/codex-as-claude.sh` that translates codex JSONL events to Claude stream-json format.
+The repository includes a working wrapper at `scripts/codex-as-claude/codex-as-claude.sh` that translates codex JSONL events to Claude stream-json format.
 
 ### Setup
 
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
-claude_command = /path/to/scripts/codex-as-claude.sh
+claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
 claude_args =
 ```
 
@@ -80,13 +80,13 @@ The script uses `jq` for JSON parsing, which is included in ralphex Docker image
 
 ## OpenCode wrapper (included example)
 
-The repository includes a wrapper at `scripts/opencode-as-claude.sh` that translates OpenCode JSONL events to Claude stream-json format. It uses `jq` for JSON parsing and auto-sets permission auto-allow (`{"permission":{"*":"allow"}}`) for autonomous execution.
+The repository includes a wrapper at `scripts/opencode/opencode-as-claude.sh` that translates OpenCode JSONL events to Claude stream-json format. It uses `jq` for JSON parsing and auto-sets permission auto-allow (`{"permission":{"*":"allow"}}`) for autonomous execution.
 
 ### Setup
 
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
-claude_command = /path/to/scripts/opencode-as-claude.sh
+claude_command = /path/to/scripts/opencode/opencode-as-claude.sh
 claude_args =
 ```
 

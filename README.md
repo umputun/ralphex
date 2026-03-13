@@ -878,7 +878,7 @@ When running ralphex in Docker, your script must be accessible inside the contai
 
 The `claude_command` and `claude_args` config options let you replace Claude Code with any CLI that produces compatible `stream-json` output. This means codex, Gemini CLI, local LLMs, or any other tool can drive task execution and review phases — you just need a wrapper script that translates the tool's output format.
 
-A working example is included: [`scripts/codex-as-claude.sh`](https://github.com/umputun/ralphex/blob/master/scripts/codex-as-claude.sh) wraps codex to produce Claude-compatible events. To use it:
+A working example is included: [`scripts/codex-as-claude/codex-as-claude.sh`](https://github.com/umputun/ralphex/blob/master/scripts/codex-as-claude/codex-as-claude.sh) wraps codex to produce Claude-compatible events. To use it:
 
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
@@ -904,7 +904,7 @@ ralphex can work with Mercurial repositories through the `vcs_command` config op
 vcs_command = ~/.config/ralphex/scripts/hg2git.sh
 ```
 
-A reference translation script is included at [`scripts/hg2git.sh`](https://github.com/umputun/ralphex/blob/master/scripts/hg2git.sh). It maps the ~15 git subcommands ralphex uses internally to Mercurial equivalents, with phase-based commit logic (amend on draft, commit on public). Requires bash 4.0+ (for associative arrays used in diff stats parsing).
+A reference translation script is included at [`scripts/hg2git/hg2git.sh`](https://github.com/umputun/ralphex/blob/master/scripts/hg2git/hg2git.sh). It maps the ~15 git subcommands ralphex uses internally to Mercurial equivalents, with phase-based commit logic (amend on draft, commit on public). Requires bash 4.0+ (for associative arrays used in diff stats parsing).
 
 You will also need to customise prompt files to replace git commands that Claude executes as bash commands during reviews. See [Mercurial support documentation](https://github.com/umputun/ralphex/blob/master/docs/hg-support.md) for full setup instructions, prompt replacement examples, `.hgignore` setup, and known limitations.
 

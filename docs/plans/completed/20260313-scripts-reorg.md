@@ -131,16 +131,16 @@ Key decisions:
 - Create: `scripts/ralphex-dk.sh` (symlink → `ralphex-dk/ralphex_dk.py`)
 - Create: `scripts/ralphex-dk/README.md`
 
-- [ ] create `scripts/ralphex-dk/` directory
-- [ ] copy `scripts/ralphex-dk.sh` to `scripts/ralphex-dk/ralphex_dk.py`
-- [ ] extract all test classes from `ralphex_dk.py` into `ralphex_dk_test.py`
-- [ ] add imports in `ralphex_dk_test.py` to import functions/classes from `ralphex_dk`
-- [ ] keep `--test` flag in `ralphex_dk.py` as thin shim that imports and runs test module
-- [ ] remove old `scripts/ralphex-dk.sh`, create symlink: `scripts/ralphex-dk.sh -> ralphex-dk/ralphex_dk.py`
-- [ ] verify `python3 scripts/ralphex-dk.sh --test` works (via symlink)
-- [ ] verify `cd scripts/ralphex-dk && python3 ralphex_dk_test.py` works (direct import)
-- [ ] create README.md with description, install instructions, usage
-- [ ] add `__pycache__/` to `.gitignore` if not already present
+- [x] create `scripts/ralphex-dk/` directory
+- [x] copy `scripts/ralphex-dk.sh` to `scripts/ralphex-dk/ralphex_dk.py`
+- [x] extract all test classes from `ralphex_dk.py` into `ralphex_dk_test.py`
+- [x] add imports in `ralphex_dk_test.py` to import functions/classes from `ralphex_dk`
+- [x] keep `--test` flag in `ralphex_dk.py` as thin shim that imports and runs test module
+- [x] remove old `scripts/ralphex-dk.sh`, create symlink: `scripts/ralphex-dk.sh -> ralphex-dk/ralphex_dk.py`
+- [x] verify `python3 scripts/ralphex-dk.sh --test` works (via symlink)
+- [x] verify `cd scripts/ralphex-dk && python3 ralphex_dk_test.py` works (direct import)
+- [x] create README.md with description, install instructions, usage
+- [x] add `__pycache__/` to `.gitignore` if not already present
 
 ### Task 6: Update build/CI references
 
@@ -151,13 +151,13 @@ Key decisions:
 - Verify: `.github/workflows/ci.yml`
 - Verify: `.zed/tasks.json`
 
-- [ ] update `Dockerfile`: `COPY scripts/init-docker.sh` → `COPY scripts/internal/init-docker.sh`
-- [ ] update `Makefile`: `scripts/prep-toy-test.sh` → `scripts/internal/prep-toy-test.sh`, `scripts/prep-review-test.sh` → `scripts/internal/prep-review-test.sh`
-- [ ] update `.goreleaser.yml` hook: `scripts/update-plugin-version.sh` → `scripts/internal/update-plugin-version.sh`
-- [ ] verify `.github/workflows/ci.yml` still works (uses `scripts/ralphex-dk.sh` which is now symlink - should work as-is)
-- [ ] verify `.zed/tasks.json` still works (uses `scripts/ralphex-dk.sh` symlink)
-- [ ] run `go test ./...` to verify Go tests pass
-- [ ] run `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
+- [x] update `Dockerfile`: `COPY scripts/init-docker.sh` → `COPY scripts/internal/init-docker.sh`
+- [x] update `Makefile`: `scripts/prep-toy-test.sh` → `scripts/internal/prep-toy-test.sh`, `scripts/prep-review-test.sh` → `scripts/internal/prep-review-test.sh`
+- [x] update `.goreleaser.yml` hook: `scripts/update-plugin-version.sh` → `scripts/internal/update-plugin-version.sh`
+- [x] verify `.github/workflows/ci.yml` still works (uses `scripts/ralphex-dk.sh` which is now symlink - should work as-is)
+- [x] verify `.zed/tasks.json` still works (uses `scripts/ralphex-dk.sh` symlink)
+- [x] run `go test ./...` to verify Go tests pass
+- [x] run `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
 
 ### Task 7: Update documentation references
 
@@ -169,30 +169,30 @@ Key decisions:
 - Modify: `docs/hg-support.md`
 - Modify: `.claude-plugin/README.md`
 
-- [ ] update `CLAUDE.md` references: `scripts/codex-as-claude.sh` → `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/hg2git.sh` → `scripts/hg2git/hg2git.sh`, `scripts/prep-toy-test.sh` → `scripts/internal/prep-toy-test.sh`, keep `scripts/ralphex-dk.sh` as-is (symlink)
-- [ ] update `README.md` references: same pattern, keep curl URL as `scripts/ralphex-dk.sh`
-- [ ] update `llms.txt` references: same pattern
-- [ ] update `docs/custom-providers.md`: `scripts/codex-as-claude.sh` → `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/opencode-as-claude.sh` → `scripts/opencode/opencode-as-claude.sh`
-- [ ] update `docs/hg-support.md`: `scripts/hg2git.sh` → `scripts/hg2git/hg2git.sh`
-- [ ] update `.claude-plugin/README.md`: `scripts/update-plugin-version.sh` → `scripts/internal/update-plugin-version.sh`
-- [ ] do NOT update `docs/plans/completed/` files (historical records)
+- [x] update `CLAUDE.md` references: `scripts/codex-as-claude.sh` → `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/hg2git.sh` → `scripts/hg2git/hg2git.sh`, `scripts/prep-toy-test.sh` → `scripts/internal/prep-toy-test.sh`, keep `scripts/ralphex-dk.sh` as-is (symlink)
+- [x] update `README.md` references: same pattern, keep curl URL as `scripts/ralphex-dk.sh`
+- [x] update `llms.txt` references: same pattern
+- [x] update `docs/custom-providers.md`: `scripts/codex-as-claude.sh` → `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/opencode-as-claude.sh` → `scripts/opencode/opencode-as-claude.sh`
+- [x] update `docs/hg-support.md`: `scripts/hg2git.sh` → `scripts/hg2git/hg2git.sh`
+- [x] update `.claude-plugin/README.md`: `scripts/update-plugin-version.sh` → `scripts/internal/update-plugin-version.sh`
+- [x] do NOT update `docs/plans/completed/` files (historical records)
 
 ### Task 8: Verify and push
 
-- [ ] run `python3 scripts/ralphex-dk.sh --test` (all 165+ tests pass via symlink)
-- [ ] run `bash scripts/hg2git/hg2git_test.sh`
-- [ ] run `bash scripts/opencode/opencode-as-claude_test.sh`
-- [ ] run `bash scripts/opencode/opencode-review_test.sh`
-- [ ] run `go test ./...`
-- [ ] run `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
-- [ ] push branch, test curl URL: `curl -sL https://raw.githubusercontent.com/umputun/ralphex/refactor/scripts-reorg/scripts/ralphex-dk.sh | head -5`
-- [ ] verify symlink works via GitHub raw
+- [x] run `python3 scripts/ralphex-dk.sh --test` (all 165+ tests pass via symlink)
+- [x] run `bash scripts/hg2git/hg2git_test.sh`
+- [x] run `bash scripts/opencode/opencode-as-claude_test.sh`
+- [x] run `bash scripts/opencode/opencode-review_test.sh`
+- [x] run `go test ./...`
+- [x] run `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
+- [x] push branch, test curl URL: `curl -sL https://raw.githubusercontent.com/umputun/ralphex/refactor/scripts-reorg/scripts/ralphex-dk.sh | head -5`
+- [x] verify symlink works via GitHub raw
 
 ### Task 9: [Final] Update project documentation
 
-- [ ] update CLAUDE.md project structure section to reflect new layout
-- [ ] update README.md if scripts section needs structural changes
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md project structure section to reflect new layout
+- [x] update README.md if scripts section needs structural changes
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

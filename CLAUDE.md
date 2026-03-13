@@ -40,7 +40,12 @@ pkg/progress/       # timestamped logging with color
 pkg/status/         # shared execution model types: signals, phases, sections
 pkg/web/            # web dashboard, SSE streaming, session management
 e2e/                # playwright e2e tests for web dashboard
-scripts/            # utility scripts (hg2git.sh, codex-as-claude.sh, prep-toy-test.sh)
+scripts/            # utility scripts organized by function
+scripts/ralphex-dk/ # Docker wrapper script (Python) with tests
+scripts/codex-as-claude/ # codex wrapper for Claude-compatible output
+scripts/hg2git/     # Mercurial-to-git translation script with tests
+scripts/opencode/   # opencode wrapper scripts with tests
+scripts/internal/   # internal dev/CI scripts (prep-toy-test, init-docker, etc.)
 docs/plans/         # plan files location
 ```
 
@@ -116,7 +121,7 @@ Key files:
 
 ### Alternative Providers for Claude Phases
 
-`claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible `stream-json` output. A codex wrapper script is included at `scripts/codex-as-claude.sh`.
+`claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible `stream-json` output. A codex wrapper script is included at `scripts/codex-as-claude/codex-as-claude.sh`.
 
 Config: `claude_command = /path/to/codex-as-claude.sh` and optionally `claude_args =` (empty).
 Note: default Claude flags may still be passed due to config fallback; wrappers should ignore unknown flags gracefully (the included script does this via `*) shift ;;`).
@@ -233,7 +238,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Custom agents: `~/.config/ralphex/agents/*.txt` or `.ralphex/agents/*.txt`
 - `default_branch` config option: override auto-detected default branch for review diffs
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
-- `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
+- `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
 - Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
 - `review_patience` config option: terminate external review after N consecutive unchanged rounds (0 = disabled). CLI flag `--review-patience` takes precedence
 - `wait_on_limit` config option: duration to wait before retrying on rate limit (e.g., "1h", "30m"). CLI flag `--wait` takes precedence. Disabled by default
@@ -358,7 +363,7 @@ Unit tests mock external calls. After ANY code changes, run e2e test with a toy 
 ### Create Toy Project
 
 ```bash
-./scripts/prep-toy-test.sh
+./scripts/internal/prep-toy-test.sh
 ```
 
 This creates `/tmp/ralphex-test` with a buggy Go file and a plan to fix it.

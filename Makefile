@@ -43,7 +43,7 @@ e2e-ui:
 	E2E_HEADLESS=false go test -v -failfast -count=1 -timeout=10m -tags=e2e ./e2e/...
 
 e2e-prep: build
-	@./scripts/prep-toy-test.sh
+	@./scripts/internal/prep-toy-test.sh
 	@cp .bin/ralphex /tmp/ralphex-test/.bin/ralphex
 	@echo ""
 	@echo "=== E2E Full Test Ready ==="
@@ -53,7 +53,7 @@ e2e-prep: build
 	@echo "Monitor: tail -f /tmp/ralphex-test/progress-fix-issues.txt"
 
 e2e-review: build
-	@./scripts/prep-review-test.sh
+	@./scripts/internal/prep-review-test.sh
 	@cp .bin/ralphex /tmp/ralphex-review-test/.bin/ralphex
 	@echo ""
 	@echo "=== E2E Review Test Ready ==="
@@ -63,7 +63,7 @@ e2e-review: build
 	@echo "Monitor: tail -f /tmp/ralphex-review-test/progress-review.txt"
 
 e2e-codex: build
-	@./scripts/prep-review-test.sh
+	@./scripts/internal/prep-review-test.sh
 	@cp .bin/ralphex /tmp/ralphex-review-test/.bin/ralphex
 	@echo ""
 	@echo "=== E2E Codex-Only Test Ready ==="

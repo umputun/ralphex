@@ -18,7 +18,7 @@ Users can install via the plugin marketplace:
 
 ## Versioning
 
-The `version` field in both JSON files is automatically updated during releases by `scripts/update-plugin-version.sh`, triggered by goreleaser.
+The `version` field in both JSON files is automatically updated during releases by `scripts/internal/update-plugin-version.sh`, triggered by goreleaser.
 
 ## Marketplace Structure
 

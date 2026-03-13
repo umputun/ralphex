@@ -6,7 +6,7 @@ ralphex can work with Mercurial repositories through a two-part approach: a conf
 
 ralphex's Go backend (`pkg/git/external.go`) shells out to a VCS command for repository operations like status checks, commits, and diffs. By default this command is `git`, but the `vcs_command` config option lets you point it at any script that accepts the same arguments and produces compatible output.
 
-The included `scripts/hg2git.sh` reference script translates the ~15 git subcommands ralphex uses into Mercurial equivalents. It dispatches on the first argument (the git subcommand) and handles format conversion where needed (e.g., converting hg status output to git porcelain format).
+The included `scripts/hg2git/hg2git.sh` reference script translates the ~15 git subcommands ralphex uses into Mercurial equivalents. It dispatches on the first argument (the git subcommand) and handles format conversion where needed (e.g., converting hg status output to git porcelain format).
 
 There are two layers to consider:
 
@@ -18,10 +18,10 @@ There are two layers to consider:
 
 ### 1. Place the translation script
 
-Copy `scripts/hg2git.sh` to a permanent location and make it executable:
+Copy `scripts/hg2git/hg2git.sh` to a permanent location and make it executable:
 
 ```bash
-cp scripts/hg2git.sh ~/.config/ralphex/scripts/hg2git.sh
+cp scripts/hg2git/hg2git.sh ~/.config/ralphex/scripts/hg2git.sh
 chmod +x ~/.config/ralphex/scripts/hg2git.sh
 ```
 
@@ -194,13 +194,13 @@ Run individual commands to see what the script produces:
 
 ```bash
 # test repo detection
-./scripts/hg2git.sh rev-parse --show-toplevel
+./scripts/hg2git/hg2git.sh rev-parse --show-toplevel
 
 # test current branch detection
-./scripts/hg2git.sh symbolic-ref --short HEAD
+./scripts/hg2git/hg2git.sh symbolic-ref --short HEAD
 
 # test status output format
-./scripts/hg2git.sh status --porcelain
+./scripts/hg2git/hg2git.sh status --porcelain
 
 # test phase detection (used for commit logic)
 hg log -r . --template '{phase}'
