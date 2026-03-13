@@ -4,9 +4,9 @@ Python wrapper script that runs ralphex inside a Docker container, handling cred
 
 ## Files
 
-- `ralphex_dk.py` - main wrapper script (~1000 lines)
+- `ralphex_dk.py` - symlink to `../ralphex-dk.sh` for Python test imports
 - `ralphex_dk_test.py` - unit tests (~1900 lines, 151 tests)
-- `../ralphex-dk.sh` - symlink to `ralphex_dk.py` for backward compatibility (curl install URL)
+- `../ralphex-dk.sh` - actual wrapper script (~1000 lines), served by curl install URL
 
 ## Usage
 
