@@ -122,6 +122,36 @@ Text content is passed verbatim — no truncation or escaping — preserving sig
 
 For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text), the wrapper prepends adapter instructions telling the model to execute review agent tasks sequentially, since OpenCode does not support parallel sub-agents.
 
+## Gemini CLI wrapper (included example)
+
+The repository includes a wrapper at `scripts/gemini-as-claude/gemini-as-claude.sh` that translates Gemini CLI plain-text output to Claude stream-json format.
+
+### Setup
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /path/to/scripts/gemini-as-claude/gemini-as-claude.sh
+claude_args =
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `GEMINI_MODEL` | (gemini default) | Model to use with Gemini CLI |
+
+### How it works
+
+Since Gemini outputs plain text, the script simply wraps each line in a `content_block_delta` JSON event.
+
+```bash
+# gemini emits text like:
+fixed the bug
+
+# wrapper translates to:
+{"type":"content_block_delta","delta":{"type":"text_delta","text":"fixed the bug\n"}}
+```
+
 ## Writing your own wrapper
 
 A wrapper script must:
