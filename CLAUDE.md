@@ -139,7 +139,7 @@ The Docker wrapper script (`scripts/ralphex-dk.sh`) supports AWS Bedrock as an a
 - Credential export: uses `aws configure export-credentials` to extract temporary credentials from AWS profiles
 - Never mounts `~/.aws` directory - exports only specific credentials needed
 
-Key functions in `scripts/ralphex-dk.sh`:
+Key functions in `scripts/ralphex-dk/ralphex_dk.py`:
 - `get_claude_provider()` - returns provider from CLI flag or env var
 - `build_bedrock_env_args()` - builds docker -e flags for BEDROCK_ENV_VARS
 - `export_aws_profile_credentials()` - exports credentials from AWS profile using aws CLI

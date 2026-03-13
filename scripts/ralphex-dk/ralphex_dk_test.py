@@ -26,6 +26,7 @@ from ralphex_dk import (  # noqa: E402
     DEFAULT_PORT,
     VALID_CLAUDE_PROVIDERS,
     ParsedEnvFlags,
+    build_base_env_vars,
     build_bedrock_env_args,
     build_env_vars,
     build_parser,
@@ -290,14 +291,16 @@ class TestDetectTimezone(unittest.TestCase):
                 os.environ["TZ"] = old
 
     def test_timezone_in_docker_cmd(self) -> None:
-        """verify TIME_ZONE env var is included in docker command."""
+        """verify TIME_ZONE env var is included in base env vars."""
         old = os.environ.get("TZ")
         try:
             os.environ["TZ"] = "Asia/Tokyo"
-            # build a minimal docker command and check TIME_ZONE is set
-            cmd = ["-e", f"TIME_ZONE={detect_timezone()}"]
-            self.assertIn("-e", cmd)
-            self.assertIn("TIME_ZONE=Asia/Tokyo", cmd)
+            env_vars = build_base_env_vars()
+            # find TIME_ZONE value in the flat list (format: ["-e", "KEY=val", ...])
+            tz_values = [env_vars[i] for i in range(len(env_vars))
+                         if env_vars[i].startswith("TIME_ZONE=")]
+            self.assertTrue(len(tz_values) > 0, "TIME_ZONE not found in base env vars")
+            self.assertEqual(tz_values[0], "TIME_ZONE=Asia/Tokyo")
         finally:
             if old is None:
                 os.environ.pop("TZ", None)
@@ -526,15 +529,18 @@ class TestClaudeConfigDirEnv(unittest.TestCase):
             shutil.rmtree(tmp)
 
     def test_empty_env_defaults_to_dot_claude(self) -> None:
-        """empty CLAUDE_CONFIG_DIR falls back to ~/.claude."""
+        """empty CLAUDE_CONFIG_DIR falls back to ~/.claude in build_volumes."""
         old = os.environ.get("CLAUDE_CONFIG_DIR")
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
         try:
-            env_val = os.environ.get("CLAUDE_CONFIG_DIR", "")
-            self.assertFalse(env_val)
-            # fallback path
-            result = Path.home() / ".claude"
-            self.assertEqual(result, Path.home() / ".claude")
+            # when CLAUDE_CONFIG_DIR is unset, build_volumes uses ~/.claude as default
+            with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+                vols = build_volumes(None, claude_home=None)
+            # the first volume mount should map ~/.claude -> /mnt/claude
+            default_claude = str((Path.home() / ".claude").resolve())
+            vol_sources = [v.split(":")[0] for v in vols if v.startswith("/")]
+            self.assertIn(default_claude, vol_sources,
+                          f"default ~/.claude path not found in volume mounts: {vols}")
         finally:
             if old is not None:
                 os.environ["CLAUDE_CONFIG_DIR"] = old

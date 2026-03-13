@@ -2,7 +2,7 @@
 # hg2git_test.sh — tests hg2git.sh against the parent hg repo.
 #
 # run from the ralphex directory:
-#   bash scripts/hg2git_test.sh
+#   bash scripts/hg2git/hg2git_test.sh
 #
 # requires: an hg repo accessible from parent directories
 

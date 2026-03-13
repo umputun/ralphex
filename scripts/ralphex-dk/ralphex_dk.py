@@ -50,8 +50,6 @@ import sys
 import tempfile
 import textwrap
 import threading
-import unittest
-import unittest.mock
 from pathlib import Path
 from types import FrameType
 from typing import Optional
@@ -117,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--update-script", action="store_true",
                         help="update this wrapper script and exit")
     parser.add_argument("--test", action="store_true",
-                        help="run embedded unit tests and exit")
+                        help="run unit tests and exit (requires full repo)")
     parser.add_argument("-h", "--help", action="store_true", dest="help",
                         help="show this help and ralphex help, then exit")
     parser.add_argument("--claude-provider", dest="claude_provider", metavar="PROVIDER",
@@ -993,13 +991,17 @@ def main() -> int:
         _cleanup_creds()
 
 
-
 def run_tests() -> None:
     """run unit tests from ralphex_dk_test module."""
     script_dir = str(Path(__file__).resolve().parent)
     if script_dir not in sys.path:
         sys.path.insert(0, script_dir)
-    import ralphex_dk_test
+    try:
+        import ralphex_dk_test
+    except ImportError:
+        print("error: test module not found. tests require the full repository, "
+              "not a standalone install.", file=sys.stderr)
+        sys.exit(1)
     ralphex_dk_test.run_tests()
 
 

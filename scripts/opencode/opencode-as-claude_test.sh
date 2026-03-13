@@ -2,7 +2,7 @@
 # opencode-as-claude_test.sh — tests for opencode-as-claude.sh wrapper.
 #
 # run from the ralphex directory:
-#   bash scripts/opencode-as-claude_test.sh
+#   bash scripts/opencode/opencode-as-claude_test.sh
 #
 # requires: jq, bash
 

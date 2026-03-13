@@ -2,7 +2,7 @@
 # opencode-review_test.sh — tests opencode-review.sh config building.
 #
 # run from the ralphex directory:
-#   bash scripts/opencode-review_test.sh
+#   bash scripts/opencode/opencode-review_test.sh
 #
 # uses a fake opencode stub to capture the final command and env without
 # actually invoking opencode.
