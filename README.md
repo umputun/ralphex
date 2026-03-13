@@ -380,6 +380,20 @@ ralphex -E API_KEY docs/plans/feature.md
 ralphex -E "TAGS=foo,bar,baz" docs/plans/feature.md
 ```
 
+**Exec mode (troubleshooting):**
+```bash
+# launch interactive shell in container for debugging
+ralphex --exec bash
+
+# run specific command in container
+ralphex --exec "go version"
+
+# combine with extra env/volume flags
+ralphex -E DEBUG=1 -v /data:/mnt/data --exec bash
+```
+
+The `--exec` flag runs an arbitrary command instead of ralphex, useful for troubleshooting container environment issues. Auth check still runs, port binding is skipped. The command is shlex-split, so `--exec "bash -l"` becomes `["bash", "-l"]`.
+
 **Updating:**
 ```bash
 ralphex --update         # pull latest docker image
