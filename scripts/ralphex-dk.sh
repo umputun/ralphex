@@ -458,6 +458,34 @@ def merge_env_flags(args_env: list[str]) -> list[str]:
     return result
 
 
+def load_env_files() -> None:
+    """load env vars from ~/.config/ralphex/env if it exists.
+
+    does not override existing os.environ values.
+    lines starting with # and empty lines are skipped.
+    """
+    env_files = [
+        Path.home() / ".config" / "ralphex" / "env",
+    ]
+    for env_file in env_files:
+        if not env_file.is_file():
+            continue
+        try:
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if key and key not in os.environ:
+                    os.environ[key] = value
+        except OSError:
+            pass
+
+
 def merge_volume_flags(args_volume: list[str]) -> list[str]:
     """merge RALPHEX_EXTRA_VOLUMES with CLI -v flags, validate entries.
 
@@ -848,6 +876,9 @@ def main() -> int:
     if parsed.test:
         run_tests()
         return 0
+
+    # load env vars from ~/.config/ralphex/env (does not override existing)
+    load_env_files()
 
     image = os.environ.get("RALPHEX_IMAGE", DEFAULT_IMAGE)
     port = os.environ.get("RALPHEX_PORT", DEFAULT_PORT)
