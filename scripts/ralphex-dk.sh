@@ -812,7 +812,11 @@ def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], b
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])
     if exec_cmd:
-        cmd.extend([image] + shlex.split(exec_cmd))
+        try:
+            cmd.extend([image] + shlex.split(exec_cmd))
+        except ValueError as e:
+            print(f"error: invalid --exec command: {e}", file=sys.stderr)
+            return 1
     else:
         cmd.extend([image, "/srv/ralphex"])
         cmd.extend(args)
@@ -995,7 +999,10 @@ def main() -> int:
         schedule_cleanup(creds_temp)
 
         # handle --exec mode: run custom command instead of ralphex
-        if parsed.exec_cmd:
+        if parsed.exec_cmd is not None:
+            if not parsed.exec_cmd.strip():
+                print("error: --exec requires a non-empty command", file=sys.stderr)
+                return 1
             return run_docker(image, port, volumes, extra_env, bind_port=False, args=[], exec_cmd=parsed.exec_cmd)
 
         # determine port binding
@@ -1418,6 +1425,15 @@ def run_tests() -> None:
             img_idx = captured_cmd.index("test-image")
             self.assertEqual(captured_cmd[img_idx + 1], "echo")
             self.assertEqual(captured_cmd[img_idx + 2], "hello world")
+
+        def test_exec_cmd_malformed_quotes_returns_error(self) -> None:
+            """exec_cmd with unclosed quotes returns error code 1."""
+            with unittest.mock.patch("subprocess.Popen") as mock_popen:
+                with unittest.mock.patch("sys.stdin.isatty", return_value=False):
+                    result = run_docker("test-image", "8080", [], [], bind_port=False, args=[], exec_cmd='"unterminated')
+            # should return 1 without calling Popen
+            self.assertEqual(result, 1)
+            mock_popen.assert_not_called()
 
     class TestKeychainServiceName(unittest.TestCase):
         def test_default_claude_dir(self) -> None:
@@ -2285,6 +2301,42 @@ def run_tests() -> None:
                 self.assertEqual(result, 0)
                 self.assertEqual(captured_args, [])
                 self.assertEqual(captured_exec_cmd, ["bash"])
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_exec_empty_string_returns_error(self) -> None:
+            """--exec '' returns error code 1."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                with unittest.mock.patch("__main__.run_docker") as mock_run_docker:
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--exec", ""]
+                        result = main()
+
+                self.assertEqual(result, 1)
+                mock_run_docker.assert_not_called()
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_exec_whitespace_only_returns_error(self) -> None:
+            """--exec '   ' returns error code 1."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                with unittest.mock.patch("__main__.run_docker") as mock_run_docker:
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--exec", "   "]
+                        result = main()
+
+                self.assertEqual(result, 1)
+                mock_run_docker.assert_not_called()
             finally:
                 shutil.rmtree(tmp)
 
