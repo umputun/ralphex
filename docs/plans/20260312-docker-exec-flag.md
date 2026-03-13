@@ -38,19 +38,19 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh` (test classes section)
 
-- [ ] add `test_exec_flag_parsed` - verify `--exec bash` sets `exec_cmd="bash"`
-- [ ] add `test_exec_flag_with_quoted_args` - verify `--exec "bash -l"` preserved as single string
-- [ ] add `test_exec_with_env_and_volume` - verify `-E FOO=bar -v /a:/b --exec bash` all parsed correctly
-- [ ] add `test_exec_ignores_ralphex_args` - verify `--exec bash plan.md` has `exec_cmd="bash"` and `plan.md` in unknown
-- [ ] run tests - expect 4 failures (--exec not implemented yet)
+- [x] add `test_exec_flag_parsed` - verify `--exec bash` sets `exec_cmd="bash"`
+- [x] add `test_exec_flag_with_quoted_args` - verify `--exec "bash -l"` preserved as single string
+- [x] add `test_exec_with_env_and_volume` - verify `-E FOO=bar -v /a:/b --exec bash` all parsed correctly
+- [x] add `test_exec_ignores_ralphex_args` - verify `--exec bash plan.md` has `exec_cmd="bash"` and `plan.md` in unknown
+- [x] run tests - expect 4 failures (--exec not implemented yet)
 
 ### Task 2: Implement parser changes
 
 **Files:**
 - Modify: `scripts/ralphex-dk.sh` (build_parser function)
 
-- [ ] add `parser.add_argument("--exec", dest="exec_cmd", metavar="CMD", help="run CMD instead of ralphex (e.g., --exec bash)")`
-- [ ] run tests - all 4 new parser tests should pass
+- [x] add `parser.add_argument("--exec", dest="exec_cmd", metavar="CMD", help="run CMD instead of ralphex (e.g., --exec bash)")`
+- [x] run tests - all 4 new parser tests should pass
 
 ### Task 3: Add run_docker tests for exec_cmd parameter
 

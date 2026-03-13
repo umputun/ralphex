@@ -112,6 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="extra env var to pass to container (can be repeated)")
     parser.add_argument("-v", "--volume", action="append", default=[], metavar="src:dst[:opts]",
                         help="extra volume mount (can be repeated)")
+    parser.add_argument("--exec", dest="exec_cmd", metavar="CMD",
+                        help="run CMD instead of ralphex (e.g., --exec bash)")
     parser.add_argument("--update", action="store_true",
                         help="pull latest Docker image and exit")
     parser.add_argument("--update-script", action="store_true",
@@ -1838,6 +1840,36 @@ def run_tests() -> None:
             self.assertFalse(args.update)
             self.assertFalse(args.update_script)
             self.assertEqual(unknown, ["--up"])
+
+        def test_exec_flag_parsed(self) -> None:
+            """--exec flag sets exec_cmd."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["--exec", "bash"])
+            self.assertEqual(args.exec_cmd, "bash")
+            self.assertEqual(unknown, [])
+
+        def test_exec_flag_with_quoted_args(self) -> None:
+            """--exec 'bash -l' is preserved as single string."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["--exec", "bash -l"])
+            self.assertEqual(args.exec_cmd, "bash -l")
+            self.assertEqual(unknown, [])
+
+        def test_exec_with_env_and_volume(self) -> None:
+            """--exec works with -E and -v flags."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["-E", "FOO=bar", "-v", "/a:/b", "--exec", "bash"])
+            self.assertEqual(args.exec_cmd, "bash")
+            self.assertEqual(args.env, ["FOO=bar"])
+            self.assertEqual(args.volume, ["/a:/b"])
+            self.assertEqual(unknown, [])
+
+        def test_exec_ignores_ralphex_args(self) -> None:
+            """--exec bash plan.md has exec_cmd='bash' and plan.md in unknown."""
+            parser = build_parser()
+            args, unknown = parser.parse_known_args(["--exec", "bash", "plan.md"])
+            self.assertEqual(args.exec_cmd, "bash")
+            self.assertEqual(unknown, ["plan.md"])
 
     class TestMainArgparse(EnvTestCase):
         """tests for main() argparse integration."""
