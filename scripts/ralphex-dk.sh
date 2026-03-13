@@ -991,10 +991,14 @@ def main() -> int:
         # schedule credential cleanup
         schedule_cleanup(creds_temp)
 
+        # handle --exec mode: run custom command instead of ralphex
+        if parsed.exec_cmd:
+            return run_docker(image, port, volumes, extra_env, bind_port=False, args=[], exec_cmd=parsed.exec_cmd)
+
         # determine port binding
         bind_port = should_bind_port(ralphex_args)
 
-        return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args)
+        return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args, exec_cmd=None)
     finally:
         _cleanup_creds()
 
@@ -2002,7 +2006,8 @@ def run_tests() -> None:
                 captured_env: list[str] = []
 
                 def fake_run_docker(image: str, port: str, volumes: list[str],
-                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
                     captured_env.extend(env_vars)
                     return 0
 
@@ -2029,7 +2034,8 @@ def run_tests() -> None:
                 captured_volumes: list[str] = []
 
                 def fake_run_docker(image: str, port: str, volumes: list[str],
-                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
                     captured_volumes.extend(volumes)
                     return 0
 
@@ -2056,7 +2062,8 @@ def run_tests() -> None:
                 captured_args: list[str] = []
 
                 def fake_run_docker(image: str, port: str, volumes: list[str],
-                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
                     captured_args.extend(args)
                     return 0
 
@@ -2081,7 +2088,8 @@ def run_tests() -> None:
                 captured_args: list[str] = []
 
                 def fake_run_docker(image: str, port: str, volumes: list[str],
-                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
                     captured_args.extend(args)
                     return 0
 
@@ -2108,7 +2116,8 @@ def run_tests() -> None:
                 captured_args: list[str] = []
 
                 def fake_run_docker(image: str, port: str, volumes: list[str],
-                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
                     captured_args.extend(args)
                     return 0
 
@@ -2135,7 +2144,8 @@ def run_tests() -> None:
                 captured_volumes: list[str] = []
 
                 def fake_run_docker(image: str, port: str, volumes: list[str],
-                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
                     captured_args.extend(args)
                     captured_env.extend(env_vars)
                     captured_volumes.extend(volumes)
@@ -2166,7 +2176,8 @@ def run_tests() -> None:
                 captured_env: list[str] = []
 
                 def fake_run_docker(image: str, port: str, volumes: list[str],
-                                    env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
                     captured_env.extend(env_vars)
                     return 0
 
@@ -2185,6 +2196,92 @@ def run_tests() -> None:
                 # warning printed
                 warning = captured_stderr.getvalue()
                 self.assertIn("=invalid", warning)
+            finally:
+                shutil.rmtree(tmp)
+
+    class TestExecFlag(EnvTestCase):
+        """tests for --exec flag in main() flow."""
+        env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "CLAUDE_CONFIG_DIR"]
+        save_argv = True
+
+        def test_exec_skips_port_binding(self) -> None:
+            """--serve --exec bash passes bind_port=False."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_bind_port: list[bool] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
+                    captured_bind_port.append(bind_port)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--serve", "--exec", "bash"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(captured_bind_port, [False])
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_exec_passes_exec_cmd_to_run_docker(self) -> None:
+            """--exec bash passes exec_cmd='bash' to run_docker."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_exec_cmd: list[str | None] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
+                    captured_exec_cmd.append(exec_cmd)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--exec", "bash"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(captured_exec_cmd, ["bash"])
+            finally:
+                shutil.rmtree(tmp)
+
+        def test_exec_ignores_ralphex_args(self) -> None:
+            """--exec bash plan.md passes args=[] and exec_cmd='bash'."""
+            tmp = Path(tempfile.mkdtemp())
+            try:
+                claude_dir = tmp / ".claude"
+                claude_dir.mkdir()
+                os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+                captured_args: list[str] = []
+                captured_exec_cmd: list[str | None] = []
+
+                def fake_run_docker(image: str, port: str, volumes: list[str],
+                                    env_vars: list[str], bind_port: bool, args: list[str],
+                                    exec_cmd: str | None = None) -> int:
+                    captured_args.extend(args)
+                    captured_exec_cmd.append(exec_cmd)
+                    return 0
+
+                with unittest.mock.patch("__main__.run_docker", side_effect=fake_run_docker):
+                    with unittest.mock.patch("__main__.extract_macos_credentials", return_value=None):
+                        sys.argv = ["ralphex-dk", "--exec", "bash", "plan.md"]
+                        result = main()
+
+                self.assertEqual(result, 0)
+                self.assertEqual(captured_args, [])
+                self.assertEqual(captured_exec_cmd, ["bash"])
             finally:
                 shutil.rmtree(tmp)
 
@@ -2631,7 +2728,7 @@ def run_tests() -> None:
 
             def fake_run_docker(
                 image: str, port: int, volumes: list[str], extra_env: list[str],
-                bind_port: bool, ralphex_args: list[str]
+                bind_port: bool, ralphex_args: list[str], exec_cmd: str | None = None
             ) -> int:
                 # capture what we need via side effect - creds_temp should be None for bedrock
                 return 0
@@ -2662,7 +2759,7 @@ def run_tests() -> None:
 
             def fake_run_docker(
                 image: str, port: int, volumes: list[str], extra_env: list[str],
-                bind_port: bool, ralphex_args: list[str]
+                bind_port: bool, ralphex_args: list[str], exec_cmd: str | None = None
             ) -> int:
                 return 0
 
@@ -2694,7 +2791,7 @@ def run_tests() -> None:
 
             def fake_run_docker(
                 image: str, port: int, volumes: list[str], extra_env: list[str],
-                bind_port: bool, ralphex_args: list[str]
+                bind_port: bool, ralphex_args: list[str], exec_cmd: str | None = None
             ) -> int:
                 return 0
 
@@ -2722,7 +2819,7 @@ def run_tests() -> None:
             """startup output includes 'bedrock' and 'keychain skipped'."""
             def fake_run_docker(
                 image: str, port: int, volumes: list[str], extra_env: list[str],
-                bind_port: bool, ralphex_args: list[str]
+                bind_port: bool, ralphex_args: list[str], exec_cmd: str | None = None
             ) -> int:
                 return 0
 
@@ -2949,7 +3046,7 @@ def run_tests() -> None:
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
-               TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
+               TestMainArgparse, TestExecFlag, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
                TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)

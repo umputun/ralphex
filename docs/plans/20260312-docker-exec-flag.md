@@ -79,21 +79,21 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh` (test classes section, add `TestExecFlag` class)
 
-- [ ] create `TestExecFlag` test class (mock `run_docker` to capture arguments)
-- [ ] add `test_exec_skips_port_binding` - verify `--serve --exec bash` passes `bind_port=False`
-- [ ] add `test_exec_passes_exec_cmd_to_run_docker` - verify `exec_cmd` param passed through
-- [ ] add `test_exec_ignores_ralphex_args` - verify `--exec bash plan.md` passes `args=[]` and `exec_cmd="bash"`
-- [ ] run tests - expect failures until main() implementation
+- [x] create `TestExecFlag` test class (mock `run_docker` to capture arguments)
+- [x] add `test_exec_skips_port_binding` - verify `--serve --exec bash` passes `bind_port=False`
+- [x] add `test_exec_passes_exec_cmd_to_run_docker` - verify `exec_cmd` param passed through
+- [x] add `test_exec_ignores_ralphex_args` - verify `--exec bash plan.md` passes `args=[]` and `exec_cmd="bash"`
+- [x] run tests - expect failures until main() implementation
 
 ### Task 6: Implement main() flow changes
 
 **Files:**
 - Modify: `scripts/ralphex-dk.sh` (main function, ~line 991)
 
-- [ ] add exec_cmd handling after provider check, before normal run_docker call
-- [ ] when `parsed.exec_cmd` is set: call `run_docker(..., bind_port=False, args=[], exec_cmd=parsed.exec_cmd)`
-- [ ] update `run_docker()` call at line 991 to pass `exec_cmd=None` (explicit default)
-- [ ] run tests - all tests should pass
+- [x] add exec_cmd handling after provider check, before normal run_docker call
+- [x] when `parsed.exec_cmd` is set: call `run_docker(..., bind_port=False, args=[], exec_cmd=parsed.exec_cmd)`
+- [x] update `run_docker()` call at line 991 to pass `exec_cmd=None` (explicit default)
+- [x] run tests - all tests should pass
 
 ### Task 7: Update documentation
 
