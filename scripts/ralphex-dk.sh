@@ -994,8 +994,11 @@ def main() -> int:
 def run_tests() -> None:
     """run unit tests from ralphex_dk_test module."""
     script_dir = str(Path(__file__).resolve().parent)
-    if script_dir not in sys.path:
-        sys.path.insert(0, script_dir)
+    # test module lives in ralphex-dk/ subdirectory next to the script
+    test_dir = os.path.join(script_dir, "ralphex-dk")
+    for d in (script_dir, test_dir):
+        if d not in sys.path:
+            sys.path.insert(0, d)
     try:
         import ralphex_dk_test
     except ImportError:
