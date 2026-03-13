@@ -397,10 +397,11 @@ func TestClaudeExecutor_Run_WithCustomCommand(t *testing.T) {
 
 func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 	var capturedArgs []string
+	var stdinBuf bytes.Buffer
 	mock := &mocks.CommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 			capturedArgs = args
-			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+			return nopWriteCloser{&stdinBuf}, strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{
@@ -411,8 +412,12 @@ func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	// should use custom args plus prompt args (custom args use -p fallback)
-	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "-p", "test prompt"}, capturedArgs)
+	// custom args should have --input-format stream-json added, no -p
+	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "--input-format", "stream-json"}, capturedArgs)
+	// prompt should be sent via stdin as stream-json
+	var msg stdinMessage
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(stdinBuf.Bytes()), &msg))
+	assert.Equal(t, "test prompt", msg.Message.Content[0].Text)
 }
 
 func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
@@ -435,7 +440,8 @@ func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "custom-claude", capturedCmd)
-	assert.Equal(t, []string{"--skip-perms", "--verbose", "-p", "the prompt"}, capturedArgs)
+	// custom args with --input-format stream-json added, no -p
+	assert.Equal(t, []string{"--skip-perms", "--verbose", "--input-format", "stream-json"}, capturedArgs)
 }
 
 func TestSplitArgs(t *testing.T) {
@@ -458,6 +464,52 @@ func TestSplitArgs(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := splitArgs(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestStripPromptFlag(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{name: "no -p flag", input: []string{"--flag1", "--flag2"}, want: []string{"--flag1", "--flag2"}},
+		{name: "-p with value", input: []string{"--flag1", "-p", "prompt text", "--flag2"}, want: []string{"--flag1", "--flag2"}},
+		{name: "--prompt with value", input: []string{"--prompt", "prompt text", "--flag2"}, want: []string{"--flag2"}},
+		{name: "-p=value", input: []string{"--flag1", "-p=prompt text"}, want: []string{"--flag1"}},
+		{name: "--prompt=value", input: []string{"--prompt=prompt text", "--flag2"}, want: []string{"--flag2"}},
+		{name: "-p at end", input: []string{"--flag1", "-p", "last"}, want: []string{"--flag1"}},
+		{name: "empty input", input: nil, want: nil},
+		{name: "only -p", input: []string{"-p", "value"}, want: nil},
+		{name: "multiple -p flags", input: []string{"-p", "one", "--flag", "-p", "two"}, want: []string{"--flag"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripPromptFlag(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestEnsureFlag(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		flag  string
+		value string
+		want  []string
+	}{
+		{name: "adds missing flag", args: []string{"--a"}, flag: "--input-format", value: "stream-json", want: []string{"--a", "--input-format", "stream-json"}},
+		{name: "skips existing flag", args: []string{"--input-format", "json"}, flag: "--input-format", value: "stream-json", want: []string{"--input-format", "json"}},
+		{name: "empty args", args: nil, flag: "--input-format", value: "stream-json", want: []string{"--input-format", "stream-json"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ensureFlag(tc.args, tc.flag, tc.value)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -919,12 +971,13 @@ func TestClaudeExecutor_Run_DefaultArgs_StreamJsonInput(t *testing.T) {
 	assert.Equal(t, "hello world", msg.Message.Content[0].Text)
 }
 
-func TestClaudeExecutor_Run_CustomArgs_UsesDashP(t *testing.T) {
+func TestClaudeExecutor_Run_CustomArgs_UsesStreamInput(t *testing.T) {
 	var capturedArgs []string
+	var stdinBuf bytes.Buffer
 	mock := &mocks.CommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
 			capturedArgs = args
-			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+			return nopWriteCloser{&stdinBuf}, strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock, Args: "--custom-flag"}
@@ -932,9 +985,11 @@ func TestClaudeExecutor_Run_CustomArgs_UsesDashP(t *testing.T) {
 	result := e.Run(context.Background(), "the prompt")
 
 	require.NoError(t, result.Error)
-	// custom args should use -p, not --input-format
-	assert.Contains(t, capturedArgs, "-p")
-	assert.NotContains(t, capturedArgs, "--input-format")
+	// custom args should use --input-format stream-json, not -p
+	assert.Contains(t, capturedArgs, "--input-format")
+	assert.NotContains(t, capturedArgs, "-p")
+	// prompt sent via stdin
+	assert.Contains(t, stdinBuf.String(), "the prompt")
 }
 
 func TestClaudeExecutor_Session_DuringRun(t *testing.T) {
@@ -987,22 +1042,30 @@ func TestClaudeExecutor_Run_SendInitialPromptFailure(t *testing.T) {
 	assert.Nil(t, e.Session())
 }
 
-func TestClaudeExecutor_Run_CustomArgs_ClosesStdin(t *testing.T) {
-	// when Args is set (custom args path), stdin should be closed immediately
-	closeCalled := false
+func TestClaudeExecutor_Run_CustomArgs_CreatesSession(t *testing.T) {
+	// when Args is set, session should still be created (stream-json input is always used)
+	sessionSeen := false
 	mock := &mocks.CommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
-			return &trackingWriteCloser{closeFn: func() { closeCalled = true }},
+			return newNopWriteCloser(),
 				strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`),
 				func() error { return nil }, nil
 		},
 	}
 	e := &ClaudeExecutor{cmdRunner: mock, Args: "--custom-flag"}
 
+	// check session mid-run via output handler
+	e.OutputHandler = func(_ string) {
+		if e.Session() != nil {
+			sessionSeen = true
+		}
+	}
+
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	assert.True(t, closeCalled, "stdin should be closed when using custom args")
+	assert.True(t, sessionSeen, "session should be available during run with custom args")
+	assert.Nil(t, e.Session(), "session should be nil after run")
 }
 
 func TestClaudeExecutor_Session_NilAfterStartError(t *testing.T) {
@@ -1075,16 +1138,54 @@ func TestClaudeExecutor_SendMessage_DuringRun(t *testing.T) {
 	}
 }
 
+func TestClaudeExecutor_Run_CustomArgs_StripsDashP(t *testing.T) {
+	// if custom args include -p, it should be stripped (incompatible with stream-json input)
+	var capturedArgs []string
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			capturedArgs = args
+			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, Args: "--custom-flag -p 'old prompt' --verbose"}
+
+	result := e.Run(context.Background(), "new prompt")
+
+	require.NoError(t, result.Error)
+	assert.NotContains(t, capturedArgs, "-p")
+	assert.NotContains(t, capturedArgs, "old prompt")
+	assert.Contains(t, capturedArgs, "--custom-flag")
+	assert.Contains(t, capturedArgs, "--verbose")
+	assert.Contains(t, capturedArgs, "--input-format")
+}
+
+func TestClaudeExecutor_Run_CustomArgs_PreservesExistingInputFormat(t *testing.T) {
+	// if custom args already have --input-format, don't duplicate it
+	var capturedArgs []string
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, args ...string) (io.WriteCloser, io.Reader, func() error, error) {
+			capturedArgs = args
+			return newNopWriteCloser(), strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, Args: "--custom-flag --input-format stream-json"}
+
+	result := e.Run(context.Background(), "test")
+
+	require.NoError(t, result.Error)
+	// count occurrences of --input-format
+	count := 0
+	for _, a := range capturedArgs {
+		if a == "--input-format" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "should not duplicate --input-format")
+}
+
 // failingWriteCloser returns an error on every Write call.
 type failingWriteCloser struct{ writeErr error }
 
 func (w *failingWriteCloser) Write([]byte) (int, error) { return 0, w.writeErr }
 func (w *failingWriteCloser) Close() error              { return nil }
 
-// trackingWriteCloser tracks Close() calls.
-type trackingWriteCloser struct {
-	closeFn func()
-}
-
-func (w *trackingWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
-func (w *trackingWriteCloser) Close() error                { w.closeFn(); return nil }

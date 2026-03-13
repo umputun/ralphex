@@ -142,6 +142,36 @@ func splitArgs(s string) []string {
 	return args
 }
 
+// stripPromptFlag removes -p/--prompt flag and its argument from the args slice.
+// this is needed because -p is incompatible with --input-format stream-json.
+func stripPromptFlag(args []string) []string {
+	var result []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		// handle -p value or --prompt value
+		if arg == "-p" || arg == "--prompt" {
+			i++ // skip the value
+			continue
+		}
+		// handle -p=value or --prompt=value
+		if strings.HasPrefix(arg, "-p=") || strings.HasPrefix(arg, "--prompt=") {
+			continue
+		}
+		result = append(result, arg)
+	}
+	return result
+}
+
+// ensureFlag appends flag and value to args if the flag is not already present.
+func ensureFlag(args []string, flag, value string) []string {
+	for _, a := range args {
+		if a == flag {
+			return args
+		}
+	}
+	return append(args, flag, value)
+}
+
 // filterEnv returns a copy of env with specified keys removed.
 func filterEnv(env []string, keysToRemove ...string) []string {
 	result := make([]string, 0, len(env))
@@ -207,13 +237,13 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		cmd = "claude"
 	}
 
-	useStreamInput := e.Args == "" // default args path uses stream-json input
-
-	// build args from configured string or use defaults
+	// build args: always use stream-json input for interactive messaging support.
+	// custom args get -p stripped (incompatible with stream-json input) and
+	// --input-format stream-json added.
 	var args []string
 	if e.Args != "" {
-		args = splitArgs(e.Args)
-		args = append(args, "-p", prompt)
+		args = stripPromptFlag(splitArgs(e.Args))
+		args = ensureFlag(args, "--input-format", "stream-json")
 	} else {
 		args = []string{
 			"--dangerously-skip-permissions",
@@ -233,27 +263,22 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		return Result{Error: err}
 	}
 
-	if useStreamInput {
-		// create session from stdin pipe for message injection
-		session := newClaudeSession(stdin)
+	// always create session from stdin pipe for message injection
+	session := newClaudeSession(stdin)
+	e.sessionMu.Lock()
+	e.session = session
+	e.sessionMu.Unlock()
+
+	defer func() {
+		session.Close()
 		e.sessionMu.Lock()
-		e.session = session
+		e.session = nil
 		e.sessionMu.Unlock()
+	}()
 
-		defer func() {
-			session.Close()
-			e.sessionMu.Lock()
-			e.session = nil
-			e.sessionMu.Unlock()
-		}()
-
-		// send initial prompt via stdin
-		if sendErr := session.Send(prompt); sendErr != nil {
-			return Result{Error: fmt.Errorf("send initial prompt: %w", sendErr)}
-		}
-	} else {
-		// custom args path: close stdin immediately (wrappers may not understand stream-json input)
-		stdin.Close()
+	// send initial prompt via stdin
+	if sendErr := session.Send(prompt); sendErr != nil {
+		return Result{Error: fmt.Errorf("send initial prompt: %w", sendErr)}
 	}
 
 	result := e.parseStream(ctx, stdout)

@@ -3419,5 +3419,5 @@ func TestRunner_SendMessage_WithoutSessionProvider(t *testing.T) {
 
 	err := r.SendMessage("hello")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "does not support sessions")
+	assert.ErrorIs(t, err, processor.ErrSessionsNotSupported)
 }

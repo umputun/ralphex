@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -512,6 +513,10 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	if breakCh := startBreakSignal(); breakCh != nil {
 		r.SetBreakCh(breakCh)
 	}
+
+	// start stdin forwarder for interactive messaging during execution
+	stopForwarder := startStdinForwarder(r, runnerLog, req.Colors)
+	defer stopForwarder()
 
 	if runErr := r.Run(ctx); runErr != nil {
 		sendNotification(req, branch, plr.baseLog.Elapsed(), git.DiffStats{}, runErr)
@@ -1190,6 +1195,38 @@ func resolveDefaultBranch(cliRef, configBranch, autoDetected string) string {
 		return configBranch
 	}
 	return autoDetected
+}
+
+// startStdinForwarder reads lines from os.Stdin and forwards them to the runner
+// as interactive messages during execution. logs to progress file and prints confirmation.
+// returns a cleanup function that stops the forwarder.
+func startStdinForwarder(r *processor.Runner, log processor.Logger, colors *progress.Colors) func() {
+	done := make(chan struct{})
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			if err := r.SendMessage(line); err != nil {
+				if errors.Is(err, processor.ErrSessionsNotSupported) {
+					colors.Error().Printf("-> mid-session interrupt messages are only currently supported for Claude\n")
+					return // stop forwarding, executor will never support sessions
+				}
+				// silently ignore - session may not be active between iterations
+				continue
+			}
+			log.Print("[user message to agent] %s", line)
+			colors.Info().Printf("-> message sent to agent\n")
+		}
+	}()
+	return func() { close(done) }
 }
 
 // ensureRepoHasCommits checks that the repository has at least one commit.

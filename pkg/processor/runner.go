@@ -231,17 +231,21 @@ func (r *Runner) SetBreakCh(ch <-chan struct{}) {
 	r.breakCh = ch
 }
 
+// ErrSessionsNotSupported is returned when the executor doesn't support interactive sessions.
+var ErrSessionsNotSupported = errors.New("executor does not support sessions")
+
 // SessionProvider provides access to an active Claude session for message injection.
 type SessionProvider interface {
 	Session() *executor.ClaudeSession
 }
 
 // SendMessage sends a user message to the currently running Claude session.
-// returns error if the executor doesn't support sessions or no session is active.
+// returns ErrSessionsNotSupported if the executor doesn't support sessions,
+// or a transient error if no session is currently active.
 func (r *Runner) SendMessage(msg string) error {
 	sp, ok := r.claude.(SessionProvider)
 	if !ok {
-		return fmt.Errorf("executor does not support sessions")
+		return ErrSessionsNotSupported
 	}
 	session := sp.Session()
 	if session == nil {
