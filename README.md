@@ -380,6 +380,15 @@ ralphex -E API_KEY docs/plans/feature.md
 ralphex -E "TAGS=foo,bar,baz" docs/plans/feature.md
 ```
 
+**Debugging:**
+```bash
+ralphex --dry-run docs/plans/feature.md  # show docker command without executing
+```
+
+The `--dry-run` flag prints the full `docker run` command that would be executed. Useful for debugging container configuration or copying the command for manual execution.
+
+Note: inherited env vars (`-E FOO` without `=value`) won't work when copying the command to a different shell. Use explicit values for portability.
+
 **Updating:**
 ```bash
 ralphex --update         # pull latest docker image

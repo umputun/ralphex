@@ -667,6 +667,28 @@ def detect_inherited_env_vars(extra_env: list[str]) -> list[str]:
     return inherited
 
 
+def detect_explicit_secrets(extra_env: list[str]) -> list[str]:
+    """detect env vars with explicit values that have sensitive names.
+
+    parses ["-e", "VAR=value", ...] and returns list of var names where
+    the var has an explicit value AND is_sensitive_name() returns True.
+    used to warn users about secrets in dry-run output.
+    """
+    secrets: list[str] = []
+    i = 0
+    while i < len(extra_env):
+        if extra_env[i] == "-e" and i + 1 < len(extra_env):
+            entry = extra_env[i + 1]
+            if "=" in entry:
+                name = entry.split("=", 1)[0]
+                if is_sensitive_name(name):
+                    secrets.append(name)
+            i += 2
+        else:
+            i += 1
+    return secrets
+
+
 def validate_bedrock_config(extra_env: list[str] | None = None) -> list[str]:
     """validate bedrock configuration and return list of warning messages.
 
@@ -995,6 +1017,7 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, _term_handler)
 
+    dry_run_completed = False
     try:
         # build volumes (base + extra from env var + CLI)
         volumes = build_volumes(creds_temp, claude_home)
@@ -1025,9 +1048,6 @@ def main() -> int:
             for warning in bedrock_warnings:
                 print(f"  warning: {warning}", file=sys.stderr)
 
-        # schedule credential cleanup
-        schedule_cleanup(creds_temp)
-
         # determine port binding
         bind_port = should_bind_port(ralphex_args)
 
@@ -1038,12 +1058,25 @@ def main() -> int:
             if inherited:
                 print(f"note: inherited env vars ({', '.join(inherited)}) require these variables "
                       "to be set in your shell when running the command", file=sys.stderr)
+            if creds_temp:
+                print(f"note: credentials extracted to {creds_temp} (delete after use)", file=sys.stderr)
+            explicit_secrets = detect_explicit_secrets(extra_env)
+            if explicit_secrets:
+                print(f"note: output contains explicit values for sensitive vars ({', '.join(explicit_secrets)}); "
+                      "avoid sharing or logging this output", file=sys.stderr)
             print(shlex.join(cmd))
+            # skip credential cleanup in dry-run mode so command is runnable
+            dry_run_completed = True
             return 0
+
+        # schedule credential cleanup (only for actual runs)
+        schedule_cleanup(creds_temp)
 
         return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args)
     finally:
-        _cleanup_creds()
+        # only skip cleanup if dry-run completed successfully (user got the file path warning)
+        if not dry_run_completed:
+            _cleanup_creds()
 
 
 def run_tests() -> None:

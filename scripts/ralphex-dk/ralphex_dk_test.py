@@ -32,6 +32,7 @@ from ralphex_dk import (  # noqa: E402
     build_env_vars,
     build_parser,
     build_volumes,
+    detect_explicit_secrets,
     detect_git_worktree,
     detect_inherited_env_vars,
     detect_timezone,
@@ -1965,6 +1966,7 @@ class TestBuildDockerCommand(unittest.TestCase):
 
     def test_build_docker_command_with_serve_web_host_set(self) -> None:
         """verify RALPHEX_WEB_HOST is NOT injected when already set in env."""
+        saved = os.environ.get("RALPHEX_WEB_HOST")
         os.environ["RALPHEX_WEB_HOST"] = "127.0.0.1"
         try:
             with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
@@ -1981,7 +1983,10 @@ class TestBuildDockerCommand(unittest.TestCase):
             # verify RALPHEX_WEB_HOST=0.0.0.0 is NOT in the command
             self.assertNotIn("RALPHEX_WEB_HOST=0.0.0.0", cmd)
         finally:
-            os.environ.pop("RALPHEX_WEB_HOST", None)
+            if saved is not None:
+                os.environ["RALPHEX_WEB_HOST"] = saved
+            else:
+                os.environ.pop("RALPHEX_WEB_HOST", None)
 
     def test_build_docker_command_interactive(self) -> None:
         """verify -it flag when stdin is tty."""
@@ -2027,6 +2032,53 @@ class TestDetectInheritedEnvVars(unittest.TestCase):
         inherited = detect_inherited_env_vars([])
         self.assertEqual(inherited, [])
 
+    def test_trailing_e_flag(self) -> None:
+        """verify trailing -e without value is handled gracefully."""
+        # trailing -e with no following element should be skipped
+        extra_env = ["-e", "VAR1=value1", "-e"]
+        inherited = detect_inherited_env_vars(extra_env)
+        self.assertEqual(inherited, [])
+
+    def test_empty_value_not_inherited(self) -> None:
+        """verify VAR= (empty value) is not considered inherited."""
+        # VAR= has explicit empty value, not inherited
+        extra_env = ["-e", "VAR1=", "-e", "VAR2"]
+        inherited = detect_inherited_env_vars(extra_env)
+        self.assertEqual(inherited, ["VAR2"])
+
+
+class TestDetectExplicitSecrets(unittest.TestCase):
+    """tests for detect_explicit_secrets() function."""
+
+    def test_detects_sensitive_with_values(self) -> None:
+        """verify detection of sensitive vars with explicit values."""
+        extra_env = ["-e", "API_KEY=secret123", "-e", "DEBUG=1", "-e", "AWS_SECRET_ACCESS_KEY=abc"]
+        secrets = detect_explicit_secrets(extra_env)
+        self.assertEqual(secrets, ["API_KEY", "AWS_SECRET_ACCESS_KEY"])
+
+    def test_ignores_inherited_sensitive(self) -> None:
+        """verify inherited (no value) sensitive vars are NOT flagged."""
+        extra_env = ["-e", "API_KEY", "-e", "AWS_SECRET_ACCESS_KEY"]
+        secrets = detect_explicit_secrets(extra_env)
+        self.assertEqual(secrets, [])
+
+    def test_ignores_non_sensitive_with_values(self) -> None:
+        """verify non-sensitive vars with values are NOT flagged."""
+        extra_env = ["-e", "DEBUG=1", "-e", "VERBOSE=true"]
+        secrets = detect_explicit_secrets(extra_env)
+        self.assertEqual(secrets, [])
+
+    def test_empty_list(self) -> None:
+        """verify empty list for empty input."""
+        secrets = detect_explicit_secrets([])
+        self.assertEqual(secrets, [])
+
+    def test_mixed_inherited_and_explicit(self) -> None:
+        """verify only explicit sensitive vars are flagged."""
+        extra_env = ["-e", "API_KEY=secret", "-e", "TOKEN", "-e", "DEBUG=1"]
+        secrets = detect_explicit_secrets(extra_env)
+        self.assertEqual(secrets, ["API_KEY"])
+
 
 class TestDryRun(EnvTestCase):
     """tests for --dry-run functionality."""
@@ -2065,6 +2117,13 @@ class TestDryRun(EnvTestCase):
             parts = shlex.split(output)
             self.assertIn("docker", parts)
             self.assertIn("run", parts)
+            # verify essential command components are present
+            self.assertIn("--rm", parts)
+            self.assertIn("/srv/ralphex", parts)
+            # verify image appears before entrypoint
+            img_indices = [i for i, p in enumerate(parts) if "ralphex" in p and ":" in p]
+            entrypoint_idx = parts.index("/srv/ralphex")
+            self.assertTrue(any(i < entrypoint_idx for i in img_indices), "image should appear before entrypoint")
 
     def test_dry_run_inherited_env_warning(self) -> None:
         """verify warning printed for inherited (no value) env vars."""
@@ -2113,6 +2172,79 @@ class TestDryRun(EnvTestCase):
             stderr_output = mock_stderr.getvalue()
             self.assertNotIn("inherited env vars", stderr_output)
 
+    def test_dry_run_explicit_secrets_warning(self) -> None:
+        """verify warning printed for explicit values of sensitive env vars."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--dry-run", "-E", "API_KEY=secret123"]
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                            mock_stdin.isatty.return_value = False
+                            with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                                with unittest.mock.patch("sys.stdout", new_callable=io.StringIO):
+                                    with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                                        result = main()
+
+            self.assertEqual(result, 0)
+            stderr_output = mock_stderr.getvalue()
+            self.assertIn("explicit values for sensitive vars", stderr_output)
+            self.assertIn("API_KEY", stderr_output)
+
+    def test_dry_run_no_explicit_secrets_warning_for_inherited(self) -> None:
+        """verify no secrets warning when sensitive vars use inherited form."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            # API_KEY without =value - inherited form, should NOT trigger warning
+            sys.argv = ["ralphex-dk", "--dry-run", "-E", "API_KEY"]
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                            mock_stdin.isatty.return_value = False
+                            with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                                with unittest.mock.patch("sys.stdout", new_callable=io.StringIO):
+                                    with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                                        result = main()
+
+            self.assertEqual(result, 0)
+            stderr_output = mock_stderr.getvalue()
+            # should have inherited warning but NOT sensitive warning
+            self.assertIn("inherited env vars", stderr_output)
+            self.assertNotIn("explicit values for sensitive vars", stderr_output)
+
+    def test_dry_run_does_not_execute_docker(self) -> None:
+        """verify --dry-run returns without calling run_docker."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--dry-run"]
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                            mock_stdin.isatty.return_value = False
+                            with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                                with unittest.mock.patch("ralphex_dk.run_docker") as mock_run_docker:
+                                    with unittest.mock.patch("sys.stdout", new_callable=io.StringIO):
+                                        with unittest.mock.patch("sys.stderr", new_callable=io.StringIO):
+                                            result = main()
+
+            self.assertEqual(result, 0)
+            mock_run_docker.assert_not_called()
+
 
 def run_tests() -> None:
     """run all unit tests."""
@@ -2127,7 +2259,7 @@ def run_tests() -> None:
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
                TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags,
-               TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDryRun]:
+               TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDetectExplicitSecrets, TestDryRun]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
