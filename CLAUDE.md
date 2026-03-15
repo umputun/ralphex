@@ -486,3 +486,4 @@ If you're an AI agent preparing a contribution, complete this checklist:
 - **Version sections**: Never add entries to existing version sections - versions are immutable once released
 - **Linter warnings**: Add exclusions to `.golangci.yml` instead of `_, _ =` prefixes for fmt.Fprintf/Fprintln
 - **Exporting functions**: When changing visibility (lowercase to uppercase), check ALL callers including test files
+- **Completed plans are immutable**: Plans in `docs/plans/completed/` represent historical record of changes. Never modify completed plans. If further changes are needed (refactoring, fixes, etc.), create a new plan
