@@ -78,14 +78,14 @@
 - Modify: `pkg/processor/runner_test.go`
 - Modify: `pkg/processor/export_test.go`
 
-- [ ] add `buildPreviousContext(claudeResponse string) string` method to Runner that returns empty string or the formatted PREVIOUS REVIEW CONTEXT block
-- [ ] extend `replaceVariablesWithIteration` to accept `claudeResponse` parameter and replace `{{PREVIOUS_REVIEW_CONTEXT}}` with the output of `buildPreviousContext`
-- [ ] replace `buildCodexPrompt` inline construction with template-based approach using `r.cfg.AppConfig.CodexReviewPrompt` and `replaceVariablesWithIteration`
-- [ ] write tests for `buildPreviousContext` - empty on first call, populated with response on subsequent
-- [ ] write tests for `buildCodexPrompt` with the new template - verify all variables are expanded correctly
-- [ ] update `TestRunner_BuildCodexPrompt_CompletedDir` to provide `AppConfig` with `CodexReviewPrompt` (required - will nil-panic without this)
-- [ ] update `TestBuildCodexPrompt` export helper in `export_test.go` if signature changes
-- [ ] run `go test ./pkg/processor/...` - must pass before next task
+- [x] add `buildPreviousContext(claudeResponse string) string` method to Runner that returns empty string or the formatted PREVIOUS REVIEW CONTEXT block
+- [x] extend `replaceVariablesWithIteration` to accept `claudeResponse` parameter and replace `{{PREVIOUS_REVIEW_CONTEXT}}` with the output of `buildPreviousContext`
+- [x] replace `buildCodexPrompt` inline construction with template-based approach using `r.cfg.AppConfig.CodexReviewPrompt` and `replaceVariablesWithIteration`
+- [x] write tests for `buildPreviousContext` - empty on first call, populated with response on subsequent
+- [x] write tests for `buildCodexPrompt` with the new template - verify all variables are expanded correctly
+- [x] update `TestRunner_BuildCodexPrompt_CompletedDir` to provide `AppConfig` with `CodexReviewPrompt` (required - will nil-panic without this)
+- [x] update `TestBuildCodexPrompt` export helper in `export_test.go` if signature changes
+- [x] run `go test ./pkg/processor/...` - must pass before next task
 
 ### Task 3: Update custom_review.txt to use {{PREVIOUS_REVIEW_CONTEXT}}
 

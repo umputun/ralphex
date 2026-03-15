@@ -764,58 +764,10 @@ func (r *Runner) isManualBreak(parentCtx context.Context) bool {
 }
 
 // buildCodexPrompt creates the prompt for codex review.
+// uses the codex_review prompt loaded from config with all variables expanded,
+// including {{PREVIOUS_REVIEW_CONTEXT}} for iteration context.
 func (r *Runner) buildCodexPrompt(isFirst bool, claudeResponse string) string {
-	// build plan context if available
-	planContext := ""
-	if r.cfg.PlanFile != "" {
-		planContext = fmt.Sprintf(`
-## Plan Context
-The code implements the plan at: %s
-
----
-`, r.resolvePlanFilePath())
-	}
-
-	// different diff command based on iteration
-	var diffInstruction, diffDescription string
-	if isFirst {
-		defaultBranch := r.getDefaultBranch()
-		diffInstruction = fmt.Sprintf("Run: git diff %s...HEAD", defaultBranch)
-		diffDescription = fmt.Sprintf("code changes between %s and HEAD branch", defaultBranch)
-	} else {
-		diffInstruction = "Run: git diff"
-		diffDescription = "uncommitted changes (Claude's fixes from previous iteration)"
-	}
-
-	basePrompt := fmt.Sprintf(`%sReview the %s.
-
-%s
-
-Check the progress log at %s for previous review iterations and findings history before reporting issues.
-
-Analyze for:
-- Bugs and logic errors
-- Security vulnerabilities
-- Race conditions
-- Error handling gaps
-- Code quality issues
-
-Report findings with file:line references. If no issues found, say "NO ISSUES FOUND".`, planContext, diffDescription, diffInstruction, r.getProgressFileRef())
-
-	if claudeResponse != "" {
-		return fmt.Sprintf(`%s
-
----
-PREVIOUS REVIEW CONTEXT:
-Claude (previous reviewer) responded to your findings:
-
-%s
-
-Re-evaluate considering Claude's arguments. If Claude's fixes are correct, acknowledge them.
-If Claude's arguments are invalid, explain why the issues still exist.`, basePrompt, claudeResponse)
-	}
-
-	return basePrompt
+	return r.replaceVariablesWithIteration(r.cfg.AppConfig.CodexReviewPrompt, isFirst, claudeResponse)
 }
 
 // hasUncompletedTasks checks if plan file has any uncompleted checkboxes.

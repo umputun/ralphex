@@ -575,7 +575,7 @@ func TestRunner_BuildCodexPrompt_CompletedDir(t *testing.T) {
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{PlanFile: originalPath}
+	cfg := processor.Config{PlanFile: originalPath, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, claude, codex, nil, &status.PhaseHolder{})
 
 	prompt := r.TestBuildCodexPrompt(true, "")

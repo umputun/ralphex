@@ -87,12 +87,30 @@ func (r *Runner) getDiffInstruction(isFirstIteration bool) string {
 	return "git diff"
 }
 
+// buildPreviousContext returns the PREVIOUS REVIEW CONTEXT block for external review prompts.
+// returns empty string on first iteration (no prior response), formatted context block on subsequent iterations.
+func (r *Runner) buildPreviousContext(claudeResponse string) string {
+	if claudeResponse == "" {
+		return ""
+	}
+	return fmt.Sprintf(`---
+PREVIOUS REVIEW CONTEXT:
+Claude (previous reviewer) responded to your findings:
+
+%s
+
+Re-evaluate considering Claude's arguments. If Claude's fixes are correct, acknowledge them.
+If Claude's arguments are invalid, explain why the issues still exist.`, claudeResponse)
+}
+
 // replaceVariablesWithIteration replaces all template variables including iteration-aware ones.
-// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}}, {{DIFF_INSTRUCTION}}, {{agent:name}}
-// this variant is used when iteration context is needed (e.g., custom review prompts).
-func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration bool) string {
+// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}},
+// {{DIFF_INSTRUCTION}}, {{PREVIOUS_REVIEW_CONTEXT}}, {{agent:name}}
+// this variant is used when iteration context is needed (e.g., external review prompts).
+func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration bool, claudeResponse string) string {
 	result := r.replaceBaseVariables(prompt)
 	result = strings.ReplaceAll(result, "{{DIFF_INSTRUCTION}}", r.getDiffInstruction(isFirstIteration))
+	result = strings.ReplaceAll(result, "{{PREVIOUS_REVIEW_CONTEXT}}", r.buildPreviousContext(claudeResponse))
 	result = r.expandAgentReferences(result)
 	return result
 }
@@ -195,25 +213,10 @@ func (r *Runner) buildPlanPrompt() string {
 }
 
 // buildCustomReviewPrompt creates the prompt for custom review tool execution.
-// uses the custom_review prompt loaded from config with {{DIFF_INSTRUCTION}} expanded.
-// claudeResponse from previous iteration is appended if present.
+// uses the custom_review prompt loaded from config with all variables expanded,
+// including {{PREVIOUS_REVIEW_CONTEXT}} for iteration context.
 func (r *Runner) buildCustomReviewPrompt(isFirst bool, claudeResponse string) string {
-	prompt := r.replaceVariablesWithIteration(r.cfg.AppConfig.CustomReviewPrompt, isFirst)
-
-	if claudeResponse != "" {
-		prompt = fmt.Sprintf(`%s
-
----
-PREVIOUS REVIEW CONTEXT:
-Claude (previous reviewer) responded to your findings:
-
-%s
-
-Re-evaluate considering Claude's arguments. If Claude's fixes are correct, acknowledge them.
-If Claude's arguments are invalid, explain why the issues still exist.`, prompt, claudeResponse)
-	}
-
-	return prompt
+	return r.replaceVariablesWithIteration(r.cfg.AppConfig.CustomReviewPrompt, isFirst, claudeResponse)
 }
 
 // buildCustomEvaluationPrompt creates the prompt for claude to evaluate custom review tool output.

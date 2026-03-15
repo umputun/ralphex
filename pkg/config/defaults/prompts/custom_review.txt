@@ -7,6 +7,7 @@
 #   {{GOAL}} - human-readable goal description
 #   {{PLAN_FILE}} - path to the plan file being executed
 #   {{PROGRESS_FILE}} - path to progress log with previous review iterations
+#   {{PREVIOUS_REVIEW_CONTEXT}} - previous review context (empty on first iteration)
 #   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
 
 You are reviewing code changes for: {{GOAL}}
@@ -46,3 +47,5 @@ Check the progress log at {{PROGRESS_FILE}} for previous review iterations and f
 - Check if issues are already mitigated in the code
 - Only report issues you can verify by reading the actual code
 - Be specific about file paths and line numbers
+
+{{PREVIOUS_REVIEW_CONTEXT}}

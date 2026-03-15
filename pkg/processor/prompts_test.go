@@ -728,13 +728,13 @@ func TestRunner_getDiffInstruction(t *testing.T) {
 func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 	t.Run("replaces DIFF_INSTRUCTION for first iteration", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", true)
+		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", true, "")
 		assert.Equal(t, "Run: git diff main...HEAD", result)
 	})
 
 	t.Run("replaces DIFF_INSTRUCTION for subsequent iteration", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", false)
+		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", false, "")
 		assert.Equal(t, "Run: git diff", result)
 	})
 
@@ -745,7 +745,7 @@ func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 			DefaultBranch: "develop",
 		}}
 		prompt := "Plan: {{PLAN_FILE}}, Progress: {{PROGRESS_FILE}}, Goal: {{GOAL}}, Branch: {{DEFAULT_BRANCH}}, Diff: {{DIFF_INSTRUCTION}}"
-		result := r.replaceVariablesWithIteration(prompt, true)
+		result := r.replaceVariablesWithIteration(prompt, true, "")
 
 		assert.Contains(t, result, "Plan: docs/plans/test.md")
 		assert.Contains(t, result, "Progress: progress.txt")
@@ -760,7 +760,7 @@ func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 			CustomAgents: []config.CustomAgent{{Name: "test-agent", Prompt: "test prompt"}},
 		}
 		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
-		result := r.replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}, Agent: {{agent:test-agent}}", true)
+		result := r.replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}, Agent: {{agent:test-agent}}", true, "")
 
 		assert.Contains(t, result, "Diff: git diff main...HEAD")
 		assert.Contains(t, result, "test prompt")
@@ -769,7 +769,7 @@ func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 
 	t.Run("handles prompt without DIFF_INSTRUCTION", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Plan: {{PLAN_FILE}}", true)
+		result := r.replaceVariablesWithIteration("Plan: {{PLAN_FILE}}", true, "")
 		assert.Contains(t, result, "(no plan file - reviewing current branch)")
 	})
 }
@@ -879,5 +879,118 @@ func TestRunner_buildCustomEvaluationPrompt(t *testing.T) {
 		prompt := r.buildCustomEvaluationPrompt("security issue found")
 
 		assert.Equal(t, "Evaluate output: security issue found. Goal: implementation of plan at docs/plans/test.md", prompt)
+	})
+}
+
+func TestRunner_buildPreviousContext(t *testing.T) {
+	r := &Runner{cfg: Config{}}
+
+	t.Run("empty on first iteration (no response)", func(t *testing.T) {
+		result := r.buildPreviousContext("")
+		assert.Empty(t, result)
+	})
+
+	t.Run("populated with response on subsequent iterations", func(t *testing.T) {
+		result := r.buildPreviousContext("I fixed the null pointer issue")
+		assert.Contains(t, result, "PREVIOUS REVIEW CONTEXT")
+		assert.Contains(t, result, "I fixed the null pointer issue")
+		assert.Contains(t, result, "Re-evaluate considering Claude's arguments")
+	})
+}
+
+func TestRunner_replaceVariablesWithIteration_PreviousReviewContext(t *testing.T) {
+	t.Run("empty when no claude response", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.replaceVariablesWithIteration("Review:\n{{PREVIOUS_REVIEW_CONTEXT}}", true, "")
+		assert.Equal(t, "Review:\n", result)
+		assert.NotContains(t, result, "PREVIOUS REVIEW CONTEXT")
+	})
+
+	t.Run("populated when claude response present", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main"}}
+		result := r.replaceVariablesWithIteration("Review:\n{{PREVIOUS_REVIEW_CONTEXT}}", false, "fixed the bug")
+		assert.Contains(t, result, "PREVIOUS REVIEW CONTEXT")
+		assert.Contains(t, result, "fixed the bug")
+		assert.NotContains(t, result, "{{PREVIOUS_REVIEW_CONTEXT}}")
+	})
+
+	t.Run("works with all variables together", func(t *testing.T) {
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", DefaultBranch: "main", ProgressPath: "progress.txt"}}
+		prompt := "Plan: {{PLAN_FILE}}, Diff: {{DIFF_INSTRUCTION}}\n{{PREVIOUS_REVIEW_CONTEXT}}"
+		result := r.replaceVariablesWithIteration(prompt, false, "previous response")
+
+		assert.Contains(t, result, "Plan: docs/plans/test.md")
+		assert.Contains(t, result, "Diff: git diff")
+		assert.Contains(t, result, "PREVIOUS REVIEW CONTEXT")
+		assert.Contains(t, result, "previous response")
+		assert.NotContains(t, result, "{{")
+	})
+}
+
+func TestRunner_buildCodexPrompt(t *testing.T) {
+	t.Run("first iteration with plan file", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/test.md",
+			ProgressPath:  "progress.txt",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCodexPrompt(true, "")
+
+		assert.Contains(t, prompt, "docs/plans/test.md")
+		assert.Contains(t, prompt, "progress.txt")
+		assert.Contains(t, prompt, "git diff main...HEAD")
+		assert.Contains(t, prompt, "NO ISSUES FOUND")
+		assert.NotContains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+		assert.NotContains(t, prompt, "{{DIFF_INSTRUCTION}}")
+		assert.NotContains(t, prompt, "{{PLAN_FILE}}")
+		assert.NotContains(t, prompt, "{{PROGRESS_FILE}}")
+		assert.NotContains(t, prompt, "{{PREVIOUS_REVIEW_CONTEXT}}")
+	})
+
+	t.Run("subsequent iteration with claude response", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/test.md",
+			ProgressPath:  "progress.txt",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCodexPrompt(false, "I fixed the null pointer issue")
+
+		assert.Contains(t, prompt, "git diff")
+		assert.NotContains(t, prompt, "main...HEAD")
+		assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+		assert.Contains(t, prompt, "I fixed the null pointer issue")
+		assert.Contains(t, prompt, "Re-evaluate considering Claude's arguments")
+	})
+
+	t.Run("first iteration without claude response has no context block", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCodexPrompt(true, "")
+
+		assert.NotContains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+	})
+
+	t.Run("replaces goal variable", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/feature.md",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCodexPrompt(true, "")
+
+		assert.Contains(t, prompt, "implementation of plan at docs/plans/feature.md")
+		assert.NotContains(t, prompt, "{{GOAL}}")
 	})
 }
