@@ -33,6 +33,7 @@ from ralphex_dk import (  # noqa: E402
     build_parser,
     build_volumes,
     detect_git_worktree,
+    detect_inherited_env_vars,
     detect_timezone,
     export_aws_profile_credentials,
     extract_env_from_flags,
@@ -1999,6 +2000,120 @@ class TestBuildDockerCommand(unittest.TestCase):
         self.assertIn("-it", cmd)
 
 
+class TestDetectInheritedEnvVars(unittest.TestCase):
+    """tests for detect_inherited_env_vars() function."""
+
+    def test_detect_inherited_env_vars(self) -> None:
+        """verify extraction of inherited (no =value) env var names."""
+        # mixed explicit and inherited vars
+        extra_env = ["-e", "VAR1=value1", "-e", "VAR2", "-e", "VAR3=value3", "-e", "VAR4"]
+        inherited = detect_inherited_env_vars(extra_env)
+        self.assertEqual(inherited, ["VAR2", "VAR4"])
+
+    def test_all_explicit(self) -> None:
+        """verify empty list when all vars have explicit values."""
+        extra_env = ["-e", "VAR1=value1", "-e", "VAR2=value2"]
+        inherited = detect_inherited_env_vars(extra_env)
+        self.assertEqual(inherited, [])
+
+    def test_all_inherited(self) -> None:
+        """verify all vars returned when none have values."""
+        extra_env = ["-e", "VAR1", "-e", "VAR2"]
+        inherited = detect_inherited_env_vars(extra_env)
+        self.assertEqual(inherited, ["VAR1", "VAR2"])
+
+    def test_empty_list(self) -> None:
+        """verify empty list for empty input."""
+        inherited = detect_inherited_env_vars([])
+        self.assertEqual(inherited, [])
+
+
+class TestDryRun(EnvTestCase):
+    """tests for --dry-run functionality."""
+
+    env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
+                "RALPHEX_EXTRA_VOLUMES", "RALPHEX_CLAUDE_PROVIDER", "CLAUDE_CONFIG_DIR",
+                "RALPHEX_WEB_HOST"]
+    save_argv = True
+
+    def test_dry_run_output_format(self) -> None:
+        """verify shlex.join() produces valid shell command."""
+        import shlex
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--dry-run"]
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                            mock_stdin.isatty.return_value = False
+                            with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                                with unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                                    with unittest.mock.patch("sys.stderr", new_callable=io.StringIO):
+                                        result = main()
+
+            self.assertEqual(result, 0)
+            output = mock_stdout.getvalue().strip()
+            # verify output starts with docker run
+            self.assertTrue(output.startswith("docker run"), f"output should start with 'docker run', got: {output}")
+            # verify shlex.split can parse it (valid shell command)
+            parts = shlex.split(output)
+            self.assertIn("docker", parts)
+            self.assertIn("run", parts)
+
+    def test_dry_run_inherited_env_warning(self) -> None:
+        """verify warning printed for inherited (no value) env vars."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--dry-run", "-E", "FOO"]
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                            mock_stdin.isatty.return_value = False
+                            with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                                with unittest.mock.patch("sys.stdout", new_callable=io.StringIO):
+                                    with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                                        result = main()
+
+            self.assertEqual(result, 0)
+            stderr_output = mock_stderr.getvalue()
+            self.assertIn("inherited env vars", stderr_output)
+            self.assertIn("FOO", stderr_output)
+
+    def test_dry_run_no_warning_explicit_values(self) -> None:
+        """verify no warning when all env vars have explicit values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--dry-run", "-E", "FOO=bar"]
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                            mock_stdin.isatty.return_value = False
+                            with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                                with unittest.mock.patch("sys.stdout", new_callable=io.StringIO):
+                                    with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                                        result = main()
+
+            self.assertEqual(result, 0)
+            stderr_output = mock_stderr.getvalue()
+            self.assertNotIn("inherited env vars", stderr_output)
+
+
 def run_tests() -> None:
     """run all unit tests."""
     loader = unittest.TestLoader()
@@ -2012,7 +2127,7 @@ def run_tests() -> None:
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
                TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags,
-               TestBuildDockerCommand]:
+               TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDryRun]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

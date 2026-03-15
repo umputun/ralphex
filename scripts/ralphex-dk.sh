@@ -42,6 +42,7 @@ import hashlib
 import os
 import platform
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -121,6 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--claude-provider", dest="claude_provider", metavar="PROVIDER",
                         choices=VALID_CLAUDE_PROVIDERS,
                         help="claude provider: 'default' or 'bedrock' (env: RALPHEX_CLAUDE_PROVIDER)")
+    parser.add_argument("--dry-run", action="store_true", dest="dry_run",
+                        help="print docker command that would be run, without executing")
     return parser
 
 
@@ -641,6 +644,26 @@ def extract_env_from_flags(extra_env: list[str] | None) -> dict[str, str]:
     return parse_env_flags(extra_env).values
 
 
+def detect_inherited_env_vars(extra_env: list[str]) -> list[str]:
+    """extract var names that use inherit form (no =value) from docker -e flags.
+
+    parses ["-e", "VAR=value", "-e", "VAR2", ...] and returns list of var names
+    that don't have explicit values (just "VAR" without "=").
+    these vars won't work when copying the command to a different shell.
+    """
+    inherited: list[str] = []
+    i = 0
+    while i < len(extra_env):
+        if extra_env[i] == "-e" and i + 1 < len(extra_env):
+            entry = extra_env[i + 1]
+            if "=" not in entry:
+                inherited.append(entry)
+            i += 2
+        else:
+            i += 1
+    return inherited
+
+
 def validate_bedrock_config(extra_env: list[str] | None = None) -> list[str]:
     """validate bedrock configuration and return list of warning messages.
 
@@ -1004,6 +1027,16 @@ def main() -> int:
 
         # determine port binding
         bind_port = should_bind_port(ralphex_args)
+
+        # handle --dry-run: print command without executing
+        if parsed.dry_run:
+            cmd = build_docker_command(image, port, volumes, extra_env, bind_port, ralphex_args)
+            inherited = detect_inherited_env_vars(extra_env)
+            if inherited:
+                print(f"note: inherited env vars ({', '.join(inherited)}) require these variables "
+                      "to be set in your shell when running the command", file=sys.stderr)
+            print(shlex.join(cmd))
+            return 0
 
         return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args)
     finally:

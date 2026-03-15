@@ -56,22 +56,22 @@
 - Modify: `scripts/ralphex-dk.sh`
 - Modify: `scripts/ralphex-dk/ralphex_dk_test.py`
 
-- [ ] add `shlex` import at top of file
-- [ ] add `--dry-run` flag to `build_parser()` with help text
-- [ ] create helper `detect_inherited_env_vars(extra_env: list[str]) -> list[str]` that extracts var names without `=value`
-- [ ] in `main()`, after volumes/env assembled and before `run_docker()` call:
+- [x] add `shlex` import at top of file
+- [x] add `--dry-run` flag to `build_parser()` with help text
+- [x] create helper `detect_inherited_env_vars(extra_env: list[str]) -> list[str]` that extracts var names without `=value`
+- [x] in `main()`, after volumes/env assembled and before `run_docker()` call:
   - check `parsed.dry_run`
   - call `build_docker_command()` to get command list
   - call `detect_inherited_env_vars()` on extra_env
   - print warning to stderr if inherited env vars found (for copy-paste scenario)
   - print `shlex.join(cmd)` to stdout
   - return 0
-- [ ] update test imports to include `detect_inherited_env_vars`
-- [ ] write test `test_detect_inherited_env_vars` - verify extraction logic
-- [ ] write test `test_dry_run_output_format` - verify `shlex.join()` produces valid shell command
-- [ ] write test `test_dry_run_inherited_env_warning` - verify warning printed for inherited vars
-- [ ] write test `test_dry_run_no_warning_explicit_values` - verify no warning when all vars have values
-- [ ] run tests - must pass before next task
+- [x] update test imports to include `detect_inherited_env_vars`
+- [x] write test `test_detect_inherited_env_vars` - verify extraction logic
+- [x] write test `test_dry_run_output_format` - verify `shlex.join()` produces valid shell command
+- [x] write test `test_dry_run_inherited_env_warning` - verify warning printed for inherited vars
+- [x] write test `test_dry_run_no_warning_explicit_values` - verify no warning when all vars have values
+- [x] run tests - must pass before next task
 
 ### Task 3: Update documentation
 
