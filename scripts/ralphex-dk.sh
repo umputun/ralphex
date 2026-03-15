@@ -782,8 +782,20 @@ def build_base_env_vars() -> list[str]:
     ]
 
 
-def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str]) -> int:
-    """build and execute docker run command."""
+def build_docker_command(
+    image: str,
+    port: str,
+    volumes: list[str],
+    env_vars: list[str],
+    bind_port: bool,
+    args: list[str],
+) -> list[str]:
+    """build docker run command as a list of arguments.
+
+    includes: docker run, interactive flag (-it when stdin is tty), --rm,
+    base env vars, extra env vars, port binding with RALPHEX_WEB_HOST,
+    volumes, workdir, image, entrypoint, and args.
+    """
     cmd = ["docker", "run"]
 
     interactive = sys.stdin.isatty()
@@ -805,6 +817,13 @@ def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], b
     cmd.extend(["-w", "/workspace"])
     cmd.extend([image, "/srv/ralphex"])
     cmd.extend(args)
+
+    return cmd
+
+
+def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+    """build and execute docker run command."""
+    cmd = build_docker_command(image, port, volumes, env_vars, bind_port, args)
 
     # defer SIGTERM during Popen+assignment to prevent race where handler sees _active_proc unset.
     # using a deferred handler instead of SIG_IGN so the signal is not lost.

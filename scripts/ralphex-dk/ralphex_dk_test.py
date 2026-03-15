@@ -28,6 +28,7 @@ from ralphex_dk import (  # noqa: E402
     ParsedEnvFlags,
     build_base_env_vars,
     build_bedrock_env_args,
+    build_docker_command,
     build_env_vars,
     build_parser,
     build_volumes,
@@ -1882,6 +1883,121 @@ class TestExtractEnvFromFlags(unittest.TestCase):
         self.assertEqual(result["MY_VAR"], "foo=bar=baz")
 
 
+class TestBuildDockerCommand(unittest.TestCase):
+    """tests for build_docker_command() function."""
+
+    def test_build_docker_command_basic(self) -> None:
+        """verify command structure includes base env vars and correct order."""
+        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = False
+            cmd = build_docker_command(
+                image="test-image:latest",
+                port="8080",
+                volumes=["-v", "/src:/dst"],
+                env_vars=["-e", "FOO=bar"],
+                bind_port=False,
+                args=["--help"],
+            )
+
+        # verify docker run command structure
+        self.assertEqual(cmd[0], "docker")
+        self.assertEqual(cmd[1], "run")
+
+        # no -it flag when not a tty
+        self.assertNotIn("-it", cmd)
+
+        # --rm is present
+        self.assertIn("--rm", cmd)
+
+        # verify base env vars are present (check one key one)
+        self.assertIn("CLAUDE_CONFIG_DIR=/home/app/.claude", cmd)
+
+        # verify extra env var is present
+        self.assertIn("FOO=bar", cmd)
+
+        # verify volumes are present
+        self.assertIn("/src:/dst", cmd)
+
+        # verify workdir
+        idx_w = cmd.index("-w")
+        self.assertEqual(cmd[idx_w + 1], "/workspace")
+
+        # verify image and entrypoint
+        self.assertIn("test-image:latest", cmd)
+        self.assertIn("/srv/ralphex", cmd)
+
+        # verify args
+        self.assertIn("--help", cmd)
+
+        # verify order: volumes before image, image before args
+        vol_idx = cmd.index("/src:/dst")
+        img_idx = cmd.index("test-image:latest")
+        args_idx = cmd.index("--help")
+        self.assertLess(vol_idx, img_idx)
+        self.assertLess(img_idx, args_idx)
+
+    def test_build_docker_command_with_serve(self) -> None:
+        """verify port binding AND RALPHEX_WEB_HOST=0.0.0.0 env var injection."""
+        # ensure RALPHEX_WEB_HOST is not in env
+        saved = os.environ.pop("RALPHEX_WEB_HOST", None)
+        try:
+            with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                mock_stdin.isatty.return_value = False
+                cmd = build_docker_command(
+                    image="test-image:latest",
+                    port="9090",
+                    volumes=[],
+                    env_vars=[],
+                    bind_port=True,
+                    args=["--serve"],
+                )
+
+            # verify port binding
+            port_idx = cmd.index("-p")
+            self.assertEqual(cmd[port_idx + 1], "127.0.0.1:9090:8080")
+
+            # verify RALPHEX_WEB_HOST is injected
+            self.assertIn("RALPHEX_WEB_HOST=0.0.0.0", cmd)
+        finally:
+            if saved is not None:
+                os.environ["RALPHEX_WEB_HOST"] = saved
+
+    def test_build_docker_command_with_serve_web_host_set(self) -> None:
+        """verify RALPHEX_WEB_HOST is NOT injected when already set in env."""
+        os.environ["RALPHEX_WEB_HOST"] = "127.0.0.1"
+        try:
+            with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                mock_stdin.isatty.return_value = False
+                cmd = build_docker_command(
+                    image="test-image:latest",
+                    port="8080",
+                    volumes=[],
+                    env_vars=[],
+                    bind_port=True,
+                    args=[],
+                )
+
+            # verify RALPHEX_WEB_HOST=0.0.0.0 is NOT in the command
+            self.assertNotIn("RALPHEX_WEB_HOST=0.0.0.0", cmd)
+        finally:
+            os.environ.pop("RALPHEX_WEB_HOST", None)
+
+    def test_build_docker_command_interactive(self) -> None:
+        """verify -it flag when stdin is tty."""
+        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = True
+            cmd = build_docker_command(
+                image="test-image:latest",
+                port="8080",
+                volumes=[],
+                env_vars=[],
+                bind_port=False,
+                args=[],
+            )
+
+        # verify -it flag is present when tty
+        self.assertIn("-it", cmd)
+
 
 def run_tests() -> None:
     """run all unit tests."""
@@ -1895,7 +2011,8 @@ def run_tests() -> None:
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
                TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
-               TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags]:
+               TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags,
+               TestBuildDockerCommand]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

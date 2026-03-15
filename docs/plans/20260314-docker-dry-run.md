@@ -40,15 +40,15 @@
 - Modify: `scripts/ralphex-dk.sh`
 - Modify: `scripts/ralphex-dk/ralphex_dk_test.py`
 
-- [ ] create `build_docker_command(image, port, volumes, env_vars, bind_port, args) -> list[str]` function
-- [ ] include ALL command assembly logic: `docker run`, interactive flag (`-it` when tty), `--rm`, `build_base_env_vars()`, env_vars, port binding with `RALPHEX_WEB_HOST`, volumes, `-w /workspace`, image, entrypoint, and args
-- [ ] update `run_docker()` to call `build_docker_command()` and use returned list
-- [ ] verify existing functionality unchanged by running `python3 scripts/ralphex-dk.sh --test`
-- [ ] update test imports in `ralphex_dk_test.py` to include `build_docker_command`
-- [ ] write test `test_build_docker_command_basic` - verify command structure includes base env vars and correct order
-- [ ] write test `test_build_docker_command_with_serve` - verify port binding AND `RALPHEX_WEB_HOST=0.0.0.0` env var injection
-- [ ] write test `test_build_docker_command_interactive` - verify `-it` flag when stdin is tty
-- [ ] run tests - must pass before next task
+- [x] create `build_docker_command(image, port, volumes, env_vars, bind_port, args) -> list[str]` function
+- [x] include ALL command assembly logic: `docker run`, interactive flag (`-it` when tty), `--rm`, `build_base_env_vars()`, env_vars, port binding with `RALPHEX_WEB_HOST`, volumes, `-w /workspace`, image, entrypoint, and args
+- [x] update `run_docker()` to call `build_docker_command()` and use returned list
+- [x] verify existing functionality unchanged by running `python3 scripts/ralphex-dk.sh --test`
+- [x] update test imports in `ralphex_dk_test.py` to include `build_docker_command`
+- [x] write test `test_build_docker_command_basic` - verify command structure includes base env vars and correct order
+- [x] write test `test_build_docker_command_with_serve` - verify port binding AND `RALPHEX_WEB_HOST=0.0.0.0` env var injection
+- [x] write test `test_build_docker_command_interactive` - verify `-it` flag when stdin is tty
+- [x] run tests - must pass before next task
 
 ### Task 2: Add --dry-run flag and output logic
 
