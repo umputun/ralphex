@@ -86,8 +86,8 @@
 **Files:**
 - Modify: `pkg/git/external.go`
 
-- [ ] lowercase first word of godoc-style comments on all unexported methods: `root`, `headHash`, `hasCommits`, `currentBranch`, `getDefaultBranch`, `branchExists`, `createBranch`, `checkoutBranch`, `isDirty`, `fileHasChanges`, `isIgnored`, `add`, `moveFile`, `commit`, `createInitialCommit`, `addWorktree`, `removeWorktree`, `pruneWorktrees` (e.g., `// Root returns...` → `// root returns...`)
-- [ ] run `go test ./pkg/git/...` — must pass before next task
+- [x] lowercase first word of godoc-style comments on all unexported methods: `root`, `headHash`, `hasCommits`, `currentBranch`, `getDefaultBranch`, `branchExists`, `createBranch`, `checkoutBranch`, `isDirty`, `fileHasChanges`, `isIgnored`, `add`, `moveFile`, `commit`, `createInitialCommit`, `addWorktree`, `removeWorktree`, `pruneWorktrees` (e.g., `// Root returns...` → `// root returns...`)
+- [x] run `go test ./pkg/git/...` — must pass before next task
 
 ### Task 5: Extract parseCommaSeparated method
 
