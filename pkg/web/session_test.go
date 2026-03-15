@@ -73,6 +73,19 @@ func TestSession_LastModified(t *testing.T) {
 	assert.Equal(t, now, s.GetLastModified())
 }
 
+func TestSession_Tailer(t *testing.T) {
+	s := NewSession("test", "/tmp/test.txt")
+
+	assert.Nil(t, s.GetTailer())
+
+	tailer := &Tailer{}
+	s.SetTailer(tailer)
+	assert.Equal(t, tailer, s.GetTailer())
+
+	s.SetTailer(nil)
+	assert.Nil(t, s.GetTailer())
+}
+
 func TestSession_Close(t *testing.T) {
 	s := NewSession("test", "/tmp/test.txt")
 	defer s.Close()
@@ -141,11 +154,8 @@ Started: 2026-01-22 10:30:00
 		// should be tailing now
 		assert.True(t, s.IsTailing())
 
-		// wait for tailer to read initial content
-		time.Sleep(200 * time.Millisecond)
-
 		s.StopTailing()
-		assert.False(t, s.IsTailing())
+		assert.Eventually(t, func() bool { return !s.IsTailing() }, time.Second, 10*time.Millisecond)
 	})
 
 	t.Run("noop if already tailing", func(t *testing.T) {
@@ -209,8 +219,7 @@ Started: 2026-01-22 10:30:00
 
 	// false after stop
 	s.StopTailing()
-	time.Sleep(50 * time.Millisecond) // give goroutine time to stop
-	assert.False(t, s.IsTailing())
+	assert.Eventually(t, func() bool { return !s.IsTailing() }, time.Second, 10*time.Millisecond)
 }
 
 func TestSession_StopTailing(t *testing.T) {
@@ -234,8 +243,7 @@ Started: 2026-01-22 10:30:00
 		assert.True(t, s.IsTailing())
 
 		s.StopTailing()
-		time.Sleep(50 * time.Millisecond)
-		assert.False(t, s.IsTailing())
+		assert.Eventually(t, func() bool { return !s.IsTailing() }, time.Second, 10*time.Millisecond)
 	})
 
 	t.Run("safe to call when not tailing", func(t *testing.T) {

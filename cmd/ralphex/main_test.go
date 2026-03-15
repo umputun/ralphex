@@ -1516,12 +1516,18 @@ func TestEnsureGitIgnored(t *testing.T) {
 	})
 }
 
+// chdirTemp changes to a temporary directory and restores the original on cleanup.
+func chdirTemp(t *testing.T) {
+	t.Helper()
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(t.TempDir()))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+}
+
 func TestSetupProgressLogger(t *testing.T) {
 	t.Run("creates_new_logger_when_not_provided", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		origDir, _ := os.Getwd()
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		chdirTemp(t)
 
 		colors := testColors()
 		req := executePlanRequest{PlanFile: "test-plan.md", Mode: processor.ModeFull, Colors: colors}
@@ -1536,10 +1542,7 @@ func TestSetupProgressLogger(t *testing.T) {
 	})
 
 	t.Run("uses_provided_logger_and_holder", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		origDir, _ := os.Getwd()
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		chdirTemp(t)
 
 		colors := testColors()
 		existingHolder := &status.PhaseHolder{}
@@ -1567,10 +1570,7 @@ func TestSetupProgressLogger(t *testing.T) {
 	})
 
 	t.Run("creates_holder_when_not_provided", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		origDir, _ := os.Getwd()
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		chdirTemp(t)
 
 		colors := testColors()
 		req := executePlanRequest{PlanFile: "holder-test.md", Mode: processor.ModeReview, Colors: colors}
@@ -1582,10 +1582,7 @@ func TestSetupProgressLogger(t *testing.T) {
 	})
 
 	t.Run("close_is_idempotent", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		origDir, _ := os.Getwd()
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		chdirTemp(t)
 
 		colors := testColors()
 		req := executePlanRequest{PlanFile: "idempotent.md", Mode: processor.ModeFull, Colors: colors}
@@ -1605,33 +1602,44 @@ func TestSendNotification(t *testing.T) {
 		sendNotification(req, "main", "5s", git.DiffStats{}, nil)
 		sendNotification(req, "main", "5s", git.DiffStats{}, errors.New("test error"))
 	})
+}
 
-	t.Run("success_notification_fields", func(t *testing.T) {
-		// nil notify service is safe to call, this verifies the function doesn't panic
-		// and correctly branches on nil error
-		req := executePlanRequest{
-			Mode:     processor.ModeFull,
-			PlanFile: "plan.md",
-		}
+func TestBuildNotifyResult(t *testing.T) {
+	t.Run("success_result", func(t *testing.T) {
+		req := executePlanRequest{Mode: processor.ModeFull, PlanFile: "plan.md"}
 		stats := git.DiffStats{Files: 3, Additions: 100, Deletions: 20}
-		sendNotification(req, "feature-branch", "1m30s", stats, nil)
+		result := buildNotifyResult(req, "feature-branch", "1m30s", stats, nil)
+
+		assert.Equal(t, "success", result.Status)
+		assert.Equal(t, "full", result.Mode)
+		assert.Equal(t, "plan.md", result.PlanFile)
+		assert.Equal(t, "feature-branch", result.Branch)
+		assert.Equal(t, "1m30s", result.Duration)
+		assert.Equal(t, 3, result.Files)
+		assert.Equal(t, 100, result.Additions)
+		assert.Equal(t, 20, result.Deletions)
+		assert.Empty(t, result.Error)
 	})
 
-	t.Run("failure_notification_fields", func(t *testing.T) {
-		req := executePlanRequest{
-			Mode:     processor.ModeReview,
-			PlanFile: "review.md",
-		}
-		sendNotification(req, "main", "45s", git.DiffStats{}, errors.New("runner failed"))
+	t.Run("failure_result", func(t *testing.T) {
+		req := executePlanRequest{Mode: processor.ModeReview, PlanFile: "review.md"}
+		result := buildNotifyResult(req, "main", "45s", git.DiffStats{}, errors.New("runner failed"))
+
+		assert.Equal(t, "failure", result.Status)
+		assert.Equal(t, "review", result.Mode)
+		assert.Equal(t, "review.md", result.PlanFile)
+		assert.Equal(t, "main", result.Branch)
+		assert.Equal(t, "45s", result.Duration)
+		assert.Equal(t, "runner failed", result.Error)
+		assert.Zero(t, result.Files)
+		assert.Zero(t, result.Additions)
+		assert.Zero(t, result.Deletions)
 	})
 }
 
 func TestDisplayStats(t *testing.T) {
 	t.Run("with_diff_stats", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		origDir, _ := os.Getwd()
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		chdirTemp(t)
 
 		colors := testColors()
 		holder := &status.PhaseHolder{}
@@ -1647,10 +1655,7 @@ func TestDisplayStats(t *testing.T) {
 	})
 
 	t.Run("without_diff_stats", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		origDir, _ := os.Getwd()
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		chdirTemp(t)
 
 		colors := testColors()
 		holder := &status.PhaseHolder{}
@@ -1665,10 +1670,7 @@ func TestDisplayStats(t *testing.T) {
 	})
 
 	t.Run("with_main_plan_file", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		origDir, _ := os.Getwd()
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		chdirTemp(t)
 
 		colors := testColors()
 		holder := &status.PhaseHolder{}

@@ -202,7 +202,7 @@ Plan creation signals:
 Key files:
 - `pkg/input/input.go` - terminal input collector (fzf/fallback, draft review)
 - `pkg/status/status.go` - shared signal constants (COMPLETED, FAILED, REVIEW_DONE, etc.)
-- `pkg/processor/signals.go` - signal detection helpers (IsReviewDone, IsCodexDone, etc.)
+- `pkg/processor/signals.go` - signal detection helpers (isReviewDone, isCodexDone, etc.)
 - `pkg/config/defaults/prompts/make_plan.txt` - plan creation prompt
 
 ## Platform Support

@@ -402,6 +402,11 @@ func setupProgressLogger(o opts, req executePlanRequest, branch string) (progres
 // uses context.Background() because the parent ctx may be canceled (e.g. SIGINT),
 // and the notification timeout is applied inside Send() independently.
 func sendNotification(req executePlanRequest, branch, elapsed string, stats git.DiffStats, runErr error) {
+	req.NotifySvc.Send(context.Background(), buildNotifyResult(req, branch, elapsed, stats, runErr))
+}
+
+// buildNotifyResult constructs a notify.Result from execution parameters.
+func buildNotifyResult(req executePlanRequest, branch, elapsed string, stats git.DiffStats, runErr error) notify.Result {
 	result := notify.Result{
 		Mode:     string(req.Mode),
 		PlanFile: req.PlanFile,
@@ -417,7 +422,7 @@ func sendNotification(req executePlanRequest, branch, elapsed string, stats git.
 		result.Additions = stats.Additions
 		result.Deletions = stats.Deletions
 	}
-	req.NotifySvc.Send(context.Background(), result)
+	return result
 }
 
 // displayStats prints completion summary with optional diff statistics and paths.

@@ -207,8 +207,8 @@ Hygiene refactor: enforce consistent access patterns. `SetState`/`GetState` and 
 
 ### Task 14: [Final] Update documentation
 
-- [ ] update CLAUDE.md if new patterns discovered during cleanup
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md if new patterns discovered during cleanup
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

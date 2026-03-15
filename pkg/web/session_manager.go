@@ -377,4 +377,3 @@ func IsActive(path string) (bool, error) {
 	// if we didn't get the lock, file is locked by another process (active)
 	return !gotLock, nil
 }
-
