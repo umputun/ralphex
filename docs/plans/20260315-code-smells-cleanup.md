@@ -57,10 +57,10 @@
 - Modify: `pkg/executor/executor.go`
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] change `fmt.Printf("[debug] non-JSON line: %s\n", line)` to `log.Printf("[debug] non-JSON line: %s", line)` in `parseStream` at `executor.go:270`
-- [ ] replace `len(rel) > 6 && rel[:6] == "../../"` with `strings.HasPrefix(rel, "../../")` in `toRelPath` at `main.go:992`
-- [ ] reformat `isResetOnly` at `main.go:1002` — break 9-condition boolean from single line to multi-line (one condition per line)
-- [ ] run `go test ./pkg/executor/... ./cmd/ralphex/...` — must pass before next task
+- [x] change `fmt.Printf("[debug] non-JSON line: %s\n", line)` to `log.Printf("[debug] non-JSON line: %s", line)` in `parseStream` at `executor.go:270`
+- [x] replace `len(rel) > 6 && rel[:6] == "../../"` with `strings.HasPrefix(rel, "../../")` in `toRelPath` at `main.go:992`
+- [x] reformat `isResetOnly` at `main.go:1002` — break 9-condition boolean from single line to multi-line (one condition per line)
+- [x] run `go test ./pkg/executor/... ./cmd/ralphex/...` — must pass before next task
 
 ### Task 2: Remove unused Collector interface
 

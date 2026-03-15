@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"runtime/debug"
 	"sync"
 	"syscall"
@@ -989,7 +990,7 @@ func toRelPath(p string) string {
 		return p
 	}
 	// if relative path escapes too far (e.g. worktree -> main repo), use absolute path instead
-	if len(rel) > 6 && rel[:6] == "../../" {
+	if strings.HasPrefix(rel, "../../") {
 		return p
 	}
 	return rel
@@ -999,7 +1000,15 @@ func toRelPath(p string) string {
 // this allows reset to work standalone (exit after reset) while also supporting
 // combined usage like "ralphex --reset docs/plans/feature.md".
 func isResetOnly(o opts) bool {
-	return o.PlanFile == "" && !o.Review && !o.ExternalOnly && !o.CodexOnly && !o.TasksOnly && !o.Serve && o.PlanDescription == "" && len(o.Watch) == 0 && o.DumpDefaults == ""
+	return o.PlanFile == "" &&
+		!o.Review &&
+		!o.ExternalOnly &&
+		!o.CodexOnly &&
+		!o.TasksOnly &&
+		!o.Serve &&
+		o.PlanDescription == "" &&
+		len(o.Watch) == 0 &&
+		o.DumpDefaults == ""
 }
 
 // startInterruptWatcher prints immediate feedback when context is canceled.

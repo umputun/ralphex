@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -267,7 +268,7 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
 		if jsonErr := json.Unmarshal([]byte(line), &event); jsonErr != nil {
 			// print non-JSON lines as-is
 			if e.Debug {
-				fmt.Printf("[debug] non-JSON line: %s\n", line)
+				log.Printf("[debug] non-JSON line: %s", line)
 			}
 			output.WriteString(line)
 			output.WriteString("\n")
