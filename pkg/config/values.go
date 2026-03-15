@@ -306,7 +306,7 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	values.WatchDirs = vl.parseCommaSeparated(section, "watch_dirs")
 
 	// notification settings
-	if err := parseNotifyValues(vl, section, &values); err != nil {
+	if err := vl.parseNotifyValues(section, &values); err != nil {
 		return Values{}, err
 	}
 
@@ -319,7 +319,7 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	values.CodexLimitPatterns = vl.parseCommaSeparated(section, "codex_limit_patterns")
 
 	// wait_on_limit duration
-	if err := parseWaitOnLimit(section, &values); err != nil {
+	if err := vl.parseWaitOnLimit(section, &values); err != nil {
 		return Values{}, err
 	}
 
@@ -327,7 +327,7 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 }
 
 // parseWaitOnLimit parses wait_on_limit duration from an INI section.
-func parseWaitOnLimit(section *ini.Section, values *Values) error {
+func (vl *valuesLoader) parseWaitOnLimit(section *ini.Section, values *Values) error {
 	if !section.HasKey("wait_on_limit") {
 		return nil
 	}
@@ -516,7 +516,7 @@ func (dst *Values) mergeNotifyFrom(src *Values) {
 
 // parseNotifyValues extracts notification-related settings from an INI section into Values.
 // called from parseValuesFromBytes to manage cyclomatic complexity.
-func parseNotifyValues(vl *valuesLoader, section *ini.Section, values *Values) error {
+func (vl *valuesLoader) parseNotifyValues(section *ini.Section, values *Values) error {
 	// notification channels (comma-separated)
 	if section.HasKey("notify_channels") {
 		values.NotifyChannelsSet = true // key present, even if empty (allows disabling)
@@ -572,12 +572,12 @@ func parseNotifyValues(vl *valuesLoader, section *ini.Section, values *Values) e
 		values.NotifyCustomScript = expandTilde(key.String())
 	}
 
-	return parseNotifyDestValues(vl, section, values)
+	return vl.parseNotifyDestValues(section, values)
 }
 
 // parseNotifyDestValues extracts SMTP/email and webhook notification settings from an INI section.
 // split from parseNotifyValues to keep cyclomatic complexity within limits.
-func parseNotifyDestValues(vl *valuesLoader, section *ini.Section, values *Values) error {
+func (vl *valuesLoader) parseNotifyDestValues(section *ini.Section, values *Values) error {
 	// webhook settings (comma-separated URLs)
 	if section.HasKey("notify_webhook_urls") {
 		values.NotifyWebhookURLsSet = true // key present, even if empty (allows disabling)

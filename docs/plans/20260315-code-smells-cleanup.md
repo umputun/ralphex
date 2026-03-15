@@ -106,10 +106,10 @@
 **Files:**
 - Modify: `pkg/config/values.go`
 
-- [ ] convert `parseNotifyValues(section, values)` to `(vl *valuesLoader) parseNotifyValues(section, values)` — update call in `parseValuesFromBytes`
-- [ ] convert `parseNotifyDestValues(section, values)` to `(vl *valuesLoader) parseNotifyDestValues(section, values)` — update call in `parseNotifyValues`
-- [ ] convert `parseWaitOnLimit(section, values)` to `(vl *valuesLoader) parseWaitOnLimit(section, values)` — update call in `parseValuesFromBytes`
-- [ ] run `go test ./pkg/config/...` — must pass before next task
+- [x] convert `parseNotifyValues(section, values)` to `(vl *valuesLoader) parseNotifyValues(section, values)` — update call in `parseValuesFromBytes`
+- [x] convert `parseNotifyDestValues(section, values)` to `(vl *valuesLoader) parseNotifyDestValues(section, values)` — update call in `parseNotifyValues`
+- [x] convert `parseWaitOnLimit(section, values)` to `(vl *valuesLoader) parseWaitOnLimit(section, values)` — update call in `parseValuesFromBytes`
+- [x] run `go test ./pkg/config/...` — must pass before next task
 
 ### Task 7: Unexport internal-only signals symbols
 
