@@ -66,12 +66,14 @@ const defaultTopic = "events"
 type Session struct {
 	mu sync.RWMutex
 
-	ID       string          // unique identifier (derived from progress filename)
-	Path     string          // full path to progress file
-	Metadata SessionMetadata // parsed header information
-	State    SessionState    // current state (active/completed)
-	SSE      *sse.Server     // SSE server for this session (handles subscriptions and replay)
-	Tailer   *Tailer         // file tailer for reading new content (nil if not tailing)
+	// set once at creation, immutable after
+	ID   string      // unique identifier (derived from progress filename)
+	Path string      // full path to progress file
+	SSE  *sse.Server // SSE server for this session (handles subscriptions and replay)
+
+	metadata SessionMetadata // parsed header information
+	state    SessionState    // current state (active/completed)
+	tailer   *Tailer         // file tailer for reading new content (nil if not tailing)
 
 	// lastModified tracks the file's last modification time for change detection
 	lastModified time.Time
@@ -115,7 +117,7 @@ func NewSession(id, path string) *Session {
 	return &Session{
 		ID:    id,
 		Path:  path,
-		State: SessionStateCompleted, // default to completed until proven active
+		state: SessionStateCompleted, // default to completed until proven active
 		SSE:   sseServer,
 	}
 }
@@ -124,28 +126,42 @@ func NewSession(id, path string) *Session {
 func (s *Session) SetMetadata(meta SessionMetadata) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Metadata = meta
+	s.metadata = meta
 }
 
 // GetMetadata returns the session's metadata thread-safely.
 func (s *Session) GetMetadata() SessionMetadata {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.Metadata
+	return s.metadata
 }
 
 // SetState updates the session's state thread-safely.
 func (s *Session) SetState(state SessionState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.State = state
+	s.state = state
 }
 
 // GetState returns the session's state thread-safely.
 func (s *Session) GetState() SessionState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.State
+	return s.state
+}
+
+// GetTailer returns the session's tailer thread-safely.
+func (s *Session) GetTailer() *Tailer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.tailer
+}
+
+// SetTailer updates the session's tailer thread-safely.
+func (s *Session) SetTailer(tailer *Tailer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tailer = tailer
 }
 
 // SetLastModified updates the last modified time thread-safely.
@@ -207,13 +223,13 @@ func (s *Session) StartTailing(fromStart bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.Tailer != nil && s.Tailer.IsRunning() {
+	if s.tailer != nil && s.tailer.IsRunning() {
 		return nil // already tailing
 	}
 
-	s.Tailer = NewTailer(s.Path, DefaultTailerConfig())
-	if err := s.Tailer.Start(fromStart); err != nil {
-		s.Tailer = nil
+	s.tailer = NewTailer(s.Path, DefaultTailerConfig())
+	if err := s.tailer.Start(fromStart); err != nil {
+		s.tailer = nil
 		return err
 	}
 
@@ -230,7 +246,7 @@ func (s *Session) StopTailing() {
 		close(s.stopTailCh)
 		s.stopTailCh = nil
 	}
-	tailer := s.Tailer
+	tailer := s.tailer
 	s.mu.Unlock()
 
 	if tailer != nil {
@@ -242,7 +258,7 @@ func (s *Session) StopTailing() {
 func (s *Session) IsTailing() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.Tailer != nil && s.Tailer.IsRunning()
+	return s.tailer != nil && s.tailer.IsRunning()
 }
 
 // Publish sends an event to all connected SSE clients and stores it for replay.
@@ -258,7 +274,7 @@ func (s *Session) Publish(event Event) error {
 // feedEvents reads events from the tailer and publishes them to SSE clients.
 func (s *Session) feedEvents() {
 	s.mu.RLock()
-	tailer := s.Tailer
+	tailer := s.tailer
 	stopCh := s.stopTailCh
 	s.mu.RUnlock()
 

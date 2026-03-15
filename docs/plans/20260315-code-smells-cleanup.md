@@ -173,12 +173,12 @@ Hygiene refactor: enforce consistent access patterns. `SetState`/`GetState` and 
 - Modify: `pkg/web/session.go`
 - Modify: `pkg/web/server_test.go`
 
-- [ ] make mutable fields private: `State` → `state`, `Metadata` → `metadata`, `Tailer` → `tailer`
-- [ ] add `GetTailer()` / `SetTailer()` thread-safe accessors (matching existing `GetState`/`SetState` pattern)
-- [ ] document immutable fields `ID`, `Path`, `SSE` with comment: `// set once at creation, immutable after`
-- [ ] update direct field access in `server_test.go` (one assertion) to use accessor
-- [ ] verify internal `session.go` methods access private fields directly (already under lock — no change needed)
-- [ ] run `go test ./pkg/web/...` — must pass before next task
+- [x] make mutable fields private: `State` → `state`, `Metadata` → `metadata`, `Tailer` → `tailer`
+- [x] add `GetTailer()` / `SetTailer()` thread-safe accessors (matching existing `GetState`/`SetState` pattern)
+- [x] document immutable fields `ID`, `Path`, `SSE` with comment: `// set once at creation, immutable after`
+- [x] update direct field access in `server_test.go` (one assertion) to use accessor
+- [x] verify internal `session.go` methods access private fields directly (already under lock — no change needed)
+- [x] run `go test ./pkg/web/...` — must pass before next task
 
 ### Task 12: Extract progress parsing from session_manager
 

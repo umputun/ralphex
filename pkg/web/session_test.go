@@ -16,7 +16,7 @@ func TestNewSession(t *testing.T) {
 
 		assert.Equal(t, "my-plan", s.ID)
 		assert.Equal(t, "/tmp/progress-my-plan.txt", s.Path)
-		assert.Equal(t, SessionStateCompleted, s.State)
+		assert.Equal(t, SessionStateCompleted, s.GetState())
 		assert.NotNil(t, s.SSE)
 	})
 
