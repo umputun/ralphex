@@ -67,10 +67,10 @@
 **Files:**
 - Modify: `pkg/input/input.go`
 
-- [ ] remove `//go:generate moq` directive at line 54
-- [ ] remove `Collector` interface definition (lines 56-68)
-- [ ] verify no references exist: `grep -r "input\.Collector" .` should return nothing
-- [ ] run `go test ./pkg/input/...` — must pass before next task
+- [x] remove `//go:generate moq` directive at line 54
+- [x] remove `Collector` interface definition (lines 56-68)
+- [x] verify no references exist: `grep -r "input\.Collector" .` should return nothing
+- [x] run `go test ./pkg/input/...` — must pass before next task
 
 ### Task 3: Fix logging convention in dashboard
 

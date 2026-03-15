@@ -51,23 +51,7 @@ func ReadLineWithContext(ctx context.Context, reader *bufio.Reader) (string, err
 	}
 }
 
-//go:generate moq -out mocks/collector.go -pkg mocks -skip-ensure -fmt goimports . Collector
-
-// Collector provides interactive input collection for plan creation.
-type Collector interface {
-	// AskQuestion presents a question with options and returns the selected answer.
-	// An "Other" option is appended automatically; if chosen, the user types a free-text answer.
-	// Returns the selected or typed text, or error if selection fails (including invalid input).
-	AskQuestion(ctx context.Context, question string, options []string) (string, error)
-
-	// AskDraftReview presents a plan draft for review with Accept/Revise/Interactive review/Reject options.
-	// Returns the selected action ("accept", "revise", or "reject") and feedback text (empty for accept/reject).
-	// Invalid selections (bad number, out of range) are retried with a warning;
-	// only fatal errors (EOF, context cancellation) return an error.
-	AskDraftReview(ctx context.Context, question string, planContent string) (action string, feedback string, err error)
-}
-
-// TerminalCollector implements Collector using fzf (if available) or numbered selection fallback.
+// TerminalCollector provides interactive input collection using fzf (if available) or numbered selection fallback.
 type TerminalCollector struct {
 	stdin      io.Reader                                                 // for testing, nil uses os.Stdin
 	stdout     io.Writer                                                 // for testing, nil uses os.Stdout
