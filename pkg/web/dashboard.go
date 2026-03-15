@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"log"
 	"path/filepath"
 	"time"
 
@@ -134,7 +134,7 @@ func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 		go func() {
 			if watchErr := watcher.Start(ctx); watchErr != nil {
 				// log error but don't fail - server can still work
-				fmt.Fprintf(os.Stderr, "warning: watcher error: %v\n", watchErr)
+				log.Printf("[WARN] watcher error: %v", watchErr)
 			}
 		}()
 	}
@@ -143,7 +143,7 @@ func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 	// these are logged but don't fail the main execution since the dashboard is supplementary
 	go func() {
 		if srvErr := <-srvErrCh; srvErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: web server error during execution: %v\n", srvErr)
+			log.Printf("[WARN] web server error during execution: %v", srvErr)
 		}
 	}()
 

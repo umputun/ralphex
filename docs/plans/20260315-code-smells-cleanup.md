@@ -77,9 +77,9 @@
 **Files:**
 - Modify: `pkg/web/dashboard.go`
 
-- [ ] change `fmt.Fprintf(os.Stderr, "warning: watcher error: %v\n", watchErr)` to `log.Printf("[WARN] watcher error: %v", watchErr)` at line ~137
-- [ ] change `fmt.Fprintf(os.Stderr, "warning: web server error during execution: %v\n", srvErr)` to `log.Printf("[WARN] web server error during execution: %v", srvErr)` at line ~146
-- [ ] run `go test ./pkg/web/...` — must pass before next task
+- [x] change `fmt.Fprintf(os.Stderr, "warning: watcher error: %v\n", watchErr)` to `log.Printf("[WARN] watcher error: %v", watchErr)` at line ~137
+- [x] change `fmt.Fprintf(os.Stderr, "warning: web server error during execution: %v\n", srvErr)` to `log.Printf("[WARN] web server error during execution: %v", srvErr)` at line ~146
+- [x] run `go test ./pkg/web/...` — must pass before next task
 
 ### Task 4: Lowercase comments on unexported methods
 
