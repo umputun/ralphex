@@ -79,10 +79,10 @@
 - Modify: `scripts/ralphex-dk.sh` (docstring)
 - Modify: `llms.txt`
 
-- [ ] add `--dry-run` to docstring wrapper flags section (around line 13)
-- [ ] add `--dry-run` usage example to docstring
-- [ ] update `llms.txt` Docker wrapper section with `--dry-run` flag
-- [ ] verify help output: `python3 scripts/ralphex-dk.sh --help | grep dry-run`
+- [x] add `--dry-run` to docstring wrapper flags section (around line 13)
+- [x] add `--dry-run` usage example to docstring
+- [x] update `llms.txt` Docker wrapper section with `--dry-run` flag
+- [x] verify help output: `python3 scripts/ralphex-dk.sh --help | grep dry-run`
 
 ### Task 4: Final verification
 

@@ -7,6 +7,7 @@ Usage: ralphex-dk.sh [wrapper-flags] [ralphex-args]
 Wrapper-specific flags (parsed by this script):
   -E, --env VAR[=val]        extra env var to pass to container (repeatable)
   -v, --volume src:dst[:opts] extra volume mount (repeatable)
+  --dry-run                  print docker command without executing
   --update                   pull latest Docker image and exit
   --update-script            update this wrapper script and exit
   --test                     run embedded unit tests and exit
@@ -22,6 +23,8 @@ Examples:
   ralphex-dk.sh -v /data:/mnt/data:ro docs/plans/feature.md
   ralphex-dk.sh -E DEBUG=1 -E API_KEY docs/plans/feature.md
   ralphex-dk.sh -E FOO -- -v /ignored:path plan.md   # -v goes to ralphex
+  ralphex-dk.sh --dry-run                            # show docker command
+  ralphex-dk.sh --dry-run -E FOO                     # warns about inherited var
   ralphex-dk.sh --update
   ralphex-dk.sh --update-script
 

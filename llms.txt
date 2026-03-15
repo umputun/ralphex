@@ -134,6 +134,9 @@ chmod +x /usr/local/bin/ralphex
 
 # for non-Go projects, use base image
 export RALPHEX_IMAGE=ghcr.io/umputun/ralphex:latest
+
+# debug docker command without running (shows full command for troubleshooting)
+ralphex --dry-run docs/plans/feature.md
 ```
 
 **Environment variables:**
