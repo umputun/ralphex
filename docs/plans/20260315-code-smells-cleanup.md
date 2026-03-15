@@ -95,11 +95,11 @@
 - Modify: `pkg/config/values.go`
 - Modify: `pkg/config/values_test.go` (if test additions needed)
 
-- [ ] add method `func (vl *valuesLoader) parseCommaSeparated(section *ini.Section, key string) []string` that reads a key, splits by comma, trims whitespace, filters empty strings
-- [ ] replace 5 comma-split blocks in `parseValuesFromBytes` with one-liner calls: `claude_error_patterns`, `codex_error_patterns`, `claude_limit_patterns`, `codex_limit_patterns`, `watch_dirs`
-- [ ] replace comma-split blocks in `parseNotifyValues` and `parseNotifyDestValues` — note: 3 blocks (`notify_channels`, `notify_webhook_urls`, `notify_email_to`) also set `*Set` flags, so the `*Set = true` assignment must remain outside the helper call
-- [ ] write tests for `parseCommaSeparated` — empty key, single value, multiple values, whitespace trimming, empty strings filtered
-- [ ] run `go test ./pkg/config/...` — must pass before next task
+- [x] add method `func (vl *valuesLoader) parseCommaSeparated(section *ini.Section, key string) []string` that reads a key, splits by comma, trims whitespace, filters empty strings
+- [x] replace 5 comma-split blocks in `parseValuesFromBytes` with one-liner calls: `claude_error_patterns`, `codex_error_patterns`, `claude_limit_patterns`, `codex_limit_patterns`, `watch_dirs`
+- [x] replace comma-split blocks in `parseNotifyValues` and `parseNotifyDestValues` — note: 3 blocks (`notify_channels`, `notify_webhook_urls`, `notify_email_to`) also set `*Set` flags, so the `*Set = true` assignment must remain outside the helper call
+- [x] write tests for `parseCommaSeparated` — empty key, single value, multiple values, whitespace trimming, empty strings filtered
+- [x] run `go test ./pkg/config/...` — must pass before next task
 
 ### Task 6: Convert config standalone functions to methods
 

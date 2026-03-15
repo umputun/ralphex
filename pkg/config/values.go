@@ -156,7 +156,7 @@ func (vl *valuesLoader) parseValuesFromEmbedded() (Values, error) {
 
 // parseValuesFromBytes parses configuration from a byte slice into Values.
 //
-//nolint:gocyclo // adding watch_dirs pushed complexity over threshold; splitting would hurt readability
+//nolint:gocyclo // high complexity from many config keys; splitting would hurt readability
 func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	// ignoreInlineComment: true prevents # from being treated as inline comment marker
 	cfg, err := ini.LoadSources(ini.LoadOptions{IgnoreInlineComment: true}, data)
@@ -303,65 +303,20 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	}
 
 	// watch directories (comma-separated)
-	if key, err := section.GetKey("watch_dirs"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.WatchDirs = append(values.WatchDirs, t)
-				}
-			}
-		}
-	}
+	values.WatchDirs = vl.parseCommaSeparated(section, "watch_dirs")
 
 	// notification settings
-	if err := parseNotifyValues(section, &values); err != nil {
+	if err := parseNotifyValues(vl, section, &values); err != nil {
 		return Values{}, err
 	}
 
 	// error patterns (comma-separated)
-	if key, err := section.GetKey("claude_error_patterns"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.ClaudeErrorPatterns = append(values.ClaudeErrorPatterns, t)
-				}
-			}
-		}
-	}
-	if key, err := section.GetKey("codex_error_patterns"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.CodexErrorPatterns = append(values.CodexErrorPatterns, t)
-				}
-			}
-		}
-	}
+	values.ClaudeErrorPatterns = vl.parseCommaSeparated(section, "claude_error_patterns")
+	values.CodexErrorPatterns = vl.parseCommaSeparated(section, "codex_error_patterns")
 
 	// limit patterns (comma-separated, same format as error patterns)
-	if key, err := section.GetKey("claude_limit_patterns"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.ClaudeLimitPatterns = append(values.ClaudeLimitPatterns, t)
-				}
-			}
-		}
-	}
-	if key, err := section.GetKey("codex_limit_patterns"); err == nil {
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.CodexLimitPatterns = append(values.CodexLimitPatterns, t)
-				}
-			}
-		}
-	}
+	values.ClaudeLimitPatterns = vl.parseCommaSeparated(section, "claude_limit_patterns")
+	values.CodexLimitPatterns = vl.parseCommaSeparated(section, "codex_limit_patterns")
 
 	// wait_on_limit duration
 	if err := parseWaitOnLimit(section, &values); err != nil {
@@ -561,18 +516,11 @@ func (dst *Values) mergeNotifyFrom(src *Values) {
 
 // parseNotifyValues extracts notification-related settings from an INI section into Values.
 // called from parseValuesFromBytes to manage cyclomatic complexity.
-func parseNotifyValues(section *ini.Section, values *Values) error {
+func parseNotifyValues(vl *valuesLoader, section *ini.Section, values *Values) error {
 	// notification channels (comma-separated)
-	if key, err := section.GetKey("notify_channels"); err == nil {
+	if section.HasKey("notify_channels") {
 		values.NotifyChannelsSet = true // key present, even if empty (allows disabling)
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.NotifyChannels = append(values.NotifyChannels, t)
-				}
-			}
-		}
+		values.NotifyChannels = vl.parseCommaSeparated(section, "notify_channels")
 	}
 
 	if key, err := section.GetKey("notify_on_error"); err == nil {
@@ -624,23 +572,16 @@ func parseNotifyValues(section *ini.Section, values *Values) error {
 		values.NotifyCustomScript = expandTilde(key.String())
 	}
 
-	return parseNotifyDestValues(section, values)
+	return parseNotifyDestValues(vl, section, values)
 }
 
 // parseNotifyDestValues extracts SMTP/email and webhook notification settings from an INI section.
 // split from parseNotifyValues to keep cyclomatic complexity within limits.
-func parseNotifyDestValues(section *ini.Section, values *Values) error {
+func parseNotifyDestValues(vl *valuesLoader, section *ini.Section, values *Values) error {
 	// webhook settings (comma-separated URLs)
-	if key, err := section.GetKey("notify_webhook_urls"); err == nil {
+	if section.HasKey("notify_webhook_urls") {
 		values.NotifyWebhookURLsSet = true // key present, even if empty (allows disabling)
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.NotifyWebhookURLs = append(values.NotifyWebhookURLs, t)
-				}
-			}
-		}
+		values.NotifyWebhookURLs = vl.parseCommaSeparated(section, "notify_webhook_urls")
 	}
 
 	// smtp/email settings
@@ -675,19 +616,32 @@ func parseNotifyDestValues(section *ini.Section, values *Values) error {
 	if key, err := section.GetKey("notify_email_from"); err == nil {
 		values.NotifyEmailFrom = key.String()
 	}
-	if key, err := section.GetKey("notify_email_to"); err == nil {
+	if section.HasKey("notify_email_to") {
 		values.NotifyEmailToSet = true // key present, even if empty (allows disabling)
-		val := strings.TrimSpace(key.String())
-		if val != "" {
-			for p := range strings.SplitSeq(val, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					values.NotifyEmailTo = append(values.NotifyEmailTo, t)
-				}
-			}
-		}
+		values.NotifyEmailTo = vl.parseCommaSeparated(section, "notify_email_to")
 	}
 
 	return nil
+}
+
+// parseCommaSeparated reads a key from an INI section, splits by comma, trims whitespace, and filters empty strings.
+// returns nil if the key doesn't exist or the value is empty.
+func (vl *valuesLoader) parseCommaSeparated(section *ini.Section, key string) []string {
+	k, err := section.GetKey(key)
+	if err != nil {
+		return nil
+	}
+	val := strings.TrimSpace(k.String())
+	if val == "" {
+		return nil
+	}
+	var result []string
+	for p := range strings.SplitSeq(val, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // expandTilde expands a leading ~ in a path to the user's home directory.

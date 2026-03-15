@@ -8,11 +8,39 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/ini.v1"
 )
 
 func Test_newValuesLoader(t *testing.T) {
 	loader := newValuesLoader(defaultsFS)
 	assert.NotNil(t, loader)
+}
+
+func TestValuesLoader_parseCommaSeparated(t *testing.T) {
+	loader := newValuesLoader(defaultsFS)
+
+	tests := []struct {
+		name, config, key string
+		expected          []string
+	}{
+		{name: "missing key", config: "", key: "missing", expected: nil},
+		{name: "empty value", config: "items = ", key: "items", expected: nil},
+		{name: "single value", config: "items = foo", key: "items", expected: []string{"foo"}},
+		{name: "multiple values", config: "items = a,b,c", key: "items", expected: []string{"a", "b", "c"}},
+		{name: "whitespace trimming", config: "items =  a , b , c ", key: "items", expected: []string{"a", "b", "c"}},
+		{name: "empty strings filtered", config: "items = a,,b,,,c", key: "items", expected: []string{"a", "b", "c"}},
+		{name: "all empty after split", config: "items = ,,,", key: "items", expected: nil},
+		{name: "spaces only in values", config: "items = , , ", key: "items", expected: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ini.LoadSources(ini.LoadOptions{IgnoreInlineComment: true}, []byte(tt.config))
+			require.NoError(t, err)
+			result := loader.parseCommaSeparated(cfg.Section(""), tt.key)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
