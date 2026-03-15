@@ -93,6 +93,13 @@ type GitChecker interface {
 	DiffFingerprint() (string, error)
 }
 
+// Executors groups the executor dependencies for the Runner.
+type Executors struct {
+	Claude Executor
+	Codex  Executor
+	Custom *executor.CustomExecutor
+}
+
 // Runner orchestrates the execution loop.
 type Runner struct {
 	cfg            Config
@@ -169,11 +176,11 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		}
 	}
 
-	return NewWithExecutors(cfg, log, claudeExec, codexExec, customExec, holder)
+	return NewWithExecutors(cfg, log, Executors{Claude: claudeExec, Codex: codexExec, Custom: customExec}, holder)
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
-func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *executor.CustomExecutor, holder *status.PhaseHolder) *Runner {
+func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.PhaseHolder) *Runner {
 	// determine iteration delay from config or default
 	iterDelay := DefaultIterationDelay
 	if cfg.IterationDelayMs > 0 {
@@ -198,9 +205,9 @@ func NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *ex
 	return &Runner{
 		cfg:            cfg,
 		log:            log,
-		claude:         claude,
-		codex:          codex,
-		custom:         custom,
+		claude:         execs.Claude,
+		codex:          execs.Codex,
+		custom:         execs.Custom,
 		phaseHolder:    holder,
 		iterationDelay: iterDelay,
 		taskRetryCount: retryCount,

@@ -134,11 +134,11 @@
 - Modify: `pkg/processor/runner.go`
 - Modify: `pkg/processor/runner_test.go`
 
-- [ ] add `Executors` struct with fields: `Claude Executor`, `Codex Executor`, `Custom *executor.CustomExecutor`
-- [ ] change `NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *executor.CustomExecutor, holder *status.PhaseHolder)` to `NewWithExecutors(cfg Config, log Logger, exec Executors, holder *status.PhaseHolder)`
-- [ ] update function body to use `exec.Claude`, `exec.Codex`, `exec.Custom`
-- [ ] update all test call sites (~87 in runner_test.go) to use `Executors{...}` struct literal — use batch find-replace
-- [ ] run `go test ./pkg/processor/...` — must pass before next task
+- [x] add `Executors` struct with fields: `Claude Executor`, `Codex Executor`, `Custom *executor.CustomExecutor`
+- [x] change `NewWithExecutors(cfg Config, log Logger, claude, codex Executor, custom *executor.CustomExecutor, holder *status.PhaseHolder)` to `NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.PhaseHolder)`
+- [x] update function body to use `execs.Claude`, `execs.Codex`, `execs.Custom`
+- [x] update all test call sites (~90 in runner_test.go) to use `Executors{...}` struct literal — use batch find-replace
+- [x] run `go test ./pkg/processor/...` — must pass before next task
 
 ### Task 9: Convert dashboard standalone functions to methods
 
