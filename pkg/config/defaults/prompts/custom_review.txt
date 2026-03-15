@@ -6,6 +6,7 @@
 #   {{DIFF_INSTRUCTION}} - git diff command appropriate for current iteration
 #   {{GOAL}} - human-readable goal description
 #   {{PLAN_FILE}} - path to the plan file being executed
+#   {{PROGRESS_FILE}} - path to progress log with previous review iterations
 #   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
 
 You are reviewing code changes for: {{GOAL}}
@@ -34,6 +35,10 @@ Report issues as a structured list:
 - file:line - description of issue
 
 If no issues found, output: NO ISSUES FOUND
+
+## Previous Review History
+
+Check the progress log at {{PROGRESS_FILE}} for previous review iterations and findings history before reporting issues.
 
 ## Important
 

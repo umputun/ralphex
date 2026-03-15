@@ -791,6 +791,8 @@ The code implements the plan at: %s
 
 %s
 
+Check the progress log at %s for previous review iterations and findings history before reporting issues.
+
 Analyze for:
 - Bugs and logic errors
 - Security vulnerabilities
@@ -798,7 +800,7 @@ Analyze for:
 - Error handling gaps
 - Code quality issues
 
-Report findings with file:line references. If no issues found, say "NO ISSUES FOUND".`, planContext, diffDescription, diffInstruction)
+Report findings with file:line references. If no issues found, say "NO ISSUES FOUND".`, planContext, diffDescription, diffInstruction, r.getProgressFileRef())
 
 	if claudeResponse != "" {
 		return fmt.Sprintf(`%s
