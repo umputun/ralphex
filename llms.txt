@@ -85,7 +85,7 @@ RALPHEX_CLAUDE_PROVIDER=bedrock ralphex docs/plans/feature.md
 
 Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `RALPHEX_CONFIG_DIR`)
 
-**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `custom_review.txt`, `custom_eval.txt`, `make_plan.txt`, `finalize.txt`
+**Prompt files** (`~/.config/ralphex/prompts/`): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `codex_review.txt`, `custom_review.txt`, `custom_eval.txt`, `make_plan.txt`, `finalize.txt`
 
 **Agent files** (`~/.config/ralphex/agents/`): Custom review agents referenced via `{{agent:name}}` in prompts
 
@@ -95,7 +95,8 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 - `{{GOAL}}` - goal description
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.), overridable via `--base-ref` CLI flag or `default_branch` config option
 - `{{agent:name}}` - expands to Task tool instructions for named agent
-- `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in custom_review.txt)
+- `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in codex_review.txt and custom_review.txt)
+- `{{PREVIOUS_REVIEW_CONTEXT}}` - previous review context for external review iterations (in codex_review.txt and custom_review.txt)
 
 **External review iterations:** By default, external review runs up to `max(3, max_iterations/5)` iterations. Override with `max_external_iterations` config option or `--max-external-iterations` CLI flag (0 = auto).
 

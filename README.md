@@ -665,8 +665,12 @@ The entire system is designed for customization - both task execution and review
 **Prompt files** (`~/.config/ralphex/prompts/`):
 - `task.txt` - task execution prompt
 - `review_first.txt` - comprehensive review (default: 5 language-agnostic agents - quality, implementation, testing, simplification, documentation; customizable)
-- `codex.txt` - codex review prompt
+- `codex.txt` - codex evaluation prompt (Claude evaluates codex output)
+- `codex_review.txt` - codex review prompt (sent to codex external review tool)
+- `custom_review.txt` - custom external review prompt (sent to custom review script)
+- `custom_eval.txt` - custom evaluation prompt (Claude evaluates custom tool output)
 - `review_second.txt` - final review, critical/major issues only (default: 2 agents - quality, implementation; customizable)
+- `make_plan.txt` - interactive plan creation prompt
 - `finalize.txt` - optional finalize step prompt (disabled by default)
 
 **Comment lines and markdown headers:**
@@ -718,7 +722,12 @@ ralphex uses a configuration directory at `~/.config/ralphex/` (override with `-
 │   ├── task.txt
 │   ├── review_first.txt
 │   ├── review_second.txt
-│   └── codex.txt
+│   ├── codex.txt
+│   ├── codex_review.txt
+│   ├── custom_review.txt
+│   ├── custom_eval.txt
+│   ├── make_plan.txt
+│   └── finalize.txt
 └── agents/             # custom review agents (*.txt files)
 ```
 
@@ -872,7 +881,9 @@ Customize `~/.config/ralphex/prompts/custom_review.txt` to modify the prompt sen
 - `{{DIFF_INSTRUCTION}}` - git diff command appropriate for current iteration
 - `{{GOAL}}` - human-readable description of what's being implemented
 - `{{PLAN_FILE}}` - path to the plan file
+- `{{PROGRESS_FILE}}` - path to progress log with previous review iterations
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, etc.)
+- `{{PREVIOUS_REVIEW_CONTEXT}}` - previous review context (empty on first iteration, populated on subsequent)
 
 Customize `~/.config/ralphex/prompts/custom_eval.txt` to modify how Claude evaluates your tool's output.
 

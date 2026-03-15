@@ -110,8 +110,8 @@ If Claude's arguments are invalid, explain why the issues still exist.`, claudeR
 func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration bool, claudeResponse string) string {
 	result := r.replaceBaseVariables(prompt)
 	result = strings.ReplaceAll(result, "{{DIFF_INSTRUCTION}}", r.getDiffInstruction(isFirstIteration))
+	result = r.expandAgentReferences(result) // expand agents before inserting external content
 	result = strings.ReplaceAll(result, "{{PREVIOUS_REVIEW_CONTEXT}}", r.buildPreviousContext(claudeResponse))
-	result = r.expandAgentReferences(result)
 	return result
 }
 
