@@ -160,21 +160,21 @@ func (d *Dashboard) RunWatchOnly(ctx context.Context, dirs []string) error {
 	}
 
 	// setup server and watcher
-	srvErrCh, watchErrCh, err := setupWatchMode(ctx, d.port, d.host, dirs)
+	srvErrCh, watchErrCh, err := d.setupWatchMode(ctx, dirs)
 	if err != nil {
 		return err
 	}
 
 	// print startup info
-	printWatchInfo(dirs, d.port, d.host, d.colors)
+	d.printWatchInfo(dirs)
 
 	// monitor for errors until shutdown
-	return monitorErrors(ctx, srvErrCh, watchErrCh, d.colors)
+	return d.monitorErrors(ctx, srvErrCh, watchErrCh)
 }
 
 // setupWatchMode creates and starts the web server and file watcher for watch-only mode.
 // returns error channels for monitoring both components.
-func setupWatchMode(ctx context.Context, port int, host string, dirs []string) (chan error, chan error, error) {
+func (d *Dashboard) setupWatchMode(ctx context.Context, dirs []string) (chan error, chan error, error) {
 	sm := NewSessionManager()
 	watcher, err := NewWatcher(dirs, sm)
 	if err != nil {
@@ -182,8 +182,8 @@ func setupWatchMode(ctx context.Context, port int, host string, dirs []string) (
 	}
 
 	serverCfg := ServerConfig{
-		Port:     port,
-		Host:     host,
+		Port:     d.port,
+		Host:     d.host,
 		PlanName: "(watch mode)",
 		Branch:   "",
 		PlanFile: "",
@@ -195,7 +195,7 @@ func setupWatchMode(ctx context.Context, port int, host string, dirs []string) (
 	}
 
 	// start server with startup check
-	srvErrCh, err := startServerAsync(ctx, srv, port)
+	srvErrCh, err := startServerAsync(ctx, srv, d.port)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -237,7 +237,7 @@ func startServerAsync(ctx context.Context, srv *Server, port int) (chan error, e
 }
 
 // monitorErrors monitors server and watcher error channels until shutdown.
-func monitorErrors(ctx context.Context, srvErrCh, watchErrCh chan error, colors *progress.Colors) error {
+func (d *Dashboard) monitorErrors(ctx context.Context, srvErrCh, watchErrCh chan error) error {
 	for {
 		// exit when both channels are nil (closed and handled)
 		if srvErrCh == nil && watchErrCh == nil {
@@ -253,7 +253,7 @@ func monitorErrors(ctx context.Context, srvErrCh, watchErrCh chan error, colors 
 				continue
 			}
 			if srvErr != nil && ctx.Err() == nil {
-				colors.Error().Printf("web server error: %v\n", srvErr)
+				d.colors.Error().Printf("web server error: %v\n", srvErr)
 			}
 		case watchErr, ok := <-watchErrCh:
 			if !ok {
@@ -261,18 +261,18 @@ func monitorErrors(ctx context.Context, srvErrCh, watchErrCh chan error, colors 
 				continue
 			}
 			if watchErr != nil && ctx.Err() == nil {
-				colors.Error().Printf("file watcher error: %v\n", watchErr)
+				d.colors.Error().Printf("file watcher error: %v\n", watchErr)
 			}
 		}
 	}
 }
 
 // printWatchInfo prints startup information for watch-only mode.
-func printWatchInfo(dirs []string, port int, host string, colors *progress.Colors) {
-	colors.Info().Printf("watch-only mode: monitoring %d directories\n", len(dirs))
+func (d *Dashboard) printWatchInfo(dirs []string) {
+	d.colors.Info().Printf("watch-only mode: monitoring %d directories\n", len(dirs))
 	for _, dir := range dirs {
-		colors.Info().Printf("  %s\n", dir)
+		d.colors.Info().Printf("  %s\n", dir)
 	}
-	colors.Info().Printf("web dashboard: http://%s:%d\n", ConnectHost(host), port)
-	colors.Info().Printf("press Ctrl+C to exit\n")
+	d.colors.Info().Printf("web dashboard: http://%s:%d\n", ConnectHost(d.host), d.port)
+	d.colors.Info().Printf("press Ctrl+C to exit\n")
 }

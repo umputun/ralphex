@@ -146,12 +146,12 @@
 - Modify: `pkg/web/dashboard.go`
 - Modify: `pkg/web/dashboard_test.go`
 
-- [ ] convert `setupWatchMode(ctx, port, host, dirs)` to `(d *Dashboard) setupWatchMode(ctx, dirs)` — use `d.port`, `d.host` instead of params
-- [ ] convert `printWatchInfo(dirs, port, host, colors)` to `(d *Dashboard) printWatchInfo(dirs)` — use `d.port`, `d.host`, `d.colors`
-- [ ] convert `monitorErrors(ctx, srvErrCh, watchErrCh, colors)` to `(d *Dashboard) monitorErrors(ctx, srvErrCh, watchErrCh)` — use `d.colors`
-- [ ] update call sites in `RunWatchOnly` to use method calls
-- [ ] update tests to call methods on Dashboard instances instead of standalone functions
-- [ ] run `go test ./pkg/web/...` — must pass before next task
+- [x] convert `setupWatchMode(ctx, port, host, dirs)` to `(d *Dashboard) setupWatchMode(ctx, dirs)` — use `d.port`, `d.host` instead of params
+- [x] convert `printWatchInfo(dirs, port, host, colors)` to `(d *Dashboard) printWatchInfo(dirs)` — use `d.port`, `d.host`, `d.colors`
+- [x] convert `monitorErrors(ctx, srvErrCh, watchErrCh, colors)` to `(d *Dashboard) monitorErrors(ctx, srvErrCh, watchErrCh)` — use `d.colors`
+- [x] update call sites in `RunWatchOnly` to use method calls
+- [x] update tests to call methods on Dashboard instances instead of standalone functions
+- [x] run `go test ./pkg/web/...` — must pass before next task
 
 ### Task 10: Split executePlan into focused helpers
 

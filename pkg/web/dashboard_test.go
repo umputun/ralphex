@@ -154,13 +154,17 @@ func TestDashboard_RunWatchOnly_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestSetupWatchMode(t *testing.T) {
+func TestDashboard_SetupWatchMode(t *testing.T) {
 	tmpDir := t.TempDir()
+
+	colors := testColors()
+	holder := &status.PhaseHolder{}
+	d := NewDashboard(DashboardConfig{Port: 0, Colors: colors}, holder)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	srvErrCh, watchErrCh, err := setupWatchMode(ctx, 0, "", []string{tmpDir})
+	srvErrCh, watchErrCh, err := d.setupWatchMode(ctx, []string{tmpDir})
 	require.NoError(t, err)
 	assert.NotNil(t, srvErrCh)
 	assert.NotNil(t, watchErrCh)
@@ -234,8 +238,10 @@ func TestStartServerAsync_PortInUse(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to start")
 }
 
-func TestMonitorErrors_ContextCanceled(t *testing.T) {
+func TestDashboard_MonitorErrors_ContextCanceled(t *testing.T) {
 	colors := testColors()
+	holder := &status.PhaseHolder{}
+	d := NewDashboard(DashboardConfig{Colors: colors}, holder)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	srvErrCh := make(chan error)
@@ -244,12 +250,14 @@ func TestMonitorErrors_ContextCanceled(t *testing.T) {
 	// cancel context immediately
 	cancel()
 
-	err := monitorErrors(ctx, srvErrCh, watchErrCh, colors)
+	err := d.monitorErrors(ctx, srvErrCh, watchErrCh)
 	assert.NoError(t, err)
 }
 
-func TestMonitorErrors_BothChannelsClosed(t *testing.T) {
+func TestDashboard_MonitorErrors_BothChannelsClosed(t *testing.T) {
 	colors := testColors()
+	holder := &status.PhaseHolder{}
+	d := NewDashboard(DashboardConfig{Colors: colors}, holder)
 	ctx := context.Background()
 
 	srvErrCh := make(chan error)
@@ -259,12 +267,14 @@ func TestMonitorErrors_BothChannelsClosed(t *testing.T) {
 	close(srvErrCh)
 	close(watchErrCh)
 
-	err := monitorErrors(ctx, srvErrCh, watchErrCh, colors)
+	err := d.monitorErrors(ctx, srvErrCh, watchErrCh)
 	assert.NoError(t, err)
 }
 
-func TestMonitorErrors_ErrorInServer(t *testing.T) {
+func TestDashboard_MonitorErrors_ErrorInServer(t *testing.T) {
 	colors := testColors()
+	holder := &status.PhaseHolder{}
+	d := NewDashboard(DashboardConfig{Colors: colors}, holder)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -278,15 +288,17 @@ func TestMonitorErrors_ErrorInServer(t *testing.T) {
 		close(watchErrCh)
 	}()
 
-	err := monitorErrors(ctx, srvErrCh, watchErrCh, colors)
+	err := d.monitorErrors(ctx, srvErrCh, watchErrCh)
 	assert.NoError(t, err) // errors are logged, not returned
 }
 
-func TestPrintWatchInfo(t *testing.T) {
+func TestDashboard_PrintWatchInfo(t *testing.T) {
 	colors := testColors()
+	holder := &status.PhaseHolder{}
+	d := NewDashboard(DashboardConfig{Port: 8080, Colors: colors}, holder)
 
 	// just verify it doesn't panic
-	printWatchInfo([]string{"/tmp", "/var"}, 8080, "", colors)
+	d.printWatchInfo([]string{"/tmp", "/var"})
 }
 
 func TestConnectHost(t *testing.T) {
