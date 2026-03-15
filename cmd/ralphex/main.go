@@ -356,14 +356,16 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 	return true, runPlanMode(ctx, o, req, selector)
 }
 
-// executePlan runs the main execution loop for a plan file.
-// handles progress logging, web dashboard, runner execution, and post-execution tasks.
-// when req.ProgressLog and req.PhaseHolder are pre-created (worktree mode), uses them directly.
-// when req.MainGitSvc is set, uses it for plan file operations (plan is in main repo).
-func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
-	branch := getCurrentBranch(req.GitSvc)
+// progressLogResult holds the result of progress logger setup.
+type progressLogResult struct {
+	holder   *status.PhaseHolder
+	baseLog  *progress.Logger
+	closeLog func()
+}
 
-	// use pre-created holder/logger (worktree mode) or create new ones
+// setupProgressLogger creates or reuses a progress logger and phase holder.
+// when req.ProgressLog and req.PhaseHolder are pre-created (worktree mode), uses them directly.
+func setupProgressLogger(o opts, req executePlanRequest, branch string) (progressLogResult, error) {
 	holder := req.PhaseHolder
 	if holder == nil {
 		holder = &status.PhaseHolder{}
@@ -383,7 +385,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			NoColor:  o.NoColor,
 		}, req.Colors, holder)
 		if err != nil {
-			return fmt.Errorf("create progress logger: %w", err)
+			return progressLogResult{}, fmt.Errorf("create progress logger: %w", err)
 		}
 		closeLog = func() {
 			closeOnce.Do(func() {
@@ -393,100 +395,33 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			})
 		}
 	}
-	defer closeLog()
+	return progressLogResult{holder: holder, baseLog: baseLog, closeLog: closeLog}, nil
+}
 
-	// wrap logger with broadcast logger if --serve is enabled
-	var runnerLog processor.Logger = baseLog
-	if o.Serve {
-		dashboard := web.NewDashboard(web.DashboardConfig{
-			BaseLog:         baseLog,
-			Port:            o.Port,
-			Host:            o.Host,
-			PlanFile:        req.PlanFile,
-			Branch:          branch,
-			WatchDirs:       o.Watch,
-			ConfigWatchDirs: req.Config.WatchDirs,
-			Colors:          req.Colors,
-		}, holder)
-		var dashErr error
-		runnerLog, dashErr = dashboard.Start(ctx)
-		if dashErr != nil {
-			return fmt.Errorf("start dashboard: %w", dashErr)
-		}
+// sendNotification sends a completion or failure notification.
+// uses context.Background() because the parent ctx may be canceled (e.g. SIGINT),
+// and the notification timeout is applied inside Send() independently.
+func sendNotification(req executePlanRequest, branch, elapsed string, stats git.DiffStats, runErr error) {
+	result := notify.Result{
+		Mode:     string(req.Mode),
+		PlanFile: req.PlanFile,
+		Branch:   branch,
+		Duration: elapsed,
 	}
-
-	// print startup info
-	printStartupInfo(startupInfo{
-		PlanFile:      req.PlanFile,
-		Branch:        branch,
-		Mode:          req.Mode,
-		MaxIterations: resolveMaxIterations(o.MaxIterations, req.Config),
-		ProgressPath:  baseLog.Path(),
-	}, req.Colors)
-
-	// create and run the runner
-	r := createRunner(req, o, runnerLog, holder)
-
-	// listen for SIGQUIT (Ctrl+\) for manual external review loop termination
-	if breakCh := startBreakSignal(); breakCh != nil {
-		r.SetBreakCh(breakCh)
+	if runErr != nil {
+		result.Status = "failure"
+		result.Error = runErr.Error()
+	} else {
+		result.Status = "success"
+		result.Files = stats.Files
+		result.Additions = stats.Additions
+		result.Deletions = stats.Deletions
 	}
+	req.NotifySvc.Send(context.Background(), result)
+}
 
-	if runErr := r.Run(ctx); runErr != nil {
-		// send failure notification before returning error.
-		// use context.Background() because the parent ctx may be canceled (e.g. SIGINT),
-		// and the notification timeout is applied inside Send() independently.
-		req.NotifySvc.Send(context.Background(), notify.Result{
-			Status:   "failure",
-			Mode:     string(req.Mode),
-			PlanFile: req.PlanFile,
-			Branch:   branch,
-			Duration: baseLog.Elapsed(),
-			Error:    runErr.Error(),
-		})
-		return fmt.Errorf("runner: %w", runErr)
-	}
-
-	elapsed := baseLog.Elapsed()
-
-	// get diff stats for completion message (optional - errors logged but don't block).
-	// use worktree GitSvc (has correct HEAD with committed changes).
-	stats, statsErr := req.GitSvc.DiffStats(req.BaseRef)
-	if statsErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
-	}
-
-	// send success notification.
-	// use context.Background() because the parent ctx may be canceled (e.g. SIGINT),
-	// and the notification timeout is applied inside Send() independently.
-	req.NotifySvc.Send(context.Background(), notify.Result{
-		Status:    "success",
-		Mode:      string(req.Mode),
-		PlanFile:  req.PlanFile,
-		Branch:    branch,
-		Duration:  elapsed,
-		Files:     stats.Files,
-		Additions: stats.Additions,
-		Deletions: stats.Deletions,
-	})
-
-	// move completed plan to completed/ directory.
-	// use MainGitSvc+MainPlanFile when available (worktree mode) because the plan file is in the main repo.
-	if req.PlanFile != "" && modeRequiresBranch(req.Mode) {
-		moveSvc := req.GitSvc
-		movePlanFile := req.PlanFile
-		if req.MainGitSvc != nil {
-			moveSvc = req.MainGitSvc
-		}
-		if req.MainPlanFile != "" {
-			movePlanFile = req.MainPlanFile
-		}
-		if moveErr := moveSvc.MovePlanToCompleted(movePlanFile); moveErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
-		}
-	}
-
-	// display completion with stats
+// displayStats prints completion summary with optional diff statistics and paths.
+func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.DiffStats, elapsed string) {
 	if stats.Files > 0 {
 		baseLog.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
 		req.Colors.Info().Printf("\ncompleted in %s (%d files, +%d/-%d lines)\n",
@@ -505,13 +440,105 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		req.Colors.Info().Printf("  plan: %s\n", completedPlanPath)
 	}
 	req.Colors.Info().Printf("  progress: %s\n", baseLog.Path())
+}
 
-	// keep web dashboard running after execution completes
-	if o.Serve {
-		closeLog()
-		req.Colors.Info().Printf("web dashboard still running at http://%s:%d (press Ctrl+C to exit)\n", web.ConnectHost(o.Host), o.Port)
-		<-ctx.Done()
+// keepDashboardAlive keeps the web dashboard running after execution completes.
+// blocks until context is canceled (Ctrl+C). no-op if --serve is not enabled.
+func keepDashboardAlive(ctx context.Context, o opts, req executePlanRequest, closeLog func()) {
+	if !o.Serve {
+		return
 	}
+	closeLog()
+	req.Colors.Info().Printf("web dashboard still running at http://%s:%d (press Ctrl+C to exit)\n",
+		web.ConnectHost(o.Host), o.Port)
+	<-ctx.Done()
+}
+
+// executePlan runs the main execution loop for a plan file.
+// handles progress logging, web dashboard, runner execution, and post-execution tasks.
+// when req.ProgressLog and req.PhaseHolder are pre-created (worktree mode), uses them directly.
+// when req.MainGitSvc is set, uses it for plan file operations (plan is in main repo).
+func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
+	branch := getCurrentBranch(req.GitSvc)
+
+	// set up progress logger and phase holder
+	plr, err := setupProgressLogger(o, req, branch)
+	if err != nil {
+		return err
+	}
+	defer plr.closeLog()
+
+	// wrap logger with broadcast logger if --serve is enabled
+	var runnerLog processor.Logger = plr.baseLog
+	if o.Serve {
+		dashboard := web.NewDashboard(web.DashboardConfig{
+			BaseLog:         plr.baseLog,
+			Port:            o.Port,
+			Host:            o.Host,
+			PlanFile:        req.PlanFile,
+			Branch:          branch,
+			WatchDirs:       o.Watch,
+			ConfigWatchDirs: req.Config.WatchDirs,
+			Colors:          req.Colors,
+		}, plr.holder)
+		var dashErr error
+		runnerLog, dashErr = dashboard.Start(ctx)
+		if dashErr != nil {
+			return fmt.Errorf("start dashboard: %w", dashErr)
+		}
+	}
+
+	// print startup info
+	printStartupInfo(startupInfo{
+		PlanFile:      req.PlanFile,
+		Branch:        branch,
+		Mode:          req.Mode,
+		MaxIterations: resolveMaxIterations(o.MaxIterations, req.Config),
+		ProgressPath:  plr.baseLog.Path(),
+	}, req.Colors)
+
+	// create and run the runner
+	r := createRunner(req, o, runnerLog, plr.holder)
+
+	// listen for SIGQUIT (Ctrl+\) for manual external review loop termination
+	if breakCh := startBreakSignal(); breakCh != nil {
+		r.SetBreakCh(breakCh)
+	}
+
+	if runErr := r.Run(ctx); runErr != nil {
+		sendNotification(req, branch, plr.baseLog.Elapsed(), git.DiffStats{}, runErr)
+		return fmt.Errorf("runner: %w", runErr)
+	}
+
+	elapsed := plr.baseLog.Elapsed()
+
+	// get diff stats for completion message (optional - errors logged but don't block).
+	// use worktree GitSvc (has correct HEAD with committed changes).
+	stats, statsErr := req.GitSvc.DiffStats(req.BaseRef)
+	if statsErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
+	}
+
+	sendNotification(req, branch, elapsed, stats, nil)
+
+	// move completed plan to completed/ directory.
+	// use MainGitSvc+MainPlanFile when available (worktree mode) because the plan file is in the main repo.
+	if req.PlanFile != "" && modeRequiresBranch(req.Mode) {
+		moveSvc := req.GitSvc
+		movePlanFile := req.PlanFile
+		if req.MainGitSvc != nil {
+			moveSvc = req.MainGitSvc
+		}
+		if req.MainPlanFile != "" {
+			movePlanFile = req.MainPlanFile
+		}
+		if moveErr := moveSvc.MovePlanToCompleted(movePlanFile); moveErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
+		}
+	}
+
+	displayStats(req, plr.baseLog, stats, elapsed)
+	keepDashboardAlive(ctx, o, req, plr.closeLog)
 
 	return nil
 }

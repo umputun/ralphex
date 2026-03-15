@@ -158,12 +158,12 @@
 **Files:**
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] extract unexported `setupProgressLogger(...)` helper from logger setup section (~15 lines)
-- [ ] extract unexported `sendNotifications(...)` helper from notification section (~10 lines)
-- [ ] extract unexported `displayStats(...)` helper from stats display section (~15 lines)
-- [ ] extract unexported `keepDashboardAlive(...)` helper from post-completion dashboard section (~20 lines)
-- [ ] verify `executePlan` reads as a sequential orchestrator calling these helpers
-- [ ] run `go test ./cmd/ralphex/...` — must pass before next task
+- [x] extract unexported `setupProgressLogger(...)` helper from logger setup section (~15 lines)
+- [x] extract unexported `sendNotifications(...)` helper from notification section (~10 lines)
+- [x] extract unexported `displayStats(...)` helper from stats display section (~15 lines)
+- [x] extract unexported `keepDashboardAlive(...)` helper from post-completion dashboard section (~20 lines)
+- [x] verify `executePlan` reads as a sequential orchestrator calling these helpers
+- [x] run `go test ./cmd/ralphex/...` — must pass before next task
 
 ### Task 11: Clean up Session field visibility
 

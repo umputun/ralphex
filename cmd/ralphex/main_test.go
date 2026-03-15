@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1512,6 +1513,202 @@ func TestEnsureGitIgnored(t *testing.T) {
 		hasChanges, chErr := gitSvc.FileHasChanges(".gitignore")
 		require.NoError(t, chErr)
 		assert.True(t, hasChanges, ".gitignore should remain dirty when it was dirty before")
+	})
+}
+
+func TestSetupProgressLogger(t *testing.T) {
+	t.Run("creates_new_logger_when_not_provided", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		req := executePlanRequest{PlanFile: "test-plan.md", Mode: processor.ModeFull, Colors: colors}
+		plr, err := setupProgressLogger(opts{NoColor: true}, req, "test-branch")
+		require.NoError(t, err)
+		defer plr.closeLog()
+
+		assert.NotNil(t, plr.holder)
+		assert.NotNil(t, plr.baseLog)
+		assert.NotNil(t, plr.closeLog)
+		assert.NotEmpty(t, plr.baseLog.Path())
+	})
+
+	t.Run("uses_provided_logger_and_holder", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		existingHolder := &status.PhaseHolder{}
+		existingLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "pre-created.md", Mode: "full", Branch: "main", NoColor: true,
+		}, colors, existingHolder)
+		require.NoError(t, err)
+		defer func() { _ = existingLog.Close() }()
+
+		req := executePlanRequest{
+			PlanFile:    "test-plan.md",
+			Mode:        processor.ModeFull,
+			Colors:      colors,
+			ProgressLog: existingLog,
+			PhaseHolder: existingHolder,
+		}
+		plr, err := setupProgressLogger(opts{NoColor: true}, req, "test-branch")
+		require.NoError(t, err)
+
+		assert.Equal(t, existingHolder, plr.holder, "should reuse provided holder")
+		assert.Equal(t, existingLog, plr.baseLog, "should reuse provided logger")
+
+		// closeLog should be a no-op (externally-owned logger)
+		plr.closeLog()
+	})
+
+	t.Run("creates_holder_when_not_provided", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		req := executePlanRequest{PlanFile: "holder-test.md", Mode: processor.ModeReview, Colors: colors}
+		plr, err := setupProgressLogger(opts{NoColor: true}, req, "main")
+		require.NoError(t, err)
+		defer plr.closeLog()
+
+		assert.NotNil(t, plr.holder, "should create new holder when not provided")
+	})
+
+	t.Run("close_is_idempotent", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		req := executePlanRequest{PlanFile: "idempotent.md", Mode: processor.ModeFull, Colors: colors}
+		plr, err := setupProgressLogger(opts{NoColor: true}, req, "main")
+		require.NoError(t, err)
+
+		// calling closeLog multiple times should not panic
+		plr.closeLog()
+		plr.closeLog()
+	})
+}
+
+func TestSendNotification(t *testing.T) {
+	t.Run("nil_service_is_noop", func(t *testing.T) {
+		req := executePlanRequest{Mode: processor.ModeFull, PlanFile: "test.md"}
+		// should not panic with nil NotifySvc
+		sendNotification(req, "main", "5s", git.DiffStats{}, nil)
+		sendNotification(req, "main", "5s", git.DiffStats{}, errors.New("test error"))
+	})
+
+	t.Run("success_notification_fields", func(t *testing.T) {
+		// nil notify service is safe to call, this verifies the function doesn't panic
+		// and correctly branches on nil error
+		req := executePlanRequest{
+			Mode:     processor.ModeFull,
+			PlanFile: "plan.md",
+		}
+		stats := git.DiffStats{Files: 3, Additions: 100, Deletions: 20}
+		sendNotification(req, "feature-branch", "1m30s", stats, nil)
+	})
+
+	t.Run("failure_notification_fields", func(t *testing.T) {
+		req := executePlanRequest{
+			Mode:     processor.ModeReview,
+			PlanFile: "review.md",
+		}
+		sendNotification(req, "main", "45s", git.DiffStats{}, errors.New("runner failed"))
+	})
+}
+
+func TestDisplayStats(t *testing.T) {
+	t.Run("with_diff_stats", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "stats-test.md", Mode: "full", Branch: "main", NoColor: true,
+		}, colors, holder)
+		require.NoError(t, err)
+		defer func() { _ = baseLog.Close() }()
+
+		req := executePlanRequest{PlanFile: "docs/plans/feature.md", Colors: colors}
+		stats := git.DiffStats{Files: 5, Additions: 200, Deletions: 50}
+		displayStats(req, baseLog, stats, "2m15s")
+	})
+
+	t.Run("without_diff_stats", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "no-stats.md", Mode: "full", Branch: "main", NoColor: true,
+		}, colors, holder)
+		require.NoError(t, err)
+		defer func() { _ = baseLog.Close() }()
+
+		req := executePlanRequest{Colors: colors}
+		displayStats(req, baseLog, git.DiffStats{}, "30s")
+	})
+
+	t.Run("with_main_plan_file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "main-plan.md", Mode: "full", Branch: "main", NoColor: true,
+		}, colors, holder)
+		require.NoError(t, err)
+		defer func() { _ = baseLog.Close() }()
+
+		req := executePlanRequest{
+			PlanFile:     "worktree/docs/plans/feature.md",
+			MainPlanFile: "docs/plans/feature.md",
+			Colors:       colors,
+		}
+		displayStats(req, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s")
+	})
+}
+
+func TestKeepDashboardAlive(t *testing.T) {
+	t.Run("noop_when_serve_disabled", func(t *testing.T) {
+		colors := testColors()
+		req := executePlanRequest{Colors: colors}
+		closeCalled := false
+		closeLog := func() { closeCalled = true }
+
+		keepDashboardAlive(t.Context(), opts{Serve: false}, req, closeLog)
+		assert.False(t, closeCalled, "closeLog should not be called when serve is disabled")
+	})
+
+	t.Run("blocks_until_context_canceled", func(t *testing.T) {
+		colors := testColors()
+		req := executePlanRequest{Colors: colors}
+		closeCalled := false
+		closeLog := func() { closeCalled = true }
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel() // cancel immediately
+
+		keepDashboardAlive(ctx, opts{Serve: true, Port: 9999, Host: "127.0.0.1"}, req, closeLog)
+		assert.True(t, closeCalled, "closeLog should be called when serve is enabled")
 	})
 }
 
