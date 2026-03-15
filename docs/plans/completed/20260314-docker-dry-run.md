@@ -89,11 +89,11 @@
 **Files:**
 - None (verification only)
 
-- [ ] run full test suite: `python3 scripts/ralphex-dk.sh --test`
-- [ ] manual test: `python3 scripts/ralphex-dk.sh --dry-run` prints command
-- [ ] manual test: `python3 scripts/ralphex-dk.sh --dry-run -E FOO` shows warning about inherited var
-- [ ] manual test: `python3 scripts/ralphex-dk.sh --dry-run -E FOO=bar` shows no warning
-- [ ] move this plan to `docs/plans/completed/`
+- [x] run full test suite: `python3 scripts/ralphex-dk.sh --test`
+- [x] manual test: `python3 scripts/ralphex-dk.sh --dry-run` prints command
+- [x] manual test: `python3 scripts/ralphex-dk.sh --dry-run -E FOO` shows warning about inherited var
+- [x] manual test: `python3 scripts/ralphex-dk.sh --dry-run -E FOO=bar` shows no warning
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
