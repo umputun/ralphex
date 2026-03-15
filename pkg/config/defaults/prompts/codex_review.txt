@@ -1,0 +1,38 @@
+# codex review prompt
+# this prompt is sent to the codex external review tool (or compatible wrapper)
+# codex reviews code changes and reports findings for claude to evaluate
+#
+# available variables:
+#   {{DIFF_INSTRUCTION}} - git diff command appropriate for current iteration
+#   {{PLAN_FILE}} - path to the plan file being executed
+#   {{PROGRESS_FILE}} - path to progress log with previous review iterations
+#   {{PREVIOUS_REVIEW_CONTEXT}} - previous review context (empty on first iteration)
+#   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
+#   {{GOAL}} - human-readable goal description
+
+Review the code changes for: {{GOAL}}
+
+## Get the Diff
+
+Run: {{DIFF_INSTRUCTION}}
+
+## Plan Context
+
+The code implements the plan at: {{PLAN_FILE}}
+
+---
+
+Check the progress log at {{PROGRESS_FILE}} for previous review iterations and findings history before reporting issues.
+
+## Review Focus
+
+Analyze for:
+- Bugs and logic errors
+- Security vulnerabilities
+- Race conditions
+- Error handling gaps
+- Code quality issues
+
+Report findings with file:line references. If no issues found, say "NO ISSUES FOUND".
+
+{{PREVIOUS_REVIEW_CONTEXT}}

@@ -24,6 +24,7 @@ const (
 	finalizePromptFile     = "finalize.txt"
 	customReviewPromptFile = "custom_review.txt"
 	customEvalPromptFile   = "custom_eval.txt"
+	codexReviewPromptFile  = "codex_review.txt"
 )
 
 // Config holds all configuration settings for ralphex.
@@ -101,6 +102,7 @@ type Config struct {
 	FinalizePrompt     string `json:"-"`
 	CustomReviewPrompt string `json:"-"`
 	CustomEvalPrompt   string `json:"-"`
+	CodexReviewPrompt  string `json:"-"`
 
 	// custom agents (loaded separately from files)
 	CustomAgents []CustomAgent `json:"-"`
@@ -324,6 +326,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		FinalizePrompt:     prompts.Finalize,
 		CustomReviewPrompt: prompts.CustomReview,
 		CustomEvalPrompt:   prompts.CustomEval,
+		CodexReviewPrompt:  prompts.CodexReview,
 		CustomAgents:       agents,
 		configDir:          globalDir,
 		localDir:           localDir,
