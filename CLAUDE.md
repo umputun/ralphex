@@ -115,9 +115,10 @@ Allows using custom scripts instead of codex for external code review:
 
 Key files:
 - `pkg/executor/custom.go` - CustomExecutor for running external scripts
+- `pkg/config/defaults/prompts/codex_review.txt` - prompt sent to codex external review tool
 - `pkg/config/defaults/prompts/custom_review.txt` - prompt sent to custom tool
 - `pkg/config/defaults/prompts/custom_eval.txt` - prompt for claude to evaluate custom tool output
-- `pkg/processor/prompts.go` - `getDiffInstruction()` and `replaceVariablesWithIteration()`
+- `pkg/processor/prompts.go` - `getDiffInstruction()`, `buildPreviousContext()`, and `replaceVariablesWithIteration()`
 - `pkg/processor/runner.go` - dispatch logic in external review loop
 
 ### Alternative Providers for Claude Phases
@@ -321,6 +322,7 @@ Implementation:
 - `{{GOAL}}` - human-readable goal (plan-based or branch comparison)
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, origin/main, etc.), overridable via `--base-ref` CLI flag or `default_branch` config option
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (first: `git diff main...HEAD`, subsequent: `git diff`)
+- `{{PREVIOUS_REVIEW_CONTEXT}}` - previous review context block for external review iterations (empty on first iteration, formatted context on subsequent)
 - `{{agent:name}}` - expands to Task tool instructions for the named agent
 
 Variables are also expanded inside agent content, so custom agents can use `{{DEFAULT_BRANCH}}` etc.

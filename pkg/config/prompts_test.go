@@ -29,6 +29,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "finalize.txt"), []byte("custom finalize prompt"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_review.txt"), []byte("custom review prompt"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_eval.txt"), []byte("custom eval prompt"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex_review.txt"), []byte("custom codex review prompt"), 0o600))
 
 	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
@@ -42,6 +43,7 @@ func TestPromptLoader_Load_FromUserDir(t *testing.T) {
 	assert.Equal(t, "custom finalize prompt", prompts.Finalize)
 	assert.Equal(t, "custom review prompt", prompts.CustomReview)
 	assert.Equal(t, "custom eval prompt", prompts.CustomEval)
+	assert.Equal(t, "custom codex review prompt", prompts.CodexReview)
 }
 
 func TestPromptLoader_Load_PartialUserFiles(t *testing.T) {
@@ -558,6 +560,7 @@ func TestPromptLoader_Load_AllCommentedPromptsFallbackToEmbedded(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "make_plan.txt"), []byte(commentedContent), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_review.txt"), []byte(commentedContent), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "custom_eval.txt"), []byte(commentedContent), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "codex_review.txt"), []byte(commentedContent), 0o600))
 
 	loader := newPromptLoader(defaultsFS)
 	prompts, err := loader.Load("", globalDir)
@@ -571,6 +574,7 @@ func TestPromptLoader_Load_AllCommentedPromptsFallbackToEmbedded(t *testing.T) {
 	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}", "make_plan prompt should fall back to embedded")
 	assert.Contains(t, prompts.CustomReview, "{{DIFF_INSTRUCTION}}", "custom_review prompt should fall back to embedded")
 	assert.Contains(t, prompts.CustomEval, "{{CUSTOM_OUTPUT}}", "custom_eval prompt should fall back to embedded")
+	assert.Contains(t, prompts.CodexReview, "{{DIFF_INSTRUCTION}}", "codex_review prompt should fall back to embedded")
 }
 
 func TestPromptLoader_Load_MixedCommentedAndCustomPrompts(t *testing.T) {

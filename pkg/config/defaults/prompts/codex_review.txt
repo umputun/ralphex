@@ -16,9 +16,9 @@ Review the code changes for: {{GOAL}}
 
 Run: {{DIFF_INSTRUCTION}}
 
-## Plan Context
+## Context
 
-The code implements the plan at: {{PLAN_FILE}}
+Plan: {{PLAN_FILE}}
 
 ---
 

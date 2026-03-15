@@ -948,6 +948,19 @@ func TestRunner_replaceVariablesWithIteration_PreviousReviewContext(t *testing.T
 		assert.Contains(t, result, "previous response")
 		assert.NotContains(t, result, "{{")
 	})
+
+	t.Run("agent refs in claude response not expanded", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: &config.Config{
+			CustomAgents: []config.CustomAgent{{Name: "quality", Prompt: "check quality"}},
+		}}}
+		prompt := "Review:\n{{PREVIOUS_REVIEW_CONTEXT}}"
+		result := r.replaceVariablesWithIteration(prompt, false, "use {{agent:quality}} for analysis")
+
+		// agent ref in prompt template should be expanded (none here), but agent ref
+		// in claude response must stay as literal text - prevents prompt injection
+		assert.Contains(t, result, "{{agent:quality}}")
+		assert.NotContains(t, result, "subagent_type")
+	})
 }
 
 func TestRunner_buildCodexPrompt(t *testing.T) {
@@ -1001,6 +1014,7 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 		prompt := r.buildCodexPrompt(true, "")
 
 		assert.NotContains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+		assert.Contains(t, prompt, "Plan: (no plan file - reviewing current branch)")
 	})
 
 	t.Run("replaces goal variable", func(t *testing.T) {
@@ -1015,5 +1029,46 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 
 		assert.Contains(t, prompt, "implementation of plan at docs/plans/feature.md")
 		assert.NotContains(t, prompt, "{{GOAL}}")
+	})
+
+	t.Run("agent refs in claude response are not expanded", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/test.md",
+			DefaultBranch: "main",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		// simulate claude response containing agent template variable (potential prompt injection)
+		response := "I used {{agent:quality}} to check and {{agent:testing}} found issues"
+		prompt := r.buildCodexPrompt(false, response)
+
+		// agent refs must remain as literal text, not expanded into Task tool instructions
+		assert.Contains(t, prompt, "{{agent:quality}}")
+		assert.Contains(t, prompt, "{{agent:testing}}")
+		assert.NotContains(t, prompt, "subagent_type")
+	})
+
+	t.Run("custom prompt template", func(t *testing.T) {
+		appCfg := &config.Config{
+			CodexReviewPrompt: "Review {{GOAL}} using {{DIFF_INSTRUCTION}}. Branch: {{DEFAULT_BRANCH}}\n{{PREVIOUS_REVIEW_CONTEXT}}",
+		}
+		r := &Runner{cfg: Config{
+			PlanFile:      "docs/plans/feature.md",
+			DefaultBranch: "develop",
+			AppConfig:     appCfg,
+		}, log: newMockLogger("")}
+
+		prompt := r.buildCodexPrompt(true, "")
+		assert.Contains(t, prompt, "implementation of plan at docs/plans/feature.md")
+		assert.Contains(t, prompt, "git diff develop...HEAD")
+		assert.Contains(t, prompt, "Branch: develop")
+		assert.NotContains(t, prompt, "{{")
+
+		prompt = r.buildCodexPrompt(false, "fixed the bug")
+		assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+		assert.Contains(t, prompt, "fixed the bug")
+		assert.Contains(t, prompt, "git diff")
+		assert.NotContains(t, prompt, "develop...HEAD")
 	})
 }

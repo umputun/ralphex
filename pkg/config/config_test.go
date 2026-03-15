@@ -124,6 +124,7 @@ func TestLoad_PopulatesAllFields(t *testing.T) {
 	assert.NotEmpty(t, cfg.ReviewFirstPrompt)
 	assert.NotEmpty(t, cfg.ReviewSecondPrompt)
 	assert.NotEmpty(t, cfg.CodexPrompt)
+	assert.NotEmpty(t, cfg.CodexReviewPrompt)
 }
 
 func TestLoad_WithUserConfig(t *testing.T) {

@@ -109,10 +109,10 @@
 - [x] verify test coverage meets 80%+
 
 ### Task 5: [Final] Update documentation
-- [ ] update CLAUDE.md with new template file and `{{PREVIOUS_REVIEW_CONTEXT}}` variable
-- [ ] update `llms.txt` with new prompt file and template variable documentation
-- [ ] update README.md customization section if needed
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md with new template file and `{{PREVIOUS_REVIEW_CONTEXT}}` variable
+- [x] update `llms.txt` with new prompt file and template variable documentation
+- [x] update README.md customization section if needed
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
