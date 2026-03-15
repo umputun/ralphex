@@ -186,24 +186,24 @@ Hygiene refactor: enforce consistent access patterns. `SetState`/`GetState` and 
 - Create: `pkg/web/session_progress.go`
 - Modify: `pkg/web/session_manager.go`
 
-- [ ] create `pkg/web/session_progress.go` with package `web` (contains `SessionManager` methods related to progress parsing)
-- [ ] move `ParseProgressHeader` to `session_progress.go`
-- [ ] move `loadProgressFileIntoSession` to `session_progress.go`
-- [ ] move `processProgressLine` to `session_progress.go`
-- [ ] move `emitPendingSection` to `session_progress.go`
-- [ ] move `phaseFromSection` to `session_progress.go`
-- [ ] move `trimLineEnding` to `session_progress.go`
-- [ ] verify no circular references — all moved functions should only depend on types already in `pkg/web`
-- [ ] run `go test ./pkg/web/...` — must pass before next task
+- [x] create `pkg/web/session_progress.go` with package `web` (contains `SessionManager` methods related to progress parsing)
+- [x] move `ParseProgressHeader` to `session_progress.go`
+- [x] move `loadProgressFileIntoSession` to `session_progress.go`
+- [x] move `processProgressLine` to `session_progress.go`
+- [x] move `emitPendingSection` to `session_progress.go`
+- [x] move `phaseFromSection` to `session_progress.go`
+- [x] move `trimLineEnding` to `session_progress.go`
+- [x] verify no circular references — all moved functions should only depend on types already in `pkg/web`
+- [x] run `go test ./pkg/web/...` — must pass before next task
 
 ### Task 13: Verify acceptance criteria
 
-- [ ] verify all 13 smell findings are addressed
-- [ ] verify no behavioral changes — all refactors are structure-only
-- [ ] run full unit test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
-- [ ] run formatters: `~/.claude/format.sh`
-- [ ] verify test coverage meets 80%+ for changed packages
+- [x] verify all 13 smell findings are addressed
+- [x] verify no behavioral changes — all refactors are structure-only
+- [x] run full unit test suite: `go test ./...`
+- [x] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
+- [x] run formatters: `~/.claude/format.sh`
+- [x] verify test coverage meets 80%+ for changed packages
 
 ### Task 14: [Final] Update documentation
 
