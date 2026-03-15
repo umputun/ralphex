@@ -789,6 +789,8 @@ func TestRunner_buildCustomReviewPrompt(t *testing.T) {
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.NotContains(t, prompt, "{{DIFF_INSTRUCTION}}")
 		assert.NotContains(t, prompt, "{{PLAN_FILE}}")
+		assert.NotContains(t, prompt, "{{PREVIOUS_REVIEW_CONTEXT}}")
+		assert.NotContains(t, prompt, "PREVIOUS REVIEW CONTEXT")
 	})
 
 	t.Run("subsequent iteration uses uncommitted diff", func(t *testing.T) {
@@ -816,6 +818,27 @@ func TestRunner_buildCustomReviewPrompt(t *testing.T) {
 		assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
 		assert.Contains(t, prompt, "I fixed the null pointer issue")
 		assert.Contains(t, prompt, "Re-evaluate considering Claude's arguments")
+		assert.NotContains(t, prompt, "{{PREVIOUS_REVIEW_CONTEXT}}")
+	})
+
+	t.Run("custom prompt with PREVIOUS_REVIEW_CONTEXT variable", func(t *testing.T) {
+		appCfg := &config.Config{
+			CustomReviewPrompt: "Review code.\n{{PREVIOUS_REVIEW_CONTEXT}}",
+		}
+		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
+
+		t.Run("empty on first iteration", func(t *testing.T) {
+			prompt := r.buildCustomReviewPrompt(true, "")
+			assert.Equal(t, "Review code.\n", prompt)
+			assert.NotContains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+		})
+
+		t.Run("populated on subsequent iteration", func(t *testing.T) {
+			prompt := r.buildCustomReviewPrompt(false, "addressed the race condition")
+			assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
+			assert.Contains(t, prompt, "addressed the race condition")
+			assert.NotContains(t, prompt, "{{PREVIOUS_REVIEW_CONTEXT}}")
+		})
 	})
 
 	t.Run("custom prompt template", func(t *testing.T) {

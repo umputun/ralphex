@@ -94,19 +94,19 @@
 - Modify: `pkg/processor/prompts.go`
 - Modify: `pkg/processor/prompts_test.go`
 
-- [ ] add `{{PREVIOUS_REVIEW_CONTEXT}}` to `custom_review.txt` template, replacing the hardcoded block in Go
-- [ ] refactor `buildCustomReviewPrompt` to use `replaceVariablesWithIteration` (with claudeResponse) instead of appending the block in Go code
-- [ ] write tests for `buildCustomReviewPrompt` with `{{PREVIOUS_REVIEW_CONTEXT}}` expansion (both empty and populated)
-- [ ] run `go test ./pkg/processor/...` - must pass before next task
+- [x] add `{{PREVIOUS_REVIEW_CONTEXT}}` to `custom_review.txt` template, replacing the hardcoded block in Go
+- [x] refactor `buildCustomReviewPrompt` to use `replaceVariablesWithIteration` (with claudeResponse) instead of appending the block in Go code
+- [x] write tests for `buildCustomReviewPrompt` with `{{PREVIOUS_REVIEW_CONTEXT}}` expansion (both empty and populated)
+- [x] run `go test ./pkg/processor/...` - must pass before next task
 
 ### Task 4: Verify acceptance criteria
-- [ ] verify codex review prompt is fully configurable via `codex_review.txt`
-- [ ] verify custom review prompt uses `{{PREVIOUS_REVIEW_CONTEXT}}` consistently
-- [ ] verify `{{PROGRESS_FILE}}` is available in both prompts
-- [ ] verify default behavior matches current behavior (no regression)
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run`
-- [ ] verify test coverage meets 80%+
+- [x] verify codex review prompt is fully configurable via `codex_review.txt`
+- [x] verify custom review prompt uses `{{PREVIOUS_REVIEW_CONTEXT}}` consistently
+- [x] verify `{{PROGRESS_FILE}}` is available in both prompts
+- [x] verify default behavior matches current behavior (no regression)
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `golangci-lint run`
+- [x] verify test coverage meets 80%+
 
 ### Task 5: [Final] Update documentation
 - [ ] update CLAUDE.md with new template file and `{{PREVIOUS_REVIEW_CONTEXT}}` variable
