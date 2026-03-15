@@ -119,14 +119,14 @@
 - Modify: `pkg/processor/signals_test.go`
 - Modify: `pkg/processor/runner_test.go`
 
-- [ ] rename `QuestionPayload` → `questionPayload` in signals.go and all references
-- [ ] rename `IsReviewDone` → `isReviewDone`, `IsCodexDone` → `isCodexDone`, `IsPlanReady` → `isPlanReady`
-- [ ] rename `ParseQuestionPayload` → `parseQuestionPayload`, `ParsePlanDraftPayload` → `parsePlanDraftPayload`
-- [ ] rename `ErrNoQuestionSignal` → `errNoQuestionSignal`, `ErrNoPlanDraftSignal` → `errNoPlanDraftSignal`
-- [ ] note: signal constants (`SignalCompleted`, `SignalFailed`, etc.) are aliases to `status.*` constants from `pkg/status` — intentionally left exported since they mirror the shared status package API
-- [ ] convert godoc comments to lowercase for all renamed symbols
-- [ ] update all references in `runner.go` and test files
-- [ ] run `go test ./pkg/processor/...` — must pass before next task
+- [x] rename `QuestionPayload` → `questionPayload` in signals.go and all references
+- [x] rename `IsReviewDone` → `isReviewDone`, `IsCodexDone` → `isCodexDone`, `IsPlanReady` → `isPlanReady`
+- [x] rename `ParseQuestionPayload` → `parseQuestionPayload`, `ParsePlanDraftPayload` → `parsePlanDraftPayload`
+- [x] rename `ErrNoQuestionSignal` → `errNoQuestionSignal`, `ErrNoPlanDraftSignal` → `errNoPlanDraftSignal`
+- [x] note: signal constants (`SignalCompleted`, `SignalFailed`, etc.) are aliases to `status.*` constants from `pkg/status` — intentionally left exported since they mirror the shared status package API
+- [x] convert godoc comments to lowercase for all renamed symbols
+- [x] update all references in `runner.go` and test files
+- [x] run `go test ./pkg/processor/...` — must pass before next task
 
 ### Task 8: Group NewWithExecutors parameters
 

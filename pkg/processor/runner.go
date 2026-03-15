@@ -436,7 +436,7 @@ func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
 		return errors.New("review failed (FAILED signal received)")
 	}
 
-	if !IsReviewDone(result.Signal) {
+	if !isReviewDone(result.Signal) {
 		r.log.Print("warning: first review pass did not complete cleanly, continuing...")
 	}
 
@@ -479,7 +479,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 			return errors.New("review failed (FAILED signal received)")
 		}
 
-		if IsReviewDone(result.Signal) {
+		if isReviewDone(result.Signal) {
 			r.log.Print("claude review complete - no more findings")
 			return nil
 		}
@@ -704,7 +704,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		claudeResponse = claudeResult.Output
 
 		// exit only when claude sees "no findings"
-		if IsCodexDone(claudeResult.Signal) {
+		if isCodexDone(claudeResult.Signal) {
 			r.log.Print("%s review complete - no more findings", cfg.name)
 			return nil
 		}
@@ -851,10 +851,10 @@ type draftReviewResult struct {
 // handlePlanDraft processes PLAN_DRAFT signal if present in output.
 // returns result indicating whether draft was handled and any feedback/errors.
 func (r *Runner) handlePlanDraft(ctx context.Context, output string) draftReviewResult {
-	planContent, draftErr := ParsePlanDraftPayload(output)
+	planContent, draftErr := parsePlanDraftPayload(output)
 	if draftErr != nil {
 		// log malformed signals (but not "no signal" which is expected)
-		if !errors.Is(draftErr, ErrNoPlanDraftSignal) {
+		if !errors.Is(draftErr, errNoPlanDraftSignal) {
 			r.log.Print("warning: %v", draftErr)
 		}
 		return draftReviewResult{handled: false}
@@ -889,10 +889,10 @@ func (r *Runner) handlePlanDraft(ctx context.Context, output string) draftReview
 // returns true if question was found and handled, false otherwise.
 // returns error if question handling failed.
 func (r *Runner) handlePlanQuestion(ctx context.Context, output string) (bool, error) {
-	question, err := ParseQuestionPayload(output)
+	question, err := parseQuestionPayload(output)
 	if err != nil {
 		// log malformed signals (but not "no signal" which is expected)
-		if !errors.Is(err, ErrNoQuestionSignal) {
+		if !errors.Is(err, errNoQuestionSignal) {
 			r.log.Print("warning: %v", err)
 		}
 		return false, nil
@@ -959,7 +959,7 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		}
 
 		// check for PLAN_READY signal
-		if IsPlanReady(result.Signal) {
+		if isPlanReady(result.Signal) {
 			r.log.Print("plan creation completed")
 			return nil
 		}

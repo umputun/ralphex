@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsReviewDone(t *testing.T) {
+func Test_isReviewDone(t *testing.T) {
 	tests := []struct {
 		signal string
 		want   bool
@@ -21,12 +21,12 @@ func TestIsReviewDone(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.signal, func(t *testing.T) {
-			assert.Equal(t, tc.want, IsReviewDone(tc.signal))
+			assert.Equal(t, tc.want, isReviewDone(tc.signal))
 		})
 	}
 }
 
-func TestIsCodexDone(t *testing.T) {
+func Test_isCodexDone(t *testing.T) {
 	tests := []struct {
 		signal string
 		want   bool
@@ -40,12 +40,12 @@ func TestIsCodexDone(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.signal, func(t *testing.T) {
-			assert.Equal(t, tc.want, IsCodexDone(tc.signal))
+			assert.Equal(t, tc.want, isCodexDone(tc.signal))
 		})
 	}
 }
 
-func TestIsPlanReady(t *testing.T) {
+func Test_isPlanReady(t *testing.T) {
 	tests := []struct {
 		signal string
 		want   bool
@@ -61,16 +61,16 @@ func TestIsPlanReady(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.signal, func(t *testing.T) {
-			assert.Equal(t, tc.want, IsPlanReady(tc.signal))
+			assert.Equal(t, tc.want, isPlanReady(tc.signal))
 		})
 	}
 }
 
-func TestParseQuestionPayload_ValidJSON(t *testing.T) {
+func Test_parseQuestionPayload_ValidJSON(t *testing.T) {
 	tests := []struct {
 		name     string
 		output   string
-		expected *QuestionPayload
+		expected *questionPayload
 	}{
 		{
 			name: "simple question with options",
@@ -79,7 +79,7 @@ func TestParseQuestionPayload_ValidJSON(t *testing.T) {
 {"question": "Which cache backend?", "options": ["Redis", "In-memory", "File-based"]}
 <<<RALPHEX:END>>>
 some output after`,
-			expected: &QuestionPayload{
+			expected: &questionPayload{
 				Question: "Which cache backend?",
 				Options:  []string{"Redis", "In-memory", "File-based"},
 			},
@@ -89,7 +89,7 @@ some output after`,
 			output: `<<<RALPHEX:QUESTION>>>
 {"question": "Select authentication method", "options": ["JWT", "Session", "OAuth"], "context": "Project uses REST API"}
 <<<RALPHEX:END>>>`,
-			expected: &QuestionPayload{
+			expected: &questionPayload{
 				Question: "Select authentication method",
 				Options:  []string{"JWT", "Session", "OAuth"},
 				Context:  "Project uses REST API",
@@ -102,7 +102,7 @@ some output after`,
     {"question": "Pick one", "options": ["A", "B"]}
 
 <<<RALPHEX:END>>>`,
-			expected: &QuestionPayload{
+			expected: &questionPayload{
 				Question: "Pick one",
 				Options:  []string{"A", "B"},
 			},
@@ -118,7 +118,7 @@ some output after`,
 <<<RALPHEX:END>>>
 
 [10:30:20] waiting for user input...`,
-			expected: &QuestionPayload{
+			expected: &questionPayload{
 				Question: "How should data be stored?",
 				Options:  []string{"Database", "File system"},
 			},
@@ -127,14 +127,14 @@ some output after`,
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ParseQuestionPayload(tc.output)
+			result, err := parseQuestionPayload(tc.output)
 			require.NoError(t, err)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
 }
 
-func TestParseQuestionPayload_MalformedJSON(t *testing.T) {
+func Test_parseQuestionPayload_MalformedJSON(t *testing.T) {
 	tests := []struct {
 		name        string
 		output      string
@@ -205,7 +205,7 @@ func TestParseQuestionPayload_MalformedJSON(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ParseQuestionPayload(tc.output)
+			result, err := parseQuestionPayload(tc.output)
 			assert.Nil(t, result)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errContains)
@@ -213,7 +213,7 @@ func TestParseQuestionPayload_MalformedJSON(t *testing.T) {
 	}
 }
 
-func TestParseQuestionPayload_NoSignal(t *testing.T) {
+func Test_parseQuestionPayload_NoSignal(t *testing.T) {
 	tests := []struct {
 		name   string
 		output string
@@ -242,14 +242,14 @@ func TestParseQuestionPayload_NoSignal(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ParseQuestionPayload(tc.output)
-			require.ErrorIs(t, err, ErrNoQuestionSignal)
+			result, err := parseQuestionPayload(tc.output)
+			require.ErrorIs(t, err, errNoQuestionSignal)
 			assert.Nil(t, result)
 		})
 	}
 }
 
-func TestParsePlanDraftPayload_ValidContent(t *testing.T) {
+func Test_parsePlanDraftPayload_ValidContent(t *testing.T) {
 	tests := []struct {
 		name     string
 		output   string
@@ -333,14 +333,14 @@ The project uses Go with standard library.
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ParsePlanDraftPayload(tc.output)
+			result, err := parsePlanDraftPayload(tc.output)
 			require.NoError(t, err)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
 }
 
-func TestParsePlanDraftPayload_Malformed(t *testing.T) {
+func Test_parsePlanDraftPayload_Malformed(t *testing.T) {
 	tests := []struct {
 		name        string
 		output      string
@@ -370,7 +370,7 @@ func TestParsePlanDraftPayload_Malformed(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ParsePlanDraftPayload(tc.output)
+			result, err := parsePlanDraftPayload(tc.output)
 			assert.Empty(t, result)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.errContains)
@@ -378,7 +378,7 @@ func TestParsePlanDraftPayload_Malformed(t *testing.T) {
 	}
 }
 
-func TestParsePlanDraftPayload_NoSignal(t *testing.T) {
+func Test_parsePlanDraftPayload_NoSignal(t *testing.T) {
 	tests := []struct {
 		name   string
 		output string
@@ -407,8 +407,8 @@ func TestParsePlanDraftPayload_NoSignal(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ParsePlanDraftPayload(tc.output)
-			require.ErrorIs(t, err, ErrNoPlanDraftSignal)
+			result, err := parsePlanDraftPayload(tc.output)
+			require.ErrorIs(t, err, errNoPlanDraftSignal)
 			assert.Empty(t, result)
 		})
 	}

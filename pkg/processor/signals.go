@@ -28,41 +28,41 @@ var questionSignalRe = regexp.MustCompile(`<<<RALPHEX:QUESTION>>>\s*([\s\S]*?)\s
 // planDraftSignalRe matches the PLAN_DRAFT signal block with plan content
 var planDraftSignalRe = regexp.MustCompile(`<<<RALPHEX:PLAN_DRAFT>>>\s*([\s\S]*?)\s*<<<RALPHEX:END>>>`)
 
-// QuestionPayload represents a question signal from Claude during plan creation
-type QuestionPayload struct {
+// questionPayload represents a question signal from Claude during plan creation
+type questionPayload struct {
 	Question string   `json:"question"`
 	Options  []string `json:"options"`
 	Context  string   `json:"context,omitempty"`
 }
 
-// IsReviewDone returns true if signal indicates review phase is complete.
-func IsReviewDone(signal string) bool {
+// isReviewDone returns true if signal indicates review phase is complete.
+func isReviewDone(signal string) bool {
 	return signal == SignalReviewDone
 }
 
-// IsCodexDone returns true if signal indicates codex phase is complete.
-func IsCodexDone(signal string) bool {
+// isCodexDone returns true if signal indicates codex phase is complete.
+func isCodexDone(signal string) bool {
 	return signal == SignalCodexDone
 }
 
-// IsPlanReady returns true if signal indicates plan creation is complete.
-func IsPlanReady(signal string) bool {
+// isPlanReady returns true if signal indicates plan creation is complete.
+func isPlanReady(signal string) bool {
 	return signal == SignalPlanReady
 }
 
-// ErrNoQuestionSignal indicates no question signal was found in output
-var ErrNoQuestionSignal = errors.New("no question signal found")
+// errNoQuestionSignal indicates no question signal was found in output
+var errNoQuestionSignal = errors.New("no question signal found")
 
-// ErrNoPlanDraftSignal indicates no plan draft signal was found in output
-var ErrNoPlanDraftSignal = errors.New("no plan draft signal found")
+// errNoPlanDraftSignal indicates no plan draft signal was found in output
+var errNoPlanDraftSignal = errors.New("no plan draft signal found")
 
-// ParseQuestionPayload extracts a QuestionPayload from output containing QUESTION signal.
-// returns ErrNoQuestionSignal if no question signal is found.
+// parseQuestionPayload extracts a questionPayload from output containing QUESTION signal.
+// returns errNoQuestionSignal if no question signal is found.
 // returns other error if signal is found but JSON is malformed.
-func ParseQuestionPayload(output string) (*QuestionPayload, error) {
+func parseQuestionPayload(output string) (*questionPayload, error) {
 	// check if output contains the question signal at all
 	if !strings.Contains(output, SignalQuestion) {
-		return nil, ErrNoQuestionSignal
+		return nil, errNoQuestionSignal
 	}
 
 	// extract the JSON payload between QUESTION and END markers
@@ -76,7 +76,7 @@ func ParseQuestionPayload(output string) (*QuestionPayload, error) {
 		return nil, errors.New("malformed question signal: empty JSON payload")
 	}
 
-	var payload QuestionPayload
+	var payload questionPayload
 	if err := json.Unmarshal([]byte(jsonStr), &payload); err != nil {
 		return nil, fmt.Errorf("malformed question signal: invalid JSON: %w", err)
 	}
@@ -92,13 +92,13 @@ func ParseQuestionPayload(output string) (*QuestionPayload, error) {
 	return &payload, nil
 }
 
-// ParsePlanDraftPayload extracts plan content from output containing PLAN_DRAFT signal.
-// returns ErrNoPlanDraftSignal if no plan draft signal is found.
+// parsePlanDraftPayload extracts plan content from output containing PLAN_DRAFT signal.
+// returns errNoPlanDraftSignal if no plan draft signal is found.
 // returns other error if signal is found but content is malformed.
-func ParsePlanDraftPayload(output string) (string, error) {
+func parsePlanDraftPayload(output string) (string, error) {
 	// check if output contains the plan draft signal at all
 	if !strings.Contains(output, SignalPlanDraft) {
-		return "", ErrNoPlanDraftSignal
+		return "", errNoPlanDraftSignal
 	}
 
 	// extract the content between PLAN_DRAFT and END markers
