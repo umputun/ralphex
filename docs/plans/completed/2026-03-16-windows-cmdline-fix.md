@@ -49,9 +49,9 @@ chars, which together with other args exceeds the limit.
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] `make test` — all tests pass
-- [ ] `make lint` — no linter issues
-- [ ] `make fmt` — code is formatted
-- [ ] `GOOS=windows GOARCH=amd64 go build ./...` — Windows cross-compile succeeds
-- [ ] Verify test coverage meets 80%+
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] `make test` — all tests pass
+- [x] `make lint` — no linter issues
+- [x] `make fmt` — code is formatted
+- [x] `GOOS=windows GOARCH=amd64 go build ./...` — Windows cross-compile succeeds
+- [x] Verify test coverage meets 80%+
+- [x] Move this plan to `docs/plans/completed/`
