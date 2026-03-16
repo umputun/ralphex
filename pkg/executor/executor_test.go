@@ -769,7 +769,7 @@ func TestHelperProcess(t *testing.T) {
 	}
 	data, _ := io.ReadAll(os.Stdin)
 	fmt.Print(string(data))
-	os.Exit(0) //nolint:revive // intentional: subprocess helper must exit immediately
+	os.Exit(0)
 }
 
 // TestHelperProcessStreamJSON is not a real test — used as a subprocess by
@@ -783,7 +783,7 @@ func TestHelperProcessStreamJSON(t *testing.T) {
 	fmt.Printf(`{"type":"content_block_delta","delta":{"type":"text_delta","text":%q}}`, string(data))
 	fmt.Println()
 	fmt.Println(`{"type":"result","result":""}`)
-	os.Exit(0) //nolint:revive // intentional: subprocess helper must exit immediately
+	os.Exit(0)
 }
 
 func TestClaudeExecutor_Run_RealRunner_StdinWired(t *testing.T) {
