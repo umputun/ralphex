@@ -21,7 +21,8 @@ command -v jq >/dev/null 2>&1 || { echo "error: jq is required but not found" >&
 # verify opencode is available
 command -v opencode >/dev/null 2>&1 || { echo "error: opencode is required but not found" >&2; exit 1; }
 
-# extract prompt from -p argument (last two args from ClaudeExecutor).
+# ralphex passes prompt via stdin (primary path, avoids Windows 8191-char cmd limit).
+# also accept -p flag for backward compatibility with direct invocations.
 # all other flags are ignored gracefully (--dangerously-skip-permissions, etc.)
 prompt=""
 while [[ $# -gt 0 ]]; do
