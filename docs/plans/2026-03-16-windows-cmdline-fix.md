@@ -44,8 +44,8 @@ chars, which together with other args exceeds the limit.
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] Under "Platform Support / Windows" section, add a note: prompts are passed via stdin to claude CLI to avoid cmd.exe 8191-char command-line limit
-- [ ] Run `make test`, `make lint`, and `GOOS=windows GOARCH=amd64 go build ./...` — all must pass
+- [x] Under "Platform Support / Windows" section, add a note: prompts are passed via stdin to claude CLI to avoid cmd.exe 8191-char command-line limit
+- [x] Run `make test`, `make lint`, and `GOOS=windows GOARCH=amd64 go build ./...` — all must pass
 
 ### Task 4: Verify acceptance criteria
 

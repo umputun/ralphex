@@ -211,6 +211,7 @@ Key files:
 - **Windows:** builds and runs, but with limitations:
   - Process group signals not available (graceful shutdown kills direct process only, not child processes)
   - File locking not available (active session detection disabled)
+  - Prompts are passed to the claude CLI via stdin (not `-p` flag) to avoid the cmd.exe 8191-character command-line limit
 
 ### Cross-Platform Development
 
