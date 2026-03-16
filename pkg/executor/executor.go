@@ -191,6 +191,10 @@ type ClaudeExecutor struct {
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
 	cmdRunner     CommandRunner     // for testing, nil uses default
+
+	// execRunnerBuilder optionally overrides execClaudeRunner construction in tests.
+	// when nil, defaults to &execClaudeRunner{stdin: stdinReader}.
+	execRunnerBuilder func(stdin io.Reader) CommandRunner
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -214,7 +218,12 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	var runner CommandRunner
 	if e.cmdRunner == nil {
 		// real execution: pass prompt via stdin to avoid Windows 8191-char command-line limit
-		runner = &execClaudeRunner{stdin: strings.NewReader(prompt)}
+		stdinReader := strings.NewReader(prompt)
+		if e.execRunnerBuilder != nil {
+			runner = e.execRunnerBuilder(stdinReader)
+		} else {
+			runner = &execClaudeRunner{stdin: stdinReader}
+		}
 	} else {
 		// test mock path: append -p so existing test assertions remain valid
 		args = append(args, "-p", prompt)

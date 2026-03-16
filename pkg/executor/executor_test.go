@@ -3,7 +3,9 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -751,6 +753,69 @@ func TestClaudeExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
 func TestLimitPatternError_Error(t *testing.T) {
 	err := &LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}
 	assert.Equal(t, `detected limit pattern: "You've hit your limit"`, err.Error())
+}
+
+// TestHelperProcess is not a real test — it is used as a subprocess by TestExecClaudeRunner_StdinSet.
+// It reads all of stdin and writes it to stdout, then exits.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	data, _ := io.ReadAll(os.Stdin)
+	fmt.Print(string(data))
+	os.Exit(0) //nolint:revive // intentional: subprocess helper must exit immediately
+}
+
+func TestExecClaudeRunner_StdinSet(t *testing.T) {
+	// verify that when execClaudeRunner.stdin is set, it is piped to the child process's stdin.
+	// uses the test binary re-invocation pattern: the subprocess runs TestHelperProcess which
+	// echoes stdin to stdout, letting us confirm the pipe is connected.
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	input := "hello from stdin"
+	r := &execClaudeRunner{stdin: strings.NewReader(input)}
+
+	output, wait, err := r.Run(context.Background(), exe, "-test.run=TestHelperProcess")
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(output)
+	require.NoError(t, err)
+	require.NoError(t, wait())
+	assert.Equal(t, input, string(data))
+}
+
+func TestClaudeExecutor_Run_RealRunner_NoPromptArg(t *testing.T) {
+	// verify that when cmdRunner is nil (real runner path), args do NOT include -p.
+	// the prompt is passed via stdin through the execRunnerBuilder hook.
+	var capturedArgs []string
+	var capturedStdin io.Reader
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
+
+	e := &ClaudeExecutor{
+		execRunnerBuilder: func(stdin io.Reader) CommandRunner {
+			capturedStdin = stdin
+			return &mocks.CommandRunnerMock{
+				RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+					capturedArgs = args
+					return strings.NewReader(jsonStream), func() error { return nil }, nil
+				},
+			}
+		},
+	}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	// real runner path must not contain -p: prompt goes via stdin, not CLI arg
+	assert.NotContains(t, capturedArgs, "-p")
+	assert.NotContains(t, capturedArgs, "test prompt")
+	// stdin must be set to the prompt content
+	require.NotNil(t, capturedStdin)
+	data, err := io.ReadAll(capturedStdin)
+	require.NoError(t, err)
+	assert.Equal(t, "test prompt", string(data))
 }
 
 func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {

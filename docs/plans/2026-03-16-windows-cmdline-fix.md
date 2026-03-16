@@ -34,10 +34,10 @@ chars, which together with other args exceeds the limit.
 **Files:**
 - Modify: `pkg/executor/executor_test.go`
 
-- [ ] Add `TestExecClaudeRunner_StdinSet`: construct `execClaudeRunner{stdin: strings.NewReader("hello")}`, call `Run()` on a no-op command (e.g., `echo`), verify `cmd.Stdin` was set (use a spy or check behavior indirectly via a helper command that reads stdin)
-- [ ] Add `TestClaudeExecutor_Run_RealRunner_NoPromptArg`: verify that when `cmdRunner` is nil, the args passed to the runner do NOT contain `-p`. Since we can't easily intercept the real runner's args, consider restructuring the test to inject a custom `CommandRunner` that checks args but simulates the real runner path — OR verify via the `execClaudeRunner` constructor logic directly
-- [ ] Verify `TestClaudeExecutor_Run_Success` and other mock-based tests still pass (mock path still receives `-p prompt`)
-- [ ] Run `make test` — all tests must pass before task 3
+- [x] Add `TestExecClaudeRunner_StdinSet`: construct `execClaudeRunner{stdin: strings.NewReader("hello")}`, call `Run()` on a no-op command (e.g., `echo`), verify `cmd.Stdin` was set (use a spy or check behavior indirectly via a helper command that reads stdin)
+- [x] Add `TestClaudeExecutor_Run_RealRunner_NoPromptArg`: verify that when `cmdRunner` is nil, the args passed to the runner do NOT contain `-p`. Since we can't easily intercept the real runner's args, consider restructuring the test to inject a custom `CommandRunner` that checks args but simulates the real runner path — OR verify via the `execClaudeRunner` constructor logic directly
+- [x] Verify `TestClaudeExecutor_Run_Success` and other mock-based tests still pass (mock path still receives `-p prompt`)
+- [x] Run `make test` — all tests must pass before task 3
 
 ### Task 3: Update CLAUDE.md platform notes
 
