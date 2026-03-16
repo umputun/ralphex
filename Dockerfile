@@ -30,7 +30,7 @@ RUN apk add --no-cache \
     python3 py3-pip \
     libgcc libstdc++ ripgrep \
     fzf git openssh-keygen bash \
-    make gcc musl-dev && \
+    make gcc musl-dev docker-cli && \
     sed -i 's|/home/app:/bin/sh|/home/app:/bin/bash|' /etc/passwd
 
 # set env for claude code on alpine (use system ripgrep)

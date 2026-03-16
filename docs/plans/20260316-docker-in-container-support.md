@@ -76,9 +76,9 @@
 **Files:**
 - Modify: `Dockerfile`
 
-- [ ] add `docker-cli` to the existing `apk add --no-cache` line in the runtime stage
-- [ ] verify the image builds: `docker build -t ralphex-test .`
-- [ ] verify `docker` CLI is available: `docker run --rm ralphex-test docker --version`
+- [x] add `docker-cli` to the existing `apk add --no-cache` line in the runtime stage
+- [x] verify the image builds: `docker build -t ralphex-test .`
+- [x] verify `docker` CLI is available: `docker run --rm ralphex-test docker --version`
 
 ### Task 2: Add --docker flag and env var support to wrapper
 
