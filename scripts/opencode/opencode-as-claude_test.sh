@@ -747,9 +747,9 @@ fi
 # ---------------------------------------------------------------------------
 echo "test: prompt via stdin"
 
-output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+output=$(echo "prompt from stdin" | MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
     PATH="$TMPDIR_TEST:$PATH" \
-    echo "prompt from stdin" | bash "$WRAPPER" --dangerously-skip-permissions --output-format stream-json 2>/dev/null)
+    bash "$WRAPPER" --dangerously-skip-permissions --output-format stream-json 2>/dev/null)
 
 if echo "$output" | grep -q '"content_block_delta"'; then
     pass "stdin prompt produces output"

@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -755,6 +756,11 @@ func TestLimitPatternError_Error(t *testing.T) {
 	assert.Equal(t, `detected limit pattern: "You've hit your limit"`, err.Error())
 }
 
+// printFlag is registered so the test binary accepts --print without erroring.
+// ClaudeExecutor.Run() always appends --print to the command args; when the test
+// binary is used as the subprocess command, this flag must be registered.
+var _ = flag.Bool("print", false, "consumed by subprocess tests")
+
 // TestHelperProcess is not a real test — it is used as a subprocess by TestExecClaudeRunner_StdinSet.
 // It reads all of stdin and writes it to stdout, then exits.
 func TestHelperProcess(t *testing.T) {
@@ -764,6 +770,40 @@ func TestHelperProcess(t *testing.T) {
 	data, _ := io.ReadAll(os.Stdin)
 	fmt.Print(string(data))
 	os.Exit(0) //nolint:revive // intentional: subprocess helper must exit immediately
+}
+
+// TestHelperProcessStreamJSON is not a real test — used as a subprocess by
+// TestClaudeExecutor_Run_RealRunner_StdinWired. Reads stdin and emits it as a
+// stream-json content_block_delta event so ClaudeExecutor.parseStream can parse it.
+func TestHelperProcessStreamJSON(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS_JSON") != "1" {
+		return
+	}
+	data, _ := io.ReadAll(os.Stdin)
+	fmt.Printf(`{"type":"content_block_delta","delta":{"type":"text_delta","text":%q}}`, string(data))
+	fmt.Println()
+	fmt.Println(`{"type":"result","result":""}`)
+	os.Exit(0) //nolint:revive // intentional: subprocess helper must exit immediately
+}
+
+func TestClaudeExecutor_Run_RealRunner_StdinWired(t *testing.T) {
+	// verify the full wiring: ClaudeExecutor.Run() with cmdRunner == nil constructs
+	// execClaudeRunner{stdin: stdinReader} and the subprocess receives the prompt via stdin.
+	// if the wiring is broken (e.g. execClaudeRunner{} without stdin), the subprocess reads
+	// empty stdin and result.Output would be empty.
+	t.Setenv("GO_WANT_HELPER_PROCESS_JSON", "1")
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	e := &ClaudeExecutor{
+		Command: exe,
+		Args:    "-test.run=TestHelperProcessStreamJSON",
+		// cmdRunner is nil — exercises the real execClaudeRunner construction path
+	}
+
+	result := e.Run(context.Background(), "hello stdin wiring")
+	require.NoError(t, result.Error)
+	assert.Contains(t, result.Output, "hello stdin wiring")
 }
 
 func TestExecClaudeRunner_StdinSet(t *testing.T) {

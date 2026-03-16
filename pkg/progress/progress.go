@@ -189,7 +189,10 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 	// this prevents mixing unrelated content when the same plan filename is reused.
 	// reads from the locked fd directly to avoid TOCTOU path-vs-inode mismatch.
 	if restart && isProgressCompleted(f, fi.Size()) {
-		if tErr := f.Truncate(0); tErr != nil {
+		// use os.Truncate (path-based) instead of f.Truncate (fd-based) to avoid
+		// "access is denied" on Windows when the fd is opened with O_APPEND, which
+		// does not grant FILE_WRITE_DATA permission required for fd-based truncation.
+		if tErr := os.Truncate(f.Name(), 0); tErr != nil {
 			_ = unlockFile(f)
 			unregisterActiveLock(f.Name())
 			f.Close()
