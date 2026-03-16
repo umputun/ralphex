@@ -194,7 +194,7 @@ func phaseFromSection(name string) status.Phase {
 		return status.PhaseCodex
 	case strings.Contains(nameLower, "review"):
 		return status.PhaseReview
-	case strings.Contains(nameLower, "claude-eval") || strings.Contains(nameLower, "claude eval"):
+	case strings.Contains(nameLower, "claude-eval"), strings.Contains(nameLower, "claude eval"):
 		return status.PhaseClaudeEval
 	default:
 		return status.PhaseTask
