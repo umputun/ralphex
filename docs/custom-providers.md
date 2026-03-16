@@ -4,7 +4,7 @@ ralphex uses Claude Code as the primary agent for task execution and code review
 
 ## How it works
 
-ralphex's `ClaudeExecutor` runs the configured command, appends `-p <prompt>` as the last two arguments, and reads stdout as a stream of JSON events. Each line must be a valid JSON object. The executor recognizes these event types:
+ralphex's `ClaudeExecutor` runs the configured command and passes the prompt via stdin, then reads stdout as a stream of JSON events. Each line must be a valid JSON object. The executor recognizes these event types:
 
 | Event type | Fields used | Purpose |
 |---|---|---|
@@ -24,12 +24,14 @@ ralphex prompts instruct the agent to emit signals like `<<<RALPHEX:COMPLETED>>>
 `ClaudeExecutor` builds the command as:
 
 ```
-<claude_command> <claude_args...> -p <prompt>
+<claude_command> <claude_args...>
 ```
 
-When `claude_args` has a value (default: `--dangerously-skip-permissions --output-format stream-json --verbose`), those flags are split and prepended before `-p`. When `ClaudeExecutor.Args` is empty at the code level, only `-p <prompt>` is appended. Note that setting `claude_args =` (empty) in the config file may not clear the default due to config fallback behavior — the embedded default value is preserved when the user-specified value is empty.
+The prompt is passed via stdin (not as a CLI argument). This avoids the cmd.exe 8191-character command-line limit on Windows, where large prompts (e.g., after variable expansion) can exceed the limit.
 
-**Wrapper scripts should ignore unknown flags gracefully** — use a catch-all `*) shift ;;` in the argument parser (as the included codex wrapper does). This way the wrapper works regardless of whether default Claude flags are passed through.
+When `claude_args` has a value (default: `--dangerously-skip-permissions --output-format stream-json --verbose`), those flags are split and passed as arguments. Note that setting `claude_args =` (empty) in the config file may not clear the default due to config fallback behavior — the embedded default value is preserved when the user-specified value is empty.
+
+**Wrapper scripts should accept the prompt via stdin** and also accept `-p <prompt>` for backward compatibility. Use `[[ ! -t 0 ]]` to detect non-interactive stdin before reading. **Wrapper scripts should also ignore unknown flags gracefully** — use a catch-all `*) shift ;;` in the argument parser.
 
 ## Codex wrapper (included example)
 
@@ -156,10 +158,11 @@ fixed the bug
 
 A wrapper script must:
 
-1. Accept `-p <prompt>` among its arguments (ignore other flags gracefully)
-2. Pass the prompt to the underlying tool
-3. Stream JSON events to stdout, one per line
-4. Exit with code 0 on success
+1. Read the prompt from stdin (ralphex pipes it to avoid Windows command-line length limits)
+2. Also accept `-p <prompt>` as a fallback for backward compatibility
+3. Ignore other flags gracefully
+4. Stream JSON events to stdout, one per line
+5. Exit with code 0 on success
 
 ### Minimal template
 
@@ -167,7 +170,7 @@ A wrapper script must:
 #!/usr/bin/env bash
 set -euo pipefail
 
-# extract prompt from -p argument
+# extract prompt from -p argument (backward compat) or stdin
 prompt=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -177,7 +180,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$prompt" ]]; then
-    echo "error: no prompt provided (-p flag required)" >&2
+    # fall back to stdin: ralphex passes prompt via pipe to avoid Windows 8191-char cmd limit.
+    # only read when stdin is not a terminal to avoid blocking interactive invocations.
+    if [[ ! -t 0 ]]; then
+        prompt=$(cat)
+    fi
+fi
+
+if [[ -z "$prompt" ]]; then
+    echo "error: no prompt provided (expected -p flag or stdin)" >&2
     exit 1
 fi
 
@@ -211,6 +222,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -z "$prompt" ]] && [[ ! -t 0 ]]; then prompt=$(cat); fi
 [[ -z "$prompt" ]] && exit 1
 
 # gemini outputs plain text; wrap each line as a stream event
@@ -236,6 +248,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -z "$prompt" ]] && [[ ! -t 0 ]]; then prompt=$(cat); fi
 [[ -z "$prompt" ]] && exit 1
 
 OLLAMA_MODEL="${OLLAMA_MODEL:-llama3}"
@@ -263,6 +276,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -z "$prompt" ]] && [[ ! -t 0 ]]; then prompt=$(cat); fi
 [[ -z "$prompt" ]] && exit 1
 
 OPENROUTER_MODEL="${OPENROUTER_MODEL:-anthropic/claude-sonnet-4}"
@@ -299,7 +313,7 @@ echo '{"type":"result","result":""}'
 ## Troubleshooting
 
 **Empty output / no events:**
-- Check that the tool is actually producing output: run the wrapper manually with `-p "say hello"`
+- Check that the tool is actually producing output: run the wrapper manually with `echo "say hello" | your-wrapper`
 - Verify stderr is redirected (add `2>/dev/null` for the underlying tool)
 - Ensure `jq` is installed and accessible
 
@@ -311,7 +325,7 @@ echo '{"type":"result","result":""}'
 **JSON parsing errors:**
 - Each line must be a complete, valid JSON object
 - No trailing commas, no multi-line JSON objects
-- Test with: `your-wrapper -p "test" | jq .` (each line should parse)
+- Test with: `echo "test" | your-wrapper | jq .` (each line should parse)
 
 **Timeout / stuck:**
 - ralphex doesn't impose a timeout on claude sessions

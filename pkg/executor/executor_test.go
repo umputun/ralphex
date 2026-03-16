@@ -403,7 +403,7 @@ func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	// should use custom args plus prompt args
-	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "-p", "test prompt"}, capturedArgs)
+	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value"}, capturedArgs)
 }
 
 func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
@@ -426,7 +426,7 @@ func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "custom-claude", capturedCmd)
-	assert.Equal(t, []string{"--skip-perms", "--verbose", "-p", "the prompt"}, capturedArgs)
+	assert.Equal(t, []string{"--skip-perms", "--verbose"}, capturedArgs)
 }
 
 func TestSplitArgs(t *testing.T) {
@@ -786,36 +786,25 @@ func TestExecClaudeRunner_StdinSet(t *testing.T) {
 	assert.Equal(t, input, string(data))
 }
 
-func TestClaudeExecutor_Run_RealRunner_NoPromptArg(t *testing.T) {
-	// verify that when cmdRunner is nil (real runner path), args do NOT include -p.
-	// the prompt is passed via stdin through the execRunnerBuilder hook.
+func TestClaudeExecutor_Run_NoPromptInArgs(t *testing.T) {
+	// verify that args never include -p: prompt is always passed via stdin, not CLI arg.
 	var capturedArgs []string
-	var capturedStdin io.Reader
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
 
 	e := &ClaudeExecutor{
-		execRunnerBuilder: func(stdin io.Reader) CommandRunner {
-			capturedStdin = stdin
-			return &mocks.CommandRunnerMock{
-				RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
-					capturedArgs = args
-					return strings.NewReader(jsonStream), func() error { return nil }, nil
-				},
-			}
+		cmdRunner: &mocks.CommandRunnerMock{
+			RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+				capturedArgs = args
+				return strings.NewReader(jsonStream), func() error { return nil }, nil
+			},
 		},
 	}
 
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	// real runner path must not contain -p: prompt goes via stdin, not CLI arg
 	assert.NotContains(t, capturedArgs, "-p")
 	assert.NotContains(t, capturedArgs, "test prompt")
-	// stdin must be set to the prompt content
-	require.NotNil(t, capturedStdin)
-	data, err := io.ReadAll(capturedStdin)
-	require.NoError(t, err)
-	assert.Equal(t, "test prompt", string(data))
 }
 
 func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
