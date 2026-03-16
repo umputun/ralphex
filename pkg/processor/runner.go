@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -777,17 +776,33 @@ func (r *Runner) buildCodexPrompt(isFirst bool, claudeResponse string) string {
 	return r.replaceVariablesWithIteration(r.cfg.AppConfig.CodexReviewPrompt, isFirst, claudeResponse)
 }
 
-// hasUncompletedTasks checks if plan file has any uncompleted checkboxes.
+// hasUncompletedTasks checks if any Task section has uncompleted checkboxes.
+// only Task sections (### Task N: or ### Iteration N:) are considered.
+// checkboxes in Success criteria, Overview, or Context are ignored for this check,
+// so the agent can output ALL_TASKS_DONE when those are verification-only.
+// for malformed plans (checkboxes without task headers), returns true if any [ ] exists.
 func (r *Runner) hasUncompletedTasks() bool {
-	content, err := os.ReadFile(r.resolvePlanFilePath())
+	path := r.resolvePlanFilePath()
+	if path == "" {
+		return false // no plan file, nothing to complete
+	}
+	p, err := plan.ParsePlanFile(path)
 	if err != nil {
+		r.log.Print("[WARN] failed to parse plan file for completion check: %v", err)
 		return true // assume incomplete if can't read
 	}
-
-	// look for uncompleted checkbox pattern: [ ] (not [x])
-	for line := range strings.SplitSeq(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "- [ ]") {
+	for _, t := range p.Tasks {
+		if t.HasUncompletedActionableWork() {
+			return true
+		}
+	}
+	// malformed plans: no task headers but file has [ ] — treat as incomplete
+	if len(p.Tasks) == 0 {
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		if err != nil {
+			return true
+		}
+		if has {
 			return true
 		}
 	}
@@ -803,7 +818,7 @@ func (r *Runner) nextPlanTaskPosition() int {
 		return 0
 	}
 	for i, t := range p.Tasks {
-		if len(t.Checkboxes) > 0 && t.Status != plan.TaskStatusDone {
+		if t.HasUncompletedActionableWork() {
 			return i + 1 // 1-indexed
 		}
 	}

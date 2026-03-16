@@ -1,5 +1,12 @@
 package plan
 
+// checkbox-test-outside
+// checkbox-test-description — use this format for [ ] unchecked items (description text, not actionable)
+// checkbox-test-description
+// checkbox-test-description-2
+// checkbox-test-description-3
+// checkbox-second-description-4
+
 import (
 	"bufio"
 	"encoding/json"
@@ -44,8 +51,11 @@ type Plan struct {
 // patterns for parsing plan markdown.
 var (
 	taskHeaderPattern = regexp.MustCompile(`^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$`)
-	checkboxPattern   = regexp.MustCompile(`^-\s+\[([ xX])\]\s*(.*)$`)
+	// allow leading whitespace for indented sub-items (e.g. "  - [ ] Unit tests")
+	checkboxPattern   = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern      = regexp.MustCompile(`^#\s+(.*)$`)
+	// formatInText matches [ ] or [x] in checkbox text — description/example, not actionable for completion check.
+	formatInText = regexp.MustCompile(`\[\s*[ xX]?\s*\]`)
 )
 
 // ParsePlan parses plan markdown content into a structured Plan.
@@ -87,6 +97,19 @@ func ParsePlan(content string) (*Plan, error) {
 			continue
 		}
 
+		// non-Task section header (e.g. ## Success criteria, ## Overview, ## Context):
+		// close current task so checkboxes below are not attached to it.
+		// only ## (h2) closes; ### and #### are subsections and must not orphan checkboxes.
+		// also close on # (h1) when title already set, e.g. # Overview in plans using single hash for sections.
+		isH2 := strings.HasPrefix(line, "##") && !strings.HasPrefix(line, "###")
+		isH1AfterTitle := strings.HasPrefix(line, "#") && p.Title != "" && !strings.HasPrefix(line, "##")
+		if currentTask != nil && (isH2 || isH1AfterTitle) && !taskHeaderPattern.MatchString(line) {
+			currentTask.Status = DetermineTaskStatus(currentTask.Checkboxes)
+			p.Tasks = append(p.Tasks, *currentTask)
+			currentTask = nil
+			continue
+		}
+
 		// check for checkbox (only if inside a task)
 		if currentTask != nil {
 			if matches := checkboxPattern.FindStringSubmatch(line); matches != nil {
@@ -121,6 +144,19 @@ func ParsePlanFile(path string) (*Plan, error) {
 	return ParsePlan(string(content))
 }
 
+// uncompletedCheckboxRegex matches - [ ] with optional leading indent (aligns with checkboxPattern).
+var uncompletedCheckboxRegex = regexp.MustCompile(`(?m)^\s*-\s+\[\s\]`)
+
+// FileHasUncompletedCheckbox returns true if the file contains any uncompleted checkbox (- [ ]).
+// used for malformed plans (no task headers) to avoid treating them as complete.
+func FileHasUncompletedCheckbox(path string) (bool, error) {
+	content, err := os.ReadFile(path) //nolint:gosec // path is internally resolved
+	if err != nil {
+		return false, err
+	}
+	return uncompletedCheckboxRegex.Match(content), nil
+}
+
 // JSON returns the plan as JSON bytes.
 func (p *Plan) JSON() ([]byte, error) {
 	data, err := json.Marshal(p)
@@ -139,6 +175,23 @@ func parseTaskNum(s string) int {
 		return 0
 	}
 	return n
+}
+
+// isActionableCheckbox returns false if checkbox text contains format pattern [ ] or [x] —
+// such checkboxes are description/examples, ignored for completion check.
+func isActionableCheckbox(cb Checkbox) bool {
+	return !formatInText.MatchString(cb.Text)
+}
+
+// HasUncompletedActionableWork returns true if the task has any unchecked actionable checkbox.
+// checkboxes whose text contains [ ] or [x] (format description) are ignored.
+func (t *Task) HasUncompletedActionableWork() bool {
+	for _, cb := range t.Checkboxes {
+		if !cb.Checked && isActionableCheckbox(cb) {
+			return true
+		}
+	}
+	return false
 }
 
 // DetermineTaskStatus calculates task status based on checkbox states.

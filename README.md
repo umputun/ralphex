@@ -600,6 +600,7 @@ Add JWT-based authentication to the API.
 **Requirements:**
 - Task headers must use `### Task N:` or `### Iteration N:` format (N can be integer or non-integer like `2.5`, `2a`)
 - Checkboxes: `- [ ]` (incomplete) or `- [x]` (completed)
+- Checkboxes belong only in Task sections (`### Task N:` or `### Iteration N:`). Do not put checkboxes in Success criteria, Overview, or Context — they cause extra loop iterations. The agent handles them gracefully when present, but plan authors should avoid them for best behavior.
 - Include `## Validation Commands` section with test/lint commands
 - Place plans in `docs/plans/` directory (configurable via `plans_dir`)
 

@@ -501,23 +501,48 @@ func TestRunner_HasUncompletedTasks(t *testing.T) {
 	}{
 		{
 			name:     "all tasks completed",
-			content:  "# Plan\n- [x] Task 1\n- [x] Task 2",
+			content:  "# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n- [x] done",
 			expected: false,
 		},
 		{
 			name:     "has uncompleted task",
-			content:  "# Plan\n- [x] Task 1\n- [ ] Task 2",
+			content:  "# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n- [ ] todo",
 			expected: true,
 		},
 		{
-			name:     "no checkboxes",
+			name:     "no tasks",
 			content:  "# Plan\nJust some text",
 			expected: false,
 		},
 		{
-			name:     "uncompleted in nested list",
-			content:  "# Plan\n- [x] Task 1\n  - [ ] Subtask",
+			name:     "uncompleted in task section",
+			content:  "# Plan\n### Task 1: first\n- [x] done\n- [ ] subtask",
 			expected: true,
+		},
+		{
+			name:     "uncompleted with extra space after dash (aligns with plan parser)",
+			content:  "# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n-  [ ] todo",
+			expected: true,
+		},
+		{
+			name:     "task sections all done, Success criteria has uncompleted (verification-only)",
+			content:  "# Plan\n## Success criteria\n- [ ] Manual: run e2e test\n### Task 1: first\n- [x] done",
+			expected: false,
+		},
+		{
+			name:     "task sections all done, Success criteria after tasks has uncompleted",
+			content:  "# Plan\n### Task 1: first\n- [x] done\n## Success criteria\n- [ ] Manual: run e2e test",
+			expected: false,
+		},
+		{
+			name:     "malformed plan with no task headers has uncompleted",
+			content:  "# Plan\n- [x] done\n- [ ] todo",
+			expected: true,
+		},
+		{
+			name:     "actionable done, only description checkbox unchecked (text contains [ ])",
+			content:  "# Plan\n### Task 1: format\n- [x] Faulti format\n- [ ] use this format for [ ] unchecked items",
+			expected: false,
 		},
 	}
 
@@ -548,7 +573,7 @@ func TestRunner_HasUncompletedTasks_CompletedDir(t *testing.T) {
 	// file is in completed/, but config references original path
 	originalPath := filepath.Join(plansDir, "plan.md")
 	completedPath := filepath.Join(completedDir, "plan.md")
-	require.NoError(t, os.WriteFile(completedPath, []byte("# Plan\n- [ ] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(completedPath, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("")
 	claude := newMockExecutor(nil)
@@ -2105,6 +2130,7 @@ func TestRunner_NextPlanTaskPosition(t *testing.T) {
 		{name: "retry same task", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [x] first\n- [ ] second\n### Task 3: test\n- [ ] test", expected: 2},
 		{name: "header-only task skipped", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: notes\n### Task 3: build\n- [ ] build it", expected: 3},
 		{name: "no tasks", content: "# Plan\nJust some text", expected: 0},
+		{name: "skips task with only description checkbox unchecked", content: "# Plan\n### Task 1: format\n- [x] done\n- [ ] use [ ] for example\n### Task 2: build\n- [ ] build it", expected: 2},
 	}
 
 	for _, tc := range tests {

@@ -175,6 +175,7 @@ Check `docs/plans/` for existing files, then create `docs/plans/YYYY-MM-DD-<task
 ## What Goes Where
 - **Implementation Steps** (`[ ]` checkboxes): tasks achievable within this codebase - code changes, tests, documentation updates
 - **Post-Completion** (no checkboxes): items requiring external action - manual testing, changes in consuming projects, deployment configs, third-party verifications
+- **Checkbox placement**: Checkboxes belong only in Task sections (`### Task N:` or `### Iteration N:`). Do not put checkboxes in Success criteria, Overview, or Context — they cause extra loop iterations.
 
 ## Implementation Steps
 

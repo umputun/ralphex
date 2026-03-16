@@ -9,6 +9,8 @@
 
 Read the plan file at {{PLAN_FILE}}. Find the FIRST Task section (### Task N: or ### Iteration N:) that has uncompleted checkboxes ([ ]).
 
+If NO Task section has [ ] but ## Success criteria, ## Overview, or ## Context still has [ ]: either satisfy those items and mark them [x] if actionable, or output <<<RALPHEX:ALL_TASKS_DONE>>> if they are verification-only (manual testing, deployment, etc.) — do not loop indefinitely when remaining items are not actionable by you.
+
 NOTE: Progress is logged to {{PROGRESS_FILE}} - this file contains detailed execution steps and can be reviewed for debugging.
 
 CRITICAL CONSTRAINT: Complete ONE Task section per iteration.
@@ -33,11 +35,11 @@ STEP 2 - VALIDATE:
 - Fix any failures, repeat until all validation passes
 
 STEP 3 - COMPLETE (after validation passes):
-- Update progress: edit {{PLAN_FILE}} and change [ ] to [x] for each checkbox you implemented in the current Task section
+- Update progress: edit {{PLAN_FILE}} and change [ ] to [x] for each checkbox you implemented in the current Task section. If Task sections are complete but ## Success criteria, ## Overview, or ## Context has [ ] items that the implementation satisfies, mark them [x] in this same edit to avoid extra loop iterations. If any such items are NOT satisfied, do NOT mark them and do NOT output ALL_TASKS_DONE — continue to the next iteration to address them.
 - Commit all changes (code + updated plan) with message: feat: <brief task description>
-- Check if any [ ] checkboxes remain in other sections
+- Check if any [ ] checkboxes remain in Task sections (### Task N: or ### Iteration N:)
 - If NO more [ ] checkboxes in the entire plan, output exactly: <<<RALPHEX:ALL_TASKS_DONE>>>
-- If more sections have [ ] checkboxes, STOP HERE - do not continue
+- If more Task sections have [ ] checkboxes, STOP HERE - do not continue
 
 If any phase fails after reasonable fix attempts, output exactly: <<<RALPHEX:TASK_FAILED>>>
 

@@ -367,6 +367,8 @@ func TestPromptLoader_loadPromptWithFallback_FallsBackToEmbed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, content, "{{PLAN_FILE}}")
 	assert.Contains(t, content, "RALPHEX:ALL_TASKS_DONE")
+	assert.Contains(t, content, "Success criteria")
+	assert.Contains(t, content, "Task sections")
 }
 
 func TestPromptLoader_loadPromptWithFallback_EmptyUserFileUsesDefault(t *testing.T) {
@@ -379,6 +381,8 @@ func TestPromptLoader_loadPromptWithFallback_EmptyUserFileUsesDefault(t *testing
 	require.NoError(t, err)
 	assert.Contains(t, content, "{{PLAN_FILE}}")
 	assert.Contains(t, content, "RALPHEX:ALL_TASKS_DONE")
+	assert.Contains(t, content, "Success criteria")
+	assert.Contains(t, content, "Task sections")
 }
 
 // --- stripComments tests ---
