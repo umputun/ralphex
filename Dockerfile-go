@@ -5,7 +5,7 @@ FROM ghcr.io/umputun/ralphex:${BASE_TAG}
 LABEL org.opencontainers.image.description="Autonomous plan execution with Claude Code - Go development"
 
 # install latest go from official distribution
-ARG GO_VERSION=1.26.0
+ARG GO_VERSION=1.26.1
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && \
     wget -qO- "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -xz -C /usr/local
 
