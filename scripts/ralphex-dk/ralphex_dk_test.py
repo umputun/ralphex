@@ -2489,8 +2489,10 @@ class TestDockerSocketMount(EnvTestCase):
         # find the socket mount entry
         for i, v in enumerate(volumes):
             if DEFAULT_DOCKER_SOCKET in v and i > 0 and volumes[i - 1] == "-v":
-                self.assertNotIn(":z", v.split(":")[-1], "socket mount must not have :z suffix")
-                self.assertNotIn(":Z", v.split(":")[-1], "socket mount must not have :Z suffix")
+                self.assertFalse(v.endswith(":z"), f"socket mount must not have :z suffix: {v}")
+                self.assertFalse(v.endswith(":Z"), f"socket mount must not have :Z suffix: {v}")
+                self.assertNotIn(",z", v, f"socket mount must not have ,z suffix: {v}")
+                self.assertNotIn(",Z", v, f"socket mount must not have ,Z suffix: {v}")
                 break
 
     def test_docker_gid_passed_when_detected_linux(self) -> None:

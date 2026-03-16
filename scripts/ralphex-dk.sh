@@ -1093,7 +1093,7 @@ def main() -> int:
                 return 1
 
             # warn on Linux about host Docker access (macOS has VM isolation, no warning needed)
-            if docker_gid is not None and platform.system() == "Linux":
+            if platform.system() == "Linux":
                 print("warning: --docker mounts host Docker socket — containers have host-level Docker access",
                       file=sys.stderr)
 

@@ -3,7 +3,7 @@
 ## Overview
 - Add `docker-cli` to the base Docker image so containers have the Docker client binary
 - Add `--docker` flag (and `RALPHEX_DOCKER_SOCKET` env var) to the wrapper script to opt-in mount the host Docker socket
-- Auto-detect socket GID and pass `--group-add` for proper permissions
+- Auto-detect socket GID and pass `DOCKER_GID` env var for baseimage group setup
 - Emit security warning on Linux (macOS has VM isolation, no warning needed)
 - Enables testcontainers and other Docker-dependent workflows inside ralphex containers
 
@@ -18,7 +18,7 @@
 - Install `docker-cli` in base Dockerfile — always available, zero cost if unused
 - Add `--docker` wrapper flag with `RALPHEX_DOCKER_SOCKET=1` env var fallback (follows `--claude-provider` pattern)
 - Socket mount added conditionally in `main()`, appended to volumes list
-- GID auto-detected by `stat`-ing `/var/run/docker.sock` on the host, passed via `--group-add` in `build_docker_command()`
+- GID auto-detected by `stat`-ing the socket on the host, passed via `DOCKER_GID` env var in `build_docker_command()`
 - Linux warning emitted to stderr when `--docker` is used and platform is Linux
 
 ## Technical Details
@@ -37,13 +37,13 @@
 - Default socket path: `/var/run/docker.sock`
 - Mount: `-v /var/run/docker.sock:/var/run/docker.sock`
 - Only mounted when flag/env var is set AND socket file exists
-- If flag is set but socket doesn't exist: warning to stderr, skip mount
+- If flag is set but socket doesn't exist: error to stderr, exit with code 1 (fail-fast)
 - **SELinux**: socket mount must NOT use `:z`/`:Z` suffixes — relabeling the Docker socket can break host Docker
 
 ### GID handling
-- `get_docker_socket_gid(socket_path) -> Optional[int]` — `os.stat()` the socket, return `st_gid`
-- Passed to `build_docker_command()` as new optional parameter `group_add: Optional[int]`
-- Renders as `--group-add <gid>` in the docker command, before volumes
+- `get_docker_socket_gid(socket_path) -> Optional[int]` — `os.stat()` the socket, return `st_gid` (0 on macOS)
+- Passed to `build_docker_command()` as new optional parameter `docker_gid: Optional[int]`
+- Renders as `-e DOCKER_GID=<gid>` env var in the docker command (baseimage adds user to group)
 
 ### Platform warning
 - On Linux + `--docker`: print warning to stderr about host Docker access
@@ -51,7 +51,7 @@
 - Detection: `platform.system() == "Linux"`
 
 ### Dry-run support
-- `--dry-run` with `--docker` shows the full command including socket mount and `--group-add`
+- `--dry-run` with `--docker` shows the full command including socket mount and `DOCKER_GID`
 
 ## Development Approach
 - **testing approach**: regular (code first, then tests)
