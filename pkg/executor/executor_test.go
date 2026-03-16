@@ -402,8 +402,8 @@ func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	// should use custom args plus prompt args
-	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value"}, capturedArgs)
+	// should use custom args plus --print (non-interactive mode flag, always appended)
+	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "--print"}, capturedArgs)
 }
 
 func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
@@ -426,7 +426,7 @@ func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "custom-claude", capturedCmd)
-	assert.Equal(t, []string{"--skip-perms", "--verbose"}, capturedArgs)
+	assert.Equal(t, []string{"--skip-perms", "--verbose", "--print"}, capturedArgs)
 }
 
 func TestSplitArgs(t *testing.T) {
@@ -788,23 +788,37 @@ func TestExecClaudeRunner_StdinSet(t *testing.T) {
 
 func TestClaudeExecutor_Run_NoPromptInArgs(t *testing.T) {
 	// verify that args never include -p: prompt is always passed via stdin, not CLI arg.
-	var capturedArgs []string
+	// also verify --print is present for non-interactive mode in both default and custom-args paths.
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
 
-	e := &ClaudeExecutor{
-		cmdRunner: &mocks.CommandRunnerMock{
-			RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
-				capturedArgs = args
-				return strings.NewReader(jsonStream), func() error { return nil }, nil
-			},
-		},
+	tests := []struct {
+		name string
+		args string
+	}{
+		{name: "default args", args: ""},
+		{name: "custom args", args: "--dangerously-skip-permissions --output-format stream-json"},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedArgs []string
+			e := &ClaudeExecutor{
+				Args: tc.args,
+				cmdRunner: &mocks.CommandRunnerMock{
+					RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+						capturedArgs = args
+						return strings.NewReader(jsonStream), func() error { return nil }, nil
+					},
+				},
+			}
 
-	result := e.Run(context.Background(), "test prompt")
+			result := e.Run(context.Background(), "test prompt")
 
-	require.NoError(t, result.Error)
-	assert.NotContains(t, capturedArgs, "-p")
-	assert.NotContains(t, capturedArgs, "test prompt")
+			require.NoError(t, result.Error)
+			assert.NotContains(t, capturedArgs, "-p")
+			assert.NotContains(t, capturedArgs, "test prompt")
+			assert.Contains(t, capturedArgs, "--print", "non-interactive flag must be present")
+		})
+	}
 }
 
 func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {

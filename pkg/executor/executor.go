@@ -209,9 +209,11 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 			"--dangerously-skip-permissions",
 			"--output-format", "stream-json",
 			"--verbose",
-			"--print",
 		}
 	}
+	// always append --print to enable non-interactive mode; mirrors old -p flag that was
+	// always appended. wrapper scripts ignore unknown flags via '*) shift ;;' catch-all.
+	args = append(args, "--print")
 	// pass prompt via stdin to avoid Windows 8191-char command-line limit;
 	// if cmdRunner is set (test injection), use it; otherwise use real runner
 	stdinReader := strings.NewReader(prompt)
