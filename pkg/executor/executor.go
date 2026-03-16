@@ -190,7 +190,7 @@ type ClaudeExecutor struct {
 	Debug         bool              // enable debug output
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
-	cmdRunner CommandRunner // for testing, nil uses default
+	cmdRunner     CommandRunner     // for testing, nil uses default
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -209,6 +209,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 			"--dangerously-skip-permissions",
 			"--output-format", "stream-json",
 			"--verbose",
+			"--print",
 		}
 	}
 	// pass prompt via stdin to avoid Windows 8191-char command-line limit;
