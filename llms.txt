@@ -124,7 +124,7 @@ ralphex provides Docker images for isolated execution:
 
 | Image | Contents |
 |-------|----------|
-| `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, Node.js, Python, git, make, gcc, bash, fzf, ripgrep |
+| `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, Node.js, Python, git, docker-cli, make, gcc, bash, fzf, ripgrep |
 | `ghcr.io/umputun/ralphex-go:latest` | Go development: base + Go 1.25, golangci-lint, moq, goimports |
 
 **Using Docker wrapper** (requires Python 3.9+):
@@ -147,8 +147,22 @@ ralphex --dry-run docs/plans/feature.md
 - `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works with both Docker wrapper and non-Docker usage.
 - `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`)
 - `RALPHEX_EXTRA_ENV` - Extra environment variables, comma-separated. Format: `VAR=value` or `VAR` (inherit from host). Warns when sensitive names (KEY, SECRET, TOKEN, etc.) have explicit values - use name-only form for secure credential passing. CLI flag: `-E`/`--env` (uppercase E to avoid conflict with ralphex's `-e`/`--external-only`)
+- `RALPHEX_DOCKER_SOCKET` - Enable Docker socket mount: `1`, `true`, or `yes` (Docker wrapper only). CLI flag: `--docker`
 - `TZ` - Override container timezone (default: auto-detected from host)
 - `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
+
+**Docker socket support** (Docker wrapper only):
+
+The `--docker` flag (or `RALPHEX_DOCKER_SOCKET=1`) mounts the host Docker socket into the container, enabling testcontainers and Docker-dependent workflows:
+```bash
+ralphex --docker docs/plans/feature.md
+ralphex --docker --dry-run   # verify socket mount in command
+```
+
+- Auto-detects socket GID and passes `DOCKER_GID` env var for baseimage group setup
+- Emits security warning on Linux (macOS has VM isolation, no warning needed)
+- Exits with error if socket file doesn't exist (fail-fast, no silent degradation)
+- Never applies SELinux `:z`/`:Z` suffixes to socket mount
 
 **AWS Bedrock support** (Docker wrapper only):
 

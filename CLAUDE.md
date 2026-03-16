@@ -149,6 +149,22 @@ Key functions in `scripts/ralphex-dk.sh`:
 
 Documentation: `docs/bedrock-setup.md`
 
+### Docker Socket Support (Docker Wrapper Only)
+
+The `--docker` flag (or `RALPHEX_DOCKER_SOCKET=1` env var) mounts the host Docker socket into the container, enabling testcontainers and Docker-dependent workflows.
+
+- Config: `--docker` CLI flag or `RALPHEX_DOCKER_SOCKET=1` env var (truthy: "1", "true", "yes")
+- Socket path: resolved from `DOCKER_HOST` env var (unix:// scheme) or defaults to `/var/run/docker.sock`
+- Socket mount: without SELinux `:z`/`:Z` suffixes
+- GID detection: `os.stat()` on socket, passed via `DOCKER_GID` env var for baseimage group setup
+- Linux warning: emits security warning to stderr (macOS has VM isolation, no warning)
+- Missing socket: exits with error (fail-fast, no silent degradation)
+
+Key functions in `scripts/ralphex-dk.sh`:
+- `is_docker_enabled()` - checks CLI flag and `RALPHEX_DOCKER_SOCKET` env var
+- `resolve_docker_socket()` - resolves socket path from `DOCKER_HOST` or default
+- `get_docker_socket_gid()` - detects socket file GID via `os.stat()`
+
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, error)`

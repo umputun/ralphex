@@ -326,8 +326,22 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works both with Docker wrapper (volume mounts and keychain derivation) and non-Docker usage (passed through to Claude Code directly). Keychain service name is derived automatically from the path.
 - `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`). Entries without `:` are silently skipped
 - `RALPHEX_EXTRA_ENV` - Extra environment variables, comma-separated (e.g., `DEBUG=1,API_KEY`). Format: `VAR=value` or `VAR` (inherit from host). Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values - use name-only form for secure credential passing
+- `RALPHEX_DOCKER_SOCKET` - Enable Docker socket mount: `1`, `true`, or `yes` (Docker wrapper only). CLI flag: `--docker`
 - `TZ` - Override container timezone (default: auto-detected from host via `/etc/localtime`). Example: `TZ=Europe/Berlin ralphex docs/plans/feature.md`
 - `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
+
+**Docker socket support:**
+
+The `--docker` flag (or `RALPHEX_DOCKER_SOCKET=1`) mounts the host Docker socket into the container, enabling testcontainers and Docker-dependent workflows:
+
+```bash
+ralphex --docker docs/plans/feature.md
+ralphex --docker --dry-run   # verify socket mount in command
+```
+
+- Auto-detects socket GID and passes `DOCKER_GID` env var for baseimage group setup
+- Emits security warning on Linux (macOS has VM isolation, no warning needed)
+- Exits with error if socket file doesn't exist (fail-fast, no silent degradation)
 
 **AWS Bedrock support:**
 
@@ -415,6 +429,7 @@ Two images are published:
 | Node.js/npm | 24.x | Required for Claude Code |
 | Python/pip | 3.x | Scripts and automation |
 | git | 2.x | Version control |
+| docker-cli | - | Docker client for container workflows |
 | make | 4.x | Build automation |
 | gcc, musl-dev | - | C compiler for native extensions |
 | bash | 5.x | Shell |

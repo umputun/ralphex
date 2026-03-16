@@ -7,6 +7,7 @@ Usage: ralphex-dk.sh [wrapper-flags] [ralphex-args]
 Wrapper-specific flags (parsed by this script):
   -E, --env VAR[=val]        extra env var to pass to container (repeatable)
   -v, --volume src:dst[:opts] extra volume mount (repeatable)
+  --docker                   mount host Docker socket into container
   --dry-run                  print docker command without executing
   --update                   pull latest Docker image and exit
   --update-script            update this wrapper script and exit
@@ -23,16 +24,19 @@ Examples:
   ralphex-dk.sh -v /data:/mnt/data:ro docs/plans/feature.md
   ralphex-dk.sh -E DEBUG=1 -E API_KEY docs/plans/feature.md
   ralphex-dk.sh -E FOO -- -v /ignored:path plan.md   # -v goes to ralphex
+  ralphex-dk.sh --docker docs/plans/feature.md        # mount host Docker socket
+  ralphex-dk.sh --docker --dry-run                   # verify socket mount in command
   ralphex-dk.sh --dry-run                            # show docker command
   ralphex-dk.sh --dry-run -E FOO                     # warns about inherited var
   ralphex-dk.sh --update
   ralphex-dk.sh --update-script
 
 Environment variables:
-  RALPHEX_IMAGE         Docker image (default: ghcr.io/umputun/ralphex-go:latest)
-  RALPHEX_PORT          Web dashboard port with --serve (default: 8080)
-  RALPHEX_EXTRA_ENV     Comma-separated env vars (VAR=value or VAR to inherit)
-  RALPHEX_EXTRA_VOLUMES Comma-separated volume mounts (src:dst[:opts])
+  RALPHEX_IMAGE          Docker image (default: ghcr.io/umputun/ralphex-go:latest)
+  RALPHEX_PORT           Web dashboard port with --serve (default: 8080)
+  RALPHEX_DOCKER_SOCKET  Enable Docker socket mount ("1", "true", "yes")
+  RALPHEX_EXTRA_ENV      Comma-separated env vars (VAR=value or VAR to inherit)
+  RALPHEX_EXTRA_VOLUMES  Comma-separated volume mounts (src:dst[:opts])
 
 Note: RALPHEX_EXTRA_ENV emits warnings for sensitive names (KEY, SECRET, TOKEN,
 etc.) with explicit values. Values containing commas must use -E flag instead.
@@ -64,6 +68,7 @@ DEFAULT_PORT = "8080"
 SCRIPT_URL = "https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
 SENSITIVE_PATTERNS = ["KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH"]
 VALID_CLAUDE_PROVIDERS = ["default", "bedrock"]
+DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock"
 
 # environment variables to pass through when using bedrock provider
 BEDROCK_ENV_VARS = [
@@ -102,10 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
         epilog=textwrap.dedent("""\
             Environment variables:
-              RALPHEX_IMAGE         Docker image (default: ghcr.io/umputun/ralphex-go:latest)
-              RALPHEX_PORT          Web dashboard port with --serve (default: 8080)
-              RALPHEX_EXTRA_ENV     Comma-separated env vars (VAR=value or VAR)
-              RALPHEX_EXTRA_VOLUMES Comma-separated volume mounts (src:dst[:opts])
+              RALPHEX_IMAGE          Docker image (default: ghcr.io/umputun/ralphex-go:latest)
+              RALPHEX_PORT           Web dashboard port with --serve (default: 8080)
+              RALPHEX_DOCKER_SOCKET  Enable Docker socket mount ("1", "true", "yes")
+              RALPHEX_EXTRA_ENV      Comma-separated env vars (VAR=value or VAR)
+              RALPHEX_EXTRA_VOLUMES  Comma-separated volume mounts (src:dst[:opts])
 
             All other arguments are passed through to ralphex.
         """),
@@ -125,6 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--claude-provider", dest="claude_provider", metavar="PROVIDER",
                         choices=VALID_CLAUDE_PROVIDERS,
                         help="claude provider: 'default' or 'bedrock' (env: RALPHEX_CLAUDE_PROVIDER)")
+    parser.add_argument("--docker", action="store_true", dest="docker",
+                        help="mount host Docker socket into container (env: RALPHEX_DOCKER_SOCKET)")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run",
                         help="print docker command that would be run, without executing")
     return parser
@@ -500,6 +508,46 @@ def get_claude_provider(cli_provider: Optional[str]) -> str:
     return env_provider
 
 
+def is_docker_enabled(cli_flag: bool) -> bool:
+    """check if docker socket mount is enabled via CLI flag or env var.
+
+    priority: CLI --docker flag > RALPHEX_DOCKER_SOCKET env var > False
+    env var truthy values: "1", "true", "yes" (case-insensitive).
+    """
+    if cli_flag:
+        return True
+    return os.environ.get("RALPHEX_DOCKER_SOCKET", "").strip().lower() in ("1", "true", "yes")
+
+
+def resolve_docker_socket() -> str:
+    """resolve docker socket path from DOCKER_HOST env var or use default.
+
+    if DOCKER_HOST is set with unix:// scheme, extracts the socket path.
+    otherwise falls back to DEFAULT_DOCKER_SOCKET.
+    non-unix schemes (tcp://, etc.) are ignored — socket mounting only works with unix sockets.
+    """
+    docker_host = os.environ.get("DOCKER_HOST", "").strip()
+    if docker_host.startswith("unix://"):
+        return docker_host[len("unix://"):]
+    return DEFAULT_DOCKER_SOCKET
+
+
+def get_docker_socket_gid(socket_path: str) -> Optional[int]:
+    """get the group ID of the docker socket file for use inside the container.
+
+    on macOS, docker desktop maps mounted socket to root:root (GID 0) inside
+    the linux VM, so host GID is irrelevant. on linux, host GID is preserved.
+    returns None if socket doesn't exist or can't be stat'd.
+    """
+    try:
+        st = os.stat(socket_path)
+    except OSError:
+        return None
+    if platform.system() == "Darwin":
+        return 0  # docker desktop always maps to root:root inside container
+    return st.st_gid
+
+
 @dataclasses.dataclass
 class ParsedEnvFlags:
     """parsed result from docker -e flags."""
@@ -837,10 +885,12 @@ def build_docker_command(
     env_vars: list[str],
     bind_port: bool,
     args: list[str],
+    docker_gid: Optional[int] = None,
 ) -> list[str]:
     """build docker run command as a list of arguments.
 
     includes: docker run, interactive flag (-it when stdin is tty), --rm,
+    DOCKER_GID env var (if provided, for baseimage user group setup),
     base env vars, extra env vars, port binding with RALPHEX_WEB_HOST,
     volumes, workdir, image, entrypoint, and args.
     """
@@ -850,6 +900,9 @@ def build_docker_command(
     if interactive:
         cmd.append("-it")
     cmd.append("--rm")
+
+    if docker_gid is not None:
+        cmd.extend(["-e", f"DOCKER_GID={docker_gid}"])
 
     cmd.extend(build_base_env_vars())
 
@@ -869,9 +922,10 @@ def build_docker_command(
     return cmd
 
 
-def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str],
+               docker_gid: Optional[int] = None) -> int:
     """build and execute docker run command."""
-    cmd = build_docker_command(image, port, volumes, env_vars, bind_port, args)
+    cmd = build_docker_command(image, port, volumes, env_vars, bind_port, args, docker_gid=docker_gid)
 
     # defer SIGTERM during Popen+assignment to prevent race where handler sees _active_proc unset.
     # using a deferred handler instead of SIG_IGN so the signal is not lost.
@@ -1023,6 +1077,26 @@ def main() -> int:
         volumes = build_volumes(creds_temp, claude_home)
         volumes.extend(extra_volumes)
 
+        # docker socket mount (when --docker flag or RALPHEX_DOCKER_SOCKET env var is set)
+        docker_gid: Optional[int] = None
+        if is_docker_enabled(parsed.docker):
+            socket_path = resolve_docker_socket()
+            if os.path.exists(socket_path):
+                # mount socket without :z/:Z — relabeling the docker socket can break host docker.
+                # always mount to DEFAULT_DOCKER_SOCKET inside the container so the docker client
+                # finds it at the standard path regardless of host DOCKER_HOST setting.
+                volumes.extend(["-v", f"{socket_path}:{DEFAULT_DOCKER_SOCKET}"])
+                docker_gid = get_docker_socket_gid(socket_path)
+            else:
+                print(f"error: --docker specified but {socket_path} not found", file=sys.stderr)
+                _cleanup_creds()
+                return 1
+
+            # warn on Linux about host Docker access (macOS has VM isolation, no warning needed)
+            if docker_gid is not None and platform.system() == "Linux":
+                print("warning: --docker mounts host Docker socket — containers have host-level Docker access",
+                      file=sys.stderr)
+
         if claude_config_dir_env:
             print(f"using claude config dir: {claude_home}", file=sys.stderr)
         print(f"using image: {image}", file=sys.stderr)
@@ -1053,7 +1127,7 @@ def main() -> int:
 
         # handle --dry-run: print command without executing
         if parsed.dry_run:
-            cmd = build_docker_command(image, port, volumes, extra_env, bind_port, ralphex_args)
+            cmd = build_docker_command(image, port, volumes, extra_env, bind_port, ralphex_args, docker_gid=docker_gid)
             inherited = detect_inherited_env_vars(extra_env)
             if inherited:
                 print(f"note: inherited env vars ({', '.join(inherited)}) require these variables "
@@ -1072,7 +1146,7 @@ def main() -> int:
         # schedule credential cleanup (only for actual runs)
         schedule_cleanup(creds_temp)
 
-        return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args)
+        return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args, docker_gid=docker_gid)
     finally:
         # only skip cleanup if dry-run completed successfully (user got the file path warning)
         if not dry_run_completed:

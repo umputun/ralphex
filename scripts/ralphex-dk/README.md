@@ -5,8 +5,8 @@ Python wrapper script that runs ralphex inside a Docker container, handling cred
 ## Files
 
 - `ralphex_dk.py` - symlink to `../ralphex-dk.sh` for Python test imports
-- `ralphex_dk_test.py` - unit tests (~1900 lines, 151 tests)
-- `../ralphex-dk.sh` - actual wrapper script (~1000 lines), served by curl install URL
+- `ralphex_dk_test.py` - unit tests (~2700 lines, 208 tests)
+- `../ralphex-dk.sh` - actual wrapper script (~1160 lines), served by curl install URL
 
 ## Usage
 
@@ -18,11 +18,31 @@ python3 scripts/ralphex-dk.sh [wrapper-flags] [ralphex-args]
 
 - `-E, --env VAR[=val]` - extra env var to pass to container (repeatable)
 - `-v, --volume src:dst[:opts]` - extra volume mount (repeatable)
+- `--docker` - mount host Docker socket into container (enables testcontainers, docker-dependent workflows)
+- `--dry-run` - print docker command without executing
 - `--update` - pull latest Docker image and exit
 - `--update-script` - update this wrapper script and exit
 - `--test` - run unit tests and exit
 - `-h, --help` - show help
 - `--claude-provider PROVIDER` - claude provider: `default` or `bedrock`
+
+### Docker socket support
+
+The `--docker` flag (or `RALPHEX_DOCKER_SOCKET=1` env var) mounts the host Docker socket into the container, enabling Docker-dependent workflows like testcontainers.
+
+```bash
+# mount Docker socket for testcontainers support
+python3 scripts/ralphex-dk.sh --docker docs/plans/feature.md
+
+# verify with dry-run
+python3 scripts/ralphex-dk.sh --docker --dry-run
+```
+
+- Respects `DOCKER_HOST` env var for custom socket paths (unix:// scheme only)
+- Auto-detects socket GID and passes `DOCKER_GID` env var for baseimage group setup
+- Emits security warning on Linux (macOS has VM isolation)
+- Exits with error if socket file doesn't exist (fail-fast)
+- Never applies SELinux `:z`/`:Z` suffixes to socket mount
 
 ## Running Tests
 

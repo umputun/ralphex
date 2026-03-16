@@ -24,6 +24,7 @@ from ralphex_dk import (  # noqa: E402
     BEDROCK_ENV_VARS,
     DEFAULT_IMAGE,
     DEFAULT_PORT,
+    DEFAULT_DOCKER_SOCKET,
     VALID_CLAUDE_PROVIDERS,
     ParsedEnvFlags,
     build_base_env_vars,
@@ -40,13 +41,16 @@ from ralphex_dk import (  # noqa: E402
     extract_env_from_flags,
     extract_macos_credentials,
     get_claude_provider,
+    get_docker_socket_gid,
     get_global_gitignore,
+    is_docker_enabled,
     is_sensitive_name,
     keychain_service_name,
     main,
     merge_env_flags,
     merge_volume_flags,
     parse_env_flags,
+    resolve_docker_socket,
     resolve_path,
     schedule_cleanup,
     selinux_enabled,
@@ -946,7 +950,8 @@ class TestMainArgparse(EnvTestCase):
             captured_env: list[str] = []
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
-                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
                 captured_env.extend(env_vars)
                 return 0
 
@@ -973,7 +978,8 @@ class TestMainArgparse(EnvTestCase):
             captured_volumes: list[str] = []
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
-                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
                 captured_volumes.extend(volumes)
                 return 0
 
@@ -1000,7 +1006,8 @@ class TestMainArgparse(EnvTestCase):
             captured_args: list[str] = []
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
-                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
                 captured_args.extend(args)
                 return 0
 
@@ -1025,7 +1032,8 @@ class TestMainArgparse(EnvTestCase):
             captured_args: list[str] = []
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
-                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
                 captured_args.extend(args)
                 return 0
 
@@ -1052,7 +1060,8 @@ class TestMainArgparse(EnvTestCase):
             captured_args: list[str] = []
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
-                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
                 captured_args.extend(args)
                 return 0
 
@@ -1079,7 +1088,8 @@ class TestMainArgparse(EnvTestCase):
             captured_volumes: list[str] = []
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
-                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
                 captured_args.extend(args)
                 captured_env.extend(env_vars)
                 captured_volumes.extend(volumes)
@@ -1110,7 +1120,8 @@ class TestMainArgparse(EnvTestCase):
             captured_env: list[str] = []
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
-                                env_vars: list[str], bind_port: bool, args: list[str]) -> int:
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
                 captured_env.extend(env_vars)
                 return 0
 
@@ -1390,6 +1401,108 @@ class TestClaudeProvider(EnvTestCase):
         provider = get_claude_provider(None)
         self.assertEqual(provider, "default")
 
+class TestDockerEnabled(EnvTestCase):
+    """tests for docker socket flag and env var detection."""
+    env_vars = ["RALPHEX_DOCKER_SOCKET"]
+
+    def test_flag_true(self) -> None:
+        """CLI --docker flag returns True."""
+        self.assertTrue(is_docker_enabled(True))
+
+    def test_flag_false_no_env(self) -> None:
+        """no flag, no env var → False."""
+        self.assertFalse(is_docker_enabled(False))
+
+    def test_env_var_1(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=1 → True."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "1"
+        self.assertTrue(is_docker_enabled(False))
+
+    def test_env_var_true(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=true → True."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "true"
+        self.assertTrue(is_docker_enabled(False))
+
+    def test_env_var_yes(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=yes → True."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "yes"
+        self.assertTrue(is_docker_enabled(False))
+
+    def test_env_var_true_uppercase(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=TRUE → True (case-insensitive)."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "TRUE"
+        self.assertTrue(is_docker_enabled(False))
+
+    def test_env_var_yes_mixed_case(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=Yes → True (case-insensitive)."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "Yes"
+        self.assertTrue(is_docker_enabled(False))
+
+    def test_env_var_falsy_zero(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=0 → False."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "0"
+        self.assertFalse(is_docker_enabled(False))
+
+    def test_env_var_falsy_no(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=no → False."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "no"
+        self.assertFalse(is_docker_enabled(False))
+
+    def test_env_var_falsy_empty(self) -> None:
+        """RALPHEX_DOCKER_SOCKET="" → False."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = ""
+        self.assertFalse(is_docker_enabled(False))
+
+    def test_env_var_falsy_random(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=blah → False."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "blah"
+        self.assertFalse(is_docker_enabled(False))
+
+    def test_flag_overrides_env(self) -> None:
+        """CLI flag True even when env var is falsy."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "0"
+        self.assertTrue(is_docker_enabled(True))
+
+    def test_env_var_whitespace_trimmed(self) -> None:
+        """whitespace around env var value is trimmed."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "  1  "
+        self.assertTrue(is_docker_enabled(False))
+
+
+class TestResolveDockerSocket(EnvTestCase):
+    """tests for resolve_docker_socket() with DOCKER_HOST env var."""
+    env_vars = ["DOCKER_HOST"]
+
+    def test_default_when_no_docker_host(self) -> None:
+        """returns default path when DOCKER_HOST is not set."""
+        self.assertEqual(resolve_docker_socket(), DEFAULT_DOCKER_SOCKET)
+
+    def test_unix_socket_path(self) -> None:
+        """extracts socket path from unix:// DOCKER_HOST."""
+        os.environ["DOCKER_HOST"] = "unix:///run/user/1000/docker.sock"
+        self.assertEqual(resolve_docker_socket(), "/run/user/1000/docker.sock")
+
+    def test_standard_unix_socket(self) -> None:
+        """extracts standard socket path from unix:// DOCKER_HOST."""
+        os.environ["DOCKER_HOST"] = "unix:///var/run/docker.sock"
+        self.assertEqual(resolve_docker_socket(), "/var/run/docker.sock")
+
+    def test_tcp_ignored(self) -> None:
+        """falls back to default when DOCKER_HOST is tcp://."""
+        os.environ["DOCKER_HOST"] = "tcp://localhost:2375"
+        self.assertEqual(resolve_docker_socket(), DEFAULT_DOCKER_SOCKET)
+
+    def test_empty_docker_host(self) -> None:
+        """falls back to default when DOCKER_HOST is empty."""
+        os.environ["DOCKER_HOST"] = ""
+        self.assertEqual(resolve_docker_socket(), DEFAULT_DOCKER_SOCKET)
+
+    def test_whitespace_trimmed(self) -> None:
+        """whitespace around DOCKER_HOST value is trimmed."""
+        os.environ["DOCKER_HOST"] = "  unix:///custom/docker.sock  "
+        self.assertEqual(resolve_docker_socket(), "/custom/docker.sock")
+
+
 class TestAwsCredentialExport(EnvTestCase):
     """tests for AWS profile credential export."""
     env_vars = ["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]
@@ -1575,7 +1688,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
 
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str]
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
         ) -> int:
             # capture what we need via side effect - creds_temp should be None for bedrock
             return 0
@@ -1606,7 +1719,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
 
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str]
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
         ) -> int:
             return 0
 
@@ -1638,7 +1751,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
 
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str]
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
         ) -> int:
             return 0
 
@@ -1666,7 +1779,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
         """startup output includes 'bedrock' and 'keychain skipped'."""
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str]
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
         ) -> int:
             return 0
 
@@ -2246,6 +2359,429 @@ class TestDryRun(EnvTestCase):
             mock_run_docker.assert_not_called()
 
 
+class TestDockerSocketGid(unittest.TestCase):
+    """tests for get_docker_socket_gid() function."""
+
+    def test_returns_gid_on_linux(self) -> None:
+        """returns st_gid from os.stat() on linux."""
+        mock_stat = unittest.mock.MagicMock()
+        mock_stat.st_gid = 999
+        with unittest.mock.patch("ralphex_dk.os.stat", return_value=mock_stat):
+            with unittest.mock.patch("ralphex_dk.platform.system", return_value="Linux"):
+                self.assertEqual(get_docker_socket_gid("/var/run/docker.sock"), 999)
+
+    def test_returns_zero_on_macos(self) -> None:
+        """returns 0 on macOS regardless of actual socket GID (docker desktop maps to root)."""
+        mock_stat = unittest.mock.MagicMock()
+        mock_stat.st_gid = 20  # staff group on macOS
+        with unittest.mock.patch("ralphex_dk.os.stat", return_value=mock_stat):
+            with unittest.mock.patch("ralphex_dk.platform.system", return_value="Darwin"):
+                self.assertEqual(get_docker_socket_gid("/var/run/docker.sock"), 0)
+
+    def test_returns_none_on_missing_socket(self) -> None:
+        """returns None when socket doesn't exist."""
+        with unittest.mock.patch("ralphex_dk.os.stat", side_effect=OSError("not found")):
+            self.assertIsNone(get_docker_socket_gid("/var/run/docker.sock"))
+
+    def test_returns_gid_zero_on_linux(self) -> None:
+        """returns 0 when socket is owned by root group on linux."""
+        mock_stat = unittest.mock.MagicMock()
+        mock_stat.st_gid = 0
+        with unittest.mock.patch("ralphex_dk.os.stat", return_value=mock_stat):
+            with unittest.mock.patch("ralphex_dk.platform.system", return_value="Linux"):
+                self.assertEqual(get_docker_socket_gid("/var/run/docker.sock"), 0)
+
+    def test_custom_socket_path_on_linux(self) -> None:
+        """works with custom socket path on linux."""
+        mock_stat = unittest.mock.MagicMock()
+        mock_stat.st_gid = 42
+        with unittest.mock.patch("ralphex_dk.os.stat", return_value=mock_stat):
+            with unittest.mock.patch("ralphex_dk.platform.system", return_value="Linux"):
+                result = get_docker_socket_gid("/custom/docker.sock")
+                self.assertEqual(result, 42)
+
+
+class TestDockerSocketMount(EnvTestCase):
+    """tests for docker socket mount in main()."""
+    env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
+                "RALPHEX_EXTRA_VOLUMES", "RALPHEX_CLAUDE_PROVIDER", "CLAUDE_CONFIG_DIR",
+                "RALPHEX_WEB_HOST", "RALPHEX_DOCKER_SOCKET", "DOCKER_HOST"]
+    save_argv = True
+
+    def _run_main_with_docker(self, docker_flag: bool = False, socket_exists: bool = True,
+                               socket_gid: int = 999, platform_name: str = "Linux",
+                               ) -> tuple[int, list[str], list]:
+        """helper: run main() with docker flag and mock socket, return (rc, captured_volumes, run_docker_calls)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            argv = ["ralphex-dk"]
+            if docker_flag:
+                argv.append("--docker")
+            argv.append("plan.md")
+            sys.argv = argv
+
+            captured_volumes: list[str] = []
+            run_docker_calls: list[dict] = []
+
+            def fake_run_docker(image: str, port: str, volumes: list[str],
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
+                captured_volumes.extend(volumes)
+                run_docker_calls.append({"docker_gid": docker_gid})
+                return 0
+
+            _real_exists = os.path.exists
+
+            def fake_exists(p: str) -> bool:
+                if p == DEFAULT_DOCKER_SOCKET:
+                    return socket_exists
+                return _real_exists(p)
+
+            _real_stat = os.stat
+
+            def fake_stat(p: str, *a: object, **kw: object) -> object:
+                if p == DEFAULT_DOCKER_SOCKET:
+                    mock_st = unittest.mock.MagicMock()
+                    mock_st.st_gid = socket_gid
+                    return mock_st
+                return _real_stat(p, *a, **kw)
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                            with unittest.mock.patch("ralphex_dk.run_docker", side_effect=fake_run_docker):
+                                with unittest.mock.patch("ralphex_dk.os.path.exists", side_effect=fake_exists):
+                                    with unittest.mock.patch("ralphex_dk.os.stat", side_effect=fake_stat):
+                                        with unittest.mock.patch("ralphex_dk.platform.system", return_value=platform_name):
+                                            with unittest.mock.patch("sys.stderr", new_callable=io.StringIO):
+                                                result = main()
+
+            return result, captured_volumes, run_docker_calls
+
+    def test_socket_mounted_when_flag_set(self) -> None:
+        """socket volume appears when --docker flag is set and socket exists."""
+        result, volumes, calls = self._run_main_with_docker(docker_flag=True, socket_exists=True)
+        self.assertEqual(result, 0)
+        # verify socket volume is in the volumes list
+        socket_mount = f"{DEFAULT_DOCKER_SOCKET}:{DEFAULT_DOCKER_SOCKET}"
+        self.assertIn(socket_mount, volumes)
+
+    def test_no_socket_mount_without_flag(self) -> None:
+        """socket volume absent when --docker flag not set."""
+        result, volumes, _ = self._run_main_with_docker(docker_flag=False, socket_exists=True)
+        self.assertEqual(result, 0)
+        socket_mount = f"{DEFAULT_DOCKER_SOCKET}:{DEFAULT_DOCKER_SOCKET}"
+        self.assertNotIn(socket_mount, volumes)
+
+    def test_fails_when_socket_missing(self) -> None:
+        """exits with error when --docker set but socket file doesn't exist."""
+        result, volumes, calls = self._run_main_with_docker(docker_flag=True, socket_exists=False)
+        self.assertEqual(result, 1)
+
+    def test_no_selinux_suffix_on_socket(self) -> None:
+        """socket mount must not have :z or :Z suffix (would break host docker)."""
+        result, volumes, _ = self._run_main_with_docker(docker_flag=True, socket_exists=True)
+        self.assertEqual(result, 0)
+        # find the socket mount entry
+        for i, v in enumerate(volumes):
+            if DEFAULT_DOCKER_SOCKET in v and i > 0 and volumes[i - 1] == "-v":
+                self.assertNotIn(":z", v.split(":")[-1], "socket mount must not have :z suffix")
+                self.assertNotIn(":Z", v.split(":")[-1], "socket mount must not have :Z suffix")
+                break
+
+    def test_docker_gid_passed_when_detected_linux(self) -> None:
+        """docker_gid is passed to run_docker with host GID on linux."""
+        result, _, calls = self._run_main_with_docker(docker_flag=True, socket_exists=True, socket_gid=999)
+        self.assertEqual(result, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["docker_gid"], 999)
+
+    def test_docker_gid_zero_on_macos(self) -> None:
+        """docker_gid is always 0 on macOS (docker desktop maps to root)."""
+        result, _, calls = self._run_main_with_docker(
+            docker_flag=True, socket_exists=True, socket_gid=20, platform_name="Darwin")
+        self.assertEqual(result, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["docker_gid"], 0)
+
+    def test_no_docker_gid_without_docker_flag(self) -> None:
+        """docker_gid is None when docker flag is not set."""
+        result, _, calls = self._run_main_with_docker(docker_flag=False, socket_exists=True)
+        self.assertEqual(result, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(calls[0]["docker_gid"])
+
+    def test_exits_early_when_socket_missing(self) -> None:
+        """run_docker not called when socket doesn't exist (fail-fast)."""
+        result, _, calls = self._run_main_with_docker(docker_flag=True, socket_exists=False)
+        self.assertEqual(result, 1)
+        self.assertEqual(len(calls), 0)
+
+    def test_error_when_socket_missing(self) -> None:
+        """error printed to stderr and exit 1 when --docker set but socket doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--docker", "plan.md"]
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                            with unittest.mock.patch("ralphex_dk.run_docker", side_effect=lambda *a, **kw: 0):
+                                with unittest.mock.patch("ralphex_dk.os.path.exists", return_value=False):
+                                    with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                                        result = main()
+
+            self.assertEqual(result, 1)
+            self.assertIn("error:", mock_stderr.getvalue())
+            self.assertIn("not found", mock_stderr.getvalue())
+
+    def test_env_var_enables_docker(self) -> None:
+        """RALPHEX_DOCKER_SOCKET=1 enables socket mount without --docker flag."""
+        os.environ["RALPHEX_DOCKER_SOCKET"] = "1"
+        result, volumes, calls = self._run_main_with_docker(docker_flag=False, socket_exists=True, socket_gid=123)
+        self.assertEqual(result, 0)
+        socket_mount = f"{DEFAULT_DOCKER_SOCKET}:{DEFAULT_DOCKER_SOCKET}"
+        self.assertIn(socket_mount, volumes)
+        self.assertEqual(calls[0]["docker_gid"], 123)
+
+    def test_docker_host_custom_socket(self) -> None:
+        """DOCKER_HOST=unix:///custom/path uses that socket path instead of default."""
+        custom_socket = "/run/user/1000/docker.sock"
+        os.environ["DOCKER_HOST"] = f"unix://{custom_socket}"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--docker", "plan.md"]
+
+            captured_volumes: list[str] = []
+            run_docker_calls: list[dict] = []
+
+            def fake_run_docker(image: str, port: str, volumes: list[str],
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None) -> int:
+                captured_volumes.extend(volumes)
+                run_docker_calls.append({"docker_gid": docker_gid})
+                return 0
+
+            _real_exists = os.path.exists
+
+            def fake_exists(p: str) -> bool:
+                if p == custom_socket:
+                    return True
+                return _real_exists(p)
+
+            _real_stat = os.stat
+
+            def fake_stat(p: str, *a: object, **kw: object) -> object:
+                if p == custom_socket:
+                    mock_st = unittest.mock.MagicMock()
+                    mock_st.st_gid = 42
+                    return mock_st
+                return _real_stat(p, *a, **kw)
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                            with unittest.mock.patch("ralphex_dk.run_docker", side_effect=fake_run_docker):
+                                with unittest.mock.patch("ralphex_dk.os.path.exists", side_effect=fake_exists):
+                                    with unittest.mock.patch("ralphex_dk.os.stat", side_effect=fake_stat):
+                                        with unittest.mock.patch("ralphex_dk.platform.system", return_value="Linux"):
+                                            with unittest.mock.patch("sys.stderr", new_callable=io.StringIO):
+                                                result = main()
+
+            self.assertEqual(result, 0)
+            # custom host socket should be mounted to the default path inside the container
+            socket_mount = f"{custom_socket}:{DEFAULT_DOCKER_SOCKET}"
+            self.assertIn(socket_mount, captured_volumes)
+            self.assertEqual(run_docker_calls[0]["docker_gid"], 42)
+
+
+class TestBuildDockerCommandDockerGid(unittest.TestCase):
+    """tests for DOCKER_GID env var in build_docker_command()."""
+
+    def test_docker_gid_in_command(self) -> None:
+        """DOCKER_GID env var appears when docker_gid is provided."""
+        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = False
+            cmd = build_docker_command(
+                image="test:latest", port="8080", volumes=[], env_vars=[],
+                bind_port=False, args=[], docker_gid=999,
+            )
+        self.assertIn("-e", cmd)
+        self.assertIn("DOCKER_GID=999", cmd)
+
+    def test_no_docker_gid_when_none(self) -> None:
+        """DOCKER_GID absent when docker_gid is None."""
+        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = False
+            cmd = build_docker_command(
+                image="test:latest", port="8080", volumes=[], env_vars=[],
+                bind_port=False, args=[], docker_gid=None,
+            )
+        self.assertNotIn("DOCKER_GID=999", cmd)
+        # no DOCKER_GID env var at all
+        for i, part in enumerate(cmd):
+            self.assertFalse(part.startswith("DOCKER_GID="), f"unexpected DOCKER_GID in cmd: {cmd}")
+
+    def test_docker_gid_before_volumes(self) -> None:
+        """DOCKER_GID env var appears before volume mounts in command."""
+        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = False
+            cmd = build_docker_command(
+                image="test:latest", port="8080", volumes=["-v", "/a:/b"], env_vars=[],
+                bind_port=False, args=[], docker_gid=42,
+            )
+        gid_idx = cmd.index("DOCKER_GID=42")
+        vol_idx = cmd.index("/a:/b")
+        self.assertLess(gid_idx, vol_idx)
+
+    def test_docker_gid_zero(self) -> None:
+        """DOCKER_GID=0 works (root group)."""
+        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = False
+            cmd = build_docker_command(
+                image="test:latest", port="8080", volumes=[], env_vars=[],
+                bind_port=False, args=[], docker_gid=0,
+            )
+        self.assertIn("DOCKER_GID=0", cmd)
+
+
+class TestDockerLinuxWarning(EnvTestCase):
+    """tests for Linux security warning when --docker is used."""
+    env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
+                "RALPHEX_EXTRA_VOLUMES", "RALPHEX_CLAUDE_PROVIDER", "CLAUDE_CONFIG_DIR",
+                "RALPHEX_WEB_HOST", "RALPHEX_DOCKER_SOCKET", "DOCKER_HOST"]
+    save_argv = True
+
+    def _run_main_with_platform(self, platform_name: str, socket_exists: bool = True,
+                                 socket_gid: int = 999) -> str:
+        """helper: run main() with --docker, mocked platform, return stderr output."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--docker", "plan.md"]
+
+            _real_exists = os.path.exists
+
+            def fake_exists(p: str) -> bool:
+                if p == DEFAULT_DOCKER_SOCKET:
+                    return socket_exists
+                return _real_exists(p)
+
+            _real_stat = os.stat
+
+            def fake_stat(p: str, *a: object, **kw: object) -> object:
+                if p == DEFAULT_DOCKER_SOCKET:
+                    mock_st = unittest.mock.MagicMock()
+                    mock_st.st_gid = socket_gid
+                    return mock_st
+                return _real_stat(p, *a, **kw)
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                            with unittest.mock.patch("ralphex_dk.run_docker", return_value=0):
+                                with unittest.mock.patch("ralphex_dk.os.path.exists", side_effect=fake_exists):
+                                    with unittest.mock.patch("ralphex_dk.os.stat", side_effect=fake_stat):
+                                        with unittest.mock.patch("ralphex_dk.platform.system", return_value=platform_name):
+                                            with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                                                main()
+
+            return mock_stderr.getvalue()
+
+    def test_warning_on_linux(self) -> None:
+        """warning printed when platform is Linux and socket is mounted."""
+        stderr = self._run_main_with_platform("Linux")
+        self.assertIn("host Docker socket", stderr)
+        self.assertIn("host-level Docker access", stderr)
+
+    def test_no_warning_on_macos(self) -> None:
+        """no warning on macOS (VM boundary provides isolation)."""
+        stderr = self._run_main_with_platform("Darwin")
+        self.assertNotIn("host Docker socket", stderr)
+        self.assertNotIn("host-level Docker access", stderr)
+
+    def test_error_instead_of_warning_when_socket_missing(self) -> None:
+        """error exit when socket doesn't exist, no Linux warning reached."""
+        stderr = self._run_main_with_platform("Linux", socket_exists=False)
+        self.assertIn("error:", stderr)
+        self.assertNotIn("host-level Docker access", stderr)
+
+
+class TestDryRunDocker(EnvTestCase):
+    """tests for --dry-run with --docker flag."""
+    env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
+                "RALPHEX_EXTRA_VOLUMES", "RALPHEX_CLAUDE_PROVIDER", "CLAUDE_CONFIG_DIR",
+                "RALPHEX_WEB_HOST", "RALPHEX_DOCKER_SOCKET", "DOCKER_HOST"]
+    save_argv = True
+
+    def test_dry_run_shows_socket_mount_and_docker_gid(self) -> None:
+        """--dry-run --docker shows socket mount and DOCKER_GID in output."""
+        import shlex
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            claude_home = tmp / ".claude"
+            claude_home.mkdir()
+
+            sys.argv = ["ralphex-dk", "--dry-run", "--docker"]
+
+            _real_exists = os.path.exists
+
+            def fake_exists(p: str) -> bool:
+                if p == DEFAULT_DOCKER_SOCKET:
+                    return True
+                return _real_exists(p)
+
+            _real_stat = os.stat
+
+            def fake_stat(p: str, *a: object, **kw: object) -> object:
+                if p == DEFAULT_DOCKER_SOCKET:
+                    mock_st = unittest.mock.MagicMock()
+                    mock_st.st_gid = 123
+                    return mock_st
+                return _real_stat(p, *a, **kw)
+
+            with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
+                with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
+                    with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
+                        with unittest.mock.patch("ralphex_dk.sys.stdin") as mock_stdin:
+                            mock_stdin.isatty.return_value = False
+                            with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                                with unittest.mock.patch("ralphex_dk.os.path.exists", side_effect=fake_exists):
+                                    with unittest.mock.patch("ralphex_dk.os.stat", side_effect=fake_stat):
+                                        with unittest.mock.patch("ralphex_dk.platform.system", return_value="Linux"):
+                                            with unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                                                with unittest.mock.patch("sys.stderr", new_callable=io.StringIO):
+                                                    result = main()
+
+            self.assertEqual(result, 0)
+            output = mock_stdout.getvalue().strip()
+            parts = shlex.split(output)
+
+            # verify socket mount is in the command
+            socket_mount = f"{DEFAULT_DOCKER_SOCKET}:{DEFAULT_DOCKER_SOCKET}"
+            self.assertIn(socket_mount, parts)
+
+            # verify DOCKER_GID=123 is passed as env var in the command
+            self.assertIn("DOCKER_GID=123", parts)
+
+
 def run_tests() -> None:
     """run all unit tests."""
     loader = unittest.TestLoader()
@@ -2257,9 +2793,11 @@ def run_tests() -> None:
                TestExtractCredentialsClaudeHome, TestSelinuxEnabled, TestSelinuxVolumeSuffix,
                TestClaudeConfigDirEnv, TestIsSensitiveName, TestBuildEnvVars,
                TestMergeEnvFlags, TestMergeVolumeFlags, TestBuildParser,
-               TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestAwsCredentialExport,
+               TestMainArgparse, TestHelpFlag, TestClaudeProvider, TestDockerEnabled, TestResolveDockerSocket, TestAwsCredentialExport,
                TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags,
-               TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDetectExplicitSecrets, TestDryRun]:
+               TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDetectExplicitSecrets, TestDryRun,
+               TestDockerSocketGid, TestDockerSocketMount, TestBuildDockerCommandDockerGid,
+               TestDockerLinuxWarning, TestDryRunDocker]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

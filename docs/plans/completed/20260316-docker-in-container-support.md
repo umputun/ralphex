@@ -85,59 +85,59 @@
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `--docker` flag to `build_parser()` (`store_true`, dest `docker`)
-- [ ] add `is_docker_enabled(cli_flag: bool) -> bool` function (checks CLI flag, then `RALPHEX_DOCKER_SOCKET` env var)
-- [ ] add `RALPHEX_DOCKER_SOCKET` to docstring header env vars section
-- [ ] write tests in `ralphex_dk_test.py`: `TestDockerEnabled` class — flag true, flag false with env var, env var truthy values ("1", "true", "yes"), env var falsy/missing
-- [ ] run tests: `python3 scripts/ralphex-dk.sh --test` — must pass before next task
+- [x] add `--docker` flag to `build_parser()` (`store_true`, dest `docker`)
+- [x] add `is_docker_enabled(cli_flag: bool) -> bool` function (checks CLI flag, then `RALPHEX_DOCKER_SOCKET` env var)
+- [x] add `RALPHEX_DOCKER_SOCKET` to docstring header env vars section
+- [x] write tests in `ralphex_dk_test.py`: `TestDockerEnabled` class — flag true, flag false with env var, env var truthy values ("1", "true", "yes"), env var falsy/missing
+- [x] run tests: `python3 scripts/ralphex-dk.sh --test` — must pass before next task
 
 ### Task 3: Add socket mount, GID detection, and --group-add
 
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] add `DOCKER_SOCKET_PATH = "/var/run/docker.sock"` constant
-- [ ] add `get_docker_socket_gid(socket_path: str) -> Optional[int]` function — `os.stat()`, return `st_gid`, return `None` on `OSError`
-- [ ] add `group_add: Optional[int] = None` parameter to `build_docker_command()`
-- [ ] add `group_add: Optional[int] = None` parameter to `run_docker()`, pass through to `build_docker_command()`
-- [ ] insert `--group-add <gid>` in docker command (after `--rm`, before volumes)
-- [ ] in `main()`: when docker enabled, check socket exists, build `-v` mount (without `:z` — never apply SELinux suffix to socket), call `get_docker_socket_gid()`, pass GID to `run_docker()`
-- [ ] append socket volume to `volumes` list (after `build_volumes()` + `extra_volumes`)
-- [ ] if flag set but socket missing: print warning to stderr, skip mount
-- [ ] write tests: `TestDockerSocketGid` class — mock `os.stat` for GID extraction, missing socket
-- [ ] write tests: `TestDockerSocketMount` class (using `EnvTestCase` + patched `main()`) — verify socket volume appears when flag set and socket exists, absent when flag not set, absent when socket missing, no `:z` suffix on socket mount
-- [ ] write tests: verify `--group-add <gid>` appears in command when GID provided, absent when `None`
-- [ ] write tests: integration test via patched `main()` — full flow with docker flag, socket exists, GID detected
-- [ ] run tests — must pass before next task
+- [x] add `DOCKER_SOCKET_PATH = "/var/run/docker.sock"` constant
+- [x] add `get_docker_socket_gid(socket_path: str) -> Optional[int]` function — `os.stat()`, return `st_gid`, return `None` on `OSError`
+- [x] add `group_add: Optional[int] = None` parameter to `build_docker_command()`
+- [x] add `group_add: Optional[int] = None` parameter to `run_docker()`, pass through to `build_docker_command()`
+- [x] insert `--group-add <gid>` in docker command (after `--rm`, before volumes)
+- [x] in `main()`: when docker enabled, check socket exists, build `-v` mount (without `:z` — never apply SELinux suffix to socket), call `get_docker_socket_gid()`, pass GID to `run_docker()`
+- [x] append socket volume to `volumes` list (after `build_volumes()` + `extra_volumes`)
+- [x] if flag set but socket missing: print warning to stderr, skip mount
+- [x] write tests: `TestDockerSocketGid` class — mock `os.stat` for GID extraction, missing socket
+- [x] write tests: `TestDockerSocketMount` class (using `EnvTestCase` + patched `main()`) — verify socket volume appears when flag set and socket exists, absent when flag not set, absent when socket missing, no `:z` suffix on socket mount
+- [x] write tests: verify `--group-add <gid>` appears in command when GID provided, absent when `None`
+- [x] write tests: integration test via patched `main()` — full flow with docker flag, socket exists, GID detected
+- [x] run tests — must pass before next task
 
 ### Task 4: Add Linux security warning and dry-run verification
 
 **Files:**
 - Modify: `scripts/ralphex-dk.sh`
 
-- [ ] after socket mount decision in `main()`: if docker enabled and socket mounted and `platform.system() == "Linux"`, print warning to stderr
-- [ ] warning text: "warning: --docker mounts host Docker socket — containers have host-level Docker access"
-- [ ] on macOS: no warning (VM boundary provides isolation)
-- [ ] verify `--dry-run --docker` shows socket mount and `--group-add` in output (should work automatically since dry-run uses `build_docker_command()`)
-- [ ] write tests: mock `platform.system()`, verify warning printed on Linux, not printed on macOS/Darwin
-- [ ] write test: dry-run with docker flag — verify socket mount and group-add visible in printed command
-- [ ] run full test suite: `python3 scripts/ralphex-dk.sh --test` — must pass before next task
+- [x] after socket mount decision in `main()`: if docker enabled and socket mounted and `platform.system() == "Linux"`, print warning to stderr
+- [x] warning text: "warning: --docker mounts host Docker socket — containers have host-level Docker access"
+- [x] on macOS: no warning (VM boundary provides isolation)
+- [x] verify `--dry-run --docker` shows socket mount and `--group-add` in output (should work automatically since dry-run uses `build_docker_command()`)
+- [x] write tests: mock `platform.system()`, verify warning printed on Linux, not printed on macOS/Darwin
+- [x] write test: dry-run with docker flag — verify socket mount and group-add visible in printed command
+- [x] run full test suite: `python3 scripts/ralphex-dk.sh --test` — must pass before next task
 
 ### Task 5: Build and verify Docker functionality
 
-- [ ] build the base image locally: `docker build -t ralphex-test .`
-- [ ] verify `docker` CLI is available inside: `docker run --rm ralphex-test docker --version`
-- [ ] test socket mount works: `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ralphex-test docker ps`
-- [ ] test with the wrapper: `./scripts/ralphex-dk.sh --docker --dry-run` — verify socket mount and `--group-add` in output
-- [ ] run wrapper with `--docker` on a toy project, verify `docker ps` works inside the container
+- [x] build the base image locally: `docker build -t ralphex-test .`
+- [x] verify `docker` CLI is available inside: `docker run --rm ralphex-test docker --version`
+- [x] test socket mount works: `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ralphex-test docker ps`
+- [x] test with the wrapper: `./scripts/ralphex-dk.sh --docker --dry-run` — verify socket mount and `DOCKER_GID` in output
+- [x] run wrapper with `--docker` on a toy project, verify `docker ps` works inside the container
 
 ### Task 6: [Final] Update documentation
 
-- [ ] update wrapper script docstring (usage examples with `--docker`)
-- [ ] update `scripts/ralphex-dk/README.md` with `--docker` flag
-- [ ] update `CLAUDE.md` Docker section with docker socket support info
-- [ ] update `llms.txt` Docker wrapper env vars section
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update wrapper script docstring (usage examples with `--docker`)
+- [x] update `scripts/ralphex-dk/README.md` with `--docker` flag
+- [x] update `CLAUDE.md` Docker section with docker socket support info
+- [x] update `llms.txt` Docker wrapper env vars section
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
