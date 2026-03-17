@@ -1253,7 +1253,9 @@ func startStdinForwarder(r *processor.Runner, log processor.Logger, colors *prog
 				return
 			default:
 			}
-			colors.Info().Printf("-> message sent to agent\n")
+			if editor == nil {
+				colors.Info().Printf("-> message sent to agent\n")
+			}
 			log.Print("[user message to agent] %s", line)
 			if err := r.SendMessage(line); err != nil {
 				if errors.Is(err, processor.ErrSessionsNotSupported) {

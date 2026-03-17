@@ -65,6 +65,11 @@ ralphex --plan "add user authentication"
 # initialize local .ralphex/ config in current project (commented-out defaults)
 ralphex --init
 
+# interactive mode — type messages to running Claude session during execution
+# uses readline for clean line editing on Unix, buffered input on Windows
+ralphex -i docs/plans/feature.md
+ralphex --interactive --review
+
 # reset global config to defaults (interactive)
 ralphex --reset
 
@@ -121,6 +126,8 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 **Session timeout:** `--session-timeout` flag (or `session_timeout` config option) sets a per-session timeout for claude. When a claude session exceeds the timeout (e.g., agent starts a blocking operation), the session is killed and the phase loop continues to the next iteration. Claude-only; codex and custom executors are not affected. Disabled by default.
 
 **Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit` (claude), `Rate limit,quota exceeded` (codex).
+
+**Interactive messaging:** The `-i`/`--interactive` flag enables typing messages to the running Claude session during execution. Messages are forwarded via stream-json stdin to the active Claude process. On Unix, uses `chzyer/readline` for full line editing with coordinated output; on Windows, uses basic buffered reading. Without `-i`, falls back to `bufio.Scanner` on all platforms.
 
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 

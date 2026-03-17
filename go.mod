@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/charmbracelet/glamour v1.0.0
+	github.com/chzyer/readline v1.5.1
 	github.com/fatih/color v1.19.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-pkgz/notify v1.3.0

@@ -28,15 +28,15 @@ go mod tidy && go mod vendor                             # tidy and re-vendor
 ## Project Structure
 
 ```
-cmd/ralphex/        # main entry point, CLI parsing
+cmd/ralphex/        # main entry point, CLI parsing, stdin forwarding, line editing
 pkg/config/         # configuration loading, defaults, prompts, agents
-pkg/executor/       # claude and codex CLI execution
+pkg/executor/       # claude and codex CLI execution, session management
 pkg/git/            # git operations (external git CLI)
 pkg/input/          # terminal input collector (fzf/fallback, draft review)
 pkg/notify/         # notification delivery (telegram, email, slack, webhook, custom)
 pkg/plan/           # plan file selection, parsing, and manipulation
 pkg/processor/      # orchestration loop, prompts, signal helpers
-pkg/progress/       # timestamped logging with color
+pkg/progress/       # timestamped logging with color, SetOutput for coordinated output
 pkg/status/         # shared execution model types: signals, phases, sections
 pkg/web/            # web dashboard, SSE streaming, session management
 e2e/                # playwright e2e tests for web dashboard
@@ -78,6 +78,8 @@ docs/plans/         # plan files location
 - File watching for multi-session dashboard using fsnotify
 - Optional finalize step after successful reviews (disabled by default)
 - Optional notifications on completion/failure via Telegram, Email, Slack, Webhook, or custom script (best-effort, disabled by default)
+- `-i`/`--interactive` flag enables raw terminal mode for typing messages to running Claude sessions during execution. Uses `chzyer/readline` on Unix for clean line editing with coordinated output; falls back to basic buffered reading on Windows. Without `-i`, stdin reading uses basic `bufio.Scanner` (no cursor control)
+- Stream-json stdin: executor uses `--input-format stream-json` instead of `-p` for all paths, enabling an open stdin pipe for interactive messaging. Custom args get `-p` stripped and `--input-format stream-json` added via `stripPromptFlag()` and `ensureFlag()`
 
 ### Finalize Step
 
@@ -232,6 +234,23 @@ Key files:
 - `pkg/processor/signals.go` - signal detection helpers (isReviewDone, isCodexDone, etc.)
 - `pkg/config/defaults/prompts/make_plan.txt` - plan creation prompt
 
+### Interactive Messaging
+
+The `-i`/`--interactive` flag enables typing messages to the running Claude session during execution. Messages are forwarded via stream-json stdin to the active Claude process.
+
+- Executor uses `--input-format stream-json` instead of `-p` for all execution paths, keeping stdin pipe open for the session
+- `ClaudeSession` in `pkg/executor/session.go` wraps the stdin pipe for sending messages to the running Claude process
+- `SessionProvider` interface in `pkg/processor/runner.go` allows Runner to send messages via `SendMessage()`
+- `startStdinForwarder()` in `cmd/ralphex/main.go` runs a goroutine reading user input and forwarding to Runner
+- `lineEditor` in `cmd/ralphex/lineedit_unix.go` / `lineedit_windows.go` provides platform-specific terminal input
+- `SetOutput()` on `pkg/progress/Logger` allows wrapping stdout for coordinated output with readline
+
+Key files:
+- `pkg/executor/session.go` - `ClaudeSession` type, stdin pipe management
+- `cmd/ralphex/lineedit_unix.go` - Unix line editor using `chzyer/readline`
+- `cmd/ralphex/lineedit_windows.go` - Windows fallback using buffered reader
+- `cmd/ralphex/main.go` - `startStdinForwarder()`, `-i` flag handling
+
 ## Platform Support
 
 - **Linux/macOS:** fully supported
@@ -251,6 +270,7 @@ When adding platform-specific code (syscalls, signals, file locking):
 Example files:
 - `pkg/executor/procgroup_unix.go` / `procgroup_windows.go` - process group management
 - `pkg/progress/flock_unix.go` / `flock_windows.go` - file locking helpers
+- `cmd/ralphex/lineedit_unix.go` / `lineedit_windows.go` - terminal line editing for interactive mode
 
 Cross-compile to verify Windows builds:
 ```bash
