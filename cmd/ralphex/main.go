@@ -530,7 +530,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			// color.Output is NOT wrapped because color.Set()/unset() are separate writes
 			// that would race with input redraw. the few color.Printf calls during streaming
 			// (confirmation messages) happen after the input buffer is already empty.
-			baseLog.SetOutput(editor.wrapWriter(os.Stdout))
+			plr.baseLog.SetOutput(editor.wrapWriter(os.Stdout))
 		}
 	}
 	stopForwarder := startStdinForwarder(r, runnerLog, req.Colors, editor)
@@ -567,7 +567,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
 		}
 	}
-	req.Colors.Info().Printf("progress log in %s\n", baseLog.Path())
+	req.Colors.Info().Printf("progress log in %s\n", plr.baseLog.Path())
 
 	displayStats(req, plr.baseLog, stats, elapsed)
 	keepDashboardAlive(ctx, o, req, plr.closeLog)

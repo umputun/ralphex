@@ -862,8 +862,8 @@ func TestClaudeExecutor_Run_DefaultArgs_NoPromptInArgs(t *testing.T) {
 	assert.Contains(t, capturedArgs, "--input-format")
 }
 
-func TestClaudeExecutor_Run_CustomArgs_HasPromptInArgs(t *testing.T) {
-	// custom args path uses -p for wrapper compatibility
+func TestClaudeExecutor_Run_CustomArgs_UsesStreamJsonNotDashP(t *testing.T) {
+	// custom args should use stream-json input, not -p
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
 
 	var capturedArgs []string
@@ -880,8 +880,8 @@ func TestClaudeExecutor_Run_CustomArgs_HasPromptInArgs(t *testing.T) {
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	assert.Contains(t, capturedArgs, "-p")
-	assert.Contains(t, capturedArgs, "test prompt")
+	assert.NotContains(t, capturedArgs, "-p")
+	assert.Contains(t, capturedArgs, "--input-format")
 }
 
 func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
