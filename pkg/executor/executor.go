@@ -51,7 +51,11 @@ type CommandRunner interface {
 }
 
 // execClaudeRunner is the default command runner using os/exec.
-type execClaudeRunner struct{}
+// when stdin is non-nil, it is connected to the child process's stdin (used to pass
+// the prompt via pipe instead of a -p CLI argument to avoid Windows 8191-char cmd limit).
+type execClaudeRunner struct {
+	stdin io.Reader
+}
 
 func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
 	// check context before starting to avoid spawning a process that will be immediately killed
@@ -65,6 +69,11 @@ func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string)
 
 	// filter out ANTHROPIC_API_KEY (claude uses different auth) and CLAUDECODE (prevents nested session errors)
 	cmd.Env = filterEnv(os.Environ(), "ANTHROPIC_API_KEY", "CLAUDECODE")
+
+	// pass prompt via stdin when set (avoids Windows 8191-char command-line limit)
+	if r.stdin != nil {
+		cmd.Stdin = r.stdin
+	}
 
 	// create new process group so we can kill all descendants on cleanup
 	setupProcessGroup(cmd)
@@ -202,11 +211,17 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 			"--verbose",
 		}
 	}
-	args = append(args, "-p", prompt)
-
-	runner := e.cmdRunner
-	if runner == nil {
-		runner = &execClaudeRunner{}
+	// always append --print to enable non-interactive mode; mirrors old -p flag that was
+	// always appended. wrapper scripts ignore unknown flags via '*) shift ;;' catch-all.
+	args = append(args, "--print")
+	// pass prompt via stdin to avoid Windows 8191-char command-line limit;
+	// if cmdRunner is set (test injection), use it; otherwise use real runner
+	stdinReader := strings.NewReader(prompt)
+	var runner CommandRunner
+	if e.cmdRunner != nil {
+		runner = e.cmdRunner
+	} else {
+		runner = &execClaudeRunner{stdin: stdinReader}
 	}
 
 	stdout, wait, err := runner.Run(ctx, cmd, args...)

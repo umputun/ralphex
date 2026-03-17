@@ -743,6 +743,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# test: prompt via stdin (primary path used by ralphex on Windows)
+# ---------------------------------------------------------------------------
+echo "test: prompt via stdin"
+
+output=$(echo "prompt from stdin" | MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" --dangerously-skip-permissions --output-format stream-json 2>/dev/null)
+
+if echo "$output" | grep -q '"content_block_delta"'; then
+    pass "stdin prompt produces output"
+else
+    fail "wrapper failed with stdin prompt" "got: $output"
+fi
+
+# ---------------------------------------------------------------------------
 # summary
 # ---------------------------------------------------------------------------
 echo ""

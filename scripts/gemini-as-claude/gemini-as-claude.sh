@@ -20,7 +20,8 @@ command -v jq >/dev/null 2>&1 || { echo "error: jq is required but not found" >&
 # verify gemini is available
 command -v gemini >/dev/null 2>&1 || { echo "error: gemini is required but not found" >&2; exit 1; }
 
-# extract prompt from -p argument (last two args from ClaudeExecutor).
+# ralphex passes prompt via stdin (primary path, avoids Windows 8191-char cmd limit).
+# also accept -p flag for backward compatibility with direct invocations.
 # all other flags are ignored gracefully (--dangerously-skip-permissions, etc.)
 prompt=""
 while [[ $# -gt 0 ]]; do
@@ -31,7 +32,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$prompt" ]]; then
-    echo "error: no prompt provided (-p flag required)" >&2
+    # fall back to stdin: ralphex passes prompt via pipe to avoid Windows 8191-char cmd limit.
+    # only read when stdin is not a terminal to avoid blocking interactive invocations.
+    if [[ ! -t 0 ]]; then
+        prompt=$(cat)
+    fi
+fi
+
+if [[ -z "$prompt" ]]; then
+    echo "error: no prompt provided (expected -p flag or stdin)" >&2
     exit 1
 fi
 

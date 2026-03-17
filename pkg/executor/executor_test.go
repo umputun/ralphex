@@ -3,7 +3,10 @@ package executor
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -400,8 +403,8 @@ func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 	result := e.Run(context.Background(), "test prompt")
 
 	require.NoError(t, result.Error)
-	// should use custom args plus prompt args
-	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "-p", "test prompt"}, capturedArgs)
+	// should use custom args plus --print (non-interactive mode flag, always appended)
+	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "--print"}, capturedArgs)
 }
 
 func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
@@ -424,7 +427,7 @@ func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "custom-claude", capturedCmd)
-	assert.Equal(t, []string{"--skip-perms", "--verbose", "-p", "the prompt"}, capturedArgs)
+	assert.Equal(t, []string{"--skip-perms", "--verbose", "--print"}, capturedArgs)
 }
 
 func TestSplitArgs(t *testing.T) {
@@ -751,6 +754,111 @@ func TestClaudeExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
 func TestLimitPatternError_Error(t *testing.T) {
 	err := &LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}
 	assert.Equal(t, `detected limit pattern: "You've hit your limit"`, err.Error())
+}
+
+// printFlag is registered so the test binary accepts --print without erroring.
+// ClaudeExecutor.Run() always appends --print to the command args; when the test
+// binary is used as the subprocess command, this flag must be registered.
+var _ = flag.Bool("print", false, "consumed by subprocess tests")
+
+// TestHelperProcess is not a real test — it is used as a subprocess by TestExecClaudeRunner_StdinSet.
+// It reads all of stdin and writes it to stdout, then exits.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	data, _ := io.ReadAll(os.Stdin)
+	fmt.Print(string(data))
+	os.Exit(0)
+}
+
+// TestHelperProcessStreamJSON is not a real test — used as a subprocess by
+// TestClaudeExecutor_Run_RealRunner_StdinWired. Reads stdin and emits it as a
+// stream-json content_block_delta event so ClaudeExecutor.parseStream can parse it.
+func TestHelperProcessStreamJSON(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS_JSON") != "1" {
+		return
+	}
+	data, _ := io.ReadAll(os.Stdin)
+	fmt.Printf(`{"type":"content_block_delta","delta":{"type":"text_delta","text":%q}}`, string(data))
+	fmt.Println()
+	fmt.Println(`{"type":"result","result":""}`)
+	os.Exit(0)
+}
+
+func TestClaudeExecutor_Run_RealRunner_StdinWired(t *testing.T) {
+	// verify the full wiring: ClaudeExecutor.Run() with cmdRunner == nil constructs
+	// execClaudeRunner{stdin: stdinReader} and the subprocess receives the prompt via stdin.
+	// if the wiring is broken (e.g. execClaudeRunner{} without stdin), the subprocess reads
+	// empty stdin and result.Output would be empty.
+	t.Setenv("GO_WANT_HELPER_PROCESS_JSON", "1")
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	e := &ClaudeExecutor{
+		Command: exe,
+		Args:    "-test.run=TestHelperProcessStreamJSON",
+		// cmdRunner is nil — exercises the real execClaudeRunner construction path
+	}
+
+	result := e.Run(context.Background(), "hello stdin wiring")
+	require.NoError(t, result.Error)
+	assert.Contains(t, result.Output, "hello stdin wiring")
+}
+
+func TestExecClaudeRunner_StdinSet(t *testing.T) {
+	// verify that when execClaudeRunner.stdin is set, it is piped to the child process's stdin.
+	// uses the test binary re-invocation pattern: the subprocess runs TestHelperProcess which
+	// echoes stdin to stdout, letting us confirm the pipe is connected.
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	input := "hello from stdin"
+	r := &execClaudeRunner{stdin: strings.NewReader(input)}
+
+	output, wait, err := r.Run(context.Background(), exe, "-test.run=TestHelperProcess")
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(output)
+	require.NoError(t, err)
+	require.NoError(t, wait())
+	assert.Equal(t, input, string(data))
+}
+
+func TestClaudeExecutor_Run_NoPromptInArgs(t *testing.T) {
+	// verify that args never include -p: prompt is always passed via stdin, not CLI arg.
+	// also verify --print is present for non-interactive mode in both default and custom-args paths.
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
+
+	tests := []struct {
+		name string
+		args string
+	}{
+		{name: "default args", args: ""},
+		{name: "custom args", args: "--dangerously-skip-permissions --output-format stream-json"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedArgs []string
+			e := &ClaudeExecutor{
+				Args: tc.args,
+				cmdRunner: &mocks.CommandRunnerMock{
+					RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+						capturedArgs = args
+						return strings.NewReader(jsonStream), func() error { return nil }, nil
+					},
+				},
+			}
+
+			result := e.Run(context.Background(), "test prompt")
+
+			require.NoError(t, result.Error)
+			assert.NotContains(t, capturedArgs, "-p")
+			assert.NotContains(t, capturedArgs, "test prompt")
+			assert.Contains(t, capturedArgs, "--print", "non-interactive flag must be present")
+		})
+	}
 }
 
 func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
