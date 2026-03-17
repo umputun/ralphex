@@ -1,12 +1,5 @@
 package plan
 
-// checkbox-test-outside
-// checkbox-test-description — use this format for [ ] unchecked items (description text, not actionable)
-// checkbox-test-description
-// checkbox-test-description-2
-// checkbox-test-description-3
-// checkbox-second-description-4
-
 import (
 	"bufio"
 	"encoding/json"
@@ -144,17 +137,28 @@ func ParsePlanFile(path string) (*Plan, error) {
 	return ParsePlan(string(content))
 }
 
-// uncompletedCheckboxRegex matches - [ ] with optional leading indent (aligns with checkboxPattern).
-var uncompletedCheckboxRegex = regexp.MustCompile(`(?m)^\s*-\s+\[\s\]`)
-
-// FileHasUncompletedCheckbox returns true if the file contains any uncompleted checkbox (- [ ]).
+// FileHasUncompletedCheckbox returns true if the file contains any uncompleted actionable checkbox (- [ ]).
 // used for malformed plans (no task headers) to avoid treating them as complete.
+// ignores format-description checkboxes (text containing [ ] or [x]) to match HasUncompletedActionableWork behavior.
 func FileHasUncompletedCheckbox(path string) (bool, error) {
 	content, err := os.ReadFile(path) //nolint:gosec // path is internally resolved
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("read plan file: %w", err)
 	}
-	return uncompletedCheckboxRegex.Match(content), nil
+	// scan lines for uncompleted checkboxes; only count actionable ones (text without [ ] or [x])
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		matches := checkboxPattern.FindStringSubmatch(line)
+		if matches == nil || matches[1] == "x" || matches[1] == "X" {
+			continue
+		}
+		text := strings.TrimSpace(matches[2])
+		if formatInText.MatchString(text) {
+			continue // format description, not actionable
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // JSON returns the plan as JSON bytes.
@@ -177,9 +181,9 @@ func parseTaskNum(s string) int {
 	return n
 }
 
-// isActionableCheckbox returns false if checkbox text contains format pattern [ ] or [x] —
+// IsActionable returns false if checkbox text contains format pattern [ ] or [x] —
 // such checkboxes are description/examples, ignored for completion check.
-func isActionableCheckbox(cb Checkbox) bool {
+func (cb Checkbox) IsActionable() bool {
 	return !formatInText.MatchString(cb.Text)
 }
 
@@ -187,7 +191,7 @@ func isActionableCheckbox(cb Checkbox) bool {
 // checkboxes whose text contains [ ] or [x] (format description) are ignored.
 func (t *Task) HasUncompletedActionableWork() bool {
 	for _, cb := range t.Checkboxes {
-		if !cb.Checked && isActionableCheckbox(cb) {
+		if !cb.Checked && cb.IsActionable() {
 			return true
 		}
 	}

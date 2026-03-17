@@ -48,13 +48,13 @@ Description: Use - [ ] for unchecked and - [x] for done.
 
 ---
 
-### Task 5: Indented sub-items (currently ignored)
+### Task 5: Indented sub-items
 
 - [ ] Add comprehensive tests
   - [ ] Unit tests for handler
   - [ ] Integration tests
 
-^ Indented lines don't match `^-\s+\[` — only "Add comprehensive tests" is parsed. Sub-items lost.
+^ Parser supports leading whitespace; all three checkboxes are parsed.
 
 ---
 
@@ -63,7 +63,7 @@ Description: Use - [ ] for unchecked and - [x] for done.
 - [ ] Manual: run e2e test
 - [ ] Deploy to staging
 
-^ These are NOT in a Task section. Parser closes task on ## so they're orphaned (not in any Task.Checkboxes). hasUncompletedTasks only checks Tasks — so these are ignored. Loop exits when Task checkboxes are done. BUT: if plan has NO ### Task headers at all, fallback FileHasUncompletedCheckbox scans whole file → sees [ ] → loop.
+^ These are NOT in a Task section. Parser closes task on ## so they're orphaned (not in any Task.Checkboxes). hasUncompletedTasks only checks Tasks — so these are ignored. Loop exits when Task checkboxes are done. Fallback FileHasUncompletedCheckbox (plans with zero Task headers) also ignores format-description checkboxes.
 
 ---
 
@@ -72,9 +72,9 @@ Description: Use - [ ] for unchecked and - [x] for done.
 | Case | Example | Parsed into Task? | Causes loop? |
 |------|---------|------------------|--------------|
 | Correct | `- [ ] Create HashPassword` | yes | no |
-| Format in text | `- [ ] use [ ] for unchecked` | yes | yes |
+| Format in text | `- [ ] use [ ] for unchecked` | yes | no (ignored as description) |
 | Prose | `Use - [ ] for unchecked` | no (not a checkbox line) | no |
 | Success criteria | `- [ ] Manual: run e2e` | no (orphaned) | no* |
-| Indented | `  - [ ] Unit tests` | no | no (work lost) |
+| Indented | `  - [ ] Unit tests` | yes | no |
 
-*When plan has Task sections, Success criteria checkboxes are orphaned — hasUncompletedTasks ignores them. Loop exits. Fallback only for plans with zero Task headers.
+*When plan has Task sections, Success criteria checkboxes are orphaned — hasUncompletedTasks ignores them. Loop exits. Fallback FileHasUncompletedCheckbox (plans with zero Task headers) also ignores format-description checkboxes.

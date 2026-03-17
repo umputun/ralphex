@@ -397,6 +397,17 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		_, err := plan.FileHasUncompletedCheckbox("/nonexistent/file.md")
 		assert.Error(t, err)
 	})
+
+	t.Run("returns false when only format-description checkboxes unchecked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\n- [ ] use this format for [ ] unchecked items\n- [ ] example with [x] in text"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.False(t, has)
+	})
 }
 
 func TestPlan_JSON(t *testing.T) {
