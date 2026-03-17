@@ -50,6 +50,7 @@ type opts struct {
 	Version               bool          `short:"v" long:"version" description:"print version and exit"`
 	Serve                 bool          `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
 	Port                  int           `short:"p" long:"port" default:"8080" description:"web dashboard port"`
+	Interactive           bool          `short:"i" long:"interactive" description:"enable raw terminal input (clean backspace during streaming)"`
 	Host                  string        `long:"host" default:"127.0.0.1" env:"RALPHEX_WEB_HOST" description:"web dashboard listen address"`
 	Watch                 []string      `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
 	Init                  bool          `long:"init" description:"initialize local .ralphex/ config directory in current project"`
@@ -514,8 +515,25 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		r.SetBreakCh(breakCh)
 	}
 
-	// start stdin forwarder for interactive messaging during execution
-	stopForwarder := startStdinForwarder(r, runnerLog, req.Colors)
+	// start line editor for interactive messaging with proper terminal handling.
+	// raw mode (-i flag) prevents backspace display corruption from interleaved streaming output.
+	var editor *lineEditor
+	if o.Interactive {
+		var editorErr error
+		editor, editorErr = newLineEditor()
+		if editorErr != nil {
+			return fmt.Errorf("start line editor: %w", editorErr)
+		}
+		if editor != nil {
+			defer editor.Close()
+			// wrap logger stdout so streaming output erases/redraws the input line.
+			// color.Output is NOT wrapped because color.Set()/unset() are separate writes
+			// that would race with input redraw. the few color.Printf calls during streaming
+			// (confirmation messages) happen after the input buffer is already empty.
+			baseLog.SetOutput(editor.wrapWriter(os.Stdout))
+		}
+	}
+	stopForwarder := startStdinForwarder(r, runnerLog, req.Colors, editor)
 	defer stopForwarder()
 
 	if runErr := r.Run(ctx); runErr != nil {
@@ -1197,33 +1215,53 @@ func resolveDefaultBranch(cliRef, configBranch, autoDetected string) string {
 	return autoDetected
 }
 
-// startStdinForwarder reads lines from os.Stdin and forwards them to the runner
+// startStdinForwarder reads lines from stdin and forwards them to the runner
 // as interactive messages during execution. logs to progress file and prints confirmation.
+// when editor is non-nil, uses its raw-mode line channel; otherwise falls back to bufio.Scanner.
 // returns a cleanup function that stops the forwarder.
-func startStdinForwarder(r *processor.Runner, log processor.Logger, colors *progress.Colors) func() {
+func startStdinForwarder(r *processor.Runner, log processor.Logger, colors *progress.Colors, editor *lineEditor) func() {
 	done := make(chan struct{})
+
+	// line source: line editor channel or fallback scanner
+	var lines <-chan string
+	if editor != nil {
+		lines = editor.Lines()
+	} else {
+		ch := make(chan string, 8)
+		lines = ch
+		go func() {
+			defer close(ch)
+			scanner := bufio.NewScanner(os.Stdin)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" {
+					continue
+				}
+				select {
+				case ch <- line:
+				case <-done:
+					return
+				}
+			}
+		}()
+	}
+
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
+		for line := range lines {
 			select {
 			case <-done:
 				return
 			default:
 			}
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
+			colors.Info().Printf("-> message sent to agent\n")
+			log.Print("[user message to agent] %s", line)
 			if err := r.SendMessage(line); err != nil {
 				if errors.Is(err, processor.ErrSessionsNotSupported) {
 					colors.Error().Printf("-> mid-session interrupt messages are only currently supported for Claude\n")
 					return // stop forwarding, executor will never support sessions
 				}
 				// silently ignore - session may not be active between iterations
-				continue
 			}
-			log.Print("[user message to agent] %s", line)
-			colors.Info().Printf("-> message sent to agent\n")
 		}
 	}()
 	return func() { close(done) }

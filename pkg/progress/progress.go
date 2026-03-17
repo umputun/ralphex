@@ -239,6 +239,12 @@ func (l *Logger) writeHeader(cfg Config) {
 	l.writeFile("%s\n\n", separatorLine)
 }
 
+// SetOutput replaces the stdout writer used for terminal output.
+// use this to wrap stdout with coordinated output (e.g. for line editing).
+func (l *Logger) SetOutput(w io.Writer) {
+	l.stdout = w
+}
+
 // Path returns the progress file path.
 func (l *Logger) Path() string {
 	if l.file == nil {
