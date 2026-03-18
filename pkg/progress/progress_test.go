@@ -622,7 +622,7 @@ func TestWrapText(t *testing.T) {
 			want:  "this is a longer\ntext that needs\nwrapping",
 		},
 		{
-			name:  "single long word",
+			name:  "single long word stays on own line",
 			text:  "superlongwordthatcannotbewrapped",
 			width: 10,
 			want:  "superlongwordthatcannotbewrapped",
@@ -660,12 +660,12 @@ func TestGetTerminalWidth(t *testing.T) {
 	t.Run("uses COLUMNS env var", func(t *testing.T) {
 		t.Setenv("COLUMNS", "100")
 		width := getTerminalWidth()
-		// should return 100 - 20 = 80
-		assert.Equal(t, 80, width)
+		// should return 100 - 22 = 78 (20 for timestamp prefix + 2 safety margin)
+		assert.Equal(t, 78, width)
 	})
 
 	t.Run("respects min width", func(t *testing.T) {
-		t.Setenv("COLUMNS", "50") // 50 - 20 = 30, but min is 40
+		t.Setenv("COLUMNS", "50") // 50 - 22 = 28, but min is 40
 		width := getTerminalWidth()
 		assert.Equal(t, 40, width)
 	})

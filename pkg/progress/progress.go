@@ -275,14 +275,18 @@ func (l *Logger) PrintSection(section status.Section) {
 }
 
 // getTerminalWidth returns terminal width, using COLUMNS env var or syscall.
-// Defaults to 80 if detection fails. Returns content width (total - 20 for timestamp).
+// Defaults to 80 if detection fails. Returns content width (total - 22 for timestamp prefix
+// and safety margin to prevent terminal-level mid-word wrapping).
 func getTerminalWidth() int {
-	const minWidth = 40
+	const (
+		minWidth       = 40
+		prefixReserved = 22 // 20 for "[DD-MM-YY HH:MM:SS] " + 2 safety margin for list indent
+	)
 
 	// try COLUMNS env var first
 	if cols := os.Getenv("COLUMNS"); cols != "" {
 		if w, err := strconv.Atoi(cols); err == nil && w > 0 {
-			contentWidth := w - 20 // leave room for timestamp prefix
+			contentWidth := w - prefixReserved
 			if contentWidth < minWidth {
 				return minWidth
 			}
@@ -292,17 +296,18 @@ func getTerminalWidth() int {
 
 	// try terminal syscall
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-		contentWidth := w - 20
+		contentWidth := w - prefixReserved
 		if contentWidth < minWidth {
 			return minWidth
 		}
 		return contentWidth
 	}
 
-	return 80 - 20 // default 80 columns minus timestamp
+	return 80 - prefixReserved // default 80 columns minus prefix
 }
 
 // wrapText wraps text to specified width, breaking on word boundaries.
+// words longer than width are placed on their own line (terminal may wrap them).
 func wrapText(text string, width int) string {
 	if width <= 0 || len(text) <= width {
 		return text
@@ -327,7 +332,7 @@ func wrapText(text string, width int) string {
 			result.WriteString(word)
 			lineLen += 1 + wordLen
 		} else {
-			// start new line
+			// start new line; word gets its own line even if longer than width
 			result.WriteString("\n")
 			result.WriteString(word)
 			lineLen = wordLen
@@ -354,16 +359,19 @@ func (l *Logger) PrintAligned(text string) {
 	// wrap text to terminal width
 	width := getTerminalWidth()
 
-	// split into lines, wrap each long line, then process
+	// split into lines, apply list indent BEFORE wrapping (so indent is included in width calc),
+	// then wrap each long line
 	var lines []string
 	for line := range strings.SplitSeq(text, "\n") {
-		if len(line) > width {
-			wrapped := wrapText(line, width)
+		// apply list indent before wrapping so it's accounted for in width calculation
+		formatted := formatListItem(line)
+		if len(formatted) > width {
+			wrapped := wrapText(formatted, width)
 			for wrappedLine := range strings.SplitSeq(wrapped, "\n") {
 				lines = append(lines, wrappedLine)
 			}
 		} else {
-			lines = append(lines, line)
+			lines = append(lines, formatted)
 		}
 	}
 
@@ -372,8 +380,7 @@ func (l *Logger) PrintAligned(text string) {
 			continue // skip empty lines
 		}
 
-		// add indent for list items
-		displayLine := formatListItem(line)
+		displayLine := line
 
 		// timestamp each line
 		timestamp := time.Now().Format(timestampFormat)
