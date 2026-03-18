@@ -70,6 +70,7 @@ docs/plans/         # plan files location
 - `--base-ref` flag overrides default branch for review diffs (branch name or commit hash)
 - `--skip-finalize` flag disables finalize step for a single run
 - `--wait` flag enables rate limit retry with specified duration (e.g., `--wait 1h`)
+- `--session-timeout` flag sets per-session timeout for claude (e.g., `--session-timeout 30m`), kills hanging sessions
 - `--review-patience` flag terminates external review after N unchanged rounds (stalemate detection)
 - Manual break via SIGQUIT (Ctrl+\) during external review loop terminates it early via injected channel
 - Custom external review support via scripts (wraps any AI tool)
@@ -111,6 +112,7 @@ Allows using custom scripts instead of codex for external code review:
 - `--external-only` (-e) flag runs only external review; `--codex-only` (-c) is deprecated alias
 - `max_external_iterations` config / `--max-external-iterations` CLI flag overrides external review loop limit (0 = auto, derived as `max(3, max_iterations/5)`)
 - `review_patience` config / `--review-patience` CLI flag enables stalemate detection: tracks consecutive rounds with no commits, terminates early when threshold reached (0 = disabled)
+- `session_timeout` config / `--session-timeout` CLI flag sets per-session timeout for claude (e.g., `30m`, `1h`). When a claude session exceeds the timeout, it is killed and the phase loop continues to the next iteration. Applied in `runWithLimitRetry` via `context.WithTimeout`. Claude-only; codex and custom executors are not affected. Disabled by default (empty/0)
 - Manual break: pressing Ctrl+\ (SIGQUIT) during external review terminates the loop immediately via context cancellation. Break channel injected from `cmd/ralphex/` into Runner via `SetBreakCh()`. Not available on Windows
 - `codex_enabled = false` backward compat: treated as `external_review_tool = none`
 
@@ -262,6 +264,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
 - `review_patience` config option: terminate external review after N consecutive unchanged rounds (0 = disabled). CLI flag `--review-patience` takes precedence
 - `wait_on_limit` config option: duration to wait before retrying on rate limit (e.g., "1h", "30m"). CLI flag `--wait` takes precedence. Disabled by default
+- `session_timeout` config option: per-session timeout for claude (e.g., "30m", "1h"). Kills hanging sessions and continues to next iteration. CLI flag `--session-timeout` takes precedence. Disabled by default
 
 ### Local Project Config (.ralphex/)
 

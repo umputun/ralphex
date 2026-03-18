@@ -328,6 +328,6 @@ echo '{"type":"result","result":""}'
 - Test with: `echo "test" | your-wrapper | jq .` (each line should parse)
 
 **Timeout / stuck:**
-- ralphex doesn't impose a timeout on claude sessions
+- ralphex supports an optional per-session timeout via `--session-timeout` flag or `session_timeout` config option (e.g., `30m`, `1h`). When set, hanging claude sessions are killed after the deadline and the phase loop continues
 - Check if the underlying tool has its own timeout settings
 - For codex: adjust `CODEX_SANDBOX` if the sandbox is blocking operations
