@@ -19,6 +19,7 @@ python3 scripts/ralphex-dk.sh [wrapper-flags] [ralphex-args]
 - `-E, --env VAR[=val]` - extra env var to pass to container (repeatable)
 - `-v, --volume src:dst[:opts]` - extra volume mount (repeatable)
 - `--docker` - mount host Docker socket into container (enables testcontainers, docker-dependent workflows)
+- `--network MODE` - Docker network mode, e.g. `host` (env: `RALPHEX_DOCKER_NETWORK`)
 - `--dry-run` - print docker command without executing
 - `--update` - pull latest Docker image and exit
 - `--update-script` - update this wrapper script and exit

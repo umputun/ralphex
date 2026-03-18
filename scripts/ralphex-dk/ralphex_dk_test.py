@@ -2149,6 +2149,7 @@ class TestDockerNetwork(EnvTestCase):
         idx = cmd.index("--network")
         self.assertEqual(cmd[idx + 1], "my-compose-net")
 
+
 class TestDetectInheritedEnvVars(unittest.TestCase):
     """tests for detect_inherited_env_vars() function."""
 
@@ -2830,7 +2831,7 @@ def run_tests() -> None:
                TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags,
                TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDetectExplicitSecrets, TestDryRun,
                TestDockerSocketGid, TestDockerSocketMount, TestBuildDockerCommandDockerGid,
-               TestDockerLinuxWarning, TestDryRunDocker]:
+               TestDockerLinuxWarning, TestDryRunDocker, TestDockerNetwork]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

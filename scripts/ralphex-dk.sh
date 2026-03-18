@@ -35,6 +35,7 @@ Environment variables:
   RALPHEX_IMAGE          Docker image (default: ghcr.io/umputun/ralphex-go:latest)
   RALPHEX_PORT           Web dashboard port with --serve (default: 8080)
   RALPHEX_DOCKER_SOCKET  Enable Docker socket mount ("1", "true", "yes")
+  RALPHEX_DOCKER_NETWORK Docker network mode (e.g., "host", "my-network")
   RALPHEX_EXTRA_ENV      Comma-separated env vars (VAR=value or VAR to inherit)
   RALPHEX_EXTRA_VOLUMES  Comma-separated volume mounts (src:dst[:opts])
 
@@ -110,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
               RALPHEX_IMAGE          Docker image (default: ghcr.io/umputun/ralphex-go:latest)
               RALPHEX_PORT           Web dashboard port with --serve (default: 8080)
               RALPHEX_DOCKER_SOCKET  Enable Docker socket mount ("1", "true", "yes")
+              RALPHEX_DOCKER_NETWORK Docker network mode (e.g., "host", "my-network")
               RALPHEX_EXTRA_ENV      Comma-separated env vars (VAR=value or VAR)
               RALPHEX_EXTRA_VOLUMES  Comma-separated volume mounts (src:dst[:opts])
 
@@ -133,6 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="claude provider: 'default' or 'bedrock' (env: RALPHEX_CLAUDE_PROVIDER)")
     parser.add_argument("--docker", action="store_true", dest="docker",
                         help="mount host Docker socket into container (env: RALPHEX_DOCKER_SOCKET)")
+    parser.add_argument("--network", dest="network", metavar="MODE",
+                        help="Docker network mode, e.g. 'host' (env: RALPHEX_DOCKER_NETWORK)")
     parser.add_argument("--dry-run", action="store_true", dest="dry_run",
                         help="print docker command that would be run, without executing")
     return parser
@@ -886,12 +890,13 @@ def build_docker_command(
     bind_port: bool,
     args: list[str],
     docker_gid: Optional[int] = None,
+    network: str = "",
 ) -> list[str]:
     """build docker run command as a list of arguments.
 
     includes: docker run, interactive flag (-it when stdin is tty), --rm,
     DOCKER_GID env var (if provided, for baseimage user group setup),
-    base env vars, extra env vars, port binding with RALPHEX_WEB_HOST,
+    network mode, base env vars, extra env vars, port binding with RALPHEX_WEB_HOST,
     volumes, workdir, image, entrypoint, and args.
     """
     cmd = ["docker", "run"]
@@ -900,6 +905,9 @@ def build_docker_command(
     if interactive:
         cmd.append("-it")
     cmd.append("--rm")
+
+    if network:
+        cmd.extend(["--network", network])
 
     if docker_gid is not None:
         cmd.extend(["-e", f"DOCKER_GID={docker_gid}"])
@@ -923,9 +931,9 @@ def build_docker_command(
 
 
 def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], bind_port: bool, args: list[str],
-               docker_gid: Optional[int] = None) -> int:
+               docker_gid: Optional[int] = None, network: str = "") -> int:
     """build and execute docker run command."""
-    cmd = build_docker_command(image, port, volumes, env_vars, bind_port, args, docker_gid=docker_gid)
+    cmd = build_docker_command(image, port, volumes, env_vars, bind_port, args, docker_gid=docker_gid, network=network)
 
     # defer SIGTERM during Popen+assignment to prevent race where handler sees _active_proc unset.
     # using a deferred handler instead of SIG_IGN so the signal is not lost.
@@ -972,6 +980,7 @@ def main() -> int:
 
     image = os.environ.get("RALPHEX_IMAGE", DEFAULT_IMAGE)
     port = os.environ.get("RALPHEX_PORT", DEFAULT_PORT)
+    network = parsed.network or os.environ.get("RALPHEX_DOCKER_NETWORK", "")
 
     # handle --update
     if parsed.update:
@@ -1127,7 +1136,7 @@ def main() -> int:
 
         # handle --dry-run: print command without executing
         if parsed.dry_run:
-            cmd = build_docker_command(image, port, volumes, extra_env, bind_port, ralphex_args, docker_gid=docker_gid)
+            cmd = build_docker_command(image, port, volumes, extra_env, bind_port, ralphex_args, docker_gid=docker_gid, network=network)
             inherited = detect_inherited_env_vars(extra_env)
             if inherited:
                 print(f"note: inherited env vars ({', '.join(inherited)}) require these variables "
@@ -1146,7 +1155,7 @@ def main() -> int:
         # schedule credential cleanup (only for actual runs)
         schedule_cleanup(creds_temp)
 
-        return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args, docker_gid=docker_gid)
+        return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args, docker_gid=docker_gid, network=network)
     finally:
         # only skip cleanup if dry-run completed successfully (user got the file path warning)
         if not dry_run_completed:

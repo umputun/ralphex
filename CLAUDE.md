@@ -168,6 +168,14 @@ Key functions in `scripts/ralphex-dk.sh`:
 - `resolve_docker_socket()` - resolves socket path from `DOCKER_HOST` or default
 - `get_docker_socket_gid()` - detects socket file GID via `os.stat()`
 
+### Docker Network Mode (Docker Wrapper Only)
+
+The `--network` flag (or `RALPHEX_DOCKER_NETWORK` env var) sets the Docker network mode for the container, allowing it to reach docker-compose services on localhost.
+
+- Config: `--network MODE` CLI flag or `RALPHEX_DOCKER_NETWORK` env var
+- Passes `--network <value>` to `docker run`
+- Common values: `host` (reach host-exposed ports), named networks (e.g., `my-compose-net`)
+
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, error)`
