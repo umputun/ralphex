@@ -63,6 +63,8 @@ func (pg *processGroupCleanup) killProcess() {
 // Wait waits for the command to complete and cleans up resources.
 // It is safe to call multiple times - subsequent calls return the cached result.
 // Callers must eventually call Wait to avoid leaking resources.
+// After the command exits, kills the direct process to clean up orphans (best-effort,
+// Windows does not support process group kills).
 func (pg *processGroupCleanup) Wait() error {
 	pg.once.Do(func() {
 		pg.err = pg.cmd.Wait()

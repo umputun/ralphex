@@ -14,9 +14,9 @@ import (
 // gracefulShutdownDelay is the time to wait between SIGTERM and SIGKILL.
 const gracefulShutdownDelay = 100 * time.Millisecond
 
-// processGroupCleanup manages process group lifecycle for graceful shutdown.
-// It ensures that when context is canceled, the entire process tree is killed,
-// not just the direct child process.
+// processGroupCleanup manages process group lifecycle and orphan cleanup.
+// It kills the entire process tree both on context cancellation and after normal exit,
+// preventing orphaned descendants (node subagents, MCP servers) from accumulating.
 type processGroupCleanup struct {
 	cmd      *exec.Cmd
 	done     chan struct{}
