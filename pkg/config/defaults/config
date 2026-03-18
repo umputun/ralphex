@@ -127,6 +127,12 @@ task_retry_count = 1
 # default: 0
 # review_patience = 0
 
+# session_timeout: maximum duration for a single claude session
+# kills hanging sessions (e.g., agent started a blocking operation)
+# uses Go duration format (e.g., "30m", "1h", "1h30m")
+# omit or leave empty to disable (no timeout)
+# session_timeout =
+
 # ------------------------------------------------------------------------------
 # paths
 # ------------------------------------------------------------------------------

@@ -30,7 +30,9 @@ type Values struct {
 	ClaudeLimitPatterns   []string // patterns to detect rate limits in claude output (for wait+retry)
 	CodexLimitPatterns    []string // patterns to detect rate limits in codex output (for wait+retry)
 	WaitOnLimit           time.Duration
-	WaitOnLimitSet        bool   // tracks if wait_on_limit was explicitly set
+	WaitOnLimitSet        bool // tracks if wait_on_limit was explicitly set
+	SessionTimeout        time.Duration
+	SessionTimeoutSet     bool   // tracks if session_timeout was explicitly set
 	ExternalReviewTool    string // "codex", "custom", or "none"
 	CustomReviewScript    string // path to custom review script (when ExternalReviewTool = "custom")
 	IterationDelayMs      int
@@ -323,6 +325,11 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		return Values{}, err
 	}
 
+	// session_timeout duration
+	if err := vl.parseSessionTimeout(section, &values); err != nil {
+		return Values{}, err
+	}
+
 	return values, nil
 }
 
@@ -344,6 +351,27 @@ func (vl *valuesLoader) parseWaitOnLimit(section *ini.Section, values *Values) e
 	}
 	values.WaitOnLimit = d
 	values.WaitOnLimitSet = true
+	return nil
+}
+
+// parseSessionTimeout parses session_timeout duration from an INI section.
+func (vl *valuesLoader) parseSessionTimeout(section *ini.Section, values *Values) error {
+	if !section.HasKey("session_timeout") {
+		return nil
+	}
+	val := strings.TrimSpace(section.Key("session_timeout").String())
+	if val == "" {
+		return nil
+	}
+	d, parseErr := time.ParseDuration(val)
+	if parseErr != nil {
+		return fmt.Errorf("invalid session_timeout: %w", parseErr)
+	}
+	if d < 0 {
+		return fmt.Errorf("invalid session_timeout: must be non-negative, got %s", val)
+	}
+	values.SessionTimeout = d
+	values.SessionTimeoutSet = true
 	return nil
 }
 
@@ -447,6 +475,10 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	if src.WaitOnLimitSet {
 		dst.WaitOnLimit = src.WaitOnLimit
 		dst.WaitOnLimitSet = true
+	}
+	if src.SessionTimeoutSet {
+		dst.SessionTimeout = src.SessionTimeout
+		dst.SessionTimeoutSet = true
 	}
 }
 

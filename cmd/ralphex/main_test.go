@@ -588,6 +588,32 @@ func TestWaitFlag(t *testing.T) {
 	})
 }
 
+func TestSessionTimeoutFlag(t *testing.T) {
+	t.Run("cli_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{SessionTimeout: 10 * time.Minute, SessionTimeoutSet: true}
+		o := opts{SessionTimeout: 2 * time.Hour}
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, 2*time.Hour, cfg.SessionTimeout)
+		assert.True(t, cfg.SessionTimeoutSet)
+	})
+
+	t.Run("zero_preserves_config", func(t *testing.T) {
+		cfg := &config.Config{SessionTimeout: 30 * time.Minute, SessionTimeoutSet: true}
+		o := opts{SessionTimeout: 0} // not set
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, 30*time.Minute, cfg.SessionTimeout, "config value should be preserved when CLI not set")
+		assert.True(t, cfg.SessionTimeoutSet)
+	})
+
+	t.Run("cli_sets_unset_config", func(t *testing.T) {
+		cfg := &config.Config{} // session_timeout not set
+		o := opts{SessionTimeout: 1 * time.Hour}
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, 1*time.Hour, cfg.SessionTimeout)
+		assert.True(t, cfg.SessionTimeoutSet)
+	})
+}
+
 func TestGetCurrentBranch(t *testing.T) {
 	t.Run("returns_branch_name", func(t *testing.T) {
 		dir := setupTestRepo(t)
@@ -627,6 +653,9 @@ func TestValidateFlags(t *testing.T) {
 		{name: "negative_wait_is_invalid", opts: opts{Wait: -30 * time.Minute}, wantErr: true, errMsg: "non-negative"},
 		{name: "positive_wait_is_valid", opts: opts{Wait: time.Hour}, wantErr: false},
 		{name: "zero_wait_is_valid", opts: opts{Wait: 0}, wantErr: false},
+		{name: "negative_session_timeout_is_invalid", opts: opts{SessionTimeout: -10 * time.Minute}, wantErr: true, errMsg: "non-negative"},
+		{name: "positive_session_timeout_is_valid", opts: opts{SessionTimeout: 30 * time.Minute}, wantErr: false},
+		{name: "zero_session_timeout_is_valid", opts: opts{SessionTimeout: 0}, wantErr: false},
 	}
 
 	for _, tc := range tests {

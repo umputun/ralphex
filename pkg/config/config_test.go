@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1089,4 +1090,63 @@ notify_custom_script = /path/to/notify.sh
 	assert.True(t, cfg.NotifyParams.OnComplete)
 	assert.Equal(t, "/path/to/notify.sh", cfg.NotifyParams.CustomScript)
 	assert.Empty(t, cfg.LocalDir(), "localDir should be empty when same as globalDir")
+}
+
+func TestLoad_SessionTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	configContent := `session_timeout = 30m`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 30*time.Minute, cfg.SessionTimeout)
+	assert.True(t, cfg.SessionTimeoutSet)
+}
+
+func TestLoad_SessionTimeout_DefaultDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// empty config - session_timeout should be zero (disabled)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Zero(t, cfg.SessionTimeout)
+	assert.False(t, cfg.SessionTimeoutSet)
+}
+
+func TestLocalConfig_LocalOverridesSessionTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+	localDir := filepath.Join(tmpDir, ".ralphex")
+
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	// global config with session_timeout = 1h
+	globalConfig := `session_timeout = 1h`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+
+	// local config overrides to 15m
+	localConfig := `session_timeout = 15m`
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
+
+	cfg, err := loadWithLocal(globalDir, localDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 15*time.Minute, cfg.SessionTimeout)
+	assert.True(t, cfg.SessionTimeoutSet)
 }

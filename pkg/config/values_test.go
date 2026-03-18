@@ -1839,6 +1839,129 @@ func TestValues_mergeFrom_WaitOnLimit(t *testing.T) {
 	})
 }
 
+func TestValuesLoader_parseValuesFromBytes_SessionTimeout(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name        string
+		input       string
+		expected    time.Duration
+		expectedSet bool
+	}{
+		{name: "30 minutes", input: "session_timeout = 30m", expected: 30 * time.Minute, expectedSet: true},
+		{name: "1 hour", input: "session_timeout = 1h", expected: time.Hour, expectedSet: true},
+		{name: "1h30m compound", input: "session_timeout = 1h30m", expected: 90 * time.Minute, expectedSet: true},
+		{name: "90 seconds", input: "session_timeout = 90s", expected: 90 * time.Second, expectedSet: true},
+		{name: "zero", input: "session_timeout = 0s", expected: 0, expectedSet: true},
+		{name: "empty value", input: "session_timeout = ", expected: 0, expectedSet: false},
+		{name: "not set", input: "", expected: 0, expectedSet: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, values.SessionTimeout)
+			assert.Equal(t, tc.expectedSet, values.SessionTimeoutSet)
+		})
+	}
+}
+
+func TestValuesLoader_parseValuesFromBytes_SessionTimeout_Invalid(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name, input, errContains string
+	}{
+		{name: "invalid format", input: "session_timeout = notaduration", errContains: "invalid session_timeout"},
+		{name: "negative duration", input: "session_timeout = -5m", errContains: "must be non-negative"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+		})
+	}
+}
+
+func TestValuesLoader_Load_SessionTimeout(t *testing.T) {
+	t.Run("parse from config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`session_timeout = 30m`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, 30*time.Minute, values.SessionTimeout)
+		assert.True(t, values.SessionTimeoutSet)
+	})
+
+	t.Run("not set uses default zero", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Zero(t, values.SessionTimeout)
+		assert.False(t, values.SessionTimeoutSet)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`session_timeout = 2h`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`session_timeout = 15m`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, 15*time.Minute, values.SessionTimeout)
+		assert.True(t, values.SessionTimeoutSet)
+	})
+
+	t.Run("explicit zero overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`session_timeout = 1h`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`session_timeout = 0s`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Zero(t, values.SessionTimeout)
+		assert.True(t, values.SessionTimeoutSet)
+	})
+}
+
+func TestValues_mergeFrom_SessionTimeout(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{SessionTimeout: 0, SessionTimeoutSet: false}
+		src := Values{SessionTimeout: 30 * time.Minute, SessionTimeoutSet: true}
+		dst.mergeFrom(&src)
+		assert.Equal(t, 30*time.Minute, dst.SessionTimeout)
+		assert.True(t, dst.SessionTimeoutSet)
+	})
+
+	t.Run("unset flag does not merge", func(t *testing.T) {
+		dst := Values{SessionTimeout: time.Hour, SessionTimeoutSet: true}
+		src := Values{SessionTimeout: 0, SessionTimeoutSet: false}
+		dst.mergeFrom(&src)
+		assert.Equal(t, time.Hour, dst.SessionTimeout)
+		assert.True(t, dst.SessionTimeoutSet)
+	})
+
+	t.Run("set flag can set to zero", func(t *testing.T) {
+		dst := Values{SessionTimeout: time.Hour, SessionTimeoutSet: true}
+		src := Values{SessionTimeout: 0, SessionTimeoutSet: true}
+		dst.mergeFrom(&src)
+		assert.Zero(t, dst.SessionTimeout)
+		assert.True(t, dst.SessionTimeoutSet)
+	})
+}
+
 func TestValues_mergeFrom_LimitPatterns(t *testing.T) {
 	t.Run("merge limit patterns when src has values", func(t *testing.T) {
 		dst := Values{ClaudeLimitPatterns: []string{"dst pattern"}, CodexLimitPatterns: []string{"dst codex"}}

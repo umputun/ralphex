@@ -40,6 +40,7 @@ type opts struct {
 	TasksOnly             bool          `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
 	BaseRef               string        `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
 	Wait                  time.Duration `long:"wait" description:"wait duration on rate limit before retry (e.g. 1h, 30m)"`
+	SessionTimeout        time.Duration `long:"session-timeout" description:"per-session timeout for claude (e.g. 30m, 1h)"`
 	SkipFinalize          bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
 	Worktree              bool          `long:"worktree" description:"run in isolated git worktree"`
 	PlanDescription       string        `long:"plan" description:"create plan interactively (enter plan description)"`
@@ -781,6 +782,9 @@ func validateFlags(o opts) error {
 	if o.Wait < 0 {
 		return fmt.Errorf("--wait must be non-negative, got %s", o.Wait)
 	}
+	if o.SessionTimeout < 0 {
+		return fmt.Errorf("--session-timeout must be non-negative, got %s", o.SessionTimeout)
+	}
 	return nil
 }
 
@@ -1079,6 +1083,10 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	if o.Wait > 0 {
 		cfg.WaitOnLimit = o.Wait
 		cfg.WaitOnLimitSet = true
+	}
+	if o.SessionTimeout > 0 {
+		cfg.SessionTimeout = o.SessionTimeout
+		cfg.SessionTimeoutSet = true
 	}
 }
 

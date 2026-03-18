@@ -87,6 +87,10 @@ type Config struct {
 	WaitOnLimit         time.Duration `json:"wait_on_limit"`
 	WaitOnLimitSet      bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
 
+	// session timeout for claude sessions (kills hanging sessions)
+	SessionTimeout    time.Duration `json:"session_timeout"`
+	SessionTimeoutSet bool          `json:"-"` // tracks if session_timeout was explicitly set in config
+
 	// notification parameters
 	NotifyParams notify.Params `json:"-"`
 
@@ -298,6 +302,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CodexLimitPatterns:    values.CodexLimitPatterns,
 		WaitOnLimit:           values.WaitOnLimit,
 		WaitOnLimitSet:        values.WaitOnLimitSet,
+		SessionTimeout:        values.SessionTimeout,
+		SessionTimeoutSet:     values.SessionTimeoutSet,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,
