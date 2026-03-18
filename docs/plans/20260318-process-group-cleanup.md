@@ -44,9 +44,9 @@ groups on Windows).
 **Files:**
 - Modify: `pkg/executor/procgroup_windows.go`
 
-- [ ] add `pg.killOnce.Do(pg.killProcess)` in Windows `Wait()` after `close(pg.done)`, matching the Unix fix — kills the direct process on normal exit (Windows doesn't have process groups, so this is best-effort for the direct child only)
-- [ ] add `killOnce sync.Once` field to Windows `processGroupCleanup` struct
-- [ ] run `GOOS=windows GOARCH=amd64 go build ./...` — must compile
+- [x] add `pg.killOnce.Do(pg.killProcess)` in Windows `Wait()` after `close(pg.done)`, matching the Unix fix — kills the direct process on normal exit (Windows doesn't have process groups, so this is best-effort for the direct child only)
+- [x] add `killOnce sync.Once` field to Windows `processGroupCleanup` struct
+- [x] run `GOOS=windows GOARCH=amd64 go build ./...` — must compile
 
 ### Task 3: Add normal-exit regression test
 

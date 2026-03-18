@@ -11,10 +11,11 @@ import (
 // processGroupCleanup manages process lifecycle for graceful shutdown on Windows.
 // Note: Windows doesn't support Unix process groups, so this only kills the direct process.
 type processGroupCleanup struct {
-	cmd  *exec.Cmd
-	done chan struct{}
-	once sync.Once
-	err  error
+	cmd      *exec.Cmd
+	done     chan struct{}
+	once     sync.Once
+	killOnce sync.Once
+	err      error
 }
 
 // setupProcessGroup is a no-op on Windows since process groups work differently.
@@ -41,7 +42,7 @@ func newProcessGroupCleanup(cmd *exec.Cmd, cancelCh <-chan struct{}) *processGro
 func (pg *processGroupCleanup) watchForCancel(cancelCh <-chan struct{}) {
 	select {
 	case <-cancelCh:
-		pg.killProcess()
+		pg.killOnce.Do(pg.killProcess)
 	case <-pg.done:
 		// process completed normally, goroutine exits
 	}
@@ -66,6 +67,7 @@ func (pg *processGroupCleanup) Wait() error {
 	pg.once.Do(func() {
 		pg.err = pg.cmd.Wait()
 		close(pg.done)
+		pg.killOnce.Do(pg.killProcess) // kill direct child on normal exit (best-effort)
 		if pg.err != nil {
 			pg.err = fmt.Errorf("command wait: %w", pg.err)
 		}
