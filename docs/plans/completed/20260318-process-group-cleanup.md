@@ -66,4 +66,4 @@ groups on Windows).
 
 ### Task 5: Move plan to completed
 
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
