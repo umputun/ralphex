@@ -318,14 +318,27 @@ func (l *Logger) getTerminalWidth() int {
 
 // wrapText wraps text to specified width, breaking on word boundaries.
 // words longer than width are placed on their own line (terminal may wrap them).
+// leading whitespace is preserved on the first line and subtracted from available width.
 func (l *Logger) wrapText(text string, width int) string {
 	if width <= 0 || len(text) <= width {
 		return text
 	}
 
+	// preserve leading whitespace
+	trimmed := strings.TrimLeft(text, " \t")
+	indent := text[:len(text)-len(trimmed)]
+	effectiveWidth := width - len(indent)
+	if effectiveWidth <= 0 {
+		return text
+	}
+
 	var result strings.Builder
-	words := strings.Fields(text)
+	words := strings.Fields(trimmed)
 	lineLen := 0
+
+	if indent != "" {
+		result.WriteString(indent)
+	}
 
 	for i, word := range words {
 		wordLen := len(word)
@@ -337,7 +350,7 @@ func (l *Logger) wrapText(text string, width int) string {
 		}
 
 		// check if word fits on current line
-		if lineLen+1+wordLen <= width {
+		if lineLen+1+wordLen <= effectiveWidth {
 			result.WriteString(" ")
 			result.WriteString(word)
 			lineLen += 1 + wordLen

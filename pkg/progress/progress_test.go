@@ -252,6 +252,40 @@ func TestLogger_PrintAligned(t *testing.T) {
 	assert.True(t, strings.HasSuffix(output, "\n"), "output should end with newline")
 }
 
+func TestLogger_PrintAligned_WrapsLongListItem(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+	t.Setenv("COLUMNS", "50") // narrow terminal to force wrapping
+
+	// long list item that should wrap, indent preserved on first line
+	l.PrintAligned("- this is a very long list item that should be wrapped properly")
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	fileStr := string(content)
+	// first line should have the indent preserved
+	assert.Contains(t, fileStr, "]   - this is a very long list")
+	// continuation should be on a new line
+	lines := strings.Split(fileStr, "\n")
+	var contentLines []string
+	for _, line := range lines {
+		if strings.Contains(line, "- this") || strings.Contains(line, "wrapped") {
+			contentLines = append(contentLines, line)
+		}
+	}
+	assert.Greater(t, len(contentLines), 1, "long list item should be wrapped into multiple lines")
+}
+
 func TestLogger_PrintAligned_Empty(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -644,6 +678,24 @@ func TestWrapText(t *testing.T) {
 			text:  "exact fit",
 			width: 9,
 			want:  "exact fit",
+		},
+		{
+			name:  "preserves leading whitespace",
+			text:  "  1. indented list item text here",
+			width: 20,
+			want:  "  1. indented list\nitem text here",
+		},
+		{
+			name:  "preserves tab indent",
+			text:  "\tindented text that wraps",
+			width: 15,
+			want:  "\tindented text\nthat wraps",
+		},
+		{
+			name:  "indent wider than width returns original",
+			text:  "          short",
+			width: 5,
+			want:  "          short",
 		},
 	}
 
