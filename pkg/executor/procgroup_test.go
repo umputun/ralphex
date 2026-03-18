@@ -53,6 +53,40 @@ func TestExecClaudeRunner_KillsProcessGroup(t *testing.T) {
 		"child process (PID %d) should be killed when parent's process group is killed", childPID)
 }
 
+func TestExecClaudeRunner_KillsOrphansOnNormalExit(t *testing.T) {
+	// verifies that when the parent process exits normally (not via cancellation),
+	// orphaned descendants are still killed by the post-Wait killProcessGroup call.
+	// Setsid: true + background sleep keeps the child in the same process group
+	// as the parent, so -pgid kill reaches it even after the parent exits.
+
+	ctx := t.Context()
+
+	runner := &execClaudeRunner{}
+
+	// bash spawns a background sleep, prints its PID, then exits immediately.
+	// the sleep outlives the parent bash and becomes an orphan in the same process group.
+	stdout, wait, err := runner.Run(ctx, "bash", "-c",
+		`sleep 300 & echo "CHILD_PID:$!"; exit 0`)
+	require.NoError(t, err)
+
+	// read until we get the child PID
+	childPID := readChildPID(t, stdout)
+	require.NotZero(t, childPID, "should capture child PID from output")
+
+	// verify child process exists before wait
+	require.True(t, processExists(childPID), "child process should be running before wait")
+
+	// wait for parent to exit normally — this triggers killProcessGroup via killOnce
+	err = wait()
+	require.NoError(t, err, "parent should exit cleanly")
+
+	// verify orphaned child is killed by the post-Wait process group kill
+	require.Eventually(t, func() bool {
+		return !processExists(childPID)
+	}, 2*time.Second, 50*time.Millisecond,
+		"orphaned child (PID %d) should be killed after normal parent exit", childPID)
+}
+
 func TestProcessGroupCleanup_Idempotent(t *testing.T) {
 	// verify that Wait() can be called multiple times without panicking
 

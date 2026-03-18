@@ -53,9 +53,9 @@ groups on Windows).
 **Files:**
 - Modify: `pkg/executor/procgroup_test.go`
 
-- [ ] add `TestExecClaudeRunner_KillsOrphansOnNormalExit` test: spawn bash that starts `sleep 300 &`, prints child PID, then exits immediately. After `wait()` returns, poll for child PID death. Reuse existing `readChildPID` and `processExists` helpers
-- [ ] add comment explaining that `Setsid: true` + background `sleep` keeps the child in the same process group as the parent, so `-pgid` kill reaches it
-- [ ] run `go test ./pkg/executor/... -race` — must pass before task 4
+- [x] add `TestExecClaudeRunner_KillsOrphansOnNormalExit` test: spawn bash that starts `sleep 300 &`, prints child PID, then exits immediately. After `wait()` returns, poll for child PID death. Reuse existing `readChildPID` and `processExists` helpers
+- [x] add comment explaining that `Setsid: true` + background `sleep` keeps the child in the same process group as the parent, so `-pgid` kill reaches it
+- [x] run `go test ./pkg/executor/... -race` — must pass before task 4
 
 ### Task 4: Verify acceptance criteria
 
