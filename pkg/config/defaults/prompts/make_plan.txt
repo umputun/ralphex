@@ -145,7 +145,6 @@ Write the accepted plan to disk:
 
 ### Task N: Verify acceptance criteria
 
-- [ ] manual test: <key user-facing test>
 - [ ] run full test suite (use project-specific command)
 - [ ] run linter (use project-specific command)
 - [ ] verify test coverage meets 80%+
@@ -171,6 +170,7 @@ Before emitting PLAN_DRAFT in Step 3.5, verify the plan against these criteria:
 - [ ] All requirements from the original description are addressed
 - [ ] Each task specifies file paths where known (use patterns for discovery tasks)
 - [ ] Each task that modifies code includes test items
+- [ ] Task section checkboxes are automatable by the agent (no manual testing, deployment, or external verification items as `- [ ]` inside Task sections; those go in Post-Completion)
 
 **Simplicity (YAGNI):**
 - [ ] No unnecessary abstractions

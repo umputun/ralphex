@@ -224,6 +224,8 @@ Example (NOTICE: tests are separate checklist items):
 - [ ] run linter - all issues must be fixed
 - [ ] verify test coverage meets project standard (80%+)
 
+*Note: manual testing, deployment verification, and external checks go in Post-Completion (no checkboxes). Task section checkboxes must be automatable by the agent.*
+
 ### Task N: [Final] Update documentation
 - [ ] update README.md if needed
 - [ ] update project knowledge docs if new patterns discovered
