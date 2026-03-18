@@ -59,10 +59,10 @@ groups on Windows).
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] run `make test` — all tests pass
-- [ ] run `make lint` — no linter issues
-- [ ] run `make fmt` — code is formatted
-- [ ] `GOOS=windows GOARCH=amd64 go build ./...` — Windows cross-compile succeeds
+- [x] run `make test` — all tests pass
+- [x] run `make lint` — no linter issues
+- [x] run `make fmt` — code is formatted
+- [x] `GOOS=windows GOARCH=amd64 go build ./...` — Windows cross-compile succeeds
 
 ### Task 5: Move plan to completed
 
