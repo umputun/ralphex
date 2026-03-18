@@ -44,3 +44,9 @@ func (r *Runner) TestBuildCodexPrompt(isFirst bool, claudeResponse string) strin
 func (r *Runner) TestNextPlanTaskPosition() int {
 	return r.nextPlanTaskPosition()
 }
+
+// TestRunWithSessionTimeout exposes runWithSessionTimeout for testing.
+func (r *Runner) TestRunWithSessionTimeout(ctx context.Context, run func(context.Context, string) executor.Result,
+	prompt, toolName string) executor.Result {
+	return r.runWithSessionTimeout(ctx, run, prompt, toolName)
+}

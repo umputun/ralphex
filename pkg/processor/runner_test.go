@@ -3,6 +3,7 @@ package processor_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -2842,4 +2843,549 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 		}
 	}
 	assert.False(t, foundBreak, "should not log manual break with nil channel")
+}
+
+func TestRunner_SessionTimeout_BlockingExecutor(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	// mock run function that blocks until context is canceled
+	mockRun := func(ctx context.Context, _ string) executor.Result {
+		<-ctx.Done()
+		return executor.Result{Error: ctx.Err()}
+	}
+
+	start := time.Now()
+	result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", "claude")
+	elapsed := time.Since(start)
+
+	// should have timed out around 50ms, not blocked indefinitely
+	assert.Less(t, elapsed, 500*time.Millisecond, "should timeout quickly, not block")
+
+	// error is cleared on session timeout so callers treat it as a non-completing iteration
+	require.NoError(t, result.Error)
+
+	// verify session timeout warning was logged
+	var foundLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "session timed out") {
+			foundLog = true
+			break
+		}
+	}
+	assert.True(t, foundLog, "should log session timeout warning")
+}
+
+func TestRunner_SessionTimeout_ZeroDoesNotAddDeadline(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	// session_timeout is zero (default) - no deadline should be applied
+	assert.Zero(t, appCfg.SessionTimeout)
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	// mock run function that checks if context has a deadline
+	var hasDeadline bool
+	mockRun := func(ctx context.Context, _ string) executor.Result {
+		_, hasDeadline = ctx.Deadline()
+		return executor.Result{Output: "success", Signal: status.Completed}
+	}
+
+	result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", "claude")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "success", result.Output)
+	assert.False(t, hasDeadline, "context should not have deadline when session_timeout is zero")
+
+	// verify no timeout warning was logged
+	for _, call := range log.PrintCalls() {
+		assert.NotContains(t, call.Format, "session timed out", "should not log timeout warning")
+	}
+}
+
+func TestRunner_SessionTimeout_ParentCancelNotMisidentified(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 10 * time.Second // long timeout, should not fire
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	// mock run that cancels the parent context, simulating SIGINT
+	mockRun := func(runCtx context.Context, _ string) executor.Result {
+		cancel() // cancel parent
+		<-runCtx.Done()
+		return executor.Result{Error: runCtx.Err()}
+	}
+
+	result := r.TestRunWithSessionTimeout(ctx, mockRun, "test prompt", "claude")
+
+	require.Error(t, result.Error)
+
+	// verify no session timeout warning was logged (parent was canceled, not session timeout)
+	for _, call := range log.PrintCalls() {
+		assert.NotContains(t, call.Format, "session timed out",
+			"should not log session timeout when parent context was canceled")
+	}
+}
+
+func TestRunner_SessionTimeout_IntegrationWithLimitRetry(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	// mock run that blocks forever - verify runWithLimitRetry also applies timeout
+	mockRun := func(ctx context.Context, _ string) executor.Result {
+		<-ctx.Done()
+		return executor.Result{Error: ctx.Err()}
+	}
+
+	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
+
+	// error is cleared on session timeout, so runWithLimitRetry returns no error
+	// (not a LimitPatternError, not retried)
+	require.NoError(t, result.Error)
+}
+
+func TestRunner_SessionTimeout_TaskPhaseContinues(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+
+	// first call blocks (simulates hanging session), second call succeeds
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			callNum++
+			if callNum == 1 {
+				<-ctx.Done() // block until session timeout fires
+				return executor.Result{Error: ctx.Err()}
+			}
+			return executor.Result{Output: "task done", Signal: status.Completed}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	// task phase should succeed: first iteration timed out, second completed
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 2, "claude should be called twice (timeout + success)")
+
+	// verify session timeout warning was logged
+	var foundLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "session timed out") {
+			foundLog = true
+			break
+		}
+	}
+	assert.True(t, foundLog, "should log session timeout warning")
+}
+
+func TestRunner_SessionTimeout_NonClaudeToolNotAffected(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	// mock run that checks if context has a deadline - codex should not get one
+	var hasDeadline bool
+	mockRun := func(ctx context.Context, _ string) executor.Result {
+		_, hasDeadline = ctx.Deadline()
+		return executor.Result{Output: "done", Signal: status.ReviewDone}
+	}
+
+	result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", "codex")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "done", result.Output)
+	assert.False(t, hasDeadline, "codex tool should not have deadline from session timeout")
+}
+
+func TestRunner_SessionTimeout_ReviewPhaseContinues(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+
+	// first call blocks (review timeout), second call succeeds with REVIEW_DONE
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			callNum++
+			if callNum == 1 {
+				<-ctx.Done() // block until session timeout fires
+				return executor.Result{Error: ctx.Err()}
+			}
+			return executor.Result{Output: "review done", Signal: status.ReviewDone}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	// review should succeed: first review timed out (treated as non-completing), second completed
+	require.NoError(t, err)
+
+	// verify session timeout warning was logged
+	var foundLog bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "session timed out") {
+			foundLog = true
+			break
+		}
+	}
+	assert.True(t, foundLog, "should log session timeout warning")
+}
+
+func TestRunner_SessionTimeout_ReviewLoopContinuesAfterTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+
+	// call 1: first review succeeds normally (enters runClaudeReviewLoop)
+	// call 2: blocks/times out inside the review loop (should continue, not exit)
+	// call 3+: ReviewDone (loop and post-codex loop exit normally)
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			callNum++
+			if callNum == 2 {
+				<-ctx.Done() // block until session timeout fires inside review loop
+				return executor.Result{Error: ctx.Err()}
+			}
+			return executor.Result{Output: "review done", Signal: status.ReviewDone}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+
+	// call 2 timed out inside the loop, call 3 should have been made (loop continued)
+	assert.GreaterOrEqual(t, len(claude.RunCalls()), 3,
+		"claude should be called at least 3 times: first review + timeout in loop + retry in loop")
+
+	// verify "retrying review iteration" was logged (the new behavior)
+	var foundRetry bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "retrying review iteration") {
+			foundRetry = true
+			break
+		}
+	}
+	assert.True(t, foundRetry, "should log retry message after session timeout in review loop")
+}
+
+func TestRunner_SessionTimeout_ClearsSignalOnTimeout(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	// mock run that emits a signal then blocks until timeout
+	mockRun := func(ctx context.Context, _ string) executor.Result {
+		<-ctx.Done()
+		// simulate: signal was detected in stream before timeout killed the process
+		return executor.Result{Output: "partial output", Signal: status.Completed, Error: ctx.Err()}
+	}
+
+	result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", "claude")
+
+	require.NoError(t, result.Error, "error should be cleared on timeout")
+	assert.Empty(t, result.Signal, "signal should be cleared on timeout to prevent false completion")
+}
+
+func TestRunner_SessionTimeout_ExternalReviewLoopSkipsStalemateOnTimeout(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// scenario: external review loop with ReviewPatience=2 and session timeout.
+	// claude eval times out on iterations 1 and 2 — these should NOT count as unchanged rounds,
+	// so stalemate should NOT fire. iteration 3 succeeds with CodexDone.
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			callNum++
+			switch callNum {
+			case 1, 2: // claude eval iterations 1,2 — block until session timeout
+				<-ctx.Done()
+				return executor.Result{Output: "partial output", Error: ctx.Err()}
+			case 3: // claude eval iteration 3 — codex done
+				return executor.Result{Output: "no issues found", Signal: status.CodexDone}
+			default: // post-codex review
+				return executor.Result{Output: "review done", Signal: status.ReviewDone}
+			}
+		},
+	}
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue in foo.go:10"}, // codex iteration 1
+		{Output: "found issue in bar.go:20"}, // codex iteration 2
+		{Output: "no issues found"},          // codex iteration 3
+	})
+
+	// git checker returns same hash every time (no changes); without the timeout guard,
+	// this would trigger stalemate after 2 unchanged rounds
+	gitMock := &mocks.GitCheckerMock{
+		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
+		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
+	}
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
+		CodexEnabled: true, ReviewPatience: 2, AppConfig: appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetGitChecker(gitMock)
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (timeouts should not trigger stalemate)")
+
+	// verify timeout retry was logged (not stalemate)
+	var foundTimeout, foundStalemate bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "claude eval session timed out") {
+			foundTimeout = true
+		}
+		if strings.Contains(call.Format, "stalemate detected") {
+			foundStalemate = true
+		}
+	}
+	assert.True(t, foundTimeout, "should log timeout retry message")
+	assert.False(t, foundStalemate, "should NOT log stalemate — timed-out rounds don't count as unchanged")
+}
+
+func TestRunner_SessionTimeout_PlanCreationSkipsOutputParsingOnTimeout(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+
+	// scenario: plan creation where iteration 1 times out after emitting a QUESTION marker.
+	// the question should NOT be presented to the user because the session was killed.
+	// iteration 2 succeeds with PLAN_READY.
+	questionSignal := "<<<RALPHEX:QUESTION>>>\n" +
+		`{"question": "Which backend?", "options": ["Redis", "Memcached"]}` + "\n<<<RALPHEX:END>>>"
+
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			callNum++
+			switch callNum {
+			case 1: // iteration 1: emit question marker then block until timeout
+				<-ctx.Done()
+				return executor.Result{Output: questionSignal, Error: ctx.Err()}
+			default: // iteration 2: complete successfully
+				return executor.Result{Output: "plan created", Signal: status.PlanReady}
+			}
+		},
+	}
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{
+		Mode: processor.ModePlan, PlanDescription: "add caching", MaxIterations: 50,
+		IterationDelayMs: 1, AppConfig: appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetInputCollector(inputCollector)
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 2, "claude should be called twice (timeout + success)")
+	assert.Empty(t, inputCollector.AskQuestionCalls(), "question should NOT be presented after timeout")
+
+	// verify timeout retry was logged
+	var foundTimeout bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "plan creation session timed out") {
+			foundTimeout = true
+		}
+	}
+	assert.True(t, foundTimeout, "should log plan creation timeout retry message")
+}
+
+func TestRunner_SessionTimeout_ExternalReviewKeepsBranchDiffAfterTimeout(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// scenario: external review loop where claude eval times out on iteration 1.
+	// the next codex iteration should still use branch-wide diff (git diff main...HEAD),
+	// not working-tree diff (git diff), because no successful eval completed yet.
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			callNum++
+			switch callNum {
+			case 1: // claude eval iteration 1 — block until session timeout
+				<-ctx.Done()
+				return executor.Result{Output: "partial", Error: ctx.Err()}
+			case 2: // claude eval iteration 2 — codex done
+				return executor.Result{Output: "no issues found", Signal: status.CodexDone}
+			default:
+				return executor.Result{Output: "review done", Signal: status.ReviewDone}
+			}
+		},
+	}
+
+	codexCallNum := 0
+	codex := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, prompt string) executor.Result {
+			codexCallNum++
+			return executor.Result{Output: fmt.Sprintf("finding %d", codexCallNum)}
+		},
+	}
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{
+		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
+		CodexEnabled: true, AppConfig: appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 2, "codex should run twice")
+
+	// both codex calls should use branch-wide diff because the first claude eval timed out
+	// and no successful eval has completed yet on iteration 2
+	for i, call := range codex.RunCalls() {
+		assert.Contains(t, call.Prompt, "git diff", "codex call %d should contain diff instruction", i+1)
+		assert.NotContains(t, call.Prompt, "PREVIOUS REVIEW CONTEXT",
+			"codex call %d should not have previous context (first timed out, second is first success)", i+1)
+	}
+	// iteration 1 should have branch-wide diff
+	assert.Contains(t, codex.RunCalls()[0].Prompt, "...HEAD", "first codex call should use branch-wide diff")
+	// iteration 2 should still have branch-wide diff (timeout didn't count as successful eval)
+	assert.Contains(t, codex.RunCalls()[1].Prompt, "...HEAD", "second codex call should still use branch-wide diff after timeout")
+}
+
+func TestRunner_SessionTimeout_PlanCreationPreservesRevisionFeedback(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+
+	// scenario: user requests revisions, but the revision attempt times out.
+	// the next iteration should still include the revision feedback.
+	planDraftSignal := "<<<RALPHEX:PLAN_DRAFT>>>\n# Test Plan\n## Tasks\n- [ ] Task 1\n<<<RALPHEX:END>>>"
+
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			callNum++
+			switch callNum {
+			case 1: // iteration 1: emit draft for review
+				return executor.Result{Output: planDraftSignal}
+			case 2: // iteration 2: revision attempt times out
+				<-ctx.Done()
+				return executor.Result{Output: "partial revision", Error: ctx.Err()}
+			case 3: // iteration 3: retry with preserved feedback, completes
+				return executor.Result{Output: "plan created", Signal: status.PlanReady}
+			default:
+				return executor.Result{Output: "done", Signal: status.PlanReady}
+			}
+		},
+	}
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
+		action   string
+		feedback string
+		err      error
+	}{
+		{action: "revise", feedback: "please add error handling task", err: nil},
+	})
+
+	appCfg := testAppConfig(t)
+	appCfg.SessionTimeout = 50 * time.Millisecond
+	appCfg.SessionTimeoutSet = true
+
+	cfg := processor.Config{
+		Mode: processor.ModePlan, PlanDescription: "add caching", MaxIterations: 50,
+		IterationDelayMs: 1, AppConfig: appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetInputCollector(inputCollector)
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 3, "claude should be called 3 times (draft + timeout + success)")
+
+	// verify feedback was preserved after timeout: iteration 3 prompt should contain revision feedback
+	thirdPrompt := claude.RunCalls()[2].Prompt
+	assert.Contains(t, thirdPrompt, "please add error handling task",
+		"revision feedback should be preserved after timeout")
+	assert.Contains(t, thirdPrompt, "PREVIOUS DRAFT FEEDBACK",
+		"feedback header should be present after timeout")
+
+	// verify iteration 2 (timed out) also had the feedback
+	secondPrompt := claude.RunCalls()[1].Prompt
+	assert.Contains(t, secondPrompt, "please add error handling task",
+		"revision feedback should be in the timed-out attempt too")
 }

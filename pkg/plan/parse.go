@@ -45,8 +45,8 @@ type Plan struct {
 var (
 	taskHeaderPattern = regexp.MustCompile(`^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$`)
 	// allow leading whitespace for indented sub-items (e.g. "  - [ ] Unit tests")
-	checkboxPattern   = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
-	titlePattern      = regexp.MustCompile(`^#\s+(.*)$`)
+	checkboxPattern = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
+	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
 	// formatInText matches [ ] or [x] in checkbox text — description/example, not actionable for completion check.
 	formatInText = regexp.MustCompile(`\[\s*[ xX]?\s*\]`)
 )

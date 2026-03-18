@@ -101,18 +101,19 @@ type Executors struct {
 
 // Runner orchestrates the execution loop.
 type Runner struct {
-	cfg            Config
-	log            Logger
-	claude         Executor
-	codex          Executor
-	custom         *executor.CustomExecutor
-	git            GitChecker
-	inputCollector InputCollector
-	phaseHolder    *status.PhaseHolder
-	iterationDelay time.Duration
-	taskRetryCount int
-	waitOnLimit    time.Duration
-	breakCh        <-chan struct{} // nil = feature disabled; close to break external review loop
+	cfg                 Config
+	log                 Logger
+	claude              Executor
+	codex               Executor
+	custom              *executor.CustomExecutor
+	git                 GitChecker
+	inputCollector      InputCollector
+	phaseHolder         *status.PhaseHolder
+	iterationDelay      time.Duration
+	taskRetryCount      int
+	waitOnLimit         time.Duration
+	breakCh             <-chan struct{} // nil = feature disabled; close to break external review loop
+	lastSessionTimedOut bool            // set by runWithSessionTimeout, checked by review loops
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
@@ -490,6 +491,13 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 			return nil
 		}
 
+		// on session timeout, skip HEAD check and retry; the session was killed before
+		// it could finish, so "no changes" doesn't mean "nothing to fix"
+		if r.lastSessionTimedOut {
+			r.log.Print("session timed out, retrying review iteration...")
+			continue
+		}
+
 		// fallback: if HEAD hash hasn't changed, claude found nothing to fix
 		if headBefore != "" {
 			if headAfter := r.headHash(); headAfter == headBefore {
@@ -647,6 +655,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 
 	var claudeResponse string // first iteration has no prior response
 	var unchangedRounds int   // consecutive iterations with no commits (for stalemate detection)
+	firstCompleted := false   // tracks if any successful eval completed; controls diff scope for external tool
 
 	for i := 1; i <= maxIterations; i++ {
 		select {
@@ -661,8 +670,9 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 
 		r.log.PrintSection(cfg.makeSection(i))
 
-		// run external review tool
-		reviewResult := r.runWithLimitRetry(loopCtx, cfg.runReview, cfg.buildPrompt(i == 1, claudeResponse), cfg.name)
+		// run external review tool. use branch-wide diff until a successful claude eval completes,
+		// so that a timeout on the first eval doesn't narrow subsequent reviews to working-tree only
+		reviewResult := r.runWithLimitRetry(loopCtx, cfg.runReview, cfg.buildPrompt(!firstCompleted, claudeResponse), cfg.name)
 		if reviewResult.Error != nil {
 			if r.isManualBreak(ctx) {
 				r.log.Print("manual break requested, external review terminated early")
@@ -707,6 +717,15 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 			return fmt.Errorf("claude execution: %w", claudeResult.Error)
 		}
 
+		// on session timeout, skip response capture and stalemate detection; the session was killed
+		// before it could finish, so partial output can't be trusted as previous context and
+		// "no changes" doesn't mean "nothing to fix"
+		if r.lastSessionTimedOut {
+			r.log.Print("claude eval session timed out, retrying %s iteration...", cfg.name)
+			continue
+		}
+
+		firstCompleted = true // successful eval completed, next iteration can use working-tree diff
 		claudeResponse = claudeResult.Output
 
 		// exit only when claude sees "no findings"
@@ -963,9 +982,9 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 
 		prompt := r.buildPlanPrompt()
 		// append revision feedback context if present
-		if lastRevisionFeedback != "" {
+		hadFeedback := lastRevisionFeedback != ""
+		if hadFeedback {
 			prompt = fmt.Sprintf("%s\n\n---\nPREVIOUS DRAFT FEEDBACK:\nUser requested revisions with this feedback:\n%s\n\nPlease revise the plan accordingly and present a new PLAN_DRAFT.", prompt, lastRevisionFeedback)
-			lastRevisionFeedback = "" // clear after use
 		}
 
 		result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
@@ -984,6 +1003,22 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		if isPlanReady(result.Signal) {
 			r.log.Print("plan creation completed")
 			return nil
+		}
+
+		// on session timeout, skip output parsing and retry; the session was killed before
+		// it could finish, so partial output may contain truncated PLAN_DRAFT or QUESTION markers.
+		// preserve lastRevisionFeedback so the next attempt re-sends the user's revision request
+		if r.lastSessionTimedOut {
+			r.log.Print("plan creation session timed out, retrying iteration...")
+			if err := r.sleepWithContext(ctx, r.iterationDelay); err != nil {
+				return fmt.Errorf("interrupted: %w", err)
+			}
+			continue
+		}
+
+		// session completed successfully, clear revision feedback since it was consumed
+		if hadFeedback {
+			lastRevisionFeedback = ""
 		}
 
 		// check for PLAN_DRAFT signal - present draft for user review
@@ -1038,15 +1073,17 @@ func (r *Runner) handlePatternMatchError(err error, tool string) error {
 	return nil
 }
 
-// runWithLimitRetry wraps an executor Run() call with rate limit retry logic.
+// runWithLimitRetry wraps an executor Run() call with rate limit retry logic and optional session timeout.
 // if the result contains a LimitPatternError and waitOnLimit > 0, it logs a message, waits, and retries.
 // if waitOnLimit == 0, the LimitPatternError is returned as-is (existing exit behavior).
 // other errors (including PatternMatchError) are returned without retry.
+// when SessionTimeout > 0, each run() call gets a child context with deadline.
+// on session timeout (child timed out but parent alive), logs a warning and returns result with error cleared.
 // retries indefinitely until success or context cancellation.
 func (r *Runner) runWithLimitRetry(ctx context.Context, run func(context.Context, string) executor.Result,
 	prompt, toolName string) executor.Result {
 	for {
-		result := run(ctx, prompt)
+		result := r.runWithSessionTimeout(ctx, run, prompt, toolName)
 		if result.Error == nil {
 			return result
 		}
@@ -1067,6 +1104,48 @@ func (r *Runner) runWithLimitRetry(ctx context.Context, run func(context.Context
 			return executor.Result{Error: fmt.Errorf("interrupted during limit wait: %w", ctx.Err())}
 		}
 	}
+}
+
+// runWithSessionTimeout runs the executor with an optional session timeout.
+// if SessionTimeout > 0 and toolName is "claude", wraps ctx with context.WithTimeout before calling run.
+// on session timeout (child timed out but parent alive), logs a warning and clears the error
+// so callers treat it as a non-completing iteration that continues naturally.
+// only applies to claude sessions; codex and custom executors are not affected.
+func (r *Runner) runWithSessionTimeout(ctx context.Context, run func(context.Context, string) executor.Result,
+	prompt, toolName string) executor.Result {
+	r.lastSessionTimedOut = false
+	sessionTimeout := r.sessionTimeout()
+	if sessionTimeout <= 0 || toolName != "claude" {
+		return run(ctx, prompt) // no timeout configured or non-claude tool
+	}
+
+	childCtx, cancel := context.WithTimeout(ctx, sessionTimeout)
+	defer cancel()
+
+	result := run(childCtx, prompt)
+
+	// check if this was a session timeout: child context expired but parent is still alive.
+	// clear the error so callers (task loop, review loop) treat it as a non-completing iteration
+	// rather than aborting the phase. set lastSessionTimedOut so review loops can distinguish
+	// timeout from "genuinely found nothing" and continue instead of exiting.
+	if childCtx.Err() != nil && ctx.Err() == nil {
+		r.log.Print("warning: %s session timed out after %s, the agent may have started a blocking operation",
+			toolName, sessionTimeout)
+		result.Error = nil
+		result.Signal = "" // clear any signal emitted before timeout; can't trust partial session
+		r.lastSessionTimedOut = true
+	}
+
+	return result
+}
+
+// sessionTimeout returns the configured session timeout duration.
+// returns 0 if not configured or AppConfig is nil.
+func (r *Runner) sessionTimeout() time.Duration {
+	if r.cfg.AppConfig == nil {
+		return 0
+	}
+	return r.cfg.AppConfig.SessionTimeout
 }
 
 // runFinalize executes the optional finalize step after successful reviews.
