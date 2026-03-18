@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ import (
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/status"
 )
+
+// multiDashRegex collapses multiple consecutive dashes into one.
+var multiDashRegex = regexp.MustCompile(`-{2,}`)
 
 // Colors holds all color configuration for output formatting.
 // use NewColors to create from config.ColorConfig.
@@ -174,12 +178,16 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 	}
 	registerActiveLock(f.Name())
 
-	// check if file already has content (restart case) — safe after lock acquisition
-	fi, err := f.Stat()
-	if err != nil {
+	cleanup := func() {
 		_ = unlockFile(f)
 		unregisterActiveLock(f.Name())
 		f.Close()
+	}
+
+	// check if file already has content (restart case) — safe after lock acquisition
+	fi, err := f.Stat()
+	if err != nil {
+		cleanup()
 		return nil, fmt.Errorf("stat progress file: %w", err)
 	}
 
@@ -193,9 +201,7 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 	// FILE_WRITE_DATA permission required for fd-based truncation ("access is denied").
 	if restart && isProgressCompleted(f, fi.Size()) {
 		if tErr := os.Truncate(f.Name(), 0); tErr != nil {
-			_ = unlockFile(f)
-			unregisterActiveLock(f.Name())
-			f.Close()
+			cleanup()
 			return nil, fmt.Errorf("truncate completed progress file: %w", tErr)
 		}
 		restart = false
@@ -213,20 +219,24 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		// write restart separator (matches sectionRegex in web parser)
 		l.writeFile("\n\n--- restarted at %s ---\n\n", time.Now().Format("2006-01-02 15:04:05"))
 	} else {
-		// write full header for new file
-		planStr := cfg.PlanFile
-		if planStr == "" {
-			planStr = "(no plan - review only)"
-		}
-		l.writeFile("# Ralphex Progress Log\n")
-		l.writeFile("Plan: %s\n", planStr)
-		l.writeFile("Branch: %s\n", cfg.Branch)
-		l.writeFile("Mode: %s\n", cfg.Mode)
-		l.writeFile("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
-		l.writeFile("%s\n\n", separatorLine)
+		l.writeHeader(cfg)
 	}
 
 	return l, nil
+}
+
+// writeHeader writes the initial progress log header for a new file.
+func (l *Logger) writeHeader(cfg Config) {
+	planStr := cfg.PlanFile
+	if planStr == "" {
+		planStr = "(no plan - review only)"
+	}
+	l.writeFile("# Ralphex Progress Log\n")
+	l.writeFile("Plan: %s\n", planStr)
+	l.writeFile("Branch: %s\n", cfg.Branch)
+	l.writeFile("Mode: %s\n", cfg.Mode)
+	l.writeFile("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	l.writeFile("%s\n\n", separatorLine)
 }
 
 // Path returns the progress file path.
@@ -244,19 +254,19 @@ const timestampFormat = "06-01-02 15:04:05"
 // isProgressCompleted relies on this exact value to detect completed files.
 var separatorLine = strings.Repeat("-", 60)
 
+// writeTimestamped writes a message to both file and stdout with timestamp and optional prefix.
+func (l *Logger) writeTimestamped(prefix string, clr *color.Color, msg string) {
+	timestamp := time.Now().Format(timestampFormat)
+	l.writeFile("[%s] %s%s\n", timestamp, prefix, msg)
+
+	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	coloredMsg := clr.Sprintf("%s%s", prefix, msg)
+	l.writeStdout("%s %s\n", tsStr, coloredMsg)
+}
+
 // Print writes a timestamped message to both file and stdout.
 func (l *Logger) Print(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	timestamp := time.Now().Format(timestampFormat)
-
-	// write to file without color
-	l.writeFile("[%s] %s\n", timestamp, msg)
-
-	// write to stdout with color
-	phaseColor := l.colors.ForPhase(l.holder.Get())
-	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
-	msgStr := phaseColor.Sprint(msg)
-	l.writeStdout("%s %s\n", tsStr, msgStr)
+	l.writeTimestamped("", l.colors.ForPhase(l.holder.Get()), fmt.Sprintf(format, args...))
 }
 
 // PrintRaw writes without timestamp (for streaming output).
@@ -277,7 +287,7 @@ func (l *Logger) PrintSection(section status.Section) {
 // getTerminalWidth returns terminal width, using COLUMNS env var or syscall.
 // Defaults to 80 if detection fails. Returns content width (total - 22 for timestamp prefix
 // and safety margin to prevent terminal-level mid-word wrapping).
-func getTerminalWidth() int {
+func (l *Logger) getTerminalWidth() int {
 	const (
 		minWidth       = 40
 		prefixReserved = 22 // 20 for "[DD-MM-YY HH:MM:SS] " + 2 safety margin for list indent
@@ -308,7 +318,7 @@ func getTerminalWidth() int {
 
 // wrapText wraps text to specified width, breaking on word boundaries.
 // words longer than width are placed on their own line (terminal may wrap them).
-func wrapText(text string, width int) string {
+func (l *Logger) wrapText(text string, width int) string {
 	if width <= 0 || len(text) <= width {
 		return text
 	}
@@ -357,16 +367,16 @@ func (l *Logger) PrintAligned(text string) {
 	phaseColor := l.colors.ForPhase(l.holder.Get())
 
 	// wrap text to terminal width
-	width := getTerminalWidth()
+	width := l.getTerminalWidth()
 
 	// split into lines, apply list indent BEFORE wrapping (so indent is included in width calc),
 	// then wrap each long line
 	var lines []string
 	for line := range strings.SplitSeq(text, "\n") {
 		// apply list indent before wrapping so it's accounted for in width calculation
-		formatted := formatListItem(line)
+		formatted := l.formatListItem(line)
 		if len(formatted) > width {
-			wrapped := wrapText(formatted, width)
+			wrapped := l.wrapText(formatted, width)
 			for wrappedLine := range strings.SplitSeq(wrapped, "\n") {
 				lines = append(lines, wrappedLine)
 			}
@@ -391,7 +401,7 @@ func (l *Logger) PrintAligned(text string) {
 		lineColor := phaseColor
 
 		// format signal lines nicely
-		if sig := extractSignal(line); sig != "" {
+		if sig := l.extractSignal(line); sig != "" {
 			displayLine = sig
 			lineColor = l.colors.Signal()
 		}
@@ -402,7 +412,7 @@ func (l *Logger) PrintAligned(text string) {
 
 // extractSignal extracts signal name from <<<RALPHEX:SIGNAL_NAME>>> format.
 // returns empty string if no signal found.
-func extractSignal(line string) string {
+func (l *Logger) extractSignal(line string) string {
 	const prefix = "<<<RALPHEX:"
 	const suffix = ">>>"
 
@@ -421,10 +431,10 @@ func extractSignal(line string) string {
 
 // formatListItem adds 2-space indent for list items (numbered or bulleted).
 // detects patterns like "1. ", "12. ", "- ", "* " at line start.
-func formatListItem(line string) string {
+func (l *Logger) formatListItem(line string) string {
 	trimmed := strings.TrimLeft(line, " \t")
 	if trimmed == line { // no leading whitespace
-		if isListItem(trimmed) {
+		if l.isListItem(trimmed) {
 			return "  " + line
 		}
 	}
@@ -432,7 +442,7 @@ func formatListItem(line string) string {
 }
 
 // isListItem returns true if line starts with a list marker.
-func isListItem(line string) bool {
+func (l *Logger) isListItem(line string) bool {
 	// check for "- " or "* " (bullet lists)
 	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
 		return true
@@ -452,26 +462,12 @@ func isListItem(line string) bool {
 
 // Error writes an error message in red.
 func (l *Logger) Error(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	timestamp := time.Now().Format(timestampFormat)
-
-	l.writeFile("[%s] ERROR: %s\n", timestamp, msg)
-
-	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
-	errStr := l.colors.Error().Sprintf("ERROR: %s", msg)
-	l.writeStdout("%s %s\n", tsStr, errStr)
+	l.writeTimestamped("ERROR: ", l.colors.Error(), fmt.Sprintf(format, args...))
 }
 
 // Warn writes a warning message in yellow.
 func (l *Logger) Warn(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	timestamp := time.Now().Format(timestampFormat)
-
-	l.writeFile("[%s] WARN: %s\n", timestamp, msg)
-
-	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
-	warnStr := l.colors.Warn().Sprintf("WARN: %s", msg)
-	l.writeStdout("%s %s\n", tsStr, warnStr)
+	l.writeTimestamped("WARN: ", l.colors.Warn(), fmt.Sprintf(format, args...))
 }
 
 // LogQuestion logs a question and its options for plan creation mode.
@@ -492,13 +488,7 @@ func (l *Logger) LogQuestion(question string, options []string) {
 // LogAnswer logs the user's answer for plan creation mode.
 // format: ANSWER: <answer>
 func (l *Logger) LogAnswer(answer string) {
-	timestamp := time.Now().Format(timestampFormat)
-
-	l.writeFile("[%s] ANSWER: %s\n", timestamp, answer)
-
-	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
-	answerStr := l.colors.Info().Sprintf("ANSWER: %s", answer)
-	l.writeStdout("%s %s\n", tsStr, answerStr)
+	l.writeTimestamped("ANSWER: ", l.colors.Info(), answer)
 }
 
 // LogDraftReview logs the user's draft review action and optional feedback.
@@ -647,9 +637,7 @@ func sanitizePlanName(desc string) string {
 	result = clean.String()
 
 	// collapse multiple dashes
-	for strings.Contains(result, "--") {
-		result = strings.ReplaceAll(result, "--", "-")
-	}
+	result = multiDashRegex.ReplaceAllString(result, "-")
 
 	// trim leading/trailing dashes
 	result = strings.Trim(result, "-")

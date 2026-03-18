@@ -647,32 +647,34 @@ func TestWrapText(t *testing.T) {
 		},
 	}
 
+	l := &Logger{}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := wrapText(tc.text, tc.width)
+			got := l.wrapText(tc.text, tc.width)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
 func TestGetTerminalWidth(t *testing.T) {
+	l := &Logger{}
 	// test with COLUMNS env var
 	t.Run("uses COLUMNS env var", func(t *testing.T) {
 		t.Setenv("COLUMNS", "100")
-		width := getTerminalWidth()
+		width := l.getTerminalWidth()
 		// should return 100 - 22 = 78 (20 for timestamp prefix + 2 safety margin)
 		assert.Equal(t, 78, width)
 	})
 
 	t.Run("respects min width", func(t *testing.T) {
 		t.Setenv("COLUMNS", "50") // 50 - 22 = 28, but min is 40
-		width := getTerminalWidth()
+		width := l.getTerminalWidth()
 		assert.Equal(t, 40, width)
 	})
 
 	t.Run("invalid COLUMNS", func(t *testing.T) {
 		t.Setenv("COLUMNS", "invalid")
-		width := getTerminalWidth()
+		width := l.getTerminalWidth()
 		// should fall back to default or syscall result
 		assert.Positive(t, width)
 	})
@@ -695,9 +697,10 @@ func TestExtractSignal(t *testing.T) {
 		{"empty", "", ""},
 	}
 
+	l := &Logger{}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := extractSignal(tc.input)
+			got := l.extractSignal(tc.input)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -721,9 +724,10 @@ func TestIsListItem(t *testing.T) {
 		{"  - already indented", false}, // has leading space, won't match
 	}
 
+	l := &Logger{}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
-			got := isListItem(tc.input)
+			got := l.isListItem(tc.input)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -743,9 +747,10 @@ func TestFormatListItem(t *testing.T) {
 		{"double digit", "12. item", "  12. item"},
 	}
 
+	l := &Logger{}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := formatListItem(tc.input)
+			got := l.formatListItem(tc.input)
 			assert.Equal(t, tc.want, got)
 		})
 	}
