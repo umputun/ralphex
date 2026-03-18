@@ -951,7 +951,7 @@ class TestMainArgparse(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_env.extend(env_vars)
                 return 0
 
@@ -979,7 +979,7 @@ class TestMainArgparse(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_volumes.extend(volumes)
                 return 0
 
@@ -1007,7 +1007,7 @@ class TestMainArgparse(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_args.extend(args)
                 return 0
 
@@ -1033,7 +1033,7 @@ class TestMainArgparse(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_args.extend(args)
                 return 0
 
@@ -1061,7 +1061,7 @@ class TestMainArgparse(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_args.extend(args)
                 return 0
 
@@ -1089,7 +1089,7 @@ class TestMainArgparse(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_args.extend(args)
                 captured_env.extend(env_vars)
                 captured_volumes.extend(volumes)
@@ -1121,7 +1121,7 @@ class TestMainArgparse(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_env.extend(env_vars)
                 return 0
 
@@ -1688,7 +1688,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
 
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None, **kwargs: object,
         ) -> int:
             # capture what we need via side effect - creds_temp should be None for bedrock
             return 0
@@ -1719,7 +1719,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
 
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None, **kwargs: object,
         ) -> int:
             return 0
 
@@ -1751,7 +1751,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
 
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None, **kwargs: object,
         ) -> int:
             return 0
 
@@ -1779,7 +1779,7 @@ class TestBedrockSkipKeychain(EnvTestCase):
         """startup output includes 'bedrock' and 'keychain skipped'."""
         def fake_run_docker(
             image: str, port: int, volumes: list[str], extra_env: list[str],
-            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None,
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None, **kwargs: object,
         ) -> int:
             return 0
 
@@ -2118,6 +2118,37 @@ class TestBuildDockerCommand(unittest.TestCase):
         self.assertIn("-it", cmd)
 
 
+class TestDockerNetwork(EnvTestCase):
+    """tests for RALPHEX_DOCKER_NETWORK / --network support."""
+    env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_DOCKER_NETWORK"]
+    save_argv = True
+
+    def test_build_docker_command_with_network(self) -> None:
+        """verify --network flag in docker command."""
+        cmd = build_docker_command(
+            image="test-image:latest", port="8080", volumes=[], env_vars=[],
+            bind_port=False, args=[], network="host",
+        )
+        idx = cmd.index("--network")
+        self.assertEqual(cmd[idx + 1], "host")
+
+    def test_build_docker_command_without_network(self) -> None:
+        """verify no --network flag when network is empty."""
+        cmd = build_docker_command(
+            image="test-image:latest", port="8080", volumes=[], env_vars=[],
+            bind_port=False, args=[],
+        )
+        self.assertNotIn("--network", cmd)
+
+    def test_build_docker_command_named_network(self) -> None:
+        """verify --network with named network."""
+        cmd = build_docker_command(
+            image="test-image:latest", port="8080", volumes=[], env_vars=[],
+            bind_port=False, args=[], network="my-compose-net",
+        )
+        idx = cmd.index("--network")
+        self.assertEqual(cmd[idx + 1], "my-compose-net")
+
 class TestDetectInheritedEnvVars(unittest.TestCase):
     """tests for detect_inherited_env_vars() function."""
 
@@ -2428,7 +2459,7 @@ class TestDockerSocketMount(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_volumes.extend(volumes)
                 run_docker_calls.append({"docker_gid": docker_gid})
                 return 0
@@ -2571,7 +2602,7 @@ class TestDockerSocketMount(EnvTestCase):
 
             def fake_run_docker(image: str, port: str, volumes: list[str],
                                 env_vars: list[str], bind_port: bool, args: list[str],
-                                docker_gid: int | None = None) -> int:
+                                docker_gid: int | None = None, **kwargs: object) -> int:
                 captured_volumes.extend(volumes)
                 run_docker_calls.append({"docker_gid": docker_gid})
                 return 0

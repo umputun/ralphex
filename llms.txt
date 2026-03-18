@@ -153,6 +153,7 @@ ralphex --dry-run docs/plans/feature.md
 - `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`)
 - `RALPHEX_EXTRA_ENV` - Extra environment variables, comma-separated. Format: `VAR=value` or `VAR` (inherit from host). Warns when sensitive names (KEY, SECRET, TOKEN, etc.) have explicit values - use name-only form for secure credential passing. CLI flag: `-E`/`--env` (uppercase E to avoid conflict with ralphex's `-e`/`--external-only`)
 - `RALPHEX_DOCKER_SOCKET` - Enable Docker socket mount: `1`, `true`, or `yes` (Docker wrapper only). CLI flag: `--docker`
+- `RALPHEX_DOCKER_NETWORK` - Docker network mode (e.g., `host`, `my-network`). CLI flag: `--network`
 - `TZ` - Override container timezone (default: auto-detected from host)
 - `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
 
