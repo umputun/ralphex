@@ -18,10 +18,11 @@ const gracefulShutdownDelay = 100 * time.Millisecond
 // It ensures that when context is canceled, the entire process tree is killed,
 // not just the direct child process.
 type processGroupCleanup struct {
-	cmd  *exec.Cmd
-	done chan struct{}
-	once sync.Once
-	err  error
+	cmd      *exec.Cmd
+	done     chan struct{}
+	once     sync.Once // guards cmd.Wait() idempotency
+	killOnce sync.Once // guards killProcessGroup() idempotency
+	err      error
 }
 
 // setupProcessGroup configures command to run in its own session and process group.
@@ -53,7 +54,7 @@ func newProcessGroupCleanup(cmd *exec.Cmd, cancelCh <-chan struct{}) *processGro
 func (pg *processGroupCleanup) watchForCancel(cancelCh <-chan struct{}) {
 	select {
 	case <-cancelCh:
-		pg.killProcessGroup()
+		pg.killOnce.Do(pg.killProcessGroup)
 	case <-pg.done:
 		// process completed normally, goroutine exits
 	}
@@ -61,6 +62,8 @@ func (pg *processGroupCleanup) watchForCancel(cancelCh <-chan struct{}) {
 
 // killProcessGroup sends SIGTERM followed by SIGKILL to the entire process group.
 // Uses graceful shutdown: SIGTERM first, then SIGKILL after brief delay.
+// Early-returns when SIGTERM gets ESRCH (group already gone) to avoid the 100ms sleep
+// overhead on every normal-exit iteration.
 func (pg *processGroupCleanup) killProcessGroup() {
 	process := pg.cmd.Process
 	if process == nil {
@@ -76,7 +79,10 @@ func (pg *processGroupCleanup) killProcessGroup() {
 	pgid := -pid
 
 	// try graceful shutdown first with SIGTERM
-	if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
+	if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil {
+		if err == syscall.ESRCH {
+			return // process group already gone, nothing to do
+		}
 		log.Printf("[executor] SIGTERM failed for pgid %d: %v", pgid, err)
 	}
 
@@ -92,10 +98,13 @@ func (pg *processGroupCleanup) killProcessGroup() {
 // Wait waits for the command to complete and cleans up resources.
 // It is safe to call multiple times - subsequent calls return the cached result.
 // Callers must eventually call Wait to avoid leaking resources.
+// After the command exits, kills the process group to reap any orphaned descendants
+// (e.g. node subagents, MCP servers) that survived the parent's exit.
 func (pg *processGroupCleanup) Wait() error {
 	pg.once.Do(func() {
 		pg.err = pg.cmd.Wait()
 		close(pg.done)
+		pg.killOnce.Do(pg.killProcessGroup)
 		if pg.err != nil {
 			pg.err = fmt.Errorf("command wait: %w", pg.err)
 		}

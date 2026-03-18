@@ -33,11 +33,11 @@ groups on Windows).
 **Files:**
 - Modify: `pkg/executor/procgroup_unix.go`
 
-- [ ] add `killOnce sync.Once` field to `processGroupCleanup` struct (separate from existing `once` which guards Wait idempotency)
-- [ ] optimize `killProcessGroup()`: early-return when SIGTERM gets `ESRCH` (group already gone), skip the 100ms sleep and SIGKILL. This avoids adding 100ms overhead to every normal-exit iteration
-- [ ] wrap `killProcessGroup()` call in `watchForCancel` with `pg.killOnce.Do()`
-- [ ] add `pg.killOnce.Do(pg.killProcessGroup)` in `Wait()` inside the existing `pg.once.Do` closure, after `close(pg.done)`. This catches orphaned descendants on normal exit
-- [ ] run `go test ./pkg/executor/... -race` — must pass before task 2
+- [x] add `killOnce sync.Once` field to `processGroupCleanup` struct (separate from existing `once` which guards Wait idempotency)
+- [x] optimize `killProcessGroup()`: early-return when SIGTERM gets `ESRCH` (group already gone), skip the 100ms sleep and SIGKILL. This avoids adding 100ms overhead to every normal-exit iteration
+- [x] wrap `killProcessGroup()` call in `watchForCancel` with `pg.killOnce.Do()`
+- [x] add `pg.killOnce.Do(pg.killProcessGroup)` in `Wait()` inside the existing `pg.once.Do` closure, after `close(pg.done)`. This catches orphaned descendants on normal exit
+- [x] run `go test ./pkg/executor/... -race` — must pass before task 2
 
 ### Task 2: Update Windows stub
 
