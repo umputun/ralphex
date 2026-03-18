@@ -13,8 +13,8 @@ import (
 type processGroupCleanup struct {
 	cmd      *exec.Cmd
 	done     chan struct{}
-	once     sync.Once
-	killOnce sync.Once
+	once     sync.Once // guards cmd.Wait() idempotency
+	killOnce sync.Once // guards killProcess() idempotency
 	err      error
 }
 
