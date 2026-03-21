@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.24.4 - 2026-03-21
+
+### Fixed
+
+- Fix default colors for light terminal readability #237 @umputun
+
 ## v0.24.3 - 2026-03-18
 
 ### Improved
