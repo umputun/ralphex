@@ -56,7 +56,7 @@ func TestExecClaudeRunner_KillsProcessGroup(t *testing.T) {
 func TestExecClaudeRunner_KillsOrphansOnNormalExit(t *testing.T) {
 	// verifies that when the parent process exits normally (not via cancellation),
 	// orphaned descendants are still killed by the post-Wait killProcessGroup call.
-	// Setsid: true + background sleep keeps the child in the same process group
+	// setsid: true + background sleep keeps the child in the same process group
 	// as the parent, so -pgid kill reaches it even after the parent exits.
 
 	ctx := t.Context()

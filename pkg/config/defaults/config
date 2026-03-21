@@ -283,28 +283,28 @@ codex_limit_patterns = Rate limit,quota exceeded
 # ------------------------------------------------------------------------------
 
 # color_task: task execution phase (green)
-color_task = #00ff00
+color_task = #2e8b57
 
-# color_review: review phase (cyan)
-color_review = #00ffff
+# color_review: review phase (teal)
+color_review = #1a9e9e
 
-# color_codex: codex external review (magenta)
-color_codex = #d096d9
+# color_codex: codex external review (purple)
+color_codex = #9b59b6
 
-# color_claude_eval: claude evaluation of codex output (light blue)
-color_claude_eval = #bdd6ff
+# color_claude_eval: claude evaluation of codex output (blue)
+color_claude_eval = #5b8dd9
 
-# color_warn: warning messages (yellow)
-color_warn = #ffc56d
+# color_warn: warning messages (amber)
+color_warn = #d4930d
 
 # color_error: error messages (red)
-color_error = #ff0000
+color_error = #cc0000
 
-# color_signal: completion/failure signals (light red)
+# color_signal: completion/failure signals (red)
 color_signal = #d25252
 
 # color_timestamp: timestamp prefix (gray)
-color_timestamp = #8a8a8a
+color_timestamp = #707070
 
-# color_info: informational messages (light gray)
-color_info = #b4b4b4
+# color_info: informational messages (gray)
+color_info = #808080

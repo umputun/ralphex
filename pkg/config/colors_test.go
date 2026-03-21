@@ -20,15 +20,15 @@ func TestColorLoader_Load_EmbeddedOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	// all colors should have expected default values
-	assert.Equal(t, "0,255,0", colors.Task, "task color should be green (#00ff00)")
-	assert.Equal(t, "0,255,255", colors.Review, "review color should be cyan (#00ffff)")
-	assert.Equal(t, "208,150,217", colors.Codex, "codex color should be light magenta (#d096d9)")
-	assert.Equal(t, "189,214,255", colors.ClaudeEval, "claude_eval color should be light blue (#bdd6ff)")
-	assert.Equal(t, "255,197,109", colors.Warn, "warn color should be orange (#ffc56d)")
-	assert.Equal(t, "255,0,0", colors.Error, "error color should be red (#ff0000)")
-	assert.Equal(t, "210,82,82", colors.Signal, "signal color should be muted red (#d25252)")
-	assert.Equal(t, "138,138,138", colors.Timestamp, "timestamp color should be gray (#8a8a8a)")
-	assert.Equal(t, "180,180,180", colors.Info, "info color should be light gray (#b4b4b4)")
+	assert.Equal(t, "46,139,87", colors.Task, "task color should be sea green (#2e8b57)")
+	assert.Equal(t, "26,158,158", colors.Review, "review color should be teal (#1a9e9e)")
+	assert.Equal(t, "155,89,182", colors.Codex, "codex color should be purple (#9b59b6)")
+	assert.Equal(t, "91,141,217", colors.ClaudeEval, "claude_eval color should be blue (#5b8dd9)")
+	assert.Equal(t, "212,147,13", colors.Warn, "warn color should be amber (#d4930d)")
+	assert.Equal(t, "204,0,0", colors.Error, "error color should be red (#cc0000)")
+	assert.Equal(t, "210,82,82", colors.Signal, "signal color should be red (#d25252)")
+	assert.Equal(t, "112,112,112", colors.Timestamp, "timestamp color should be gray (#707070)")
+	assert.Equal(t, "128,128,128", colors.Info, "info color should be gray (#808080)")
 }
 
 func TestColorLoader_Load_GlobalConfigOverridesEmbedded(t *testing.T) {
@@ -50,8 +50,8 @@ color_error = #00ff00
 	assert.Equal(t, "0,255,0", colors.Error)
 
 	// missing colors from embedded defaults
-	assert.Equal(t, "0,255,255", colors.Review)
-	assert.Equal(t, "208,150,217", colors.Codex)
+	assert.Equal(t, "26,158,158", colors.Review)
+	assert.Equal(t, "155,89,182", colors.Codex)
 }
 
 func TestColorLoader_Load_LocalOverridesGlobal(t *testing.T) {
@@ -81,7 +81,7 @@ color_task = #0000ff
 	assert.Equal(t, "0,255,0", colors.Error)
 
 	// embedded defaults for unset colors
-	assert.Equal(t, "0,255,255", colors.Review)
+	assert.Equal(t, "26,158,158", colors.Review)
 }
 
 func TestColorLoader_Load_NonExistentFiles(t *testing.T) {
@@ -90,8 +90,8 @@ func TestColorLoader_Load_NonExistentFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	// should fall back to embedded defaults
-	assert.Equal(t, "0,255,0", colors.Task)
-	assert.Equal(t, "255,0,0", colors.Error)
+	assert.Equal(t, "46,139,87", colors.Task)
+	assert.Equal(t, "204,0,0", colors.Error)
 }
 
 func TestColorLoader_Load_InvalidColor(t *testing.T) {
