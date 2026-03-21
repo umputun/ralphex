@@ -222,6 +222,9 @@ func TestCodexExecutor_Run_DefaultSettings(t *testing.T) {
 	assert.Contains(t, argsStr, "model_reasoning_effort=xhigh")
 	assert.Contains(t, argsStr, "stream_idle_timeout_ms=3600000")
 	assert.Contains(t, argsStr, "--sandbox read-only")
+
+	// prompt must not appear in CLI args (passed via stdin to avoid Windows 8191-char limit)
+	assert.NotContains(t, capturedArgs, "test prompt", "prompt should be passed via stdin, not as CLI arg")
 }
 
 func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
@@ -261,6 +264,9 @@ func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
 	assert.Contains(t, argsStr, "stream_idle_timeout_ms=1000")
 	assert.Contains(t, argsStr, "--sandbox off")
 	assert.Contains(t, argsStr, `project_doc="/path/to/doc.md"`)
+
+	// prompt must not appear in CLI args (passed via stdin to avoid Windows 8191-char limit)
+	assert.NotContains(t, capturedArgs, "test", "prompt should be passed via stdin, not as CLI arg")
 }
 
 func TestCodexExecutor_shouldDisplay_headerBlock(t *testing.T) {
@@ -473,6 +479,25 @@ func TestExecCodexRunner_Run(t *testing.T) {
 	assert.Contains(t, string(data), "hello")
 
 	// wait should complete successfully
+	err = wait()
+	require.NoError(t, err)
+}
+
+func TestExecCodexRunner_Run_Stdin(t *testing.T) {
+	// test that stdin is piped to the child process (prompt via stdin for Windows compat)
+	prompt := "hello from stdin"
+	runner := &execCodexRunner{stdin: strings.NewReader(prompt)}
+
+	// use cat which reads stdin and writes to stdout
+	streams, wait, err := runner.Run(context.Background(), "cat")
+
+	require.NoError(t, err)
+	require.NotNil(t, streams.Stdout)
+
+	data, readErr := io.ReadAll(streams.Stdout)
+	require.NoError(t, readErr)
+	assert.Equal(t, prompt, string(data))
+
 	err = wait()
 	require.NoError(t, err)
 }

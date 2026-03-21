@@ -24,7 +24,11 @@ type CodexRunner interface {
 
 // execCodexRunner is the default command runner using os/exec for codex.
 // codex outputs streaming progress to stderr, final response to stdout.
-type execCodexRunner struct{}
+// when stdin is non-nil, it is connected to the child process's stdin (used to pass
+// the prompt via pipe instead of a CLI argument to avoid Windows 8191-char cmd limit).
+type execCodexRunner struct {
+	stdin io.Reader
+}
 
 func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) (CodexStreams, func() error, error) {
 	// check context before starting to avoid spawning a process that will be immediately killed
@@ -35,6 +39,11 @@ func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) 
 	// use exec.Command (not CommandContext) because we handle cancellation ourselves
 	// to ensure the entire process group is killed, not just the direct child
 	cmd := exec.Command(name, args...) //nolint:noctx // intentional: we handle context cancellation via process group kill
+
+	// pass prompt via stdin when set (avoids Windows 8191-char command-line limit)
+	if r.stdin != nil {
+		cmd.Stdin = r.stdin
+	}
 
 	// create new process group so we can kill all descendants on cleanup
 	setupProcessGroup(cmd)
@@ -125,11 +134,12 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 		args = append(args, "-c", fmt.Sprintf("project_doc=%q", e.ProjectDoc))
 	}
 
-	args = append(args, prompt)
-
+	// pass prompt via stdin to avoid Windows 8191-char command-line limit;
+	// codex reads from stdin when no positional prompt argument is given
+	stdinReader := strings.NewReader(prompt)
 	runner := e.runner
 	if runner == nil {
-		runner = &execCodexRunner{}
+		runner = &execCodexRunner{stdin: stdinReader}
 	}
 
 	streams, wait, err := runner.Run(ctx, cmd, args...)

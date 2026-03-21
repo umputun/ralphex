@@ -63,7 +63,8 @@ codex_args=(exec --json --dangerously-bypass-approvals-and-sandbox -s "$CODEX_SA
 if [[ "$is_review_prompt" == "1" ]]; then
     codex_args+=(-c "features.multi_agent=true")
 fi
-codex_args+=("$prompt")
+# prompt is passed via stdin to codex (not as CLI arg) to avoid command-line length limits.
+# codex reads from stdin when no positional prompt argument is given.
 
 # run codex with JSON output, translate events to claude stream-json format.
 # only agent messages are emitted — command executions and file reads produce
@@ -83,7 +84,7 @@ if [[ "$CODEX_VERBOSE" != "0" && "$CODEX_VERBOSE" != "1" ]]; then
     CODEX_VERBOSE=0
 fi
 
-codex "${codex_args[@]}" 2>/dev/null | while IFS= read -r line; do
+printf '%s' "$prompt" | codex "${codex_args[@]}" 2>/dev/null | while IFS= read -r line; do
     echo "$line" | jq -c --argjson verbose "$CODEX_VERBOSE" '
         if .type == "item.completed" then
             if .item.type == "agent_message" then

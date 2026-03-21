@@ -22,21 +22,21 @@ Windows has an 8191-character command-line limit (cmd.exe). The ClaudeExecutor a
 
 The codex CLI's `exec` subcommand reads prompt from stdin when no positional prompt argument is given. Mirror the ClaudeExecutor pattern:
 
-- [ ] Add `stdin io.Reader` field to `execCodexRunner` struct
-- [ ] Set `cmd.Stdin = r.stdin` in `execCodexRunner.Run()` when stdin is non-nil
-- [ ] In `CodexExecutor.Run()`, remove `args = append(args, prompt)` (line 128)
-- [ ] In `CodexExecutor.Run()`, create `stdinReader := strings.NewReader(prompt)` and pass it to `execCodexRunner`
-- [ ] Update `CodexRunner` interface if needed (or keep stdin as internal detail of `execCodexRunner`)
-- [ ] Update tests in `codex_test.go`: verify prompt is NOT in args, add test for stdin piping
+- [x] Add `stdin io.Reader` field to `execCodexRunner` struct
+- [x] Set `cmd.Stdin = r.stdin` in `execCodexRunner.Run()` when stdin is non-nil
+- [x] In `CodexExecutor.Run()`, remove `args = append(args, prompt)` (line 128)
+- [x] In `CodexExecutor.Run()`, create `stdinReader := strings.NewReader(prompt)` and pass it to `execCodexRunner`
+- [x] Update `CodexRunner` interface if needed (or keep stdin as internal detail of `execCodexRunner`)
+- [x] Update tests in `codex_test.go`: verify prompt is NOT in args, add test for stdin piping
 - [ ] Run `make test` and `make lint`
 
 ### Task 2: Fix codex-as-claude.sh to pipe prompt via stdin
 
 The script reads prompt from stdin (or `-p` flag), then passes it as a CLI argument to codex. Instead, pipe it to codex's stdin.
 
-- [ ] Remove `"$prompt"` from `codex_args` array in `codex-as-claude.sh`
-- [ ] Pipe prompt to codex via stdin (e.g., `echo "$prompt" | codex ...` or heredoc)
-- [ ] Verify script still works with both `-p` and stdin prompt sources
+- [x] Remove `"$prompt"` from `codex_args` array in `codex-as-claude.sh`
+- [x] Pipe prompt to codex via stdin (`printf '%s' "$prompt" | codex ...`)
+- [ ] Verify script still works with both `-p` and stdin prompt sources (requires jq)
 - [ ] Update tests in `codex-as-claude_test.sh` if they verify args
 
 ### Task 3: Fix gemini-as-claude.sh to pipe prompt via stdin
