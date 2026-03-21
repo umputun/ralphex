@@ -65,7 +65,7 @@ func TestExecClaudeRunner_KillsOrphansOnNormalExit(t *testing.T) {
 
 	// bash spawns a background sleep, prints its PID, then exits immediately.
 	// the sleep outlives the parent bash and becomes an orphan in the same process group.
-	stdout, wait, err := runner.Run(ctx, "bash", "-c",
+	_, stdout, wait, err := runner.Run(ctx, "bash", "-c",
 		`sleep 300 & echo "CHILD_PID:$!"; exit 0`)
 	require.NoError(t, err)
 

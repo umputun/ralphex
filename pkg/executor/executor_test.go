@@ -1212,4 +1212,3 @@ type failingWriteCloser struct{ writeErr error }
 
 func (w *failingWriteCloser) Write([]byte) (int, error) { return 0, w.writeErr }
 func (w *failingWriteCloser) Close() error              { return nil }
-

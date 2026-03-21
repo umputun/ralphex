@@ -2845,7 +2845,6 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 	assert.False(t, foundBreak, "should not log manual break with nil channel")
 }
 
-<<<<<<< HEAD
 func TestRunner_SessionTimeout_BlockingExecutor(t *testing.T) {
 	log := newMockLogger("")
 	claude := newMockExecutor(nil)
