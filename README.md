@@ -710,7 +710,7 @@ Note: Inline comments are not supported (`text # comment` keeps the entire line)
 
 **Examples:**
 - Add a security-focused agent for fintech projects
-- Remove `simplification` agent if over-engineering isn't a concern
+- Remove `{{agent:simplification}}` from prompt files if over-engineering isn't a concern
 - Create language-specific agents (Python linting, TypeScript types)
 - Modify prompts to change how many agents run per phase
 
@@ -779,7 +779,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 **Merge behavior:**
 - **Config file**: per-field override (local values override global, missing fields fall back)
 - **Prompts**: per-file fallback (local → global → embedded for each prompt file)
-- **Agents**: replace entirely (if local `agents/` has `.txt` files, use ONLY local agents)
+- **Agents**: per-file fallback (local → global → embedded for each agent file, same as prompts)
 
 ### Configuration options
 
@@ -991,7 +991,7 @@ Run `ralphex --reset` to interactively reset global config. Select which compone
 
 **How does local .ralphex/ config interact with global config?**
 
-Priority: CLI flags > local `.ralphex/config` > global `~/.config/ralphex/config` > embedded defaults. Each local setting overrides the corresponding global one—no need to duplicate the entire file. For agents: if local `agents/` has any `.txt` files, it replaces global agents entirely.
+Priority: CLI flags > local `.ralphex/config` > global `~/.config/ralphex/config` > embedded defaults. Each local setting overrides the corresponding global one—no need to duplicate the entire file. For agents: per-file fallback (local → global → embedded), same as prompts. Override one agent without copying all others.
 
 **What happens to uncommitted changes if ralphex fails?**
 

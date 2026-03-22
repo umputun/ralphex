@@ -40,15 +40,21 @@ func (al *agentLoader) Load(localDir, globalDir string) ([]CustomAgent, error) {
 	}
 
 	// add global dir filenames
-	for _, name := range al.collectDirFilenames(globalDir) {
+	globalNames, err := al.collectDirFilenames(globalDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range globalNames {
 		filenames[name] = struct{}{}
 	}
 
 	// add local dir filenames
-	if localDir != "" {
-		for _, name := range al.collectDirFilenames(localDir) {
-			filenames[name] = struct{}{}
-		}
+	localNames, err := al.collectDirFilenames(localDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range localNames {
+		filenames[name] = struct{}{}
 	}
 
 	// resolve each filename with per-file fallback: local → global → embedded
@@ -73,14 +79,17 @@ func (al *agentLoader) Load(localDir, globalDir string) ([]CustomAgent, error) {
 }
 
 // collectDirFilenames returns .txt filenames from a directory, ignoring subdirs and non-.txt files.
-// returns nil if directory doesn't exist or can't be read.
-func (al *agentLoader) collectDirFilenames(dir string) []string {
+// returns nil, nil if directory doesn't exist; returns error for other filesystem failures.
+func (al *agentLoader) collectDirFilenames(dir string) ([]string, error) {
 	if dir == "" {
-		return nil
+		return nil, nil
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read agents dir %s: %w", dir, err)
 	}
 	var names []string
 	for _, entry := range entries {
@@ -88,7 +97,7 @@ func (al *agentLoader) collectDirFilenames(dir string) []string {
 			names = append(names, entry.Name())
 		}
 	}
-	return names
+	return names, nil
 }
 
 // collectEmbeddedFilenames returns .txt filenames from the embedded agents directory.
@@ -108,12 +117,15 @@ func (al *agentLoader) collectEmbeddedFilenames() ([]string, error) {
 
 // loadAgentWithFallback resolves a single agent file with fallback: local → global → embedded.
 // for each location, uses loadFileWithFallback for content-level fallback (empty/all-commented → embedded).
+// returns error for filesystem failures other than file-not-found.
 func (al *agentLoader) loadAgentWithFallback(localDir, globalDir, filename string) (string, error) {
 	// try local first
 	if localDir != "" {
 		path := filepath.Join(localDir, filename)
 		if _, err := os.Stat(path); err == nil {
 			return al.loadFileWithFallback(path, filename)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("stat agent file %s: %w", path, err)
 		}
 	}
 
@@ -122,6 +134,8 @@ func (al *agentLoader) loadAgentWithFallback(localDir, globalDir, filename strin
 		path := filepath.Join(globalDir, filename)
 		if _, err := os.Stat(path); err == nil {
 			return al.loadFileWithFallback(path, filename)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("stat agent file %s: %w", path, err)
 		}
 	}
 

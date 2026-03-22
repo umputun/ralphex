@@ -24,15 +24,6 @@ func findAgent(agents []CustomAgent, name string) *CustomAgent {
 	return nil
 }
 
-// agentNames extracts sorted agent names from the list.
-func agentNames(agents []CustomAgent) []string {
-	names := make([]string, 0, len(agents))
-	for _, a := range agents {
-		names = append(names, a.Name)
-	}
-	return names
-}
-
 func Test_newAgentLoader(t *testing.T) {
 	loader := newAgentLoader(defaultsFS)
 	assert.NotNil(t, loader)
@@ -76,9 +67,8 @@ func TestAgentLoader_Load_NoAgentsDir_FallsBackToEmbedded(t *testing.T) {
 	require.NoError(t, err)
 	// when agents directory doesn't exist, should fall back to embedded agents
 	assert.NotEmpty(t, agents, "should load embedded agents when directory doesn't exist")
-	names := agentNames(agents)
-	assert.Contains(t, names, "quality", "should include quality agent from embedded")
-	assert.Contains(t, names, "implementation", "should include implementation agent from embedded")
+	assert.NotNil(t, findAgent(agents, "quality"), "should include quality agent from embedded")
+	assert.NotNil(t, findAgent(agents, "implementation"), "should include implementation agent from embedded")
 }
 
 func TestAgentLoader_Load_EmptyAgentsDir(t *testing.T) {
@@ -276,8 +266,14 @@ func TestAgentLoader_Load_LocalAgentsEmptyFallsBackToGlobal(t *testing.T) {
 
 	// global agents + 5 embedded = 7
 	assert.Len(t, agents, 7)
-	assert.Equal(t, "global performance", findAgent(agents, "performance").Prompt)
-	assert.Equal(t, "global security", findAgent(agents, "security").Prompt)
+
+	perf := findAgent(agents, "performance")
+	require.NotNil(t, perf)
+	assert.Equal(t, "global performance", perf.Prompt)
+
+	sec := findAgent(agents, "security")
+	require.NotNil(t, sec)
+	assert.Equal(t, "global security", sec.Prompt)
 }
 
 func TestAgentLoader_Load_NoLocalAgentsDirFallsBackToGlobal(t *testing.T) {
@@ -321,10 +317,22 @@ func TestAgentLoader_Load_LocalAgentsMultipleFiles(t *testing.T) {
 
 	// alpha, beta, gamma (local) + global (global) + 5 embedded = 9
 	assert.Len(t, agents, 9)
-	assert.Equal(t, "alpha agent", findAgent(agents, "alpha").Prompt)
-	assert.Equal(t, "beta agent", findAgent(agents, "beta").Prompt)
-	assert.Equal(t, "gamma agent", findAgent(agents, "gamma").Prompt)
-	assert.Equal(t, "global agent", findAgent(agents, "global").Prompt)
+
+	alpha := findAgent(agents, "alpha")
+	require.NotNil(t, alpha)
+	assert.Equal(t, "alpha agent", alpha.Prompt)
+
+	beta := findAgent(agents, "beta")
+	require.NotNil(t, beta)
+	assert.Equal(t, "beta agent", beta.Prompt)
+
+	gamma := findAgent(agents, "gamma")
+	require.NotNil(t, gamma)
+	assert.Equal(t, "gamma agent", gamma.Prompt)
+
+	gl := findAgent(agents, "global")
+	require.NotNil(t, gl)
+	assert.Equal(t, "global agent", gl.Prompt)
 }
 
 func TestAgentLoader_collectDirFilenames(t *testing.T) {
@@ -332,28 +340,33 @@ func TestAgentLoader_collectDirFilenames(t *testing.T) {
 	agentsDir := filepath.Join(tmpDir, "agents")
 	al := newAgentLoader(defaultsFS)
 
-	// non-existent dir returns nil
-	names := al.collectDirFilenames(filepath.Join(tmpDir, "nonexistent"))
+	// non-existent dir returns nil, no error
+	names, err := al.collectDirFilenames(filepath.Join(tmpDir, "nonexistent"))
+	require.NoError(t, err)
 	assert.Nil(t, names)
 
 	// empty dir returns nil
 	require.NoError(t, os.MkdirAll(agentsDir, 0o700))
-	names = al.collectDirFilenames(agentsDir)
+	names, err = al.collectDirFilenames(agentsDir)
+	require.NoError(t, err)
 	assert.Nil(t, names)
 
 	// dir with non-.txt files only
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "readme.md"), []byte("readme"), 0o600))
-	names = al.collectDirFilenames(agentsDir)
+	names, err = al.collectDirFilenames(agentsDir)
+	require.NoError(t, err)
 	assert.Nil(t, names)
 
 	// dir with .txt files
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "agent.txt"), []byte("agent"), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(agentsDir, "subdir.txt"), 0o700)) // subdir skipped
-	names = al.collectDirFilenames(agentsDir)
+	names, err = al.collectDirFilenames(agentsDir)
+	require.NoError(t, err)
 	assert.Equal(t, []string{"agent.txt"}, names)
 
-	// empty string dir returns nil
-	names = al.collectDirFilenames("")
+	// empty string dir returns nil, no error
+	names, err = al.collectDirFilenames("")
+	require.NoError(t, err)
 	assert.Nil(t, names)
 }
 

@@ -284,14 +284,14 @@ project/
 │   ├── config          # overrides specific settings (per-field merge)
 │   ├── prompts/        # per-file fallback: local → global → embedded
 │   │   └── task.txt    # only override task prompt
-│   └── agents/         # replaces global if has files (no merge)
+│   └── agents/         # per-file fallback: local → global → embedded
 │       └── custom.txt  # project-specific agent
 ```
 
 **Merge strategy:**
 - **Config file**: per-field override (local values override global, missing fields fall back)
 - **Prompts**: per-file fallback (local → global → embedded for each prompt file)
-- **Agents**: replace entirely (if local agents/ has .txt files, use ONLY local agents)
+- **Agents**: per-file fallback (local → global → embedded for each agent file, same as prompts)
 
 ### Config Defaults Behavior
 

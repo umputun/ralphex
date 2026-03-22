@@ -678,7 +678,7 @@ color_task = #0000ff
 	// local prompts: only task.txt (overrides global task.txt)
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "prompts", "task.txt"), []byte("local task"), 0o600))
 
-	// local agents: completely different set (replaces global)
+	// local agents: adds custom agent (merged per-file with global and embedded)
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "agents", "custom.txt"), []byte("local custom agent"), 0o600))
 
 	cfg, err := loadWithLocal(globalDir, localDir)
