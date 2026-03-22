@@ -559,7 +559,7 @@ class ParsedEnvFlags:
     explicit: set[str]  # var names with explicit VAR=value form
 
 
-def parse_env_flags(extra_env: list[str] | None) -> ParsedEnvFlags:
+def parse_env_flags(extra_env: Optional[list[str]]) -> ParsedEnvFlags:
     """parse docker -e flags list into values dict and explicit names set.
 
     parses ["-e", "VAR=value", "-e", "VAR2", ...] format.
@@ -588,7 +588,7 @@ def parse_env_flags(extra_env: list[str] | None) -> ParsedEnvFlags:
     return ParsedEnvFlags(values, explicit)
 
 
-def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
+def build_bedrock_env_args(existing_env: Optional[list[str]] = None) -> list[str]:
     """build docker -e flags for bedrock env vars that are actually set.
 
     always sets CLAUDE_CODE_USE_BEDROCK=1 (since this function is only called when
@@ -630,7 +630,7 @@ def build_bedrock_env_args(existing_env: list[str] | None = None) -> list[str]:
     return result
 
 
-def export_aws_profile_credentials(extra_env: list[str] | None = None) -> dict[str, str]:
+def export_aws_profile_credentials(extra_env: Optional[list[str]] = None) -> dict[str, str]:
     """export AWS credentials from profile using aws configure export-credentials.
 
     returns dict with AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally
@@ -690,7 +690,7 @@ def export_aws_profile_credentials(extra_env: list[str] | None = None) -> dict[s
         return {}
 
 
-def extract_env_from_flags(extra_env: list[str] | None) -> dict[str, str]:
+def extract_env_from_flags(extra_env: Optional[list[str]]) -> dict[str, str]:
     """extract env vars from docker -e flags list.
 
     parses ["-e", "VAR=value", "-e", "VAR2", ...] into dict.
@@ -741,7 +741,7 @@ def detect_explicit_secrets(extra_env: list[str]) -> list[str]:
     return secrets
 
 
-def validate_bedrock_config(extra_env: list[str] | None = None) -> list[str]:
+def validate_bedrock_config(extra_env: Optional[list[str]] = None) -> list[str]:
     """validate bedrock configuration and return list of warning messages.
 
     checks for common misconfigurations when using bedrock provider:
