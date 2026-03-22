@@ -1333,3 +1333,106 @@ func TestService_formatDirtyFiles(t *testing.T) {
 		assert.Empty(t, svc.formatDirtyFiles([]string{}))
 	})
 }
+
+func TestService_SetCommitTrailer(t *testing.T) {
+	t.Run("stores trailer value", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetCommitTrailer("Co-authored-by: test <test@example.com>")
+		assert.Equal(t, "Co-authored-by: test <test@example.com>", svc.trailer)
+	})
+
+	t.Run("clears trailer with empty string", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetCommitTrailer("something")
+		svc.SetCommitTrailer("")
+		assert.Empty(t, svc.trailer)
+	})
+}
+
+func TestService_appendTrailer(t *testing.T) {
+	svc := &Service{}
+
+	t.Run("returns message unchanged when trailer is empty", func(t *testing.T) {
+		assert.Equal(t, "some commit msg", svc.appendTrailer("some commit msg"))
+	})
+
+	t.Run("appends trailer with blank line", func(t *testing.T) {
+		svc.trailer = "Co-authored-by: bot <bot@example.com>"
+		result := svc.appendTrailer("feat: add feature")
+		assert.Equal(t, "feat: add feature\n\nCo-authored-by: bot <bot@example.com>", result)
+	})
+
+	t.Run("appends trailer to multi-line message", func(t *testing.T) {
+		svc.trailer = "Signed-off-by: user"
+		result := svc.appendTrailer("fix: bug\n\ndetailed description")
+		assert.Equal(t, "fix: bug\n\ndetailed description\n\nSigned-off-by: user", result)
+	})
+}
+
+func TestService_CommitWithTrailer(t *testing.T) {
+	t.Run("trailer appears in commit log", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetCommitTrailer("Co-authored-by: ralphex <noreply@ralphex.com>")
+
+		// create and commit a plan file via CommitPlanFile
+		plansDir := filepath.Join(svc.Root(), "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "trailer-test.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		err = svc.CommitPlanFile(planFile, svc.Root())
+		require.NoError(t, err)
+
+		// verify trailer in commit message
+		out := runGit(t, svc.Root(), "log", "-1", "--format=%B")
+		assert.Contains(t, out, "add plan: trailer-test")
+		assert.Contains(t, out, "Co-authored-by: ralphex <noreply@ralphex.com>")
+	})
+
+	t.Run("no trailer when not configured", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		// no SetCommitTrailer call
+
+		plansDir := filepath.Join(svc.Root(), "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "no-trailer.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		err = svc.CommitPlanFile(planFile, svc.Root())
+		require.NoError(t, err)
+
+		out := runGit(t, svc.Root(), "log", "-1", "--format=%B")
+		assert.Contains(t, out, "add plan: no-trailer")
+		assert.NotContains(t, out, "Co-authored-by")
+	})
+
+	t.Run("trailer in MovePlanToCompleted", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetCommitTrailer("Signed-off-by: test")
+
+		// create and commit a plan file first
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "move-trailer.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		require.NoError(t, svc.repo.add(planFile))
+		require.NoError(t, svc.repo.commit("add plan"))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		out := runGit(t, dir, "log", "-1", "--format=%B")
+		assert.Contains(t, out, "move completed plan: move-trailer.md")
+		assert.Contains(t, out, "Signed-off-by: test")
+	})
+}

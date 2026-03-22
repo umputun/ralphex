@@ -56,8 +56,9 @@ type DiffStats struct {
 // Service provides git operations for ralphex workflows.
 // It is the single public API for the git package.
 type Service struct {
-	repo backend
-	log  Logger
+	repo    backend
+	log     Logger
+	trailer string // optional trailer line appended to all commits
 }
 
 // NewService opens a git repository and returns a Service.
@@ -74,6 +75,21 @@ func NewService(path string, log Logger, vcsCmd ...string) (*Service, error) {
 		return nil, err
 	}
 	return &Service{repo: b, log: log}, nil
+}
+
+// SetCommitTrailer sets an optional trailer line appended to all commit messages.
+// when set, a blank line and the trailer are appended after the commit message.
+func (s *Service) SetCommitTrailer(trailer string) {
+	s.trailer = trailer
+}
+
+// appendTrailer appends the configured trailer to a commit message.
+// returns the message unchanged when no trailer is configured.
+func (s *Service) appendTrailer(msg string) string {
+	if s.trailer == "" {
+		return msg
+	}
+	return msg + "\n\n" + s.trailer
 }
 
 // Root returns the absolute path to the repository root.
@@ -233,7 +249,7 @@ func (s *Service) CreateBranchForPlan(planFile, defaultBranch string) error {
 		if err := s.repo.add(planFile); err != nil {
 			return fmt.Errorf("stage plan file: %w", err)
 		}
-		if err := s.repo.commit("add plan: " + branchName); err != nil {
+		if err := s.repo.commit(s.appendTrailer("add plan: " + branchName)); err != nil {
 			return fmt.Errorf("commit plan file: %w", err)
 		}
 	}
@@ -321,7 +337,7 @@ func (s *Service) CommitPlanFile(planFile, mainRepoRoot string) error {
 	if err := s.repo.add(localPlan); err != nil {
 		return fmt.Errorf("stage plan file: %w", err)
 	}
-	if err := s.repo.commit("add plan: " + branchName); err != nil {
+	if err := s.repo.commit(s.appendTrailer("add plan: " + branchName)); err != nil {
 		return fmt.Errorf("commit plan file: %w", err)
 	}
 	return nil
@@ -416,7 +432,7 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 
 	// commit the move
 	commitMsg := "move completed plan: " + filepath.Base(planFile)
-	if err := s.repo.commit(commitMsg); err != nil {
+	if err := s.repo.commit(s.appendTrailer(commitMsg)); err != nil {
 		return fmt.Errorf("commit plan move: %w", err)
 	}
 
@@ -512,7 +528,7 @@ func (s *Service) CommitIgnoreChanges() error {
 	if err := s.repo.add(".gitignore"); err != nil {
 		return fmt.Errorf("stage .gitignore: %w", err)
 	}
-	if err := s.repo.commitFiles("add ralphex entries to .gitignore", ".gitignore"); err != nil {
+	if err := s.repo.commitFiles(s.appendTrailer("add ralphex entries to .gitignore"), ".gitignore"); err != nil {
 		return fmt.Errorf("commit .gitignore: %w", err)
 	}
 	s.log.Printf("committed .gitignore changes\n")

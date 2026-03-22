@@ -17,7 +17,7 @@ Related to #240.
 - Git backend: `pkg/git/external.go` (`commit()` and `commitFiles()` methods on `externalBackend`)
 - Git service: `pkg/git/service.go` (`NewService`, `CommitPlanFile`, `MovePlanToCompleted`)
 - Template variables: `pkg/processor/prompts.go` (`replaceBaseVariables()`)
-- Prompt files with commit instructions: `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `custom_eval.txt`, `finalize.txt`
+- Prompt files with commit instructions (no changes needed, trailer instruction auto-appended): `task.txt`, `review_first.txt`, `review_second.txt`, `codex.txt`, `custom_eval.txt`, `finalize.txt`
 - Embedded defaults: `pkg/config/defaults/config`
 - Callers of `git.NewService`: `cmd/ralphex/main.go` (3 call sites: `openGitService`, worktree service in `runWithWorktree`, and tests)
 
@@ -27,8 +27,7 @@ Related to #240.
 2. Parse from INI, merge like other string fields
 3. Add `SetCommitTrailer(string)` method on `git.Service` — stores trailer on Service, not on backend
 4. Service methods that call `repo.commit()`/`repo.commitFiles()` append trailer to message before passing it down (no backend interface change)
-5. Add `{{COMMIT_TRAILER}}` template variable expanding to LLM instruction text, accessed via `r.cfg.AppConfig.CommitTrailer`
-6. Add trailer instruction block to prompt files that contain commit commands
+5. When `commit_trailer` is set, auto-append trailer instruction suffix to all prompts in `replaceBaseVariables()` — no prompt file modifications needed
 
 ## Development Approach
 
@@ -63,31 +62,24 @@ Related to #240.
 - Modify: `pkg/git/service_test.go`
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] add `trailer string` field to `Service` struct
-- [ ] add `SetCommitTrailer(string)` method on `Service` that sets the field
-- [ ] add helper `Service.appendTrailer(msg string) string` that appends "\n\n<trailer>" when set, returns msg unchanged when empty
-- [ ] modify Service methods that call `repo.commit()` to use `appendTrailer()`: `CreateBranchForPlan`, `CommitPlanFile`, `MovePlanToCompleted`
-- [ ] modify Service methods that call `repo.commitFiles()` to use `appendTrailer()` (if any)
-- [ ] call `gitSvc.SetCommitTrailer(cfg.CommitTrailer)` in `cmd/ralphex/main.go` at all 3 call sites: `openGitService`, worktree service in `runWithWorktree`, and any other NewService calls
-- [ ] write tests: commit with trailer appended (verify trailer in git log output), commit without trailer (empty config)
-- [ ] write tests: SetCommitTrailer stores value, appendTrailer helper logic
-- [ ] run `make test` — must pass before next task
+- [x] add `trailer string` field to `Service` struct
+- [x] add `SetCommitTrailer(string)` method on `Service` that sets the field
+- [x] add helper `Service.appendTrailer(msg string) string` that appends "\n\n<trailer>" when set, returns msg unchanged when empty
+- [x] modify Service methods that call `repo.commit()` to use `appendTrailer()`: `CreateBranchForPlan`, `CommitPlanFile`, `MovePlanToCompleted`
+- [x] modify Service methods that call `repo.commitFiles()` to use `appendTrailer()` (if any)
+- [x] call `gitSvc.SetCommitTrailer(cfg.CommitTrailer)` in `cmd/ralphex/main.go` at all 3 call sites: `openGitService`, worktree service in `runWithWorktree`, and any other NewService calls
+- [x] write tests: commit with trailer appended (verify trailer in git log output), commit without trailer (empty config)
+- [x] write tests: SetCommitTrailer stores value, appendTrailer helper logic
+- [x] run `make test` — must pass before next task
 
-### Task 3: Add template variable for LLM prompts
+### Task 3: Add trailer instruction suffix to LLM prompts
 
 **Files:**
 - Modify: `pkg/processor/prompts.go`
 - Modify: `pkg/processor/prompts_test.go`
-- Modify: `pkg/config/defaults/prompts/task.txt`
-- Modify: `pkg/config/defaults/prompts/review_first.txt`
-- Modify: `pkg/config/defaults/prompts/review_second.txt`
-- Modify: `pkg/config/defaults/prompts/codex.txt`
-- Modify: `pkg/config/defaults/prompts/custom_eval.txt`
-- Modify: `pkg/config/defaults/prompts/finalize.txt`
 
-- [ ] add `{{COMMIT_TRAILER}}` expansion in `replaceBaseVariables()` using `r.cfg.AppConfig.CommitTrailer` — when trailer is set, expand to instruction text like "When making git commits, add the following trailer after a blank line at the end of the commit message:\n<trailer>"; when empty, expand to empty string
-- [ ] add `{{COMMIT_TRAILER}}` placeholder to each prompt file that contains commit instructions (after the commit instruction line)
-- [ ] write tests: template variable expansion with trailer set, with trailer empty
+- [ ] in `replaceBaseVariables()`, when `r.cfg.AppConfig.CommitTrailer` is set, append a trailer instruction suffix to the prompt result (e.g., "\n\nWhen making git commits, add the following trailer after a blank line at the end of the commit message:\n<trailer>"). When empty, append nothing. No prompt file changes needed — all prompts get the instruction automatically
+- [ ] write tests: prompt with trailer set has suffix appended, prompt with empty trailer is unchanged
 - [ ] run `make test` — must pass before next task
 
 ### Task 4: Verify and document
