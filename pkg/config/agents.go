@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// agentLoader loads custom agent files from config directories with embedded fallback.
+// agentLoader loads custom agent files from config directories with per-file fallback.
 type agentLoader struct {
 	embedFS embed.FS
 }
@@ -22,74 +22,46 @@ func newAgentLoader(embedFS embed.FS) *agentLoader {
 	return &agentLoader{embedFS: embedFS}
 }
 
-// Load loads custom agent files from config directories.
-// agents use "replace entire set" behavior: if local agents dir has any .txt files,
-// use ONLY local agents; otherwise fall back to global agents.
-// this differs from prompts which use per-file fallback (local → global → embedded).
-// rationale: agents define the review strategy as a cohesive set, so partial mixing
-// would create unpredictable review behavior.
+// Load loads agent files using per-file fallback: local → global → embedded.
+// collects the union of all .txt filenames from embedded defaults, global dir, and local dir,
+// then for each unique filename resolves content with precedence: local → global → embedded.
+// this matches the prompt loading strategy (see promptLoader.loadPromptWithLocalFallback).
 func (al *agentLoader) Load(localDir, globalDir string) ([]CustomAgent, error) {
-	// check if local agents dir has any .txt files
+	// collect union of all agent filenames from all sources
+	filenames := make(map[string]struct{})
+
+	// baseline: embedded defaults
+	embeddedNames, err := al.collectEmbeddedFilenames()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range embeddedNames {
+		filenames[name] = struct{}{}
+	}
+
+	// add global dir filenames
+	for _, name := range al.collectDirFilenames(globalDir) {
+		filenames[name] = struct{}{}
+	}
+
+	// add local dir filenames
 	if localDir != "" {
-		hasAgentFiles, err := al.dirHasAgentFiles(localDir)
-		if err != nil {
-			return nil, err
-		}
-		if hasAgentFiles {
-			// use ONLY local agents
-			return al.loadFromDir(localDir)
+		for _, name := range al.collectDirFilenames(localDir) {
+			filenames[name] = struct{}{}
 		}
 	}
 
-	// fall back to global agents
-	return al.loadFromDir(globalDir)
-}
-
-// dirHasAgentFiles checks if a directory has any .txt files.
-func (al *agentLoader) dirHasAgentFiles(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("read agents directory %s: %w", dir, err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".txt") {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// loadFromDir loads agent files from a specific directory.
-// files with only comments/empty content fall back to embedded defaults.
-// if directory doesn't exist, falls back to loading all embedded agents.
-func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return al.loadAllFromEmbedFS()
-		}
-		return nil, fmt.Errorf("read agents directory %s: %w", agentsDir, err)
-	}
-
-	agents := make([]CustomAgent, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
-			continue
-		}
-
-		prompt, err := al.loadFileWithFallback(filepath.Join(agentsDir, entry.Name()), entry.Name())
-		if err != nil {
-			return nil, err
+	// resolve each filename with per-file fallback: local → global → embedded
+	agents := make([]CustomAgent, 0, len(filenames))
+	for filename := range filenames {
+		prompt, loadErr := al.loadAgentWithFallback(localDir, globalDir, filename)
+		if loadErr != nil {
+			return nil, loadErr
 		}
 		if prompt == "" {
 			continue
 		}
-
-		name := strings.TrimSuffix(entry.Name(), ".txt")
+		name := strings.TrimSuffix(filename, ".txt")
 		agents = append(agents, al.buildAgent(name, prompt))
 	}
 
@@ -98,6 +70,63 @@ func (al *agentLoader) loadFromDir(agentsDir string) ([]CustomAgent, error) {
 	})
 
 	return agents, nil
+}
+
+// collectDirFilenames returns .txt filenames from a directory, ignoring subdirs and non-.txt files.
+// returns nil if directory doesn't exist or can't be read.
+func (al *agentLoader) collectDirFilenames(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".txt") {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
+}
+
+// collectEmbeddedFilenames returns .txt filenames from the embedded agents directory.
+func (al *agentLoader) collectEmbeddedFilenames() ([]string, error) {
+	entries, err := al.embedFS.ReadDir("defaults/agents")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded agents dir: %w", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".txt") {
+			names = append(names, entry.Name())
+		}
+	}
+	return names, nil
+}
+
+// loadAgentWithFallback resolves a single agent file with fallback: local → global → embedded.
+// for each location, uses loadFileWithFallback for content-level fallback (empty/all-commented → embedded).
+func (al *agentLoader) loadAgentWithFallback(localDir, globalDir, filename string) (string, error) {
+	// try local first
+	if localDir != "" {
+		path := filepath.Join(localDir, filename)
+		if _, err := os.Stat(path); err == nil {
+			return al.loadFileWithFallback(path, filename)
+		}
+	}
+
+	// try global
+	if globalDir != "" {
+		path := filepath.Join(globalDir, filename)
+		if _, err := os.Stat(path); err == nil {
+			return al.loadFileWithFallback(path, filename)
+		}
+	}
+
+	// fall back to embedded
+	return al.loadFromEmbedFS(filename)
 }
 
 // loadFileWithFallback reads an agent file from disk with fallback to embedded.
@@ -132,38 +161,6 @@ func (al *agentLoader) loadFromEmbedFS(filename string) (string, error) {
 		return "", fmt.Errorf("read embedded agent %s: %w", filename, err)
 	}
 	return strings.TrimSpace(normalizeCRLF(string(data))), nil
-}
-
-// loadAllFromEmbedFS loads all agent files from the embedded filesystem.
-// used as fallback when the agents directory doesn't exist.
-func (al *agentLoader) loadAllFromEmbedFS() ([]CustomAgent, error) {
-	entries, err := al.embedFS.ReadDir("defaults/agents")
-	if err != nil {
-		return nil, fmt.Errorf("read embedded agents dir: %w", err)
-	}
-
-	agents := make([]CustomAgent, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
-			continue
-		}
-
-		prompt, err := al.loadFromEmbedFS(entry.Name())
-		if err != nil {
-			return nil, err
-		}
-		if prompt == "" {
-			continue
-		}
-		name := strings.TrimSuffix(entry.Name(), ".txt")
-		agents = append(agents, al.buildAgent(name, prompt))
-	}
-
-	sort.Slice(agents, func(i, j int) bool {
-		return agents[i].Name < agents[j].Name
-	})
-
-	return agents, nil
 }
 
 // buildAgent parses frontmatter options from prompt and builds a CustomAgent.

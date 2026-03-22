@@ -40,13 +40,13 @@
 - Modify: `pkg/config/agents_test.go`
 - Modify: `pkg/config/config_test.go`
 
-- [ ] rewrite `Load()` to collect union of filenames from embedded `defaults/agents/` (baseline), global dir, and local dir
-- [ ] for each unique filename in the union: try local path → try global path → try embedded, following `promptLoader.loadPromptWithLocalFallback()` pattern
-- [ ] remove `dirHasAgentFiles()` function (no longer needed)
-- [ ] remove `loadFromDir()` function (replaced by union-based approach)
-- [ ] add helper method to collect filenames from an on-disk directory (returns set of filenames, ignores non-.txt and dirs)
-- [ ] update code comments to reflect new per-file fallback strategy (replace "replace entire set" rationale)
-- [ ] update all existing tests that assert exact agent counts from single directories to account for embedded defaults in union:
+- [x] rewrite `Load()` to collect union of filenames from embedded `defaults/agents/` (baseline), global dir, and local dir
+- [x] for each unique filename in the union: try local path → try global path → try embedded, following `promptLoader.loadPromptWithLocalFallback()` pattern
+- [x] remove `dirHasAgentFiles()` function (no longer needed)
+- [x] remove `loadFromDir()` function (replaced by union-based approach)
+- [x] add helper method to collect filenames from an on-disk directory (returns set of filenames, ignores non-.txt and dirs)
+- [x] update code comments to reflect new per-file fallback strategy (replace "replace entire set" rationale)
+- [x] update all existing tests that assert exact agent counts from single directories to account for embedded defaults in union:
   - `TestAgentLoader_Load_FromAgentsDir` — agents from dir + embedded defaults
   - `TestAgentLoader_Load_OnlyTxtFiles` — non-txt files skipped, embedded defaults still appear
   - `TestAgentLoader_Load_SkipsEmptyFiles` — empty files skipped, embedded defaults appear
@@ -61,20 +61,20 @@
   - `TestAgentLoader_Load_NoLocalAgentsDirFallsBackToGlobal` — no local dir, global + embedded
   - `TestAgentLoader_loadFromDir` tests — remove or refactor (function removed)
   - remove `TestAgentLoader_dirHasAgentFiles` tests (function removed)
-- [ ] rename `TestAgentLoader_Load_LocalAgentsReplaceGlobal` → verify per-file merge (local overrides specific, global/embedded fill rest)
-- [ ] add test: local overrides one default agent, other 4 come from embedded
-- [ ] add test: local adds custom agent alongside all 5 embedded defaults
-- [ ] add test: local overrides global for same-named agent (precedence: local > global > embedded)
-- [ ] update `TestLocalConfig_LocalAgentsReplaceGlobal` in config_test.go to verify per-file merge
-- [ ] update `TestLoad_PartialOverridesAllComponents` in config_test.go — agents should be merged, not replaced
-- [ ] run `go test ./pkg/config/` — must pass before next task
+- [x] rename `TestAgentLoader_Load_LocalAgentsReplaceGlobal` → verify per-file merge (local overrides specific, global/embedded fill rest)
+- [x] add test: local overrides one default agent, other 4 come from embedded
+- [x] add test: local adds custom agent alongside all 5 embedded defaults
+- [x] add test: local overrides global for same-named agent (precedence: local > global > embedded)
+- [x] update `TestLocalConfig_LocalAgentsReplaceGlobal` in config_test.go to verify per-file merge
+- [x] update `TestLoad_PartialOverridesAllComponents` in config_test.go — agents should be merged, not replaced
+- [x] run `go test ./pkg/config/` — must pass before next task
 
 ### Task 2: Verify and finalize
 
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
-- [ ] verify no `dirHasAgentFiles` or `loadFromDir` references remain in codebase
-- [ ] verify test coverage for pkg/config meets 80%+
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
+- [x] verify no `dirHasAgentFiles` or `loadFromDir` references remain in codebase
+- [x] verify test coverage for pkg/config meets 80%+
 
 ### Task 3: Update documentation
 

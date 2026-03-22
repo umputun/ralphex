@@ -587,7 +587,7 @@ func TestLocalConfig_LocalPromptsOverrideGlobal(t *testing.T) {
 	assert.Equal(t, "global review first", cfg.ReviewFirstPrompt)
 }
 
-func TestLocalConfig_LocalAgentsReplaceGlobal(t *testing.T) {
+func TestLocalConfig_LocalAgentsMergeWithGlobalAndEmbedded(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalDir := filepath.Join(tmpDir, "global")
 	localDir := filepath.Join(tmpDir, ".ralphex")
@@ -600,16 +600,24 @@ func TestLocalConfig_LocalAgentsReplaceGlobal(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "agents", "security.txt"), []byte("global security"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "agents", "performance.txt"), []byte("global performance"), 0o600))
 
-	// local agents (completely different set)
+	// local agents (per-file merge, not replace)
 	require.NoError(t, os.WriteFile(filepath.Join(localDir, "agents", "custom.txt"), []byte("local custom agent"), 0o600))
 
 	cfg, err := loadWithLocal(globalDir, localDir)
 	require.NoError(t, err)
 
-	// only local agents should be used (replace behavior)
-	assert.Len(t, cfg.CustomAgents, 1)
-	assert.Equal(t, "custom", cfg.CustomAgents[0].Name)
-	assert.Equal(t, "local custom agent", cfg.CustomAgents[0].Prompt)
+	// per-file merge: custom (local) + security, performance (global) + 5 embedded = 8
+	assert.Len(t, cfg.CustomAgents, 8)
+	names := make([]string, 0, len(cfg.CustomAgents))
+	for _, a := range cfg.CustomAgents {
+		names = append(names, a.Name)
+	}
+	assert.Contains(t, names, "custom")
+	assert.Contains(t, names, "security")
+	assert.Contains(t, names, "performance")
+	// embedded defaults present
+	assert.Contains(t, names, "quality")
+	assert.Contains(t, names, "documentation")
 }
 
 func TestLoad_InvalidConfig(t *testing.T) {
@@ -708,10 +716,17 @@ color_task = #0000ff
 	assert.Contains(t, cfg.ReviewSecondPrompt, "{{GOAL}}", "embedded review_second should be used")
 	assert.Contains(t, cfg.CodexPrompt, "{{CODEX_OUTPUT}}", "embedded codex should be used")
 
-	// --- verify agents replace behavior (local agents completely replace global) ---
-	require.Len(t, cfg.CustomAgents, 1, "local agents should replace global entirely")
-	assert.Equal(t, "custom", cfg.CustomAgents[0].Name)
-	assert.Equal(t, "local custom agent", cfg.CustomAgents[0].Prompt)
+	// --- verify agents per-file merge behavior (local + global + embedded) ---
+	// custom (local) + security, perf (global) + 5 embedded = 8
+	require.Len(t, cfg.CustomAgents, 8, "agents should be merged per-file, not replaced")
+	agentNames := make(map[string]string, len(cfg.CustomAgents))
+	for _, a := range cfg.CustomAgents {
+		agentNames[a.Name] = a.Prompt
+	}
+	assert.Equal(t, "local custom agent", agentNames["custom"], "local agent should be present")
+	assert.Equal(t, "global security agent", agentNames["security"], "global agent should be present")
+	assert.Equal(t, "global perf agent", agentNames["perf"], "global agent should be present")
+	assert.Contains(t, agentNames, "quality", "embedded agent should be present")
 }
 
 func TestLoad_SymlinkedConfigDir(t *testing.T) {
@@ -748,10 +763,16 @@ color_task = #123456
 	// verify prompts loaded through symlink
 	assert.Equal(t, "symlinked task prompt", cfg.TaskPrompt)
 
-	// verify agents loaded through symlink
-	require.Len(t, cfg.CustomAgents, 1)
-	assert.Equal(t, "custom", cfg.CustomAgents[0].Name)
-	assert.Equal(t, "symlinked agent", cfg.CustomAgents[0].Prompt)
+	// verify agents loaded through symlink (custom + 5 embedded defaults)
+	require.Len(t, cfg.CustomAgents, 6)
+	var customFound bool
+	for _, a := range cfg.CustomAgents {
+		if a.Name == "custom" {
+			assert.Equal(t, "symlinked agent", a.Prompt)
+			customFound = true
+		}
+	}
+	assert.True(t, customFound, "custom agent should be loaded through symlink")
 
 	// verify configDir is the symlink path (not resolved real path)
 	assert.Equal(t, symlinkDir, cfg.configDir)
