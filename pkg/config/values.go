@@ -48,6 +48,7 @@ type Values struct {
 	WorktreeEnabled       bool
 	WorktreeEnabledSet    bool   // tracks if use_worktree was explicitly set
 	VcsCommand            string // custom VCS command (default: "git")
+	CommitTrailer         string // trailer line to append to all commits (e.g., "Co-authored-by: ...")
 	PlansDir              string
 	DefaultBranch         string   // override auto-detected default branch
 	WatchDirs             []string // directories to watch for progress files
@@ -303,6 +304,9 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	if key, err := section.GetKey("vcs_command"); err == nil {
 		values.VcsCommand = expandTilde(key.String())
 	}
+	if key, err := section.GetKey("commit_trailer"); err == nil {
+		values.CommitTrailer = strings.TrimSpace(key.String())
+	}
 
 	// watch directories (comma-separated)
 	values.WatchDirs = vl.parseCommaSeparated(section, "watch_dirs")
@@ -456,6 +460,9 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	}
 	if src.VcsCommand != "" {
 		dst.VcsCommand = src.VcsCommand
+	}
+	if src.CommitTrailer != "" {
+		dst.CommitTrailer = src.CommitTrailer
 	}
 	if len(src.WatchDirs) > 0 {
 		dst.WatchDirs = src.WatchDirs

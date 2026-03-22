@@ -47,14 +47,14 @@ Related to #240.
 - Modify: `pkg/config/config.go`
 - Modify: `pkg/config/defaults/config`
 
-- [ ] add `CommitTrailer string` field to `Values` struct
-- [ ] add INI parsing for `commit_trailer` key in `parseValuesFromBytes()`
-- [ ] add merge logic in `mergeFrom()` (same pattern as `VcsCommand` — non-empty overrides)
-- [ ] add `CommitTrailer string` field to `Config` struct with json tag
-- [ ] map `values.CommitTrailer` to `Config.CommitTrailer` in the builder
-- [ ] add commented `# commit_trailer =` to embedded defaults config file
-- [ ] write tests: parse commit_trailer from INI, merge behavior, empty default
-- [ ] run `make test` — must pass before next task
+- [x] add `CommitTrailer string` field to `Values` struct
+- [x] add INI parsing for `commit_trailer` key in `parseValuesFromBytes()`
+- [x] add merge logic in `mergeFrom()` (same pattern as `VcsCommand` — non-empty overrides)
+- [x] add `CommitTrailer string` field to `Config` struct with json tag
+- [x] map `values.CommitTrailer` to `Config.CommitTrailer` in the builder
+- [x] add commented `# commit_trailer =` to embedded defaults config file
+- [x] write tests: parse commit_trailer from INI, merge behavior, empty default
+- [x] run `make test` — must pass before next task
 
 ### Task 2: Inject trailer in git Service layer
 

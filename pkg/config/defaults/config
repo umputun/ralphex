@@ -163,6 +163,12 @@ plans_dir = docs/plans
 # default: git
 vcs_command = git
 
+# commit_trailer: trailer line appended to all ralphex-orchestrated git commits
+# useful for attribution or tracking (e.g., Co-authored-by lines)
+# example: commit_trailer = Co-authored-by: ralphex <noreply@ralphex.com>
+# default: empty (disabled)
+# commit_trailer =
+
 # ------------------------------------------------------------------------------
 # error pattern detection
 # ------------------------------------------------------------------------------

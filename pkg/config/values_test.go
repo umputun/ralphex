@@ -65,6 +65,7 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.True(t, values.TaskRetryCountSet)
 	assert.Equal(t, "docs/plans", values.PlansDir)
 	assert.Equal(t, "git", values.VcsCommand)
+	assert.Empty(t, values.CommitTrailer)
 	assert.Equal(t, []string{"You've hit your limit", "API Error:", "cannot be launched inside another Claude Code session"}, values.ClaudeErrorPatterns)
 	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexErrorPatterns)
 	assert.Equal(t, []string{"You've hit your limit"}, values.ClaudeLimitPatterns)
@@ -1675,6 +1676,66 @@ func TestValues_mergeFrom_VcsCommand(t *testing.T) {
 		src := Values{VcsCommand: ""}
 		dst.mergeFrom(&src)
 		assert.Equal(t, "/path/to/hg2git.sh", dst.VcsCommand)
+	})
+}
+
+func TestValuesLoader_Load_CommitTrailer(t *testing.T) {
+	t.Run("parse commit_trailer", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`commit_trailer = Co-authored-by: ralphex <noreply@ralphex.com>`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "Co-authored-by: ralphex <noreply@ralphex.com>", values.CommitTrailer)
+	})
+
+	t.Run("empty default", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Empty(t, values.CommitTrailer)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`commit_trailer = Global-Trailer: global`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`commit_trailer = Local-Trailer: local`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, "Local-Trailer: local", values.CommitTrailer)
+	})
+
+	t.Run("whitespace trimmed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`commit_trailer =   Co-authored-by: test   `), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "Co-authored-by: test", values.CommitTrailer)
+	})
+}
+
+func TestValues_mergeFrom_CommitTrailer(t *testing.T) {
+	t.Run("non-empty overrides", func(t *testing.T) {
+		dst := Values{CommitTrailer: "original"}
+		src := Values{CommitTrailer: "override"}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "override", dst.CommitTrailer)
+	})
+
+	t.Run("empty does not overwrite", func(t *testing.T) {
+		dst := Values{CommitTrailer: "keep-this"}
+		src := Values{CommitTrailer: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "keep-this", dst.CommitTrailer)
 	})
 }
 
