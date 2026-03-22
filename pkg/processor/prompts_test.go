@@ -1072,3 +1072,76 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 		assert.NotContains(t, prompt, "develop...HEAD")
 	})
 }
+
+func TestRunner_appendCommitTrailerInstruction(t *testing.T) {
+	t.Run("appends trailer instruction when configured", func(t *testing.T) {
+		appCfg := &config.Config{CommitTrailer: "Co-authored-by: ralphex <noreply@ralphex.com>"}
+		r := &Runner{cfg: Config{AppConfig: appCfg}}
+
+		result := r.appendCommitTrailerInstruction("do the task")
+
+		assert.Contains(t, result, "do the task")
+		assert.Contains(t, result, "When making git commits, add the following trailer")
+		assert.Contains(t, result, "Co-authored-by: ralphex <noreply@ralphex.com>")
+	})
+
+	t.Run("no change when trailer is empty", func(t *testing.T) {
+		appCfg := &config.Config{CommitTrailer: ""}
+		r := &Runner{cfg: Config{AppConfig: appCfg}}
+
+		result := r.appendCommitTrailerInstruction("do the task")
+
+		assert.Equal(t, "do the task", result)
+	})
+
+	t.Run("no change when AppConfig is nil", func(t *testing.T) {
+		r := &Runner{cfg: Config{AppConfig: nil}}
+
+		result := r.appendCommitTrailerInstruction("do the task")
+
+		assert.Equal(t, "do the task", result)
+	})
+}
+
+func TestRunner_replaceBaseVariables_CommitTrailer(t *testing.T) {
+	t.Run("replaceBaseVariables does not append trailer", func(t *testing.T) {
+		appCfg := &config.Config{CommitTrailer: "Signed-off-by: bot <bot@example.com>"}
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", DefaultBranch: "main", AppConfig: appCfg}}
+
+		result := r.replaceBaseVariables("Plan: {{PLAN_FILE}}, Branch: {{DEFAULT_BRANCH}}")
+
+		assert.Contains(t, result, "Plan: docs/plans/test.md")
+		assert.Contains(t, result, "Branch: main")
+		assert.NotContains(t, result, "trailer", "replaceBaseVariables should not append trailer to avoid duplication in agent expansions")
+	})
+
+	t.Run("prompt with empty trailer is unchanged", func(t *testing.T) {
+		appCfg := &config.Config{CommitTrailer: ""}
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", DefaultBranch: "main", AppConfig: appCfg}}
+
+		result := r.replaceBaseVariables("Plan: {{PLAN_FILE}}")
+
+		assert.Equal(t, "Plan: docs/plans/test.md", result)
+		assert.NotContains(t, result, "trailer")
+	})
+
+	t.Run("trailer instruction propagates through replacePromptVariables", func(t *testing.T) {
+		appCfg := &config.Config{CommitTrailer: "Co-authored-by: test <test@test.com>"}
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
+
+		result := r.replacePromptVariables("Task: {{GOAL}}")
+
+		assert.Contains(t, result, "implementation of plan at docs/plans/test.md")
+		assert.Contains(t, result, "Co-authored-by: test <test@test.com>")
+	})
+
+	t.Run("trailer instruction propagates through replaceVariablesWithIteration", func(t *testing.T) {
+		appCfg := &config.Config{CommitTrailer: "Co-authored-by: test <test@test.com>"}
+		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}}
+
+		result := r.replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}", true, "")
+
+		assert.Contains(t, result, "git diff main...HEAD")
+		assert.Contains(t, result, "Co-authored-by: test <test@test.com>")
+	})
+}

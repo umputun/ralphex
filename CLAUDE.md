@@ -269,6 +269,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - `default_branch` config option: override auto-detected default branch for review diffs
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
 - `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
+- `commit_trailer` config option: trailer line appended to all ralphex-orchestrated git commits (both Go-code commits and LLM-prompted commits). When set, the trailer is appended after a blank line at the end of every commit message. Example: `commit_trailer = Co-authored-by: ralphex <noreply@ralphex.com>`. Disabled by default (empty)
 - Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
 - `review_patience` config option: terminate external review after N consecutive unchanged rounds (0 = disabled). CLI flag `--review-patience` takes precedence
 - `wait_on_limit` config option: duration to wait before retrying on rate limit (e.g., "1h", "30m"). CLI flag `--wait` takes precedence. Disabled by default

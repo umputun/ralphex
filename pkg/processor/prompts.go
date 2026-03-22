@@ -67,6 +67,9 @@ func (r *Runner) getProgressFileRef() string {
 // replaceBaseVariables replaces common template variables in prompts.
 // supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}}
 // this is the core replacement function used by all prompt builders.
+// replaces common template variables shared across all prompt types.
+// does not append trailer instruction — callers are responsible for calling appendCommitTrailerInstruction
+// once on the final assembled prompt, to avoid duplication when expanding agent references.
 func (r *Runner) replaceBaseVariables(prompt string) string {
 	result := prompt
 	result = strings.ReplaceAll(result, "{{PLAN_FILE}}", r.getPlanFileRef())
@@ -75,6 +78,17 @@ func (r *Runner) replaceBaseVariables(prompt string) string {
 	result = strings.ReplaceAll(result, "{{DEFAULT_BRANCH}}", r.getDefaultBranch())
 	result = strings.ReplaceAll(result, "{{PLANS_DIR}}", r.getPlansDir())
 	return result
+}
+
+// appendCommitTrailerInstruction appends trailer instruction to prompt when commit_trailer is configured.
+// returns prompt unchanged when commit_trailer is empty or AppConfig is nil.
+func (r *Runner) appendCommitTrailerInstruction(prompt string) string {
+	if r.cfg.AppConfig == nil || r.cfg.AppConfig.CommitTrailer == "" {
+		return prompt
+	}
+	return prompt + "\n\nWhen making git commits, add the following trailer" +
+		" after a blank line at the end of the commit message:\n" +
+		r.cfg.AppConfig.CommitTrailer
 }
 
 // getDiffInstruction returns the appropriate git diff command based on iteration.
@@ -112,7 +126,7 @@ func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration b
 	result = strings.ReplaceAll(result, "{{DIFF_INSTRUCTION}}", r.getDiffInstruction(isFirstIteration))
 	result = r.expandAgentReferences(result) // expand agents before inserting external content
 	result = strings.ReplaceAll(result, "{{PREVIOUS_REVIEW_CONTEXT}}", r.buildPreviousContext(claudeResponse))
-	return result
+	return r.appendCommitTrailerInstruction(result)
 }
 
 // formatAgentExpansion creates the Task tool instruction for an agent, respecting frontmatter overrides.
@@ -176,7 +190,7 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 func (r *Runner) replacePromptVariables(prompt string) string {
 	result := r.replaceBaseVariables(prompt)
 	result = r.expandAgentReferences(result)
-	return result
+	return r.appendCommitTrailerInstruction(result)
 }
 
 // getDefaultBranch returns the default branch name or "master" as fallback.
@@ -209,7 +223,8 @@ func (r *Runner) buildCodexEvaluationPrompt(codexOutput string) string {
 func (r *Runner) buildPlanPrompt() string {
 	prompt := r.cfg.AppConfig.MakePlanPrompt
 	prompt = strings.ReplaceAll(prompt, "{{PLAN_DESCRIPTION}}", r.cfg.PlanDescription)
-	return r.replaceBaseVariables(prompt)
+	result := r.replaceBaseVariables(prompt)
+	return r.appendCommitTrailerInstruction(result)
 }
 
 // buildCustomReviewPrompt creates the prompt for custom review tool execution.

@@ -78,19 +78,19 @@ Related to #240.
 - Modify: `pkg/processor/prompts.go`
 - Modify: `pkg/processor/prompts_test.go`
 
-- [ ] in `replaceBaseVariables()`, when `r.cfg.AppConfig.CommitTrailer` is set, append a trailer instruction suffix to the prompt result (e.g., "\n\nWhen making git commits, add the following trailer after a blank line at the end of the commit message:\n<trailer>"). When empty, append nothing. No prompt file changes needed — all prompts get the instruction automatically
-- [ ] write tests: prompt with trailer set has suffix appended, prompt with empty trailer is unchanged
-- [ ] run `make test` — must pass before next task
+- [x] in `replaceBaseVariables()`, when `r.cfg.AppConfig.CommitTrailer` is set, append a trailer instruction suffix to the prompt result (e.g., "\n\nWhen making git commits, add the following trailer after a blank line at the end of the commit message:\n<trailer>"). When empty, append nothing. No prompt file changes needed — all prompts get the instruction automatically
+- [x] write tests: prompt with trailer set has suffix appended, prompt with empty trailer is unchanged
+- [x] run `make test` — must pass before next task
 
 ### Task 4: Verify and document
 
-- [ ] verify all requirements: config option parsed, trailer appended to Go commits, trailer instruction in LLM prompts
-- [ ] run full test suite: `make test`
-- [ ] run linter: `make lint`
-- [ ] run formatters: `make fmt`
-- [ ] update README.md customization section (add `commit_trailer` to config options)
-- [ ] update CLAUDE.md configuration section
-- [ ] move this plan to `docs/plans/completed/`
+- [x] verify all requirements: config option parsed, trailer appended to Go commits, trailer instruction in LLM prompts
+- [x] run full test suite: `make test`
+- [x] run linter: `make lint`
+- [x] run formatters: `make fmt`
+- [x] update README.md customization section (add `commit_trailer` to config options)
+- [x] update CLAUDE.md configuration section
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

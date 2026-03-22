@@ -804,6 +804,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `plans_dir` | Plans directory | `docs/plans` |
 | `default_branch` | Override auto-detected default branch for review diffs | auto-detect |
 | `vcs_command` | VCS command for the git backend (set to a translation script for hg repos) | `git` |
+| `commit_trailer` | Trailer line appended to all ralphex-orchestrated git commits | disabled |
 | `color_task` | Task execution phase color (hex) | `#00ff00` |
 | `color_review` | Review phase color (hex) | `#00ffff` |
 | `color_codex` | Codex review color (hex) | `#ff00ff` |

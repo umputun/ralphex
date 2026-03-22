@@ -561,6 +561,27 @@ func TestService_EnsureHasCommits(t *testing.T) {
 		assert.True(t, hasCommits)
 	})
 
+	t.Run("creates initial commit with trailer when configured", func(t *testing.T) {
+		dir := t.TempDir()
+		runGit(t, dir, "init")
+		runGit(t, dir, "config", "user.email", "test@test.com")
+		runGit(t, dir, "config", "user.name", "test")
+		runGit(t, dir, "config", "commit.gpgsign", "false")
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test"), 0o600))
+
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetCommitTrailer("Co-authored-by: ralphex <noreply@ralphex.com>")
+
+		err = svc.EnsureHasCommits(func() bool { return true })
+		require.NoError(t, err)
+
+		// verify trailer in commit message
+		out := runGit(t, dir, "log", "-1", "--format=%B")
+		assert.Contains(t, out, "Co-authored-by: ralphex <noreply@ralphex.com>")
+	})
+
 	t.Run("returns error when user declines", func(t *testing.T) {
 		// create empty repo (no commits)
 		dir := t.TempDir()
@@ -1412,6 +1433,43 @@ func TestService_CommitWithTrailer(t *testing.T) {
 		out := runGit(t, svc.Root(), "log", "-1", "--format=%B")
 		assert.Contains(t, out, "add plan: no-trailer")
 		assert.NotContains(t, out, "Co-authored-by")
+	})
+
+	t.Run("trailer in CreateBranchForPlan", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetCommitTrailer("Co-authored-by: ralphex <noreply@ralphex.com>")
+
+		// create an untracked plan file so CreateBranchForPlan auto-commits it
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "branch-trailer.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		err = svc.CreateBranchForPlan(planFile, "master")
+		require.NoError(t, err)
+
+		out := runGit(t, dir, "log", "-1", "--format=%B")
+		assert.Contains(t, out, "add plan: branch-trailer")
+		assert.Contains(t, out, "Co-authored-by: ralphex <noreply@ralphex.com>")
+	})
+
+	t.Run("trailer in CommitIgnoreChanges", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetCommitTrailer("Signed-off-by: bot")
+
+		// create a .gitignore with changes
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("*.log\n"), 0o600))
+
+		err = svc.CommitIgnoreChanges()
+		require.NoError(t, err)
+
+		out := runGit(t, dir, "log", "-1", "--format=%B")
+		assert.Contains(t, out, "add ralphex entries to .gitignore")
+		assert.Contains(t, out, "Signed-off-by: bot")
 	})
 
 	t.Run("trailer in MovePlanToCompleted", func(t *testing.T) {

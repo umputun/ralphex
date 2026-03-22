@@ -459,7 +459,7 @@ func (s *Service) EnsureHasCommits(promptFn func() bool) error {
 	}
 
 	// create the commit
-	if err := s.repo.createInitialCommit("initial commit"); err != nil {
+	if err := s.repo.createInitialCommit(s.appendTrailer("initial commit")); err != nil {
 		return fmt.Errorf("create initial commit: %w", err)
 	}
 	return nil
