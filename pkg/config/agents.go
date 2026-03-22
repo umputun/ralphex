@@ -121,26 +121,45 @@ func (al *agentLoader) collectEmbeddedFilenames() ([]string, error) {
 func (al *agentLoader) loadAgentWithFallback(localDir, globalDir, filename string) (string, error) {
 	// try local first
 	if localDir != "" {
-		path := filepath.Join(localDir, filename)
-		if _, err := os.Stat(path); err == nil {
-			return al.loadFileWithFallback(path, filename)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("stat agent file %s: %w", path, err)
+		content, err := al.tryLoadFromDir(localDir, filename)
+		if err != nil {
+			return "", err
+		}
+		if content != "" {
+			return content, nil
 		}
 	}
 
 	// try global
 	if globalDir != "" {
-		path := filepath.Join(globalDir, filename)
-		if _, err := os.Stat(path); err == nil {
-			return al.loadFileWithFallback(path, filename)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("stat agent file %s: %w", path, err)
+		content, err := al.tryLoadFromDir(globalDir, filename)
+		if err != nil {
+			return "", err
+		}
+		if content != "" {
+			return content, nil
 		}
 	}
 
 	// fall back to embedded
 	return al.loadFromEmbedFS(filename)
+}
+
+// tryLoadFromDir attempts to load an agent file from a directory.
+// returns empty string if file doesn't exist or is not a regular file.
+func (al *agentLoader) tryLoadFromDir(dir, filename string) (string, error) {
+	path := filepath.Join(dir, filename)
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("stat agent file %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", nil
+	}
+	return al.loadFileWithFallback(path, filename)
 }
 
 // loadFileWithFallback reads an agent file from disk with fallback to embedded.
