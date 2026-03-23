@@ -56,8 +56,8 @@ github.com/deckarep/golang-set/v2
 ## explicit; go 1.13
 github.com/dlclark/regexp2
 github.com/dlclark/regexp2/syntax
-# github.com/fatih/color v1.18.0
-## explicit; go 1.17
+# github.com/fatih/color v1.19.0
+## explicit; go 1.25.0
 github.com/fatih/color
 # github.com/fsnotify/fsnotify v1.9.0
 ## explicit; go 1.17
