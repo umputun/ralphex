@@ -1342,6 +1342,28 @@ func TestHandleEarlyFlags(t *testing.T) {
 		assert.Contains(t, err.Error(), "must run from repository root")
 	})
 
+	t.Run("init_fails_with_custom_vcs_empty_root", func(t *testing.T) {
+		// custom VCS returns empty string — must reject
+		tmpDir := t.TempDir()
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		t.Cleanup(func() { require.NoError(t, os.Chdir(origDir)) })
+
+		// create a fake VCS script that outputs empty string
+		fakeVCS := filepath.Join(t.TempDir(), "fake-vcs.sh")
+		writeExecutable(t, fakeVCS, "#!/bin/sh\necho\n")
+
+		cfgDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config"),
+			[]byte("vcs_command = "+fakeVCS), 0o600))
+
+		done, err := handleEarlyFlags(opts{Init: true, ConfigDir: cfgDir})
+		assert.True(t, done)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must run from repository root")
+	})
+
 	t.Run("init_fails_with_custom_vcs_in_subdirectory", func(t *testing.T) {
 		// custom VCS returns parent as root, but cwd is a subdirectory — must reject
 		tmpDir := t.TempDir()

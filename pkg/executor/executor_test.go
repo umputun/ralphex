@@ -114,25 +114,6 @@ func TestClaudeExecutor_Run_ContextCanceled(t *testing.T) {
 	require.ErrorIs(t, result.Error, context.Canceled)
 }
 
-func TestClaudeExecutor_Run_ContextCanceledWaitNil(t *testing.T) {
-	// simulates a race where the child process exits 0 despite context cancellation
-	// (e.g., macOS bash exits 0 when SIGTERM arrives during "wait" builtin).
-	// wait() returns nil, but ctx is canceled — must still propagate cancellation.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	mock := &mocks.CommandRunnerMock{
-		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
-			return strings.NewReader(""), func() error { return nil }, nil
-		},
-	}
-	e := &ClaudeExecutor{cmdRunner: mock}
-
-	result := e.Run(ctx, "test prompt")
-
-	require.ErrorIs(t, result.Error, context.Canceled)
-}
-
 func TestClaudeExecutor_Run_WithOutputHandler(t *testing.T) {
 	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"chunk1"}}
 {"type":"content_block_delta","delta":{"type":"text_delta","text":"chunk2"}}`

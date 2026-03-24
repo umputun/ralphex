@@ -42,10 +42,9 @@ func TestExecClaudeRunner_KillsProcessGroup(t *testing.T) {
 	// cancel context - this should kill the process group
 	cancel()
 
-	// wait for command to exit — may or may not return error depending on signal timing.
-	// on macOS bash 3.2 under load, bash can exit 0 if SIGTERM arrives during "wait" builtin
-	// at a specific window. the important assertion is that the child process is killed below.
-	_ = wait()
+	// wait for command to exit (will error due to kill, that's expected)
+	err = wait()
+	require.Error(t, err, "wait should error when process is killed")
 
 	// verify child process is killed using polling instead of fixed sleep
 	require.Eventually(t, func() bool {

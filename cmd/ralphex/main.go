@@ -1055,11 +1055,14 @@ func validateRepoRoot(vcsCommand string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, vcsCommand, "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("custom VCS backend %q cannot validate repository: %w", vcsCommand, err)
+		return fmt.Errorf("custom VCS backend %q cannot validate repository: %w\n%s", vcsCommand, err, strings.TrimSpace(string(out)))
 	}
 	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return errors.New("VCS returned empty repository root")
+	}
 	// resolve symlinks for consistent comparison (macOS /var -> /private/var)
 	root, err = filepath.EvalSymlinks(root)
 	if err != nil {

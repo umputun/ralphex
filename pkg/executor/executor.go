@@ -246,13 +246,6 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		}
 	}
 
-	// even if wait() returned nil, check if context was canceled.
-	// on macOS, a killed child can exit 0 during SIGTERM handling (e.g., bash "wait" builtin),
-	// so wait() returning nil does not guarantee the session completed successfully.
-	if ctx.Err() != nil {
-		return Result{Output: result.Output, Signal: result.Signal, Error: ctx.Err()}
-	}
-
 	// check limit patterns first (higher priority)
 	if pattern := matchPattern(result.Output, e.LimitPatterns); pattern != "" {
 		return Result{
