@@ -52,14 +52,14 @@ Coexists with `--session-timeout`: session timeout is the outer hard wall-clock 
 - Modify: `pkg/executor/executor.go`
 - Modify: `pkg/executor/executor_test.go`
 
-- [ ] add `IdleTimeout time.Duration` field to `ClaudeExecutor` struct
-- [ ] in `Run()`, before `runner.Run()`: if `IdleTimeout > 0`, create `idleCtx, idleCancel := context.WithCancel(ctx)`, start `timer := time.AfterFunc(e.IdleTimeout, idleCancel)`, defer `timer.Stop()`, define `touch := func() { timer.Reset(e.IdleTimeout) }`. Pass `idleCtx` to `runner.Run()`. If idle timeout not configured, `touch` is a no-op: `touch := func() {}`
-- [ ] in `parseStream`, call `touch()` at the top of the `readLines` handler (before empty-line check), so all pipe activity resets the timer. `parseStream` signature stays unchanged — `touch` is captured via closure from `Run()`
-- [ ] handle idle timeout in `Run()`'s error path after `wait()`: check `idleCtx.Err() != nil && ctx.Err() == nil` — if true, it's an idle timeout (not a real error). Clear the error and return result with signal (same pattern as `runWithSessionTimeout`)
-- [ ] write test: idle timeout fires when executor produces no output after initial output (mock runner that blocks after sending one line)
-- [ ] write test: idle timeout does NOT fire when output is continuous (mock runner that sends lines within the timeout window)
-- [ ] write test: idle timeout disabled when IdleTimeout is zero (default behavior unchanged)
-- [ ] run `go test ./pkg/executor/...` — must pass before next task
+- [x] add `IdleTimeout time.Duration` field to `ClaudeExecutor` struct
+- [x] in `Run()`, before `runner.Run()`: if `IdleTimeout > 0`, create `idleCtx, idleCancel := context.WithCancel(ctx)`, start `timer := time.AfterFunc(e.IdleTimeout, idleCancel)`, defer `timer.Stop()`, define `touch := func() { timer.Reset(e.IdleTimeout) }`. Pass `idleCtx` to `runner.Run()`. If idle timeout not configured, `touch` is a no-op: `touch := func() {}`
+- [x] in `parseStream`, call `touch()` at the top of the `readLines` handler (before empty-line check), so all pipe activity resets the timer. `parseStream` signature stays unchanged — `touch` is captured via closure from `Run()`
+- [x] handle idle timeout in `Run()`'s error path after `wait()`: check `idleCtx.Err() != nil && ctx.Err() == nil` — if true, it's an idle timeout (not a real error). Clear the error and return result with signal (same pattern as `runWithSessionTimeout`)
+- [x] write test: idle timeout fires when executor produces no output after initial output (mock runner that blocks after sending one line)
+- [x] write test: idle timeout does NOT fire when output is continuous (mock runner that sends lines within the timeout window)
+- [x] write test: idle timeout disabled when IdleTimeout is zero (default behavior unchanged)
+- [x] run `go test ./pkg/executor/...` — must pass before next task
 
 ### Task 2: Add idle_timeout to config, CLI, and wire to executor
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/umputun/ralphex/pkg/status"
 )
@@ -190,7 +191,9 @@ type ClaudeExecutor struct {
 	Debug         bool              // enable debug output
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
+	IdleTimeout   time.Duration     // kill session after this duration of no output, zero = disabled
 	cmdRunner     CommandRunner     // for testing, nil uses default
+	idleTouch     func()            // resets idle timer, set by Run() for parseStream to call
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -224,25 +227,47 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		runner = &execClaudeRunner{stdin: stdinReader}
 	}
 
-	stdout, wait, err := runner.Run(ctx, cmd, args...)
+	// set up idle timeout: derive a cancellable context that fires when no output
+	// is received for IdleTimeout duration. the touch closure resets the timer on
+	// each line of output and is called from parseStream's readLines handler.
+	execCtx := ctx
+	e.idleTouch = func() {} // no-op by default
+	if e.IdleTimeout > 0 {
+		var idleCancel context.CancelFunc
+		execCtx, idleCancel = context.WithCancel(ctx)
+		defer idleCancel()
+		timer := time.AfterFunc(e.IdleTimeout, idleCancel)
+		defer timer.Stop()
+		e.idleTouch = func() { timer.Reset(e.IdleTimeout) }
+	}
+
+	stdout, wait, err := runner.Run(execCtx, cmd, args...)
 	if err != nil {
 		return Result{Error: err}
 	}
 
-	result := e.parseStream(ctx, stdout)
+	result := e.parseStream(execCtx, stdout)
+	waitErr := wait()
 
-	if err := wait(); err != nil {
+	// idle timeout: derived context canceled but parent is alive — not an error.
+	// return accumulated output and signal as-is, clearing any context-cancellation errors.
+	if e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil {
+		result.Error = nil
+		return result
+	}
+
+	if waitErr != nil {
 		// check if it was context cancellation
 		if ctx.Err() != nil {
 			return Result{Output: result.Output, Signal: result.Signal, Error: ctx.Err()}
 		}
 		if result.Output == "" {
-			return Result{Error: fmt.Errorf("claude exited with error: %w", err)}
+			return Result{Error: fmt.Errorf("claude exited with error: %w", waitErr)}
 		}
 		// non-zero exit with output but no signal means claude failed without doing useful work.
 		// if there IS a signal, work was done — ignore exit code (some tasks exit non-zero after completion).
 		if result.Signal == "" {
-			result.Error = fmt.Errorf("claude exited with error: %w", err)
+			result.Error = fmt.Errorf("claude exited with error: %w", waitErr)
 		}
 	}
 
@@ -275,6 +300,9 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
 	var signal string
 
 	err := readLines(ctx, r, func(line string) {
+		if e.idleTouch != nil {
+			e.idleTouch() // reset idle timer on every line of pipe activity
+		}
 		if line == "" {
 			return
 		}

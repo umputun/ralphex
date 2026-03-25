@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -754,6 +755,74 @@ func TestClaudeExecutor_Run_ErrorPattern_WithSignal(t *testing.T) {
 func TestLimitPatternError_Error(t *testing.T) {
 	err := &LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}
 	assert.Equal(t, `detected limit pattern: "You've hit your limit"`, err.Error())
+}
+
+func TestClaudeExecutor_Run_IdleTimeoutFires(t *testing.T) {
+	// idle timeout fires when no output comes after the first line
+	pr, pw := io.Pipe()
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(ctx context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			go func() {
+				defer pw.Close()
+				// send one line then go silent, simulating a hang
+				fmt.Fprintln(pw, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}`)
+				<-ctx.Done() // wait for idle timeout to cancel context and kill process
+			}()
+			return pr, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	e := &ClaudeExecutor{cmdRunner: mock, IdleTimeout: 100 * time.Millisecond}
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "hello", result.Output)
+}
+
+func TestClaudeExecutor_Run_IdleTimeoutNotFiredOnContinuousOutput(t *testing.T) {
+	// continuous output keeps resetting the timer, so idle timeout never fires
+	pr, pw := io.Pipe()
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			go func() {
+				defer pw.Close()
+				for i := 0; i < 5; i++ {
+					fmt.Fprintln(pw, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"x"}}`)
+					time.Sleep(30 * time.Millisecond) // well within idle timeout
+				}
+			}()
+			return pr, func() error { return nil }, nil
+		},
+	}
+
+	e := &ClaudeExecutor{cmdRunner: mock, IdleTimeout: 200 * time.Millisecond}
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "xxxxx", result.Output)
+}
+
+func TestClaudeExecutor_Run_IdleTimeoutDisabledWhenZero(t *testing.T) {
+	// default behavior: IdleTimeout=0 means no idle timeout, runs normally
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"output"}}`
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock} // IdleTimeout is zero (default)
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "output", result.Output)
+	assert.Zero(t, e.IdleTimeout)
 }
 
 // printFlag is registered so the test binary accepts --print without erroring.
