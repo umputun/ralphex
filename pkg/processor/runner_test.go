@@ -2765,9 +2765,9 @@ func TestRunner_ExternalReviewLoop_StalemateDetection_NilGitChecker(t *testing.T
 func TestRunner_ExternalReviewLoop_BreakChannel_ExitsEarly(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
-	// break channel is closed during codex execution, causing context cancellation.
+	// break channel receives a value during codex execution, causing context cancellation.
 	// codex-only flow: codex run (break fires) → loop exits → post-codex claude review.
-	breakCh := make(chan struct{})
+	breakCh := make(chan struct{}, 1)
 
 	claude := &mocks.ExecutorMock{
 		RunFunc: func(_ context.Context, _ string) executor.Result {
@@ -2776,8 +2776,8 @@ func TestRunner_ExternalReviewLoop_BreakChannel_ExitsEarly(t *testing.T) {
 	}
 	codex := &mocks.ExecutorMock{
 		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			close(breakCh) // trigger break during codex execution
-			<-ctx.Done()   // wait for context cancellation
+			breakCh <- struct{}{} // trigger break during codex execution
+			<-ctx.Done()          // wait for context cancellation
 			return executor.Result{Error: ctx.Err()}
 		},
 	}
@@ -2843,6 +2843,106 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 		}
 	}
 	assert.False(t, foundBreak, "should not log manual break with nil channel")
+}
+
+func TestRunner_FullMode_ErrUserAborted_SkipsReview(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	claude := newMockExecutor(nil) // should not be called for review
+	codex := newMockExecutor(nil)  // should not be called
+
+	cfg := processor.Config{
+		Mode: processor.ModeFull, MaxIterations: 50, CodexEnabled: true,
+		PlanFile: "some-plan.md", AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.TestSetTaskPhaseOverride(func(_ context.Context) error {
+		return processor.ErrUserAborted
+	})
+
+	err := r.Run(t.Context())
+	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller")
+
+	// verify no executor was called (task phase was overridden, review phase skipped)
+	assert.Empty(t, claude.RunCalls(), "claude should not run when task phase aborts")
+	assert.Empty(t, codex.RunCalls(), "codex should not run when task phase aborts")
+
+	// verify abort log message
+	var foundAbort bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "aborted by user") {
+			foundAbort = true
+			break
+		}
+	}
+	assert.True(t, foundAbort, "should log abort message")
+}
+
+func TestRunner_TasksOnly_ErrUserAborted_CleanExit(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode: processor.ModeTasksOnly, MaxIterations: 50,
+		PlanFile: "some-plan.md", AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.TestSetTaskPhaseOverride(func(_ context.Context) error {
+		return processor.ErrUserAborted
+	})
+
+	err := r.Run(t.Context())
+	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller in tasks-only mode")
+}
+
+func TestRunner_DrainBreakCh(t *testing.T) {
+	t.Run("drains pending value", func(t *testing.T) {
+		breakCh := make(chan struct{}, 1)
+		breakCh <- struct{}{} // pre-load a pending value
+
+		cfg := processor.Config{AppConfig: testAppConfig(t)}
+		log := newMockLogger("")
+		r := processor.NewWithExecutors(cfg, log, processor.Executors{
+			Claude: newMockExecutor(nil), Codex: newMockExecutor(nil),
+		}, &status.PhaseHolder{})
+		r.SetBreakCh(breakCh)
+
+		r.TestDrainBreakCh()
+
+		// channel should now be empty
+		select {
+		case <-breakCh:
+			t.Fatal("channel should be empty after drain")
+		default:
+			// expected: no value remaining
+		}
+	})
+
+	t.Run("no-op on empty channel", func(t *testing.T) {
+		breakCh := make(chan struct{}, 1) // empty
+
+		cfg := processor.Config{AppConfig: testAppConfig(t)}
+		log := newMockLogger("")
+		r := processor.NewWithExecutors(cfg, log, processor.Executors{
+			Claude: newMockExecutor(nil), Codex: newMockExecutor(nil),
+		}, &status.PhaseHolder{})
+		r.SetBreakCh(breakCh)
+
+		r.TestDrainBreakCh() // should not block
+	})
+
+	t.Run("no-op on nil channel", func(t *testing.T) {
+		cfg := processor.Config{AppConfig: testAppConfig(t)}
+		log := newMockLogger("")
+		r := processor.NewWithExecutors(cfg, log, processor.Executors{
+			Claude: newMockExecutor(nil), Codex: newMockExecutor(nil),
+		}, &status.PhaseHolder{})
+		// deliberately NOT calling r.SetBreakCh() — nil channel
+
+		r.TestDrainBreakCh() // should not panic
+	})
 }
 
 func TestRunner_SessionTimeout_BlockingExecutor(t *testing.T) {
@@ -3388,4 +3488,171 @@ func TestRunner_SessionTimeout_PlanCreationPreservesRevisionFeedback(t *testing.
 	secondPrompt := claude.RunCalls()[1].Prompt
 	assert.Contains(t, secondPrompt, "please add error handling task",
 		"revision feedback should be in the timed-out attempt too")
+}
+
+func TestRunner_TaskPhase_BreakWithPauseResume(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	// plan with completed checkboxes so hasUncompletedTasks returns false on SignalCompleted
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [x] something"), 0o600))
+
+	breakCh := make(chan struct{}, 1)
+	pauseCalls := 0
+
+	// first call: break fires during execution → pause handler returns true (resume)
+	// second call: completes normally
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			if pauseCalls == 0 {
+				breakCh <- struct{}{} // trigger break during first iteration
+				<-ctx.Done()
+				return executor.Result{Error: ctx.Err()}
+			}
+			return executor.Result{Output: "done", Signal: status.Completed}
+		},
+	}
+	codex := newMockExecutor(nil)
+	log := newMockLogger("progress.txt")
+
+	cfg := processor.Config{
+		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
+		IterationDelayMs: 1, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetBreakCh(breakCh)
+	r.SetPauseHandler(func(_ context.Context) bool {
+		pauseCalls++
+		return true // resume
+	})
+
+	err := r.Run(t.Context())
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, pauseCalls, "pause handler should be called once")
+	assert.Len(t, claude.RunCalls(), 2, "claude should run twice: interrupted + resumed")
+
+	// verify break log message
+	var foundBreak bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "session interrupted") {
+			foundBreak = true
+			break
+		}
+	}
+	assert.True(t, foundBreak, "should log break message")
+}
+
+func TestRunner_TaskPhase_BreakWithPauseAbort(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [ ] something"), 0o600))
+
+	breakCh := make(chan struct{}, 1)
+
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			breakCh <- struct{}{} // trigger break
+			<-ctx.Done()
+			return executor.Result{Error: ctx.Err()}
+		},
+	}
+	codex := newMockExecutor(nil)
+	log := newMockLogger("progress.txt")
+
+	cfg := processor.Config{
+		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
+		IterationDelayMs: 1, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetBreakCh(breakCh)
+	r.SetPauseHandler(func(_ context.Context) bool {
+		return false // abort
+	})
+
+	err := r.Run(t.Context())
+	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller")
+	assert.Len(t, claude.RunCalls(), 1, "claude should run once before abort")
+}
+
+func TestRunner_TaskPhase_BreakWithNilHandler(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [ ] something"), 0o600))
+
+	breakCh := make(chan struct{}, 1)
+
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			breakCh <- struct{}{} // trigger break
+			<-ctx.Done()
+			return executor.Result{Error: ctx.Err()}
+		},
+	}
+	codex := newMockExecutor(nil)
+	log := newMockLogger("progress.txt")
+
+	cfg := processor.Config{
+		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
+		IterationDelayMs: 1, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetBreakCh(breakCh)
+	// deliberately NOT setting pause handler — nil handler = abort
+
+	err := r.Run(t.Context())
+	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller")
+	assert.Len(t, claude.RunCalls(), 1, "claude should run once before abort")
+}
+
+func TestRunner_TaskPhase_StickySignalDrainAfterPause(t *testing.T) {
+	// verify that a SIGQUIT arriving during the pause prompt does not immediately
+	// cancel the next resumed iteration (sticky signal is drained before breakContext)
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [x] something"), 0o600))
+
+	breakCh := make(chan struct{}, 1)
+	pauseCalls := 0
+
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(ctx context.Context, _ string) executor.Result {
+			if pauseCalls == 0 {
+				breakCh <- struct{}{} // trigger initial break
+				<-ctx.Done()
+				return executor.Result{Error: ctx.Err()}
+			}
+			// second call should complete normally without being canceled by sticky signal
+			select {
+			case <-ctx.Done():
+				return executor.Result{Error: errors.New("unexpected cancellation from sticky signal")}
+			case <-time.After(50 * time.Millisecond):
+				return executor.Result{Output: "done", Signal: status.Completed}
+			}
+		},
+	}
+	codex := newMockExecutor(nil)
+	log := newMockLogger("progress.txt")
+
+	cfg := processor.Config{
+		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
+		IterationDelayMs: 1, AppConfig: testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetBreakCh(breakCh)
+	r.SetPauseHandler(func(_ context.Context) bool {
+		pauseCalls++
+		// simulate a SIGQUIT arriving during the pause prompt
+		breakCh <- struct{}{}
+		return true // resume
+	})
+
+	err := r.Run(t.Context())
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, pauseCalls, "pause handler should be called once")
+	assert.Len(t, claude.RunCalls(), 2, "claude should run twice: interrupted + resumed")
+
+	// verify second call was not canceled by sticky signal
+	secondResult := claude.RunCalls()[1]
+	assert.NotNil(t, secondResult, "second claude call should exist")
 }

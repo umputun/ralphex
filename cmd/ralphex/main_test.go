@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1916,6 +1917,37 @@ func TestKeepDashboardAlive(t *testing.T) {
 		keepDashboardAlive(ctx, opts{Serve: true, Port: 9999, Host: "127.0.0.1"}, req, closeLog)
 		assert.True(t, closeCalled, "closeLog should be called when serve is enabled")
 	})
+}
+
+func TestMakePauseHandler_EnterResumes(t *testing.T) {
+	stdin := bytes.NewReader([]byte("\n"))
+	var stdout bytes.Buffer
+	handler := makePauseHandler(stdin, &stdout)
+	result := handler(context.Background())
+	assert.True(t, result, "handler should return true on Enter")
+	assert.Contains(t, stdout.String(), "session interrupted")
+}
+
+func TestMakePauseHandler_ContextCancelAborts(t *testing.T) {
+	// stdin that blocks forever (never returns)
+	r, w := io.Pipe()
+	defer w.Close()
+	defer r.Close()
+	var stdout bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	handler := makePauseHandler(r, &stdout)
+	result := handler(ctx)
+	assert.False(t, result, "handler should return false on context cancel")
+}
+
+func TestMakePauseHandler_EOFAborts(t *testing.T) {
+	// empty reader returns EOF immediately, treated as abort (safe default for Docker/piped stdin)
+	stdin := bytes.NewReader(nil)
+	var stdout bytes.Buffer
+	handler := makePauseHandler(stdin, &stdout)
+	result := handler(context.Background())
+	assert.False(t, result, "handler should return false on EOF (stdin closed = abort)")
 }
 
 // branchExists checks if a branch exists in the given git repository.

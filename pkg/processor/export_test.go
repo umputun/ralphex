@@ -50,3 +50,13 @@ func (r *Runner) TestRunWithSessionTimeout(ctx context.Context, run func(context
 	prompt, toolName string) executor.Result {
 	return r.runWithSessionTimeout(ctx, run, prompt, toolName)
 }
+
+// TestSetTaskPhaseOverride sets a function that replaces runTaskPhase for testing abort handling.
+func (r *Runner) TestSetTaskPhaseOverride(fn func(ctx context.Context) error) {
+	r.taskPhaseOverride = fn
+}
+
+// TestDrainBreakCh exposes drainBreakCh for testing.
+func (r *Runner) TestDrainBreakCh() {
+	r.drainBreakCh()
+}

@@ -508,12 +508,18 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	// create and run the runner
 	r := createRunner(req, o, runnerLog, plr.holder)
 
-	// listen for SIGQUIT (Ctrl+\) for manual external review loop termination
+	// listen for SIGQUIT (Ctrl+\) for manual break during task and review loops
 	if breakCh := startBreakSignal(); breakCh != nil {
 		r.SetBreakCh(breakCh)
+		r.SetPauseHandler(makePauseHandler(os.Stdin, os.Stdout))
 	}
 
 	if runErr := r.Run(ctx); runErr != nil {
+		if errors.Is(runErr, processor.ErrUserAborted) {
+			// user aborted during task phase — clean exit without success actions
+			fmt.Fprintln(os.Stderr, "aborted by user, plan left in place")
+			return nil
+		}
 		sendNotification(req, branch, plr.baseLog.Elapsed(), git.DiffStats{}, runErr)
 		return fmt.Errorf("runner: %w", runErr)
 	}
@@ -775,6 +781,29 @@ func determineMode(o opts) processor.Mode {
 // ModeFull and ModeTasksOnly both execute tasks that make commits, requiring a branch.
 func modeRequiresBranch(mode processor.Mode) bool {
 	return mode == processor.ModeFull || mode == processor.ModeTasksOnly
+}
+
+// makePauseHandler returns a context-aware pause handler for task loop breaks.
+// on break, prints a message and waits for Enter to resume or context cancellation to abort.
+// stdin read runs in a goroutine so the handler responds to Ctrl+C (SIGINT) promptly.
+func makePauseHandler(stdin io.Reader, stdout io.Writer) func(ctx context.Context) bool {
+	return func(ctx context.Context) bool {
+		fmt.Fprintln(stdout, "\nsession interrupted. press Enter to continue, Ctrl+C to abort")
+
+		resultCh := make(chan bool, 1)
+		go func() {
+			buf := make([]byte, 1)
+			n, _ := stdin.Read(buf) // blocks until Enter or EOF
+			resultCh <- n > 0       // true = Enter (resume), false = EOF (abort)
+		}()
+
+		select {
+		case resume := <-resultCh:
+			return resume
+		case <-ctx.Done():
+			return false
+		}
+	}
 }
 
 // validateFlags checks for conflicting CLI flags.

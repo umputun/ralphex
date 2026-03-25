@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"os/signal"
 	"syscall"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 func TestStartBreakSignal_RepeatedSends(t *testing.T) {
+	signal.Reset(syscall.SIGQUIT)
 	ch := startBreakSignal()
 	require.NotNil(t, ch)
 
@@ -36,6 +38,7 @@ func TestStartBreakSignal_RepeatedSends(t *testing.T) {
 }
 
 func TestStartBreakSignal_BufferedDropsWhenFull(t *testing.T) {
+	signal.Reset(syscall.SIGQUIT)
 	ch := startBreakSignal()
 	require.NotNil(t, ch)
 
@@ -62,6 +65,7 @@ func TestStartBreakSignal_BufferedDropsWhenFull(t *testing.T) {
 }
 
 func TestStartBreakSignal_ReturnsBidirectionalChannel(t *testing.T) {
+	signal.Reset(syscall.SIGQUIT)
 	ch := startBreakSignal()
 	require.NotNil(t, ch)
 

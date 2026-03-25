@@ -112,8 +112,10 @@ type Runner struct {
 	iterationDelay      time.Duration
 	taskRetryCount      int
 	waitOnLimit         time.Duration
-	breakCh             <-chan struct{} // nil = feature disabled; close to break external review loop
-	lastSessionTimedOut bool            // set by runWithSessionTimeout, checked by review loops
+	breakCh             <-chan struct{}                 // nil = feature disabled; receives one value per break signal
+	pauseHandler        func(ctx context.Context) bool  // called on break during task phase; true = resume, false = abort
+	lastSessionTimedOut bool                            // set by runWithSessionTimeout, checked by review loops
+	taskPhaseOverride   func(ctx context.Context) error // test seam: override runTaskPhase result (nil = normal execution)
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
@@ -225,10 +227,17 @@ func (r *Runner) SetGitChecker(g GitChecker) {
 	r.git = g
 }
 
-// SetBreakCh sets the break channel for manual termination of the external review loop.
-// closing the channel causes the current executor run to be canceled and the loop to exit.
+// SetBreakCh sets the break channel for manual termination of review and task loops.
+// each value sent on the channel triggers one break event (repeatable, not close-based).
 func (r *Runner) SetBreakCh(ch <-chan struct{}) {
 	r.breakCh = ch
+}
+
+// SetPauseHandler sets the callback invoked when a break signal is received during task iteration.
+// the handler should prompt the user and return true to resume or false to abort.
+// if nil, break during task phase returns ErrUserAborted immediately.
+func (r *Runner) SetPauseHandler(fn func(ctx context.Context) bool) {
+	r.pauseHandler = fn
 }
 
 // Run executes the main loop based on configured mode.
@@ -260,6 +269,10 @@ func (r *Runner) runFull(ctx context.Context) error {
 	r.log.PrintRaw("starting task execution phase\n")
 
 	if err := r.runTaskPhase(ctx); err != nil {
+		if errors.Is(err, ErrUserAborted) {
+			r.log.Print("task phase aborted by user")
+			return ErrUserAborted
+		}
 		return fmt.Errorf("task phase: %w", err)
 	}
 
@@ -362,6 +375,10 @@ func (r *Runner) runTasksOnly(ctx context.Context) error {
 	r.log.PrintRaw("starting task execution phase\n")
 
 	if err := r.runTaskPhase(ctx); err != nil {
+		if errors.Is(err, ErrUserAborted) {
+			r.log.Print("task phase aborted by user")
+			return ErrUserAborted
+		}
 		return fmt.Errorf("task phase: %w", err)
 	}
 
@@ -370,8 +387,13 @@ func (r *Runner) runTasksOnly(ctx context.Context) error {
 }
 
 // runTaskPhase executes tasks until completion or max iterations.
-// executes ONE Task section per iteration.
+// executes ONE Task section per iteration. supports break (Ctrl+\) with pause+resume:
+// on break, the current session is canceled, pauseHandler is called, and on resume
+// the same iteration re-runs with a fresh session that re-reads the plan file.
 func (r *Runner) runTaskPhase(ctx context.Context) error {
+	if r.taskPhaseOverride != nil {
+		return r.taskPhaseOverride(ctx)
+	}
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt)
 	retryCount := 0
 
@@ -389,7 +411,28 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 		}
 		r.log.PrintSection(status.NewTaskIterationSection(taskNum))
 
-		result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
+		// create per-iteration break context so Ctrl+\ cancels only the current session
+		loopCtx, loopCancel := r.breakContext(ctx)
+
+		result := r.runWithLimitRetry(loopCtx, r.claude.Run, prompt, "claude")
+
+		// check break before calling loopCancel — cancel would make loopCtx.Err() non-nil
+		manualBreak := r.isBreak(loopCtx, ctx)
+		loopCancel()
+
+		if manualBreak {
+			r.log.Print("session interrupted by break signal")
+			r.drainBreakCh() // clear signal that may have arrived during cancellation
+			if r.pauseHandler == nil || !r.pauseHandler(ctx) {
+				return ErrUserAborted
+			}
+			// resume: decrement i to preserve iteration budget and re-run same task
+			r.drainBreakCh() // clear any signal received during pause prompt
+			i--
+			retryCount = 0
+			continue
+		}
+
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
@@ -660,7 +703,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 	for i := 1; i <= maxIterations; i++ {
 		select {
 		case <-loopCtx.Done():
-			if r.isManualBreak(ctx) {
+			if r.isBreak(loopCtx, ctx) {
 				r.log.Print("manual break requested, external review terminated early")
 				return nil
 			}
@@ -674,7 +717,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// so that a timeout on the first eval doesn't narrow subsequent reviews to working-tree only
 		reviewResult := r.runWithLimitRetry(loopCtx, cfg.runReview, cfg.buildPrompt(!firstCompleted, claudeResponse), cfg.name)
 		if reviewResult.Error != nil {
-			if r.isManualBreak(ctx) {
+			if r.isBreak(loopCtx, ctx) {
 				r.log.Print("manual break requested, external review terminated early")
 				return nil
 			}
@@ -707,7 +750,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// restore codex phase for next iteration
 		r.phaseHolder.Set(status.PhaseCodex)
 		if claudeResult.Error != nil {
-			if r.isManualBreak(ctx) {
+			if r.isBreak(loopCtx, ctx) {
 				r.log.Print("manual break requested, external review terminated early")
 				return nil
 			}
@@ -745,7 +788,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		}
 
 		if err := r.sleepWithContext(loopCtx, r.iterationDelay); err != nil {
-			if r.isManualBreak(ctx) {
+			if r.isBreak(loopCtx, ctx) {
 				r.log.Print("manual break requested, external review terminated early")
 				return nil
 			}
@@ -757,8 +800,9 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 	return nil
 }
 
-// breakContext derives a child context that cancels when the break channel fires.
+// breakContext derives a child context that cancels when one value is drained from the break channel.
 // if no break channel is configured, returns the parent context and a no-op cancel.
+// callers detect break by checking loopCtx.Err() != nil && parentCtx.Err() == nil.
 func (r *Runner) breakContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if r.breakCh == nil {
 		return parent, func() {}
@@ -774,17 +818,24 @@ func (r *Runner) breakContext(parent context.Context) (context.Context, context.
 	return ctx, cancel
 }
 
-// isManualBreak returns true if the break channel was fired but the parent context is still alive.
-// this distinguishes manual break from SIGINT/timeout.
-func (r *Runner) isManualBreak(parentCtx context.Context) bool {
-	if r.breakCh == nil || parentCtx.Err() != nil {
-		return false
+// isBreak returns true if the loop context was canceled by a break signal
+// while the parent context is still alive. does not read from the break channel,
+// so it can be called without consuming a pending signal.
+func (r *Runner) isBreak(loopCtx, parentCtx context.Context) bool {
+	return loopCtx.Err() != nil && parentCtx.Err() == nil
+}
+
+// drainBreakCh does a non-blocking drain of one pending value from the break channel.
+// called after pause+resume to prevent a SIGQUIT received during the pause prompt
+// from immediately canceling the next iteration. not called on normal iteration
+// boundaries so that a legitimate Ctrl+\ between iterations is preserved.
+func (r *Runner) drainBreakCh() {
+	if r.breakCh == nil {
+		return
 	}
 	select {
 	case <-r.breakCh:
-		return true
 	default:
-		return false
 	}
 }
 
@@ -878,6 +929,10 @@ func (r *Runner) showExternalReviewSummary(toolName, output string) {
 		r.log.PrintAligned("  " + line)
 	}
 }
+
+// ErrUserAborted is returned when the user aborts or declines to resume after a break signal (Ctrl+\).
+// mode entrypoints treat this as a clean non-error exit to avoid falling through to review/finalize.
+var ErrUserAborted = errors.New("user aborted")
 
 // ErrUserRejectedPlan is returned when user rejects the plan draft.
 var ErrUserRejectedPlan = errors.New("user rejected plan")
