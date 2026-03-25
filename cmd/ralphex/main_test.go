@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	flags "github.com/jessevdk/go-flags"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -638,6 +639,43 @@ func TestIdleTimeoutFlag(t *testing.T) {
 		applyCLIOverrides(o, cfg)
 		assert.Equal(t, 5*time.Minute, cfg.IdleTimeout)
 		assert.True(t, cfg.IdleTimeoutSet)
+	})
+}
+
+func TestExplicitZeroOverridesConfig(t *testing.T) {
+	// verify that --flag 0 on the command line overrides a non-zero config value.
+	// uses markFlagsSet with a real go-flags parser to populate the *Set bools.
+	makeOpts := func(flagName string) opts {
+		var o opts
+		p := flags.NewParser(&o, flags.Default)
+		_, err := p.ParseArgs([]string{"--" + flagName, "0"})
+		require.NoError(t, err)
+		o.markFlagsSet(p)
+		return o
+	}
+
+	t.Run("idle_timeout_zero_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{IdleTimeout: 5 * time.Minute, IdleTimeoutSet: true}
+		o := makeOpts("idle-timeout")
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, time.Duration(0), cfg.IdleTimeout)
+		assert.True(t, cfg.IdleTimeoutSet)
+	})
+
+	t.Run("session_timeout_zero_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{SessionTimeout: 30 * time.Minute, SessionTimeoutSet: true}
+		o := makeOpts("session-timeout")
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, time.Duration(0), cfg.SessionTimeout)
+		assert.True(t, cfg.SessionTimeoutSet)
+	})
+
+	t.Run("wait_zero_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{WaitOnLimit: 1 * time.Hour, WaitOnLimitSet: true}
+		o := makeOpts("wait")
+		applyCLIOverrides(o, cfg)
+		assert.Equal(t, time.Duration(0), cfg.WaitOnLimit)
+		assert.True(t, cfg.WaitOnLimitSet)
 	})
 }
 

@@ -329,5 +329,6 @@ echo '{"type":"result","result":""}'
 
 **Timeout / stuck:**
 - ralphex supports an optional per-session timeout via `--session-timeout` flag or `session_timeout` config option (e.g., `30m`, `1h`). When set, hanging claude sessions are killed after the deadline and the phase loop continues
+- ralphex also supports `--idle-timeout` flag or `idle_timeout` config option (e.g., `5m`). Unlike session timeout (fixed wall-clock limit), idle timeout resets on each output line and fires only when the session goes silent — useful for detecting sessions that stopped producing output but didn't exit
 - Check if the underlying tool has its own timeout settings
 - For codex: adjust `CODEX_SANDBOX` if the sandbox is blocking operations

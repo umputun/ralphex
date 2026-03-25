@@ -58,6 +58,22 @@ type opts struct {
 	ConfigDir             string        `long:"config-dir" env:"RALPHEX_CONFIG_DIR" description:"custom config directory"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
+
+	// set by markFlagsSet after parsing; true when the flag was explicitly provided on the CLI
+	waitSet           bool
+	sessionTimeoutSet bool
+	idleTimeoutSet    bool
+}
+
+// markFlagsSet detects which duration flags were explicitly provided on the CLI
+// so that --flag 0 can override a non-zero config value.
+func (o *opts) markFlagsSet(parser *flags.Parser) {
+	if parser == nil {
+		return
+	}
+	o.waitSet = isFlagSet(parser, "wait")
+	o.sessionTimeoutSet = isFlagSet(parser, "session-timeout")
+	o.idleTimeoutSet = isFlagSet(parser, "idle-timeout")
 }
 
 var revision = "unknown"
@@ -172,6 +188,10 @@ func main() {
 	// setup context with signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// detect explicitly-set zero values for duration flags so --flag 0 can disable config values.
+	// go-flags can't distinguish "not provided" from "set to zero" via the field alone.
+	o.markFlagsSet(parser)
 
 	if err := run(ctx, o); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1183,6 +1203,8 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 }
 
 // applyCLIOverrides applies CLI flag overrides to config.
+// uses opts.*Set bools (populated by markFlagsSet) to detect explicitly-set zero values
+// so that e.g. --idle-timeout 0 can disable a non-zero config value.
 func applyCLIOverrides(o opts, cfg *config.Config) {
 	if o.SkipFinalize {
 		cfg.FinalizeEnabled = false
@@ -1190,18 +1212,27 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	if o.Worktree {
 		cfg.WorktreeEnabled = true
 	}
-	if o.Wait > 0 {
+	if o.Wait > 0 || (o.Wait == 0 && o.waitSet) {
 		cfg.WaitOnLimit = o.Wait
 		cfg.WaitOnLimitSet = true
 	}
-	if o.SessionTimeout > 0 {
+	if o.SessionTimeout > 0 || (o.SessionTimeout == 0 && o.sessionTimeoutSet) {
 		cfg.SessionTimeout = o.SessionTimeout
 		cfg.SessionTimeoutSet = true
 	}
-	if o.IdleTimeout > 0 {
+	if o.IdleTimeout > 0 || (o.IdleTimeout == 0 && o.idleTimeoutSet) {
 		cfg.IdleTimeout = o.IdleTimeout
 		cfg.IdleTimeoutSet = true
 	}
+}
+
+// isFlagSet returns true if the named CLI flag was explicitly provided on the command line.
+func isFlagSet(parser *flags.Parser, name string) bool {
+	if parser == nil {
+		return false
+	}
+	opt := parser.FindOptionByLongName(name)
+	return opt != nil && opt.IsSet()
 }
 
 // resolveMaxIterations returns the effective max iterations value.

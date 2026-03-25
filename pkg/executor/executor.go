@@ -19,9 +19,10 @@ import (
 
 // Result holds execution result with output and detected signal.
 type Result struct {
-	Output string // accumulated text output
-	Signal string // detected signal (COMPLETED, FAILED, etc.) or empty
-	Error  error  // execution error if any
+	Output       string // accumulated text output
+	Signal       string // detected signal (COMPLETED, FAILED, etc.) or empty
+	Error        error  // execution error if any
+	IdleTimedOut bool   // true when idle timeout fired (derived context canceled, parent alive)
 }
 
 // PatternMatchError is returned when a configured error pattern is detected in output.
@@ -193,7 +194,6 @@ type ClaudeExecutor struct {
 	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
 	IdleTimeout   time.Duration     // kill session after this duration of no output, zero = disabled
 	cmdRunner     CommandRunner     // for testing, nil uses default
-	idleTouch     func()            // resets idle timer, set by Run() for parseStream to call
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -231,14 +231,14 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	// is received for IdleTimeout duration. the touch closure resets the timer on
 	// each line of output and is called from parseStream's readLines handler.
 	execCtx := ctx
-	e.idleTouch = func() {} // no-op by default
+	idleTouch := func() {} // no-op by default
 	if e.IdleTimeout > 0 {
 		var idleCancel context.CancelFunc
 		execCtx, idleCancel = context.WithCancel(ctx)
 		defer idleCancel()
 		timer := time.AfterFunc(e.IdleTimeout, idleCancel)
 		defer timer.Stop()
-		e.idleTouch = func() { timer.Reset(e.IdleTimeout) }
+		idleTouch = func() { timer.Reset(e.IdleTimeout) }
 	}
 
 	stdout, wait, err := runner.Run(execCtx, cmd, args...)
@@ -246,13 +246,33 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		return Result{Error: err}
 	}
 
-	result := e.parseStream(execCtx, stdout)
+	result := e.parseStream(execCtx, stdout, idleTouch)
 	waitErr := wait()
 
 	// idle timeout: derived context canceled but parent is alive — not an error.
 	// return accumulated output and signal as-is, clearing any context-cancellation errors.
+	// set IdleTimedOut so the runner can distinguish idle timeout from normal completion
+	// and avoid false "no changes detected" exits in review loops.
 	if e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil {
+		// check limit patterns first — idle timeout may have fired after a rate-limit message,
+		// and the caller needs LimitPatternError to trigger wait-and-retry logic.
+		if pattern := matchPattern(result.Output, e.LimitPatterns); pattern != "" {
+			return Result{
+				Output: result.Output,
+				Signal: result.Signal,
+				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"},
+			}
+		}
+		// check for error patterns in output
+		if pattern := matchPattern(result.Output, e.ErrorPatterns); pattern != "" {
+			return Result{
+				Output: result.Output,
+				Signal: result.Signal,
+				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"},
+			}
+		}
 		result.Error = nil
+		result.IdleTimedOut = true
 		return result
 	}
 
@@ -295,14 +315,13 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 // parseStream reads and parses the JSON stream from claude CLI.
 // uses readLines internally, so there is no line length limit.
 // checks ctx.Done() between reads so cancellation is not blocked by slow pipe reads.
-func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader) Result {
+// idleTouch resets the idle timer on each line of output; pass no-op when idle timeout is disabled.
+func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch func()) Result {
 	var output strings.Builder
 	var signal string
 
 	err := readLines(ctx, r, func(line string) {
-		if e.idleTouch != nil {
-			e.idleTouch() // reset idle timer on every line of pipe activity
-		}
+		idleTouch() // reset idle timer on every line of pipe activity
 		if line == "" {
 			return
 		}

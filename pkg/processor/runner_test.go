@@ -3656,3 +3656,83 @@ func TestRunner_TaskPhase_StickySignalDrainAfterPause(t *testing.T) {
 	secondResult := claude.RunCalls()[1]
 	assert.NotNil(t, secondResult, "second claude call should exist")
 }
+
+func TestRunner_IdleTimeout_ReviewLoopContinuesAfterTimeout(t *testing.T) {
+	// when idle timeout fires without a signal, the review loop should retry (not exit with "no changes detected")
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+
+	// call 1: first review succeeds normally (enters runClaudeReviewLoop)
+	// call 2: returns with IdleTimedOut=true, no signal (simulates idle timeout)
+	// call 3+: ReviewDone (loop exits normally)
+	callNum := 0
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			callNum++
+			if callNum == 2 {
+				return executor.Result{Output: "partial output", IdleTimedOut: true}
+			}
+			return executor.Result{Output: "review done", Signal: status.ReviewDone}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+
+	// call 2 was idle-timed-out, call 3 should have been made (loop continued, not exited)
+	assert.GreaterOrEqual(t, len(claude.RunCalls()), 3,
+		"claude should be called at least 3 times: first review + idle timeout in loop + retry")
+
+	// verify idle timeout warning was logged
+	var foundIdleMsg bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "idle timed out") {
+			foundIdleMsg = true
+			break
+		}
+	}
+	assert.True(t, foundIdleMsg, "should log idle timeout message")
+}
+
+func TestRunner_IdleTimeout_ReviewLoopExitsWhenSignalPresent(t *testing.T) {
+	// when idle timeout fires but REVIEW_DONE signal was already emitted, review should exit normally
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger("progress.txt")
+
+	// all calls return IdleTimedOut=true with REVIEW_DONE signal
+	claude := &mocks.ExecutorMock{
+		RunFunc: func(_ context.Context, _ string) executor.Result {
+			return executor.Result{Output: "review done", Signal: status.ReviewDone, IdleTimedOut: true}
+		},
+	}
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+
+	// with signal present, the loop should exit normally; idle timeout with signal
+	// should NOT cause unnecessary retries
+	var foundIdleMsg bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "idle timed out") {
+			foundIdleMsg = true
+			break
+		}
+	}
+	assert.False(t, foundIdleMsg, "should NOT log idle timeout when signal is present")
+}

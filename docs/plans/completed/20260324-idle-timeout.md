@@ -99,8 +99,8 @@ Coexists with `--session-timeout`: session timeout is the outer hard wall-clock 
 
 ### Task 4: [Final] Update documentation
 
-- [ ] update CLAUDE.md — add idle timeout to Key Patterns and Configuration sections
-- [ ] update llms.txt — add `--idle-timeout` to usage docs
-- [ ] update README.md — add idle timeout to configuration section
-- [ ] update comment on issue #248 referencing the new feature
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md — add idle timeout to Key Patterns and Configuration sections
+- [x] update llms.txt — add `--idle-timeout` to usage docs
+- [x] update README.md — add idle timeout to configuration section
+- [x] update comment on issue #248 referencing the new feature
+- [x] move this plan to `docs/plans/completed/`

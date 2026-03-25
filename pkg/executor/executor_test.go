@@ -222,7 +222,7 @@ func TestClaudeExecutor_parseStream(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &ClaudeExecutor{}
-			result := e.parseStream(context.Background(), strings.NewReader(tc.input))
+			result := e.parseStream(context.Background(), strings.NewReader(tc.input), func() {})
 
 			assert.Equal(t, tc.wantOutput, result.Output)
 			assert.Equal(t, tc.wantSignal, result.Signal)
@@ -241,7 +241,7 @@ func TestClaudeExecutor_parseStream_withHandler(t *testing.T) {
 		},
 	}
 
-	result := e.parseStream(context.Background(), strings.NewReader(input))
+	result := e.parseStream(context.Background(), strings.NewReader(input), func() {})
 
 	assert.Equal(t, "chunk1chunk2", result.Output)
 	assert.Equal(t, []string{"chunk1", "chunk2"}, chunks)
@@ -252,7 +252,7 @@ func TestClaudeExecutor_parseStream_withDebug(t *testing.T) {
 	input := "not json\n" + `{"type":"content_block_delta","delta":{"type":"text_delta","text":"valid"}}`
 
 	e := &ClaudeExecutor{Debug: true}
-	result := e.parseStream(context.Background(), strings.NewReader(input))
+	result := e.parseStream(context.Background(), strings.NewReader(input), func() {})
 
 	assert.Equal(t, "not json\nvalid", result.Output)
 }
@@ -533,7 +533,7 @@ func TestClaudeExecutor_parseStream_largeLines(t *testing.T) {
 			jsonLine := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + largeText + `"}}`
 
 			e := &ClaudeExecutor{}
-			result := e.parseStream(context.Background(), strings.NewReader(jsonLine))
+			result := e.parseStream(context.Background(), strings.NewReader(jsonLine), func() {})
 
 			require.NoError(t, result.Error, "should handle %d byte line without error", tc.size)
 			assert.Len(t, result.Output, tc.size, "output should contain full text")
@@ -554,7 +554,7 @@ func TestClaudeExecutor_parseStream_multipleLargeLines(t *testing.T) {
 	input := strings.Join(lines, "\n")
 
 	e := &ClaudeExecutor{}
-	result := e.parseStream(context.Background(), strings.NewReader(input))
+	result := e.parseStream(context.Background(), strings.NewReader(input), func() {})
 
 	require.NoError(t, result.Error)
 	assert.Len(t, result.Output, lineSize*numLines, "should contain all output from all lines")
@@ -781,6 +781,7 @@ func TestClaudeExecutor_Run_IdleTimeoutFires(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, "hello", result.Output)
+	assert.True(t, result.IdleTimedOut, "IdleTimedOut should be set when idle timeout fires")
 }
 
 func TestClaudeExecutor_Run_IdleTimeoutNotFiredOnContinuousOutput(t *testing.T) {
@@ -823,6 +824,119 @@ func TestClaudeExecutor_Run_IdleTimeoutDisabledWhenZero(t *testing.T) {
 	require.NoError(t, result.Error)
 	assert.Equal(t, "output", result.Output)
 	assert.Zero(t, e.IdleTimeout)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false when idle timeout is disabled")
+}
+
+func TestClaudeExecutor_Run_IdleTimeoutWithSessionTimeout(t *testing.T) {
+	// when both session timeout and idle timeout are set, idle timeout fires first
+	// if the session goes silent, even though session timeout is still alive
+	pr, pw := io.Pipe()
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(ctx context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			go func() {
+				defer pw.Close()
+				fmt.Fprintln(pw, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}`)
+				<-ctx.Done()
+			}()
+			return pr, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	// session timeout is 5s (long), idle timeout is 100ms (short) — idle fires first
+	sessionCtx, sessionCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer sessionCancel()
+
+	e := &ClaudeExecutor{cmdRunner: mock, IdleTimeout: 100 * time.Millisecond}
+	result := e.Run(sessionCtx, "test prompt")
+
+	require.NoError(t, result.Error, "idle timeout should not produce an error")
+	assert.Equal(t, "hello", result.Output)
+	require.NoError(t, sessionCtx.Err(), "session timeout context should still be alive")
+	assert.True(t, result.IdleTimedOut, "IdleTimedOut should be set when idle timeout fires")
+}
+
+func TestClaudeExecutor_Run_IdleTimeoutDetectsLimitPattern(t *testing.T) {
+	// when idle timeout fires after a rate-limit message, the limit pattern should be detected
+	// instead of silently returning success. this ensures runWithLimitRetry can wait-and-retry.
+	pr, pw := io.Pipe()
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(ctx context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			go func() {
+				defer pw.Close()
+				// print rate limit message then go silent
+				fmt.Fprintln(pw, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}`)
+				<-ctx.Done()
+			}()
+			return pr, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	e := &ClaudeExecutor{
+		cmdRunner:     mock,
+		IdleTimeout:   100 * time.Millisecond,
+		LimitPatterns: []string{"You've hit your limit"},
+	}
+	result := e.Run(context.Background(), "test prompt")
+
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr, "should return LimitPatternError")
+	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should not be set when pattern matched")
+}
+
+func TestClaudeExecutor_Run_IdleTimeoutDetectsErrorPattern(t *testing.T) {
+	// when idle timeout fires after an error pattern message, the error pattern should be detected
+	pr, pw := io.Pipe()
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(ctx context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			go func() {
+				defer pw.Close()
+				fmt.Fprintln(pw, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"API Error: something broke"}}`)
+				<-ctx.Done()
+			}()
+			return pr, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	e := &ClaudeExecutor{
+		cmdRunner:     mock,
+		IdleTimeout:   100 * time.Millisecond,
+		ErrorPatterns: []string{"API Error:"},
+	}
+	result := e.Run(context.Background(), "test prompt")
+
+	var patternErr *PatternMatchError
+	require.ErrorAs(t, result.Error, &patternErr, "should return PatternMatchError")
+	assert.Equal(t, "API Error:", patternErr.Pattern)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should not be set when pattern matched")
+}
+
+func TestClaudeExecutor_Run_IdleTimeoutNotFiredResult(t *testing.T) {
+	// verify IdleTimedOut is false on normal (non-idle-timeout) completion with idle timeout configured
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			return strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"done"}}`),
+				func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, IdleTimeout: 5 * time.Second}
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "done", result.Output)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false on normal completion")
 }
 
 // printFlag is registered so the test binary accepts --print without erroring.
