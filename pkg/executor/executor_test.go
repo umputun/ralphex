@@ -1052,7 +1052,7 @@ func TestClaudeExecutor_Run_SendInitialPromptFailure(t *testing.T) {
 	mock := &mocks.CommandRunnerMock{
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.WriteCloser, io.Reader, func() error, error) {
 			// return a writer that always fails
-			failWriter := &failingWriteCloser{writeErr: errors.New("broken pipe")}
+			failWriter := &failWriteCloser{writeErr: errors.New("broken pipe")}
 			return failWriter, strings.NewReader(""), func() error { return nil }, nil
 		},
 	}
@@ -1207,8 +1207,3 @@ func TestClaudeExecutor_Run_CustomArgs_PreservesExistingInputFormat(t *testing.T
 	assert.Equal(t, 1, count, "should not duplicate --input-format")
 }
 
-// failingWriteCloser returns an error on every Write call.
-type failingWriteCloser struct{ writeErr error }
-
-func (w *failingWriteCloser) Write([]byte) (int, error) { return 0, w.writeErr }
-func (w *failingWriteCloser) Close() error              { return nil }

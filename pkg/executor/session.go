@@ -47,8 +47,10 @@ func (s *ClaudeSession) Send(msg string) error {
 	}
 	data = append(data, '\n')
 
-	_, err = s.stdin.Write(data)
-	return err
+	if _, err = s.stdin.Write(data); err != nil {
+		return fmt.Errorf("write to stdin: %w", err)
+	}
+	return nil
 }
 
 // Close closes the stdin pipe. idempotent.
