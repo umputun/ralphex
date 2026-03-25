@@ -634,10 +634,12 @@ func TestService_EnsureIgnored(t *testing.T) {
 		assert.Len(t, log.logs, 1)
 		assert.Contains(t, log.logs[0], ".ralphex/progress/", "log message should contain pattern")
 
-		// verify pattern was added to .gitignore
+		// verify pattern was added to .gitignore with unified comment
 		gitignorePath := filepath.Join(dir, ".gitignore")
 		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
 		require.NoError(t, err)
+		assert.Contains(t, string(content), "# ralphex")
+		assert.NotContains(t, string(content), "# ralphex progress logs")
 		assert.Contains(t, string(content), ".ralphex/progress/")
 	})
 
@@ -704,6 +706,76 @@ func TestService_EnsureIgnored(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(content), "*.log")
 		assert.Contains(t, string(content), "*.tmp")
+	})
+
+	t.Run("does not duplicate comment on second call", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// first call adds comment + pattern
+		err = svc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt")
+		require.NoError(t, err)
+
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Equal(t, 1, strings.Count(string(content), "# ralphex"), "first call should add comment once")
+		assert.Contains(t, string(content), ".ralphex/progress/")
+
+		// second call with different pattern should not add comment again
+		err = svc.EnsureIgnored(".ralphex/worktrees/", ".ralphex/worktrees/test-branch")
+		require.NoError(t, err)
+
+		content, err = os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Equal(t, 1, strings.Count(string(content), "# ralphex"), "second call should not duplicate comment")
+		assert.Contains(t, string(content), ".ralphex/progress/")
+		assert.Contains(t, string(content), ".ralphex/worktrees/")
+	})
+
+	t.Run("recognizes legacy header from older versions", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// simulate .gitignore from older ralphex version with legacy header
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		err = os.WriteFile(gitignorePath, []byte("# ralphex progress logs\n.ralphex/progress/\n"), 0o600)
+		require.NoError(t, err)
+
+		// add worktrees pattern — should reuse legacy header, not add new one
+		err = svc.EnsureIgnored(".ralphex/worktrees/", ".ralphex/worktrees/test-branch")
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.NotContains(t, string(content), "\n# ralphex\n", "should not add new header when legacy exists")
+		assert.Contains(t, string(content), ".ralphex/worktrees/")
+	})
+
+	t.Run("handles file without trailing newline", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// create .gitignore with ralphex header but no trailing newline
+		gitignorePath := filepath.Join(dir, ".gitignore")
+		err = os.WriteFile(gitignorePath, []byte("# ralphex\n.ralphex/progress/"), 0o600) // no trailing \n
+		require.NoError(t, err)
+
+		// add second pattern — should not corrupt the last line
+		err = svc.EnsureIgnored(".ralphex/worktrees/", ".ralphex/worktrees/test-branch")
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(gitignorePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		for line := range strings.SplitSeq(string(content), "\n") {
+			// each non-empty line should be a complete entry, not concatenated
+			assert.NotContains(t, line, ".ralphex/progress/.ralphex/worktrees/",
+				"patterns should not be concatenated on the same line")
+		}
+		assert.Contains(t, string(content), ".ralphex/worktrees/")
 	})
 }
 
