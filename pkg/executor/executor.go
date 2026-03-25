@@ -20,10 +20,13 @@ import (
 // Result holds execution result with output and detected signal.
 type Result struct {
 	Output       string // accumulated text output
+	RecentText   string // last 10 text blocks joined, used for pattern matching to avoid false positives
 	Signal       string // detected signal (COMPLETED, FAILED, etc.) or empty
 	Error        error  // execution error if any
 	IdleTimedOut bool   // true when idle timeout fired (derived context canceled, parent alive)
 }
+
+const recentBlockCount = 10 // number of recent text blocks to keep for pattern matching
 
 // PatternMatchError is returned when a configured error pattern is detected in output.
 type PatternMatchError struct {
@@ -256,17 +259,17 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	if e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil {
 		// check limit patterns first — idle timeout may have fired after a rate-limit message,
 		// and the caller needs LimitPatternError to trigger wait-and-retry logic.
-		if pattern := matchPattern(result.Output, e.LimitPatterns); pattern != "" {
+		if pattern := matchPattern(result.RecentText, e.LimitPatterns); pattern != "" {
 			return Result{
-				Output: result.Output,
+				Output: result.Output, RecentText: result.RecentText,
 				Signal: result.Signal,
 				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"},
 			}
 		}
 		// check for error patterns in output
-		if pattern := matchPattern(result.Output, e.ErrorPatterns); pattern != "" {
+		if pattern := matchPattern(result.RecentText, e.ErrorPatterns); pattern != "" {
 			return Result{
-				Output: result.Output,
+				Output: result.Output, RecentText: result.RecentText,
 				Signal: result.Signal,
 				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"},
 			}
@@ -279,7 +282,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	if waitErr != nil {
 		// check if it was context cancellation
 		if ctx.Err() != nil {
-			return Result{Output: result.Output, Signal: result.Signal, Error: ctx.Err()}
+			return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: ctx.Err()}
 		}
 		if result.Output == "" {
 			return Result{Error: fmt.Errorf("claude exited with error: %w", waitErr)}
@@ -292,18 +295,18 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	}
 
 	// check limit patterns first (higher priority)
-	if pattern := matchPattern(result.Output, e.LimitPatterns); pattern != "" {
+	if pattern := matchPattern(result.RecentText, e.LimitPatterns); pattern != "" {
 		return Result{
-			Output: result.Output,
+			Output: result.Output, RecentText: result.RecentText,
 			Signal: result.Signal,
 			Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"},
 		}
 	}
 
 	// check for error patterns in output
-	if pattern := matchPattern(result.Output, e.ErrorPatterns); pattern != "" {
+	if pattern := matchPattern(result.RecentText, e.ErrorPatterns); pattern != "" {
 		return Result{
-			Output: result.Output,
+			Output: result.Output, RecentText: result.RecentText,
 			Signal: result.Signal,
 			Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"},
 		}
@@ -319,6 +322,8 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch func()) Result {
 	var output strings.Builder
 	var signal string
+	var recentBlocks [recentBlockCount]string
+	var blockIdx int
 
 	err := readLines(ctx, r, func(line string) {
 		idleTouch() // reset idle timer on every line of pipe activity
@@ -334,6 +339,8 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 			}
 			output.WriteString(line)
 			output.WriteString("\n")
+			recentBlocks[blockIdx%recentBlockCount] = line
+			blockIdx++
 			if e.OutputHandler != nil {
 				e.OutputHandler(line + "\n")
 			}
@@ -347,6 +354,10 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 				e.OutputHandler(text)
 			}
 
+			// track recent blocks for pattern matching (avoids false positives on full output)
+			recentBlocks[blockIdx%recentBlockCount] = text
+			blockIdx++
+
 			// check for signals in text
 			if sig := detectSignal(text); sig != "" {
 				signal = sig
@@ -354,11 +365,24 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 		}
 	})
 
-	if err != nil {
-		return Result{Output: output.String(), Signal: signal, Error: fmt.Errorf("stream read: %w", err)}
+	// join recent blocks in chronological order for pattern matching.
+	// iterate from the oldest slot forward to preserve order after wrap-around.
+	var recent strings.Builder
+	start := blockIdx % recentBlockCount
+	for i := range recentBlockCount {
+		b := recentBlocks[(start+i)%recentBlockCount]
+		if b != "" {
+			recent.WriteString(b)
+			recent.WriteString("\n")
+		}
 	}
 
-	return Result{Output: output.String(), Signal: signal}
+	if err != nil {
+		return Result{Output: output.String(), RecentText: recent.String(), Signal: signal,
+			Error: fmt.Errorf("stream read: %w", err)}
+	}
+
+	return Result{Output: output.String(), RecentText: recent.String(), Signal: signal}
 }
 
 // extractText extracts text content from various event types.

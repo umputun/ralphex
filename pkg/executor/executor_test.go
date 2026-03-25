@@ -1124,3 +1124,69 @@ func TestClaudeExecutor_Run_LimitPattern(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeExecutor_Run_PatternFalsePositive_InAnalysisText(t *testing.T) {
+	// pattern appears in early output (analysis text) but is followed by many blocks of real work.
+	// should NOT trigger pattern match because the pattern falls outside the recent blocks window.
+	lines := make([]string, 0, recentBlockCount+2)
+	// block 1: analysis text containing the pattern
+	lines = append(lines, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"the error message says You've hit your limit when rate limited"}}`)
+	// blocks 2-5: normal work output (pushes pattern out of the recentBlockCount window)
+	for i := range recentBlockCount + 1 {
+		lines = append(lines, fmt.Sprintf(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"normal work output block %d"}}`, i))
+	}
+	jsonStream := strings.Join(lines, "\n")
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, LimitPatterns: []string{"You've hit your limit"}, ErrorPatterns: []string{"hit your limit"}}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error, "should not detect pattern in old analysis text")
+	assert.Contains(t, result.Output, "You've hit your limit", "full output still has the text")
+	assert.NotContains(t, result.RecentText, "You've hit your limit", "recent blocks should not contain old text")
+}
+
+func TestClaudeExecutor_Run_PatternInRecentBlock(t *testing.T) {
+	// pattern in the last block (real rate limit) — should be detected
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"some work done"}}
+{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit · resets 5pm"}}`
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, LimitPatterns: []string{"You've hit your limit"}}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr)
+	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
+}
+
+func TestClaudeExecutor_Run_PatternInSecondToLastBlock(t *testing.T) {
+	// pattern in second-to-last block, one more short block after (e.g., reset info) — still in window
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"You've hit your limit"}}
+{"type":"content_block_delta","delta":{"type":"text_delta","text":"resets at 5pm (Europe/Vilnius)"}}`
+
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, LimitPatterns: []string{"You've hit your limit"}}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr)
+	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
+}
