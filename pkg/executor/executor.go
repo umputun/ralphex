@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 
@@ -164,10 +165,8 @@ func stripPromptFlag(args []string) []string {
 
 // ensureFlag appends flag and value to args if the flag is not already present.
 func ensureFlag(args []string, flag, value string) []string {
-	for _, a := range args {
-		if a == flag {
-			return args
-		}
+	if slices.Contains(args, flag) {
+		return args
 	}
 	return append(args, flag, value)
 }
@@ -365,7 +364,7 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, onResult 
 		// result event marks the end of this conversation turn;
 		// close stdin so the process can exit instead of waiting for more input
 		if event.Type == "result" && onResult != nil {
-			onResult()
+			onResult() //nolint:errcheck // onResult closes stdin; errors are non-actionable here
 		}
 	})
 

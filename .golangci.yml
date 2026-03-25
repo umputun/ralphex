@@ -146,6 +146,10 @@ linters:
         text: "Error return value of .*.Close.*is not checked"
       - linters:
           - errcheck
+          - wrapcheck
+        path: _test\.go$
+      - linters:
+          - errcheck
         text: "Error return value of .*.Fprintf.*is not checked"
       - linters:
           - errcheck

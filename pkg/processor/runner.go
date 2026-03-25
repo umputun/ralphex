@@ -249,9 +249,12 @@ func (r *Runner) SendMessage(msg string) error {
 	}
 	session := sp.Session()
 	if session == nil {
-		return fmt.Errorf("no active session")
+		return errors.New("no active session")
 	}
-	return session.Send(msg)
+	if err := session.Send(msg); err != nil {
+		return fmt.Errorf("send message: %w", err)
+	}
+	return nil
 }
 
 // Run executes the main loop based on configured mode.

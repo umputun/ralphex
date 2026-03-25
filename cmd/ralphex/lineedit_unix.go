@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 
@@ -25,7 +26,7 @@ type lineEditor struct {
 // returns nil, nil if stdin is not a terminal (e.g. piped input).
 func newLineEditor() (*lineEditor, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil,nil signals "not a terminal" to caller
 	}
 
 	rl, err := readline.NewEx(&readline.Config{
@@ -34,7 +35,7 @@ func newLineEditor() (*lineEditor, error) {
 		EOFPrompt:       "",
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("init readline: %w", err)
 	}
 
 	le := &lineEditor{
@@ -60,7 +61,7 @@ func (le *lineEditor) Close() {
 	default:
 	}
 	close(le.done)
-	le.rl.Close() //nolint:errcheck
+	le.rl.Close()
 }
 
 // wrapWriter returns a writer that coordinates with the input line.

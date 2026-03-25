@@ -2,6 +2,7 @@ package executor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -23,14 +24,14 @@ func newClaudeSession(stdin io.WriteCloser) *ClaudeSession {
 // Send marshals msg as a stream-json user message and writes it to stdin.
 func (s *ClaudeSession) Send(msg string) error {
 	if s == nil {
-		return fmt.Errorf("session is nil")
+		return errors.New("session is nil")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.closed {
-		return fmt.Errorf("session is closed")
+		return errors.New("session is closed")
 	}
 
 	m := stdinMessage{
@@ -67,7 +68,10 @@ func (s *ClaudeSession) Close() error {
 	}
 
 	s.closed = true
-	return s.stdin.Close()
+	if err := s.stdin.Close(); err != nil {
+		return fmt.Errorf("close stdin: %w", err)
+	}
+	return nil
 }
 
 // stdinMessage is the top-level JSON envelope for stream-json input.

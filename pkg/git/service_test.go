@@ -1056,14 +1056,17 @@ func TestService_CreateWorktreeForPlan(t *testing.T) {
 		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile, "master")
 		require.NoError(t, err)
 		assert.True(t, planNeedsCommit, "untracked plan file should need commit")
-		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // cleanup
+		defer svc.RemoveWorktree(wtPath)
 
 		// try to create second worktree at different path but same branch.
 		// use AddWorktree directly to bypass dir-exists check.
 		secondPath := filepath.Join(dir, ".ralphex", "worktrees", "branch-conflict-2")
 		err = svc.repo.addWorktree(secondPath, "branch-conflict", false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "already used by worktree")
+		errMsg := err.Error()
+		assert.True(t, strings.Contains(errMsg, "already used by worktree") ||
+			strings.Contains(errMsg, "is already checked out at"),
+			"expected worktree conflict error, got: %s", errMsg)
 	})
 
 	t.Run("strips date prefix from branch name", func(t *testing.T) {

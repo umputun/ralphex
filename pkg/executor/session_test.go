@@ -3,7 +3,7 @@ package executor
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"sync"
 	"testing"
 
@@ -108,11 +108,11 @@ func TestClaudeSession_Send_Concurrent(t *testing.T) {
 	const n = 50
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := range n {
-		go func(i int) {
+	for range n {
+		go func() {
 			defer wg.Done()
 			_ = s.Send("msg")
-		}(i)
+		}()
 	}
 	wg.Wait()
 
@@ -136,7 +136,7 @@ func TestClaudeSession_Close_Nil(t *testing.T) {
 }
 
 func TestClaudeSession_Send_WriterError(t *testing.T) {
-	s := newClaudeSession(&failWriteCloser{writeErr: fmt.Errorf("broken pipe")})
+	s := newClaudeSession(&failWriteCloser{writeErr: errors.New("broken pipe")})
 
 	err := s.Send("hello")
 
