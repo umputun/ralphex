@@ -511,7 +511,7 @@ func (s *Service) EnsureIgnored(pattern, probePath string) error {
 	}
 	if writeErr != nil {
 		_ = f.Close() // close on write error, ignore close error since write already failed
-		return fmt.Errorf("write .gitignore: %w", err)
+		return fmt.Errorf("write .gitignore: %w", writeErr)
 	}
 
 	if err := f.Close(); err != nil {
