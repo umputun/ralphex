@@ -108,7 +108,7 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 
 **Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when Claude produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and Claude can't agree on findings.
 
-**Manual break:** Press Ctrl+\ (SIGQUIT) during the external review loop to terminate it immediately. Not available on Windows.
+**Manual break (Ctrl+\):** Press Ctrl+\ (SIGQUIT) to intervene during execution. In the task phase, it pauses execution and prompts "press Enter to continue, Ctrl+C to abort" — on Enter the same task re-runs with a fresh session that re-reads the plan file, so you can edit the plan mid-run. In the external review phase, it terminates the loop immediately. Not available on Windows.
 
 **Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing.
 

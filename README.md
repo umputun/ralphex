@@ -96,6 +96,8 @@ ralphex executes plans in four phases with automated code reviews, plus an optio
 4. Marks checkboxes as done `[x]`, commits changes
 5. Repeats until all tasks complete or max iterations reached
 
+**Steering mid-run:** Press Ctrl+\ (SIGQUIT) during a task iteration to pause execution. ralphex cancels the current Claude session and prompts "press Enter to continue, Ctrl+C to abort". While paused, you can edit the plan file — on Enter, the same task re-runs with a fresh session that re-reads the plan. Press Ctrl+C to abort cleanly. Not available on Windows.
+
 ### Phase 2: First Code Review
 
 Launches 5 review agents **in parallel** via Claude Code Task tool:
@@ -122,7 +124,7 @@ The loop terminates when: all issues resolved, max iterations reached, stalemate
 
 **Stalemate detection:** When the external tool and Claude can't agree on findings, the loop can waste tokens iterating to the max. Set `--review-patience=N` (or `review_patience` in config) to terminate after N consecutive rounds with no commits or working tree changes.
 
-**Manual break:** Press Ctrl+\ (SIGQUIT) during the external review loop to terminate it immediately. The current executor run is cancelled via context cancellation. Not available on Windows.
+**Manual break:** Press Ctrl+\ (SIGQUIT) during the external review loop to terminate it immediately. The current executor run is cancelled via context cancellation. During the task phase, Ctrl+\ pauses instead — see [Phase 1: Task Execution](#phase-1-task-execution). Not available on Windows.
 
 Supported tools:
 - **codex** (default): OpenAI Codex for independent code review
