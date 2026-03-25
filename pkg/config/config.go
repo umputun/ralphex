@@ -92,6 +92,10 @@ type Config struct {
 	SessionTimeout    time.Duration `json:"session_timeout"`
 	SessionTimeoutSet bool          `json:"-"` // tracks if session_timeout was explicitly set in config
 
+	// idle timeout for claude sessions (kills session after no output for this duration)
+	IdleTimeout    time.Duration `json:"idle_timeout"`
+	IdleTimeoutSet bool          `json:"-"` // tracks if idle_timeout was explicitly set in config
+
 	// notification parameters
 	NotifyParams notify.Params `json:"-"`
 
@@ -306,6 +310,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		WaitOnLimitSet:        values.WaitOnLimitSet,
 		SessionTimeout:        values.SessionTimeout,
 		SessionTimeoutSet:     values.SessionTimeoutSet,
+		IdleTimeout:           values.IdleTimeout,
+		IdleTimeoutSet:        values.IdleTimeoutSet,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,

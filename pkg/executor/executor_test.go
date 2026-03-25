@@ -791,7 +791,7 @@ func TestClaudeExecutor_Run_IdleTimeoutNotFiredOnContinuousOutput(t *testing.T) 
 		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
 			go func() {
 				defer pw.Close()
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					fmt.Fprintln(pw, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"x"}}`)
 					time.Sleep(30 * time.Millisecond) // well within idle timeout
 				}

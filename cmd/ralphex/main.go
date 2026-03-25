@@ -41,6 +41,7 @@ type opts struct {
 	BaseRef               string        `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
 	Wait                  time.Duration `long:"wait" description:"wait duration on rate limit before retry (e.g. 1h, 30m)"`
 	SessionTimeout        time.Duration `long:"session-timeout" description:"per-session timeout for claude (e.g. 30m, 1h)"`
+	IdleTimeout           time.Duration `long:"idle-timeout" description:"kill claude session after no output for this duration (e.g. 5m, 10m)"`
 	SkipFinalize          bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
 	Worktree              bool          `long:"worktree" description:"run in isolated git worktree"`
 	PlanDescription       string        `long:"plan" description:"create plan interactively (enter plan description)"`
@@ -817,6 +818,9 @@ func validateFlags(o opts) error {
 	if o.SessionTimeout < 0 {
 		return fmt.Errorf("--session-timeout must be non-negative, got %s", o.SessionTimeout)
 	}
+	if o.IdleTimeout < 0 {
+		return fmt.Errorf("--idle-timeout must be non-negative, got %s", o.IdleTimeout)
+	}
 	return nil
 }
 
@@ -1193,6 +1197,10 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	if o.SessionTimeout > 0 {
 		cfg.SessionTimeout = o.SessionTimeout
 		cfg.SessionTimeoutSet = true
+	}
+	if o.IdleTimeout > 0 {
+		cfg.IdleTimeout = o.IdleTimeout
+		cfg.IdleTimeoutSet = true
 	}
 }
 

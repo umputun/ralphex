@@ -72,30 +72,30 @@ Coexists with `--session-timeout`: session timeout is the outer hard wall-clock 
 - Modify: `pkg/processor/runner.go`
 - Modify: `pkg/config/defaults/config`
 
-- [ ] add `IdleTimeout time.Duration` and `IdleTimeoutSet bool` fields to `Values` struct (same pattern as `SessionTimeout`)
-- [ ] add `parseIdleTimeout` method to `valuesLoader` (same pattern as `parseSessionTimeout`)
-- [ ] call `parseIdleTimeout` from `parseValuesFromBytes`
-- [ ] add idle timeout to `mergeExtraFrom` in `values.go` (same pattern as `SessionTimeout` merge)
-- [ ] add `IdleTimeout time.Duration` and `IdleTimeoutSet bool` fields to `Config` struct in `config.go`
-- [ ] add mapping in `loadConfigFromDirs` from `values.IdleTimeout`/`values.IdleTimeoutSet` to `Config` fields (same pattern as `SessionTimeout`)
-- [ ] add `--idle-timeout` CLI flag to options struct with description
-- [ ] add validation: `--idle-timeout must be non-negative`
-- [ ] wire CLI flag in `applyCLIOverrides` (same pattern as `SessionTimeout`)
-- [ ] in `New()` of `runner.go`, set `claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout`
-- [ ] add `idle_timeout` to embedded default config file with commented-out entry
-- [ ] write config tests: parse idle_timeout from INI, default disabled, local overrides global
-- [ ] write CLI validation test: negative value rejected
-- [ ] run `go test ./pkg/config/... ./cmd/ralphex/... ./pkg/processor/...` — must pass before next task
+- [x] add `IdleTimeout time.Duration` and `IdleTimeoutSet bool` fields to `Values` struct (same pattern as `SessionTimeout`)
+- [x] add `parseIdleTimeout` method to `valuesLoader` (same pattern as `parseSessionTimeout`)
+- [x] call `parseIdleTimeout` from `parseValuesFromBytes`
+- [x] add idle timeout to `mergeExtraFrom` in `values.go` (same pattern as `SessionTimeout` merge)
+- [x] add `IdleTimeout time.Duration` and `IdleTimeoutSet bool` fields to `Config` struct in `config.go`
+- [x] add mapping in `loadConfigFromDirs` from `values.IdleTimeout`/`values.IdleTimeoutSet` to `Config` fields (same pattern as `SessionTimeout`)
+- [x] add `--idle-timeout` CLI flag to options struct with description
+- [x] add validation: `--idle-timeout must be non-negative`
+- [x] wire CLI flag in `applyCLIOverrides` (same pattern as `SessionTimeout`)
+- [x] in `New()` of `runner.go`, set `claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout`
+- [x] add `idle_timeout` to embedded default config file with commented-out entry
+- [x] write config tests: parse idle_timeout from INI, default disabled, local overrides global
+- [x] write CLI validation test: negative value rejected
+- [x] run `go test ./pkg/config/... ./cmd/ralphex/... ./pkg/processor/...` — must pass before next task
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] verify `--idle-timeout 5m` kills a hanging claude session after 5 minutes of no output
-- [ ] verify active sessions (continuous output) are not affected by idle timeout
-- [ ] verify `--session-timeout` and `--idle-timeout` coexist correctly
-- [ ] verify idle timeout disabled by default (zero value)
-- [ ] verify Windows builds: `GOOS=windows GOARCH=amd64 go build ./...`
-- [ ] run full test suite: `go test ./...`
-- [ ] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
+- [x] verify `--idle-timeout 5m` kills a hanging claude session after 5 minutes of no output
+- [x] verify active sessions (continuous output) are not affected by idle timeout
+- [x] verify `--session-timeout` and `--idle-timeout` coexist correctly
+- [x] verify idle timeout disabled by default (zero value)
+- [x] verify Windows builds: `GOOS=windows GOARCH=amd64 go build ./...`
+- [x] run full test suite: `go test ./...`
+- [x] run linter: `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`
 
 ### Task 4: [Final] Update documentation
 

@@ -32,9 +32,11 @@ type Values struct {
 	WaitOnLimit           time.Duration
 	WaitOnLimitSet        bool // tracks if wait_on_limit was explicitly set
 	SessionTimeout        time.Duration
-	SessionTimeoutSet     bool   // tracks if session_timeout was explicitly set
-	ExternalReviewTool    string // "codex", "custom", or "none"
-	CustomReviewScript    string // path to custom review script (when ExternalReviewTool = "custom")
+	SessionTimeoutSet     bool          // tracks if session_timeout was explicitly set
+	IdleTimeout           time.Duration // kill session after no output for this duration
+	IdleTimeoutSet        bool          // tracks if idle_timeout was explicitly set
+	ExternalReviewTool    string        // "codex", "custom", or "none"
+	CustomReviewScript    string        // path to custom review script (when ExternalReviewTool = "custom")
 	IterationDelayMs      int
 	IterationDelayMsSet   bool // tracks if iteration_delay_ms was explicitly set
 	TaskRetryCount        int
@@ -334,6 +336,11 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		return Values{}, err
 	}
 
+	// idle_timeout duration
+	if err := vl.parseIdleTimeout(section, &values); err != nil {
+		return Values{}, err
+	}
+
 	return values, nil
 }
 
@@ -376,6 +383,27 @@ func (vl *valuesLoader) parseSessionTimeout(section *ini.Section, values *Values
 	}
 	values.SessionTimeout = d
 	values.SessionTimeoutSet = true
+	return nil
+}
+
+// parseIdleTimeout parses idle_timeout duration from an INI section.
+func (vl *valuesLoader) parseIdleTimeout(section *ini.Section, values *Values) error {
+	if !section.HasKey("idle_timeout") {
+		return nil
+	}
+	val := strings.TrimSpace(section.Key("idle_timeout").String())
+	if val == "" {
+		return nil
+	}
+	d, parseErr := time.ParseDuration(val)
+	if parseErr != nil {
+		return fmt.Errorf("invalid idle_timeout: %w", parseErr)
+	}
+	if d < 0 {
+		return fmt.Errorf("invalid idle_timeout: must be non-negative, got %s", val)
+	}
+	values.IdleTimeout = d
+	values.IdleTimeoutSet = true
 	return nil
 }
 
@@ -486,6 +514,10 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	if src.SessionTimeoutSet {
 		dst.SessionTimeout = src.SessionTimeout
 		dst.SessionTimeoutSet = true
+	}
+	if src.IdleTimeoutSet {
+		dst.IdleTimeout = src.IdleTimeout
+		dst.IdleTimeoutSet = true
 	}
 }
 

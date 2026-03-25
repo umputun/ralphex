@@ -2023,6 +2023,114 @@ func TestValues_mergeFrom_SessionTimeout(t *testing.T) {
 	})
 }
 
+func TestValuesLoader_parseValuesFromBytes_IdleTimeout(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name        string
+		input       string
+		expected    time.Duration
+		expectedSet bool
+	}{
+		{name: "5 minutes", input: "idle_timeout = 5m", expected: 5 * time.Minute, expectedSet: true},
+		{name: "1 hour", input: "idle_timeout = 1h", expected: time.Hour, expectedSet: true},
+		{name: "30 seconds", input: "idle_timeout = 30s", expected: 30 * time.Second, expectedSet: true},
+		{name: "zero", input: "idle_timeout = 0s", expected: 0, expectedSet: true},
+		{name: "empty value", input: "idle_timeout = ", expected: 0, expectedSet: false},
+		{name: "not set", input: "", expected: 0, expectedSet: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, values.IdleTimeout)
+			assert.Equal(t, tc.expectedSet, values.IdleTimeoutSet)
+		})
+	}
+}
+
+func TestValuesLoader_parseValuesFromBytes_IdleTimeout_Invalid(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name, input, errContains string
+	}{
+		{name: "invalid format", input: "idle_timeout = notaduration", errContains: "invalid idle_timeout"},
+		{name: "negative duration", input: "idle_timeout = -5m", errContains: "must be non-negative"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+		})
+	}
+}
+
+func TestValuesLoader_Load_IdleTimeout(t *testing.T) {
+	t.Run("parse from config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`idle_timeout = 5m`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, 5*time.Minute, values.IdleTimeout)
+		assert.True(t, values.IdleTimeoutSet)
+	})
+
+	t.Run("not set uses default zero", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Zero(t, values.IdleTimeout)
+		assert.False(t, values.IdleTimeoutSet)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`idle_timeout = 30m`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`idle_timeout = 5m`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, 5*time.Minute, values.IdleTimeout)
+		assert.True(t, values.IdleTimeoutSet)
+	})
+}
+
+func TestValues_mergeFrom_IdleTimeout(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{IdleTimeout: 0, IdleTimeoutSet: false}
+		src := Values{IdleTimeout: 5 * time.Minute, IdleTimeoutSet: true}
+		dst.mergeFrom(&src)
+		assert.Equal(t, 5*time.Minute, dst.IdleTimeout)
+		assert.True(t, dst.IdleTimeoutSet)
+	})
+
+	t.Run("unset flag does not merge", func(t *testing.T) {
+		dst := Values{IdleTimeout: 10 * time.Minute, IdleTimeoutSet: true}
+		src := Values{IdleTimeout: 0, IdleTimeoutSet: false}
+		dst.mergeFrom(&src)
+		assert.Equal(t, 10*time.Minute, dst.IdleTimeout)
+		assert.True(t, dst.IdleTimeoutSet)
+	})
+
+	t.Run("set flag can set to zero", func(t *testing.T) {
+		dst := Values{IdleTimeout: 10 * time.Minute, IdleTimeoutSet: true}
+		src := Values{IdleTimeout: 0, IdleTimeoutSet: true}
+		dst.mergeFrom(&src)
+		assert.Zero(t, dst.IdleTimeout)
+		assert.True(t, dst.IdleTimeoutSet)
+	})
+}
+
 func TestValues_mergeFrom_LimitPatterns(t *testing.T) {
 	t.Run("merge limit patterns when src has values", func(t *testing.T) {
 		dst := Values{ClaudeLimitPatterns: []string{"dst pattern"}, CodexLimitPatterns: []string{"dst codex"}}

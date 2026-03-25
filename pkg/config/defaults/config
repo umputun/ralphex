@@ -133,6 +133,13 @@ task_retry_count = 1
 # omit or leave empty to disable (no timeout)
 # session_timeout =
 
+# idle_timeout: kill claude session after no output for this duration
+# unlike session_timeout (fixed wall-clock limit), idle timeout resets on each
+# output line and only fires when the session goes silent
+# uses Go duration format (e.g., "5m", "10m", "30m")
+# omit or leave empty to disable (no timeout)
+# idle_timeout =
+
 # ------------------------------------------------------------------------------
 # paths
 # ------------------------------------------------------------------------------

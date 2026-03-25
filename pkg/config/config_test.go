@@ -1171,3 +1171,62 @@ func TestLocalConfig_LocalOverridesSessionTimeout(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, cfg.SessionTimeout)
 	assert.True(t, cfg.SessionTimeoutSet)
 }
+
+func TestLoad_IdleTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	configContent := `idle_timeout = 5m`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 5*time.Minute, cfg.IdleTimeout)
+	assert.True(t, cfg.IdleTimeoutSet)
+}
+
+func TestLoad_IdleTimeout_DefaultDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	// empty config - idle_timeout should be zero (disabled)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Zero(t, cfg.IdleTimeout)
+	assert.False(t, cfg.IdleTimeoutSet)
+}
+
+func TestLocalConfig_LocalOverridesIdleTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+	localDir := filepath.Join(tmpDir, ".ralphex")
+
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	// global config with idle_timeout = 30m
+	globalConfig := `idle_timeout = 30m`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+
+	// local config overrides to 5m
+	localConfig := `idle_timeout = 5m`
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
+
+	cfg, err := loadWithLocal(globalDir, localDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 5*time.Minute, cfg.IdleTimeout)
+	assert.True(t, cfg.IdleTimeoutSet)
+}

@@ -133,6 +133,7 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		claudeExec.Args = cfg.AppConfig.ClaudeArgs
 		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
 		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
+		claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout
 	}
 
 	// build codex executor with config values
