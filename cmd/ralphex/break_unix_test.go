@@ -44,9 +44,10 @@ func TestStartBreakSignal_BufferedDropsWhenFull(t *testing.T) {
 
 	// send SIGQUIT twice without consuming — second should be dropped (buffer size 1)
 	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGQUIT))
-	time.Sleep(100 * time.Millisecond) // let goroutine process
+	require.Eventually(t, func() bool { return len(ch) == 1 },
+		2*time.Second, 10*time.Millisecond, "timed out waiting for first buffered signal")
 	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGQUIT))
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // let goroutine attempt (and drop) the second signal
 
 	// consume the one buffered value
 	select {
@@ -64,25 +65,19 @@ func TestStartBreakSignal_BufferedDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestStartBreakSignal_ReturnsBidirectionalChannel(t *testing.T) {
+func TestStartBreakSignal_BufferSizeAndSignalDelivery(t *testing.T) {
 	signal.Reset(syscall.SIGQUIT)
 	ch := startBreakSignal()
 	require.NotNil(t, ch)
 
-	// verify we can send directly on the channel (bidirectional type)
-	select {
-	case ch <- struct{}{}:
-		// ok, direct send works
-	default:
-		t.Fatal("should be able to send on bidirectional channel")
-	}
+	assert.Equal(t, 1, cap(ch), "channel buffer size should be 1")
 
-	// consume
+	// send SIGQUIT and verify a value is received
+	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGQUIT))
 	select {
 	case <-ch:
-	default:
-		t.Fatal("should have a value after direct send")
+		// ok, value received after SIGQUIT
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for break signal after SIGQUIT")
 	}
-
-	assert.Equal(t, 1, cap(ch), "channel buffer size should be 1")
 }

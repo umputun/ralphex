@@ -930,8 +930,9 @@ func (r *Runner) showExternalReviewSummary(toolName, output string) {
 	}
 }
 
-// ErrUserAborted is returned when the user aborts or declines to resume after a break signal (Ctrl+\).
-// mode entrypoints treat this as a clean non-error exit to avoid falling through to review/finalize.
+// ErrUserAborted is a sentinel error returned when the user aborts or declines to resume after a break
+// signal (Ctrl+\). it is propagated as a non-nil error so that callers (including mode entrypoints) can
+// detect it and treat it as a clean user-initiated exit, avoiding further review/finalize steps.
 var ErrUserAborted = errors.New("user aborted")
 
 // ErrUserRejectedPlan is returned when user rejects the plan draft.
