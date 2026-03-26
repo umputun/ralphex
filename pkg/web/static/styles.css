@@ -548,6 +548,97 @@ header h1 {
     display: none;
 }
 
+.usage-wrap {
+    position: relative;
+}
+
+.usage-stats {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    display: none;
+    align-items: baseline;
+    gap: 4px;
+    max-width: 360px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    padding: 4px 8px;
+    cursor: pointer;
+}
+
+.usage-stats:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
+}
+
+.usage-stats:empty {
+    display: none;
+}
+
+.usage-wrap.has-usage .usage-stats {
+    display: inline-flex;
+}
+
+.usage-popover {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    min-width: 320px;
+    max-width: 420px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    z-index: 120;
+}
+
+.usage-wrap.open .usage-popover {
+    display: block;
+}
+
+.usage-popover-title {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.usage-popover-content {
+    display: grid;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.usage-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-md);
+    align-items: center;
+}
+
+.usage-row-label {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-row-value {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
 .diff-stats .diff-files {
     color: var(--text-muted);
 }
@@ -1099,6 +1190,17 @@ header h1 {
 .output-line[data-type="signal"] .content {
     color: var(--color-signal);
     font-weight: 600;
+}
+
+/* usage metadata lines should stay visible but less prominent */
+.output-line[data-type="usage"] .content {
+    color: var(--text-muted) !important;
+    font-size: 12px;
+    opacity: 0.9;
+}
+
+.output-line[data-type="usage"] .timestamp {
+    color: var(--text-faint);
 }
 
 /* ═══════════════════════════════════════════════════════════════

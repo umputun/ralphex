@@ -14,6 +14,10 @@
     const statusBadge = document.getElementById('status-badge');
     const elapsedTimeEl = document.getElementById('elapsed-time');
     const diffStatsEl = document.getElementById('diff-stats');
+    const usageWrapEl = document.getElementById('usage-wrap');
+    const usageStatsEl = document.getElementById('usage-stats');
+    const usagePopoverEl = document.getElementById('usage-popover');
+    const usagePopoverContentEl = document.getElementById('usage-popover-content');
     const searchInput = document.getElementById('search');
     const scrollIndicator = document.getElementById('scroll-indicator');
     const scrollToBottomBtn = document.getElementById('scroll-to-bottom');
@@ -94,6 +98,10 @@
         focusedSectionElement: null, // direct reference to focused section for O(1) unfocus
         hasRunTerminalCleanup: false, // guard for terminal cleanup to prevent double-calls
         expandedSections: {}, // tracks user-expanded sections per session {sessionId: Set of sectionIds}
+        usage: {
+            total: null,
+            byTool: {}
+        },
 
         // SSE connection state
         reconnectDelay: SSE_INITIAL_RECONNECT_MS,
@@ -272,6 +280,9 @@
     var TASK_ITERATION_PATTERN = /^task iteration \d+$/i;
     var TASK_ITERATION_NUMBER_PATTERN = /^task iteration (\d+)$/i;
     var DIFF_STATS_PATTERN = /^DIFFSTATS:\s*files=(\d+)\s+additions=(\d+)\s+deletions=(\d+)\s*$/i;
+    var USAGE_REQUEST_PATTERN = /^usage \(([^)]+)\):\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s+cache_read=(\d+)\s+cache_write=(\d+)\s*$/i;
+    var USAGE_SUMMARY_TOTAL_PATTERN = /^usage summary total:\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s+cache_read=(\d+)\s+cache_write=(\d+)\s*$/i;
+    var USAGE_SUMMARY_TOOL_PATTERN = /^usage summary ([^:]+):\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s+cache_read=(\d+)\s+cache_write=(\d+)\s*$/i;
 
     // check if section text is a task iteration pattern
     function isTaskIteration(sectionText) {
@@ -337,6 +348,170 @@
         };
     }
 
+    function parseUsageText(text) {
+        if (!text) return null;
+
+        var summaryTotalMatches = USAGE_SUMMARY_TOTAL_PATTERN.exec(text);
+        if (summaryTotalMatches) {
+            return {
+                kind: 'summary_total',
+                usage: {
+                    input: parseInt(summaryTotalMatches[1], 10),
+                    output: parseInt(summaryTotalMatches[2], 10),
+                    total: parseInt(summaryTotalMatches[3], 10),
+                    cacheRead: parseInt(summaryTotalMatches[4], 10),
+                    cacheWrite: parseInt(summaryTotalMatches[5], 10)
+                }
+            };
+        }
+
+        var summaryToolMatches = USAGE_SUMMARY_TOOL_PATTERN.exec(text);
+        if (summaryToolMatches) {
+            return {
+                kind: 'summary_tool',
+                tool: summaryToolMatches[1].trim(),
+                usage: {
+                    input: parseInt(summaryToolMatches[2], 10),
+                    output: parseInt(summaryToolMatches[3], 10),
+                    total: parseInt(summaryToolMatches[4], 10),
+                    cacheRead: parseInt(summaryToolMatches[5], 10),
+                    cacheWrite: parseInt(summaryToolMatches[6], 10)
+                }
+            };
+        }
+
+        var requestMatches = USAGE_REQUEST_PATTERN.exec(text);
+        if (!requestMatches) return null;
+
+        var toolMeta = requestMatches[1];
+        var tool = toolMeta.split(',')[0].trim();
+        return {
+            kind: 'request',
+            tool: tool,
+            usage: {
+                input: parseInt(requestMatches[2], 10),
+                output: parseInt(requestMatches[3], 10),
+                total: parseInt(requestMatches[4], 10),
+                cacheRead: parseInt(requestMatches[5], 10),
+                cacheWrite: parseInt(requestMatches[6], 10)
+            }
+        };
+    }
+
+    function addUsage(dst, src) {
+        dst.input += src.input || 0;
+        dst.output += src.output || 0;
+        dst.total += src.total || 0;
+        dst.cacheRead += src.cacheRead || 0;
+        dst.cacheWrite += src.cacheWrite || 0;
+    }
+
+    function formatUsageValue(n) {
+        if (typeof n !== 'number' || !isFinite(n)) return '0';
+        if (Math.abs(n) >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (Math.abs(n) >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+        return String(n);
+    }
+
+    function updateUsageStats(record) {
+        if (!usageStatsEl || !usageWrapEl) return;
+
+        if (record) {
+            if (record.kind === 'summary_total') {
+                state.usage.total = record.usage;
+            } else if (record.kind === 'summary_tool' && record.tool) {
+                state.usage.byTool[record.tool] = record.usage;
+            } else if (record.kind === 'request' && record.tool) {
+                if (!state.usage.byTool[record.tool]) {
+                    state.usage.byTool[record.tool] = { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 };
+                }
+                addUsage(state.usage.byTool[record.tool], record.usage);
+                if (!state.usage.total) {
+                    state.usage.total = { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 };
+                }
+                addUsage(state.usage.total, record.usage);
+            }
+        }
+
+        if (!state.usage.total || state.usage.total.total <= 0) {
+            usageStatsEl.textContent = '';
+            usageWrapEl.classList.remove('has-usage');
+            if (usagePopoverContentEl) usagePopoverContentEl.textContent = '';
+            return;
+        }
+        usageWrapEl.classList.add('has-usage');
+
+        var total = state.usage.total;
+        var text = 'Tokens ' +
+            formatUsageValue(total.input) + '/' +
+            formatUsageValue(total.output) + '/' +
+            formatUsageValue(total.total);
+
+        var tools = Object.keys(state.usage.byTool);
+        tools.sort(function(a, b) {
+            return (state.usage.byTool[b].total || 0) - (state.usage.byTool[a].total || 0);
+        });
+        var topTools = tools.slice(0, 2).map(function(tool) {
+            return tool + ':' + formatUsageValue(state.usage.byTool[tool].total || 0);
+        });
+        if (topTools.length > 0) {
+            text += ' • ' + topTools.join(' ');
+        }
+
+        usageStatsEl.textContent = text;
+        renderUsagePopover();
+    }
+
+    function createUsageRow(label, value) {
+        var row = document.createElement('div');
+        row.className = 'usage-row';
+
+        var l = document.createElement('div');
+        l.className = 'usage-row-label';
+        l.textContent = label;
+
+        var v = document.createElement('div');
+        v.className = 'usage-row-value';
+        v.textContent = value;
+
+        row.appendChild(l);
+        row.appendChild(v);
+        return row;
+    }
+
+    function usageValueString(u) {
+        return 'in ' + formatUsageValue(u.input) +
+            ' / out ' + formatUsageValue(u.output) +
+            ' / total ' + formatUsageValue(u.total);
+    }
+
+    function renderUsagePopover() {
+        if (!usagePopoverContentEl) return;
+        usagePopoverContentEl.textContent = '';
+
+        if (!state.usage.total || state.usage.total.total <= 0) return;
+        usagePopoverContentEl.appendChild(
+            createUsageRow('Total', usageValueString(state.usage.total))
+        );
+        usagePopoverContentEl.appendChild(
+            createUsageRow(
+                'Cache',
+                'read ' + formatUsageValue(state.usage.total.cacheRead || 0) +
+                ' / write ' + formatUsageValue(state.usage.total.cacheWrite || 0)
+            )
+        );
+
+        var tools = Object.keys(state.usage.byTool);
+        tools.sort(function(a, b) {
+            return (state.usage.byTool[b].total || 0) - (state.usage.byTool[a].total || 0);
+        });
+        tools.forEach(function(tool) {
+            usagePopoverContentEl.appendChild(
+                createUsageRow(tool, usageValueString(state.usage.byTool[tool]))
+            );
+        });
+    }
+
     // look up task title by position (1-indexed) from plan data
     function getTaskTitle(taskNum) {
         if (!state.planData || !state.planData.tasks) return null;
@@ -390,7 +565,10 @@
         const line = document.createElement('div');
         line.className = 'output-line';
         line.dataset.phase = event.phase;
-        line.dataset.type = event.type;
+        const isUsageText = typeof event.text === 'string' &&
+            (event.text.startsWith('usage (') || event.text.startsWith('usage summary '));
+        const lineType = (event.renderType === 'usage' || isUsageText) ? 'usage' : (event.renderType || event.type);
+        line.dataset.type = lineType;
 
         const timestamp = document.createElement('span');
         timestamp.className = 'timestamp';
@@ -827,6 +1005,14 @@
                 }
                 updateDiffStats(diffStats);
                 return; // metadata line, don't render
+            }
+
+            var usageRecord = parseUsageText(event.text);
+            if (usageRecord) {
+                updateUsageStats(usageRecord);
+                event.renderType = 'usage';
+                // keep usage lines in the stream as regular output too.
+                // this preserves full run chronology inside task/review sections.
             }
         }
 
@@ -1620,6 +1806,8 @@
         }
         elapsedTimeEl.textContent = '';
         updateDiffStats(null);
+        state.usage = { total: null, byTool: {} };
+        updateUsageStats(null);
         if (seedStartTime) {
             seedExecutionStartTimeFromSession({ startTime: seedStartTime });
         }
@@ -1747,6 +1935,17 @@
     searchInput.addEventListener('input', debouncedSearch);
 
     planToggle.addEventListener('click', togglePlanPanel);
+    if (usageStatsEl && usageWrapEl) {
+        usageStatsEl.addEventListener('click', function(e) {
+            e.stopPropagation();
+            usageWrapEl.classList.toggle('open');
+        });
+        document.addEventListener('click', function(e) {
+            if (!usageWrapEl.contains(e.target)) {
+                usageWrapEl.classList.remove('open');
+            }
+        });
+    }
     sidebarToggle.addEventListener('click', toggleSessionSidebar);
     if (viewToggle) {
         viewToggle.addEventListener('click', toggleSessionViewMode);
