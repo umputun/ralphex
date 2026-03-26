@@ -143,10 +143,9 @@ type Config struct {
 // colors must be provided (created via NewColors from config).
 // holder is the shared PhaseHolder for reading the current execution phase.
 func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger, error) {
-	// set global color setting
-	if cfg.NoColor {
-		color.NoColor = true
-	}
+	// set global color setting explicitly for deterministic behavior across runs/tests.
+	// relying on previous global state can cause cross-session or cross-test leakage.
+	color.NoColor = cfg.NoColor
 
 	progressPath := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode)
 

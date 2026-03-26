@@ -2,6 +2,7 @@ package processor_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -80,6 +81,90 @@ func TestRunner_RunFull_NoPlanFile(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plan file required")
+}
+
+func TestRunner_UsageJSONExport_TasksOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	progressPath := filepath.Join(tmpDir, "progress.txt")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	log := newMockLogger(progressPath)
+	claude := newMockExecutor([]executor.Result{
+		{
+			Output: "task done",
+			Signal: status.Completed,
+			Usage: executor.Usage{
+				InputTokens:  12,
+				OutputTokens: 8,
+				TotalTokens:  20,
+			},
+		},
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:         processor.ModeTasksOnly,
+		PlanFile:     planFile,
+		MaxIterations: 5,
+		AppConfig:    testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{
+		Claude: claude,
+		Codex:  codex,
+		Custom: nil,
+	}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+	require.NoError(t, err)
+
+	usagePath := strings.TrimSuffix(progressPath, ".txt") + ".usage.jsonl"
+	data, readErr := os.ReadFile(usagePath) //nolint:gosec // usagePath is created under t.TempDir
+	require.NoError(t, readErr)
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	require.GreaterOrEqual(t, len(lines), 2, "expected request + summary records")
+
+	var first map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &first))
+	assert.Equal(t, "request", first["event"])
+	assert.Equal(t, "claude", first["tool"])
+	assert.Equal(t, "claude", first["provider"])
+	assert.NotEmpty(t, first["model"])
+	assert.Equal(t, "task", first["phase"])
+	assert.InDelta(t, 1.0, first["iteration"], 0.0)
+}
+
+func TestRunner_UsageJSONExport_FallbackDoesNotFail(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+
+	// invalid child path under a file to force json export open failure.
+	log := newMockLogger(filepath.Join(os.DevNull, "progress.txt"))
+	claude := newMockExecutor([]executor.Result{
+		{
+			Output: "task done",
+			Signal: status.Completed,
+			Usage: executor.Usage{
+				InputTokens: 1, OutputTokens: 1, TotalTokens: 2,
+			},
+		},
+	})
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{
+		Mode:          processor.ModeTasksOnly,
+		PlanFile:      planFile,
+		MaxIterations: 5,
+		AppConfig:     testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{
+		Claude: claude,
+		Codex:  codex,
+		Custom: nil,
+	}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+	require.NoError(t, err, "usage json export failure must not fail run")
 }
 
 func TestRunner_RunFull_Success(t *testing.T) {

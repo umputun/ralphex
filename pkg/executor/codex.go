@@ -185,6 +185,7 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 
 	// detect signal in stdout (the actual response)
 	signal := detectSignal(stdoutContent)
+	usage := extractUsageFromText(stdoutContent)
 
 	// only check error/limit patterns when the process failed (non-zero exit or stream error).
 	// when codex exits cleanly, pattern matches in output are false positives from findings
@@ -196,6 +197,7 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 			return Result{
 				Output: stdoutContent,
 				Signal: signal,
+				Usage:  usage,
 				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "codex /status"},
 			}
 		}
@@ -205,13 +207,14 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 			return Result{
 				Output: stdoutContent,
 				Signal: signal,
+				Usage:  usage,
 				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "codex /status"},
 			}
 		}
 	}
 
 	// return stdout content as the result (the actual answer from codex)
-	return Result{Output: stdoutContent, Signal: signal, Error: finalErr}
+	return Result{Output: stdoutContent, Signal: signal, Usage: usage, Error: finalErr}
 }
 
 // stderrResult holds processed stderr output and any error from reading.

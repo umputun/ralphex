@@ -24,6 +24,51 @@ type Result struct {
 	Signal       string // detected signal (COMPLETED, FAILED, etc.) or empty
 	Error        error  // execution error if any
 	IdleTimedOut bool   // true when idle timeout fired (derived context canceled, parent alive)
+	Usage  Usage  // token usage metadata (best-effort)
+}
+
+// Usage holds token usage for a single request.
+// fields are best-effort because providers expose different naming.
+type Usage struct {
+	InputTokens  int // prompt/input tokens
+	OutputTokens int // completion/output tokens
+	TotalTokens  int // total tokens (if available or derived)
+	CacheRead    int // optional cached-input reads (provider-specific)
+	CacheWrite   int // optional cached-input writes (provider-specific)
+}
+
+// Empty reports if usage has no non-zero fields.
+func (u Usage) Empty() bool {
+	return u.InputTokens == 0 &&
+		u.OutputTokens == 0 &&
+		u.TotalTokens == 0 &&
+		u.CacheRead == 0 &&
+		u.CacheWrite == 0
+}
+
+// Merge combines usage values, preferring non-zero updates.
+// for request-scoped usage we usually want the latest non-zero snapshot.
+func (u Usage) Merge(update Usage) Usage {
+	out := u
+	if update.InputTokens > 0 {
+		out.InputTokens = update.InputTokens
+	}
+	if update.OutputTokens > 0 {
+		out.OutputTokens = update.OutputTokens
+	}
+	if update.TotalTokens > 0 {
+		out.TotalTokens = update.TotalTokens
+	}
+	if update.CacheRead > 0 {
+		out.CacheRead = update.CacheRead
+	}
+	if update.CacheWrite > 0 {
+		out.CacheWrite = update.CacheWrite
+	}
+	if out.TotalTokens == 0 && (out.InputTokens > 0 || out.OutputTokens > 0) {
+		out.TotalTokens = out.InputTokens + out.OutputTokens
+	}
+	return out
 }
 
 const recentBlockCount = 10 // number of recent text blocks to keep for pattern matching
@@ -170,6 +215,15 @@ func filterEnv(env []string, keysToRemove ...string) []string {
 // streamEvent represents a JSON event from claude CLI stream output.
 type streamEvent struct {
 	Type    string `json:"type"`
+	Usage   struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		PromptTokens             int `json:"prompt_tokens"`
+		CompletionTokens         int `json:"completion_tokens"`
+		TotalTokens              int `json:"total_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	} `json:"usage"`
 	Message struct {
 		Content []struct {
 			Type string `json:"type"`
@@ -184,7 +238,7 @@ type streamEvent struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"delta"`
-	Result json.RawMessage `json:"result"` // can be string or object with "output" field
+	Result json.RawMessage `json:"result"` // can be string or object with "output"/"usage" fields
 }
 
 // ClaudeExecutor runs claude CLI commands with streaming JSON parsing.
@@ -324,6 +378,7 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 	var signal string
 	var recentBlocks [recentBlockCount]string
 	var blockIdx int
+	var usage Usage
 
 	err := readLines(ctx, r, func(line string) {
 		idleTouch() // reset idle timer on every line of pipe activity
@@ -363,6 +418,7 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 				signal = sig
 			}
 		}
+		usage = usage.Merge(e.extractUsage(&event))
 	})
 
 	// join recent blocks in chronological order for pattern matching.
@@ -379,10 +435,10 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 
 	if err != nil {
 		return Result{Output: output.String(), RecentText: recent.String(), Signal: signal,
-			Error: fmt.Errorf("stream read: %w", err)}
+			Error: fmt.Errorf("stream read: %w", err), Usage: usage}
 	}
 
-	return Result{Output: output.String(), RecentText: recent.String(), Signal: signal}
+	return Result{Output: output.String(), RecentText: recent.String(), Signal: signal, Usage: usage}
 }
 
 // extractText extracts text content from various event types.
@@ -427,6 +483,67 @@ func (e *ClaudeExecutor) extractText(event *streamEvent) string {
 		}
 	}
 	return ""
+}
+
+// extractUsage extracts usage from known stream event shapes.
+func (e *ClaudeExecutor) extractUsage(event *streamEvent) Usage {
+	usage := usageFromCommonFields(
+		event.Usage.InputTokens,
+		event.Usage.OutputTokens,
+		event.Usage.PromptTokens,
+		event.Usage.CompletionTokens,
+		event.Usage.TotalTokens,
+		event.Usage.CacheReadInputTokens,
+		event.Usage.CacheCreationInputTokens,
+	)
+
+	// some CLIs put usage inside "result" object in result events.
+	if event.Type == "result" && len(event.Result) > 0 {
+		var resultObj struct {
+			Usage struct {
+				InputTokens              int `json:"input_tokens"`
+				OutputTokens             int `json:"output_tokens"`
+				PromptTokens             int `json:"prompt_tokens"`
+				CompletionTokens         int `json:"completion_tokens"`
+				TotalTokens              int `json:"total_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(event.Result, &resultObj); err == nil {
+			resultUsage := usageFromCommonFields(
+				resultObj.Usage.InputTokens,
+				resultObj.Usage.OutputTokens,
+				resultObj.Usage.PromptTokens,
+				resultObj.Usage.CompletionTokens,
+				resultObj.Usage.TotalTokens,
+				resultObj.Usage.CacheReadInputTokens,
+				resultObj.Usage.CacheCreationInputTokens,
+			)
+			usage = usage.Merge(resultUsage)
+		}
+	}
+	return usage
+}
+
+func usageFromCommonFields(
+	inputTokens, outputTokens, promptTokens, completionTokens, totalTokens, cacheRead, cacheWrite int,
+) Usage {
+	input := inputTokens
+	if input == 0 {
+		input = promptTokens
+	}
+	output := outputTokens
+	if output == 0 {
+		output = completionTokens
+	}
+	return Usage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  totalTokens,
+		CacheRead:    cacheRead,
+		CacheWrite:   cacheWrite,
+	}.Merge(Usage{})
 }
 
 // detectSignal checks text for completion status.

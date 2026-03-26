@@ -3,9 +3,12 @@ package processor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -116,6 +119,20 @@ type Runner struct {
 	pauseHandler        func(ctx context.Context) bool  // called on break during task phase; true = resume, false = abort
 	lastSessionTimedOut bool                            // set by runWithSessionTimeout, checked by review loops
 	taskPhaseOverride   func(ctx context.Context) error // test seam: override runTaskPhase result (nil = normal execution)
+	usageTotal     executor.Usage
+	usageByTool    map[string]executor.Usage
+}
+
+// usageLogRecord is a single JSONL record for token usage export.
+type usageLogRecord struct {
+	Timestamp string         `json:"timestamp"`
+	Event     string         `json:"event"`
+	Tool      string         `json:"tool,omitempty"`
+	Provider  string         `json:"provider,omitempty"`
+	Model     string         `json:"model,omitempty"`
+	Phase     string         `json:"phase,omitempty"`
+	Iteration int            `json:"iteration,omitempty"`
+	Usage     executor.Usage `json:"usage"`
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
@@ -215,6 +232,7 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 		iterationDelay: iterDelay,
 		taskRetryCount: retryCount,
 		waitOnLimit:    waitOnLimit,
+		usageByTool:    make(map[string]executor.Usage),
 	}
 }
 
@@ -243,6 +261,8 @@ func (r *Runner) SetPauseHandler(fn func(ctx context.Context) bool) {
 
 // Run executes the main loop based on configured mode.
 func (r *Runner) Run(ctx context.Context) error {
+	defer r.logUsageSummary()
+
 	switch r.cfg.Mode {
 	case ModeFull:
 		return r.runFull(ctx)
@@ -416,6 +436,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 		loopCtx, loopCancel := r.breakContext(ctx)
 
 		result := r.runWithLimitRetry(loopCtx, r.claude.Run, prompt, "claude")
+		r.recordUsage("claude", result, taskNum)
 
 		// check break before calling loopCancel — cancel would make loopCtx.Err() non-nil
 		manualBreak := r.isBreak(loopCtx, ctx)
@@ -433,7 +454,6 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 			retryCount = 0
 			continue
 		}
-
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
@@ -476,6 +496,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 // runClaudeReview runs Claude review with the given prompt until REVIEW_DONE.
 func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
 	result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
+	r.recordUsage("claude", result, 0)
 	if result.Error != nil {
 		if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 			return err
@@ -519,6 +540,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 
 		result := r.runWithLimitRetry(ctx, r.claude.Run,
 			prefix+r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt), "claude")
+		r.recordUsage("claude", result, i)
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
@@ -717,6 +739,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// run external review tool. use branch-wide diff until a successful claude eval completes,
 		// so that a timeout on the first eval doesn't narrow subsequent reviews to working-tree only
 		reviewResult := r.runWithLimitRetry(loopCtx, cfg.runReview, cfg.buildPrompt(!firstCompleted, claudeResponse), cfg.name)
+		r.recordUsage(cfg.name, reviewResult, i)
 		if reviewResult.Error != nil {
 			if r.isBreak(loopCtx, ctx) {
 				r.log.Print("manual break requested, external review terminated early")
@@ -747,6 +770,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		r.phaseHolder.Set(status.PhaseClaudeEval)
 		r.log.PrintSection(status.NewClaudeEvalSection())
 		claudeResult := r.runWithLimitRetry(loopCtx, r.claude.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
+		r.recordUsage("claude", claudeResult, i)
 
 		// restore codex phase for next iteration
 		r.phaseHolder.Set(status.PhaseCodex)
@@ -1045,6 +1069,7 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 		}
 
 		result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
+		r.recordUsage("claude", result, i)
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 				return err
@@ -1229,6 +1254,7 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.FinalizePrompt)
 	result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
+	r.recordUsage("claude", result, 1)
 
 	if result.Error != nil {
 		// propagate context cancellation - user wants to abort
@@ -1251,6 +1277,177 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 
 	r.log.Print("finalize step completed")
 	return nil
+}
+
+// recordUsage logs per-request usage in progress format and appends JSONL export.
+// it is best-effort and never returns an error to keep execution resilient.
+func (r *Runner) recordUsage(tool string, result executor.Result, iteration int) {
+	if result.Usage.Empty() {
+		return
+	}
+
+	r.usageByTool[tool] = mergeUsageTotals(r.usageByTool[tool], result.Usage)
+	r.usageTotal = mergeUsageTotals(r.usageTotal, result.Usage)
+	provider, model := r.usageProviderModel(tool)
+	phase := string(r.phaseHolder.Get())
+	r.log.Print("usage (%s, provider=%s, model=%s, phase=%s, iteration=%d): input=%d output=%d total=%d cache_read=%d cache_write=%d",
+		tool, provider, model, phase, iteration,
+		result.Usage.InputTokens,
+		result.Usage.OutputTokens,
+		result.Usage.TotalTokens,
+		result.Usage.CacheRead,
+		result.Usage.CacheWrite,
+	)
+	r.writeUsageJSON(usageLogRecord{
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+		Event:     "request",
+		Tool:      tool,
+		Provider:  provider,
+		Model:     model,
+		Phase:     phase,
+		Iteration: iteration,
+		Usage:     result.Usage,
+	})
+}
+
+// logUsageSummary writes aggregate usage totals to text log and JSONL export.
+func (r *Runner) logUsageSummary() {
+	if r.usageTotal.Empty() {
+		return
+	}
+	r.log.Print("usage summary total: input=%d output=%d total=%d cache_read=%d cache_write=%d",
+		r.usageTotal.InputTokens,
+		r.usageTotal.OutputTokens,
+		r.usageTotal.TotalTokens,
+		r.usageTotal.CacheRead,
+		r.usageTotal.CacheWrite,
+	)
+	r.writeUsageJSON(usageLogRecord{
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+		Event:     "summary_total",
+		Usage:     r.usageTotal,
+	})
+	for tool, usage := range r.usageByTool {
+		provider, model := r.usageProviderModel(tool)
+		r.log.Print("usage summary %s: input=%d output=%d total=%d cache_read=%d cache_write=%d",
+			tool,
+			usage.InputTokens,
+			usage.OutputTokens,
+			usage.TotalTokens,
+			usage.CacheRead,
+			usage.CacheWrite,
+		)
+		r.writeUsageJSON(usageLogRecord{
+			Timestamp: time.Now().Format(time.RFC3339Nano),
+			Event:     "summary_tool",
+			Tool:      tool,
+			Provider:  provider,
+			Model:     model,
+			Usage:     usage,
+		})
+	}
+}
+
+// mergeUsageTotals accumulates usage metrics across multiple requests.
+func mergeUsageTotals(total, add executor.Usage) executor.Usage {
+	total.InputTokens += add.InputTokens
+	total.OutputTokens += add.OutputTokens
+	total.CacheRead += add.CacheRead
+	total.CacheWrite += add.CacheWrite
+	if add.TotalTokens > 0 {
+		total.TotalTokens += add.TotalTokens
+	} else {
+		total.TotalTokens += add.InputTokens + add.OutputTokens
+	}
+	return total
+}
+
+// usageProviderModel derives provider/model labels for usage logs by tool.
+func (r *Runner) usageProviderModel(tool string) (provider, model string) {
+	if r.cfg.AppConfig == nil {
+		return tool, "unknown"
+	}
+
+	switch tool {
+	case "claude":
+		cmd := r.cfg.AppConfig.ClaudeCommand
+		if cmd == "" {
+			cmd = "claude"
+		}
+		provider = filepath.Base(cmd)
+		model = modelFromClaudeArgs(r.cfg.AppConfig.ClaudeArgs)
+		if model == "" {
+			model = "default"
+		}
+		return provider, model
+	case "codex":
+		provider = "codex"
+		model = r.cfg.AppConfig.CodexModel
+		if model == "" {
+			model = "gpt-5.4"
+		}
+		return provider, model
+	case "custom":
+		return "custom", "script"
+	default:
+		return tool, "unknown"
+	}
+}
+
+// modelFromClaudeArgs extracts --model from configured claude args.
+// returns empty string when model is not explicitly configured.
+func modelFromClaudeArgs(args string) string {
+	if strings.TrimSpace(args) == "" {
+		return ""
+	}
+	parts := strings.Fields(args)
+	for i := range parts {
+		part := parts[i]
+		if modelVal, ok := strings.CutPrefix(part, "--model="); ok {
+			return strings.Trim(modelVal, `"'`)
+		}
+		if part == "--model" && i+1 < len(parts) {
+			return strings.Trim(parts[i+1], `"'`)
+		}
+	}
+	return ""
+}
+
+// usageLogPath returns the JSONL export path near the progress text log.
+func (r *Runner) usageLogPath() string {
+	progressPath := r.log.Path()
+	if progressPath == "" {
+		return ""
+	}
+	return strings.TrimSuffix(progressPath, ".txt") + ".usage.jsonl"
+}
+
+// writeUsageJSON appends one usage record as JSON line.
+// any I/O or serialization error is logged and ignored.
+func (r *Runner) writeUsageJSON(rec usageLogRecord) {
+	path := r.usageLogPath()
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path is derived from logger path in current workspace
+	if err != nil {
+		r.log.Print("warning: failed to open usage json log: %v", err)
+		return
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			r.log.Print("warning: failed to close usage json log: %v", closeErr)
+		}
+	}()
+
+	line, err := json.Marshal(rec)
+	if err != nil {
+		r.log.Print("warning: failed to marshal usage json log: %v", err)
+		return
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		r.log.Print("warning: failed to write usage json log: %v", err)
+	}
 }
 
 // sleepWithContext pauses for the given duration but returns immediately if context is canceled.

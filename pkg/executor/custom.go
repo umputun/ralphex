@@ -118,12 +118,14 @@ func (e *CustomExecutor) Run(ctx context.Context, promptContent string) Result {
 	// only check error/limit patterns when the process failed (non-zero exit or stream error).
 	// when script exits cleanly, pattern matches in output are false positives from findings.
 	// skip pattern checks on context cancellation — cancellation must propagate as-is.
+	usage := extractUsageFromText(output)
 	if finalErr != nil && ctx.Err() == nil {
 		// check limit patterns first (higher priority)
 		if pattern := matchPattern(output, e.LimitPatterns); pattern != "" {
 			return Result{
 				Output: output,
 				Signal: signal,
+				Usage:  usage,
 				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: e.Script + " --help"},
 			}
 		}
@@ -133,12 +135,13 @@ func (e *CustomExecutor) Run(ctx context.Context, promptContent string) Result {
 			return Result{
 				Output: output,
 				Signal: signal,
+				Usage:  usage,
 				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: e.Script + " --help"},
 			}
 		}
 	}
 
-	return Result{Output: output, Signal: signal, Error: finalErr}
+	return Result{Output: output, Signal: signal, Usage: usage, Error: finalErr}
 }
 
 // processOutput reads stdout line-by-line, streams to OutputHandler, and detects signals.
