@@ -39,7 +39,7 @@ jobs:
           version: latest
 
       - name: submit coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ${{ github.workspace }}/profile.cov
           token: ${{ secrets.CODECOV_TOKEN }}
