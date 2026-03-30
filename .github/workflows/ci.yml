@@ -38,8 +38,10 @@ jobs:
         with:
           version: latest
 
+      - name: install goveralls
+        run: go install github.com/mattn/goveralls@latest
+
       - name: submit coverage
-        uses: codecov/codecov-action@v5
-        with:
-          files: ${{ github.workspace }}/profile.cov
-          token: ${{ secrets.CODECOV_TOKEN }}
+        run: $(go env GOPATH)/bin/goveralls -service="github" -coverprofile=$GITHUB_WORKSPACE/profile.cov
+        env:
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}

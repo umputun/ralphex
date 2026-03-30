@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/umputun/ralphex/actions/workflows/ci.yml"><img src="https://github.com/umputun/ralphex/actions/workflows/ci.yml/badge.svg" alt="build"></a>
-  <a href="https://codecov.io/gh/umputun/ralphex"><img src="https://codecov.io/gh/umputun/ralphex/graph/badge.svg?token=5AH7YL5PSG" alt="codecov"></a>
+  <a href="https://coveralls.io/github/umputun/ralphex?branch=master"><img src="https://coveralls.io/repos/github/umputun/ralphex/badge.svg?branch=master" alt="Coverage Status"></a>
   <a href="https://goreportcard.com/report/github.com/umputun/ralphex"><img src="https://goreportcard.com/badge/github.com/umputun/ralphex?v=2" alt="Go Report Card"></a>
 </p>
 
