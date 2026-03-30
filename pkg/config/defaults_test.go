@@ -1349,7 +1349,7 @@ func TestInitLocal(t *testing.T) {
 		require.NoError(t, os.MkdirAll(localDir, 0o700))
 
 		customIG := "progress/\nworktrees/\ncustom-dir/\n"
-		require.NoError(t, os.WriteFile(filepath.Join(localDir, ".gitignore"), []byte(customIG), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(localDir, ".gitignore"), []byte(customIG), 0o600))
 
 		require.NoError(t, InitLocal(localDir))
 

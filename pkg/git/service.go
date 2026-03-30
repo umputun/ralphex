@@ -34,7 +34,6 @@ type backend interface {
 	isDirty() (bool, error)
 	fileHasChanges(path string) (bool, error)
 	hasChangesOtherThan(path string) ([]string, error)
-	isIgnored(path string) (bool, error)
 	add(path string) error
 	moveFile(src, dst string) error
 	commit(msg string) error

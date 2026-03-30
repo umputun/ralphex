@@ -55,14 +55,12 @@ Edit each prompt file and replace git commands. See the [custom prompts](#custom
 
 ### 4. Set up .hgignore
 
-ralphex creates a `.gitignore` file internally (via `EnsureIgnored` in the Go code) to exclude its working files. In hg repos, you need to manually add these patterns to `.hgignore`:
+ralphex creates a `.ralphex/.gitignore` file internally (via `EnsureLocalGitignore`) to exclude its runtime artifacts (progress/, worktrees/). This file is self-contained inside `.ralphex/` and ignores itself. In hg repos, you need to manually add these patterns to `.hgignore`:
 
 ```
 syntax: glob
 .ralphex/
 ```
-
-The `.gitignore` file that ralphex creates can be safely ignored or deleted in hg repos.
 
 ## Custom prompts
 
@@ -101,23 +99,16 @@ This produces a single-commit-per-diff workflow. When customising prompts, instr
 
 ## .hgignore setup
 
-ralphex's `EnsureIgnored` function writes to `.gitignore` internally. This is hardcoded in the Go code and not affected by `vcs_command`. For hg repos:
+ralphex creates a self-contained `.ralphex/.gitignore` that ignores runtime artifacts (progress/, worktrees/) and itself. This file stays inside `.ralphex/` and never modifies the root `.gitignore`. For hg repos:
 
 1. Create or update `.hgignore` in your repo root:
 
 ```
 syntax: glob
 .ralphex/
-.ralphex/progress/*
-.ralphex/worktrees/*
 ```
 
-2. The `.gitignore` file created by ralphex can be:
-   - Added to `.hgignore` itself (so hg ignores it)
-   - Manually deleted after each run
-   - Left in place (harmless in hg repos)
-
-3. ralphex checks whether paths are ignored before writing ignore patterns. With `hg2git.sh`, the `check-ignore` translation looks at `.hgignore` patterns for non-existent paths. Make sure `.hgignore` has the `.ralphex/` pattern before the first run to avoid re-appending on every execution.
+2. The `.ralphex/.gitignore` file is invisible to git (it ignores itself) and harmless in hg repos.
 
 ## Limitations
 
@@ -143,7 +134,7 @@ The `hg2git.sh` script only handles the specific git subcommands that ralphex's 
 
 ### .gitignore is hardcoded
 
-The `EnsureIgnored` and `CommitIgnoreChanges` functions in the Go code create and commit `.gitignore` entries. With an hg backend, this creates a `.gitignore` file via hg commands, which is harmless but cosmetically noisy. Users must maintain `.hgignore` separately.
+`EnsureLocalGitignore` creates `.ralphex/.gitignore` to exclude runtime artifacts. With an hg backend, this file is harmless (stays inside `.ralphex/` and ignores itself). Users must maintain `.hgignore` separately for hg-level ignoring.
 
 ### Error messages hardcode "git"
 
@@ -182,11 +173,13 @@ If commits are being amended when you expect new ones (or vice versa):
 
 ### check-ignore returns wrong results
 
-The `check-ignore` translation has two code paths:
+The `check-ignore` translation in `hg2git.sh` has two code paths:
 - For existing files: uses `hg status -i` (reliable)
 - For non-existent files: falls back to pattern matching against `.hgignore` (regex-based)
 
 The fallback only supports regex syntax (Mercurial's default). If your `.hgignore` uses `syntax: glob`, patterns like `*.pyc` will be misinterpreted as regex by `grep -E`. To work around this, either use regex syntax for the `.ralphex/` patterns or add a separate `syntax: regexp` section at the end of `.hgignore` for them.
+
+Note: `check-ignore` is no longer used by ralphex's Go code (the old `EnsureIgnored` was replaced by `EnsureLocalGitignore`), but the `hg2git.sh` script still supports it for backward compatibility and direct use.
 
 ### Debugging the script
 

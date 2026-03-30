@@ -649,7 +649,7 @@ func TestService_EnsureLocalGitignore(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".ralphex"), 0o750))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, ".ralphex", ".gitignore"),
-			[]byte(".gitignore\nprogress/\nworktrees/\n"), 0o644))
+			[]byte(".gitignore\nprogress/\nworktrees/\n"), 0o600))
 
 		err = svc.EnsureLocalGitignore()
 		require.NoError(t, err)
@@ -665,7 +665,7 @@ func TestService_EnsureLocalGitignore(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".ralphex"), 0o750))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, ".ralphex", ".gitignore"),
-			[]byte("old-content\n"), 0o644))
+			[]byte("old-content\n"), 0o600))
 
 		err = svc.EnsureLocalGitignore()
 		require.NoError(t, err)

@@ -525,40 +525,6 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 	})
 }
 
-func TestExternalBackend_IsIgnored(t *testing.T) {
-	t.Run("returns false for non-ignored file", func(t *testing.T) {
-		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir, "git")
-		require.NoError(t, err)
-
-		ignored, err := eb.isIgnored("README.md")
-		require.NoError(t, err)
-		assert.False(t, ignored)
-	})
-
-	t.Run("returns true for ignored pattern", func(t *testing.T) {
-		dir := setupExternalTestRepo(t)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("progress-*.txt\n"), 0o600))
-
-		eb, err := newExternalBackend(dir, "git")
-		require.NoError(t, err)
-
-		ignored, err := eb.isIgnored("progress-test.txt")
-		require.NoError(t, err)
-		assert.True(t, ignored)
-	})
-
-	t.Run("returns false for no gitignore", func(t *testing.T) {
-		dir := setupExternalTestRepo(t)
-		eb, err := newExternalBackend(dir, "git")
-		require.NoError(t, err)
-
-		ignored, err := eb.isIgnored("somefile.txt")
-		require.NoError(t, err)
-		assert.False(t, ignored)
-	})
-}
-
 func TestExternalBackend_Add(t *testing.T) {
 	t.Run("stages new file", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
@@ -1019,8 +985,5 @@ func TestExternalBackend_CustomCommand(t *testing.T) {
 		require.NoError(t, err)
 
 		_ = eb.getDefaultBranch()
-
-		_, err = eb.isIgnored("README.md")
-		require.NoError(t, err)
 	})
 }

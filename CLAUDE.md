@@ -181,7 +181,7 @@ The `--network` flag (or `RALPHEX_DOCKER_NETWORK` env var) sets the Docker netwo
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, error)`
-- All git operations are methods on `Service` (CreateBranchForPlan, CreateWorktreeForPlan, MovePlanToCompleted, EnsureIgnored, etc.)
+- All git operations are methods on `Service` (CreateBranchForPlan, CreateWorktreeForPlan, MovePlanToCompleted, EnsureLocalGitignore, etc.)
 - `Logger` interface for dependency injection, compatible with `*color.Color`
 - Uses `backend` interface internally, implemented by `externalBackend` which shells out to the configured VCS command
 - Optional `vcsCmd` parameter overrides the default `"git"` command (e.g., path to `hg2git.sh` translation script)

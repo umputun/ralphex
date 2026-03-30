@@ -294,24 +294,6 @@ func (e *externalBackend) hasChangesOtherThan(path string) ([]string, error) {
 	return dirty, nil
 }
 
-// isIgnored checks if a path is ignored by gitignore rules.
-func (e *externalBackend) isIgnored(path string) (bool, error) {
-	cmd := exec.CommandContext(context.Background(), e.command, "check-ignore", "-q", "--", path)
-	cmd.Dir = e.path
-	err := cmd.Run()
-	if err == nil {
-		return true, nil // exit 0 = ignored
-	}
-	// exit 1 = not ignored, other codes = error
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		if exitErr.ExitCode() == 1 {
-			return false, nil
-		}
-	}
-	return false, fmt.Errorf("check-ignore: %w", err)
-}
-
 // add stages a file for commit.
 func (e *externalBackend) add(path string) error {
 	rel, err := e.toRelative(path)
