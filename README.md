@@ -56,7 +56,7 @@ ralphex solves both problems. Each task executes in a fresh Claude Code session 
 
 ## Quick Start
 
-Make sure ralphex is [installed](#installation) and your project is a git repository. You need a plan file in `docs/plans/`, for example:
+Make sure ralphex is [installed](#installation) and your project is a git repository. You need a  [plan file](#plan-creation) in `docs/plans/`, for example:
 
 ```markdown
 # Plan: My Feature
