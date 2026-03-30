@@ -471,62 +471,30 @@ func (s *Service) DiffStats(baseBranch string) (DiffStats, error) {
 	return s.repo.diffStats(baseBranch)
 }
 
-// EnsureIgnored ensures a pattern is in .gitignore.
-// uses probePath to check if pattern is already ignored before adding.
-// if pattern is already ignored, does nothing.
-// if pattern is not ignored, appends it to .gitignore with comment.
-func (s *Service) EnsureIgnored(pattern, probePath string) error {
-	// check if already ignored - if check fails, proceed to add pattern anyway
-	ignored, err := s.repo.isIgnored(probePath)
-	if err == nil && ignored {
-		return nil // already ignored
-	}
-	if err != nil {
-		s.log.Printf("warning: checking gitignore: %v, adding pattern anyway\n", err)
+// EnsureLocalGitignore creates .ralphex/.gitignore with patterns for runtime artifacts
+// (progress/ and worktrees/). this keeps ignore rules self-contained inside .ralphex/
+// instead of modifying the project's root .gitignore.
+// idempotent: does nothing if the file already exists with the expected content.
+func (s *Service) EnsureLocalGitignore() error {
+	ralphexDir := filepath.Join(s.repo.root(), ".ralphex")
+	if err := os.MkdirAll(ralphexDir, 0o750); err != nil {
+		return fmt.Errorf("create .ralphex dir: %w", err)
 	}
 
-	// check if ralphex comment already exists in .gitignore (matches both current "# ralphex"
-	// and legacy "# ralphex progress logs" from older versions for backward compatibility)
-	gitignorePath := filepath.Join(s.repo.root(), ".gitignore")
-	hasComment := false
-	endsWithNewline := true // assume true for new files (O_CREATE)
-	if existing, readErr := os.ReadFile(gitignorePath); readErr == nil { //nolint:gosec // .gitignore is world-readable
-		for line := range strings.SplitSeq(string(existing), "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "# ralphex" || trimmed == "# ralphex progress logs" {
-				hasComment = true
-				break
-			}
+	gitignorePath := filepath.Join(ralphexDir, ".gitignore")
+	const content = ".gitignore\nprogress/\nworktrees/\n"
+
+	if existing, err := os.ReadFile(gitignorePath); err == nil { //nolint:gosec // .gitignore is world-readable
+		if string(existing) == content {
+			return nil
 		}
-		endsWithNewline = len(existing) == 0 || existing[len(existing)-1] == '\n'
 	}
 
-	// write to .gitignore at repo root
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // .gitignore needs world-readable
-	if err != nil {
-		return fmt.Errorf("open .gitignore: %w", err)
+	if err := os.WriteFile(gitignorePath, []byte(content), 0o644); err != nil { //nolint:gosec // .gitignore needs world-readable
+		return fmt.Errorf("write .ralphex/.gitignore: %w", err)
 	}
 
-	var writeErr error
-	if hasComment {
-		if endsWithNewline {
-			_, writeErr = fmt.Fprintf(f, "%s\n", pattern)
-		} else {
-			_, writeErr = fmt.Fprintf(f, "\n%s\n", pattern)
-		}
-	} else {
-		_, writeErr = fmt.Fprintf(f, "\n# ralphex\n%s\n", pattern)
-	}
-	if writeErr != nil {
-		_ = f.Close() // close on write error, ignore close error since write already failed
-		return fmt.Errorf("write .gitignore: %w", writeErr)
-	}
-
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close .gitignore: %w", err)
-	}
-
-	s.log.Printf("added %s to .gitignore\n", pattern)
+	s.log.Printf("created .ralphex/.gitignore\n")
 	return nil
 }
 
@@ -537,27 +505,6 @@ func (s *Service) FileHasChanges(path string) (bool, error) {
 		return false, fmt.Errorf("file has changes %q: %w", path, err)
 	}
 	return changed, nil
-}
-
-// CommitIgnoreChanges stages and commits .gitignore if it has uncommitted changes.
-// no-op if .gitignore is clean. used to prevent dirty state from blocking branch/worktree creation
-// after EnsureIgnored has modified .gitignore.
-func (s *Service) CommitIgnoreChanges() error {
-	changed, err := s.repo.fileHasChanges(".gitignore")
-	if err != nil {
-		return fmt.Errorf("check .gitignore status: %w", err)
-	}
-	if !changed {
-		return nil
-	}
-	if err := s.repo.add(".gitignore"); err != nil {
-		return fmt.Errorf("stage .gitignore: %w", err)
-	}
-	if err := s.repo.commitFiles(s.appendTrailer("add ralphex entries to .gitignore"), ".gitignore"); err != nil {
-		return fmt.Errorf("commit .gitignore: %w", err)
-	}
-	s.log.Printf("committed .gitignore changes\n")
-	return nil
 }
 
 // formatDirtyFiles formats a list of dirty file paths for display in error messages.

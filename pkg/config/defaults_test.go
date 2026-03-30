@@ -1298,6 +1298,11 @@ func TestInitLocal(t *testing.T) {
 		agentFiles, err := os.ReadDir(filepath.Join(localDir, "agents"))
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(agentFiles), 5)
+
+		// verify .gitignore for runtime artifacts
+		igData, err := os.ReadFile(filepath.Join(localDir, ".gitignore")) //nolint:gosec // test
+		require.NoError(t, err)
+		assert.Equal(t, ".gitignore\nprogress/\nworktrees/\n", string(igData))
 	})
 
 	t.Run("second call preserves existing customized files", func(t *testing.T) {
@@ -1336,6 +1341,21 @@ func TestInitLocal(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join(localDir, "config")) //nolint:gosec // test
 		require.NoError(t, err)
 		assert.NotEqual(t, commentedContent, string(data), "commented-only config should be overwritten")
+	})
+
+	t.Run("preserves existing gitignore", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		localDir := filepath.Join(tmpDir, ".ralphex")
+		require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+		customIG := "progress/\nworktrees/\ncustom-dir/\n"
+		require.NoError(t, os.WriteFile(filepath.Join(localDir, ".gitignore"), []byte(customIG), 0o644))
+
+		require.NoError(t, InitLocal(localDir))
+
+		data, err := os.ReadFile(filepath.Join(localDir, ".gitignore")) //nolint:gosec // test
+		require.NoError(t, err)
+		assert.Equal(t, customIG, string(data), ".gitignore should not be overwritten")
 	})
 
 	t.Run("empty dir returns error", func(t *testing.T) {

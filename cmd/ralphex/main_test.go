@@ -1746,49 +1746,6 @@ func TestRunWithWorktree_CreateWorktreeError(t *testing.T) {
 	assert.Contains(t, err.Error(), "create worktree")
 }
 
-func TestEnsureGitIgnored(t *testing.T) {
-	t.Run("odd_pairs_returns_error", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		gitSvc, err := git.NewService(dir, noopLogger())
-		require.NoError(t, err)
-		err = ensureGitIgnored(gitSvc, "pattern-only")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "requires pairs")
-	})
-
-	t.Run("commits_when_gitignore_clean", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		gitSvc, err := git.NewService(dir, noopLogger())
-		require.NoError(t, err)
-
-		err = ensureGitIgnored(gitSvc, ".ralphex/progress/", ".ralphex/progress/test-probe")
-		require.NoError(t, err)
-
-		// verify .gitignore was committed (no uncommitted changes)
-		hasChanges, chErr := gitSvc.FileHasChanges(".gitignore")
-		require.NoError(t, chErr)
-		assert.False(t, hasChanges, ".gitignore should be committed")
-	})
-
-	t.Run("skips_commit_when_gitignore_dirty", func(t *testing.T) {
-		dir := setupTestRepo(t)
-		gitSvc, err := git.NewService(dir, noopLogger())
-		require.NoError(t, err)
-
-		// make .gitignore dirty first
-		igPath := filepath.Join(dir, ".gitignore")
-		require.NoError(t, os.WriteFile(igPath, []byte("some-user-pattern\n"), 0o600))
-
-		err = ensureGitIgnored(gitSvc, ".ralphex/progress/", ".ralphex/progress/test-probe")
-		require.NoError(t, err)
-
-		// .gitignore should still have uncommitted changes (not auto-committed)
-		hasChanges, chErr := gitSvc.FileHasChanges(".gitignore")
-		require.NoError(t, chErr)
-		assert.True(t, hasChanges, ".gitignore should remain dirty when it was dirty before")
-	})
-}
-
 // chdirTemp changes to a temporary directory and restores the original on cleanup.
 func chdirTemp(t *testing.T) {
 	t.Helper()

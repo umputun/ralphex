@@ -327,22 +327,17 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 	req.PlanFile = planFile
 
 	// worktree mode: create worktree, chdir into it, run execution from there.
-	// EnsureIgnored is called inside runWithWorktree after worktree creation
-	// to avoid HasChangesOtherThan conflict in CreateWorktreeForPlan.
 	if req.Config.WorktreeEnabled && planFile != "" && modeRequiresBranch(req.Mode) {
 		return runWithWorktree(ctx, o, req)
 	}
 
-	// normal mode: create branch first, then add gitignore patterns.
-	// EnsureIgnored must be called AFTER CreateBranchForPlan because it modifies
-	// .gitignore, and CreateBranchForPlan checks HasChangesOtherThan(planFile).
+	if err := req.GitSvc.EnsureLocalGitignore(); err != nil {
+		return fmt.Errorf("ensure gitignore: %w", err)
+	}
 	if planFile != "" && modeRequiresBranch(req.Mode) {
 		if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch); err != nil {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
-	}
-	if err := req.GitSvc.EnsureIgnored(".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
-		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
 	return executePlan(ctx, o, req)
@@ -618,9 +613,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error 
 		}
 	}()
 
-	// add gitignore patterns and commit if clean
-	if igErr := ensureGitIgnored(req.GitSvc, ".ralphex/progress/", ".ralphex/progress/progress-test.txt",
-		".ralphex/worktrees/", ".ralphex/worktrees/test"); igErr != nil {
+	if igErr := req.GitSvc.EnsureLocalGitignore(); igErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: gitignore setup: %v\n", igErr)
 	}
 
@@ -726,39 +719,6 @@ func openGitService(colors *progress.Colors, vcsCmd string) (*git.Service, error
 		return nil, fmt.Errorf("new git service: %w", err)
 	}
 	return svc, nil
-}
-
-// ensureGitIgnored adds patterns to .gitignore and commits if .gitignore was clean before.
-// patterns are pairs of (pattern, probePath) passed to EnsureIgnored.
-// returns error if arguments are invalid or pattern addition fails; commit errors are logged as warnings.
-func ensureGitIgnored(gitSvc *git.Service, patternPairs ...string) error {
-	if len(patternPairs)%2 != 0 {
-		return errors.New("ensureGitIgnored requires pairs of (pattern, probePath)")
-	}
-
-	// track if .gitignore was already dirty before we modify it.
-	// on error, assume dirty to avoid auto-committing unrelated user changes.
-	igDirtyBefore, igErr := gitSvc.FileHasChanges(".gitignore")
-	if igErr != nil {
-		igDirtyBefore = true
-		fmt.Fprintf(os.Stderr, "warning: failed to check .gitignore status: %v\n", igErr)
-	}
-
-	// iterate pairs (pattern, probePath); i+1 guard satisfies gosec G602 slice bounds check
-	for i := 0; i+1 < len(patternPairs); i += 2 {
-		if err := gitSvc.EnsureIgnored(patternPairs[i], patternPairs[i+1]); err != nil {
-			return fmt.Errorf("ensure gitignore %s: %w", patternPairs[i], err)
-		}
-	}
-
-	// commit .gitignore changes only if it was clean before to avoid
-	// auto-committing unrelated user changes under the ralphex commit message.
-	if !igDirtyBefore {
-		if err := gitSvc.CommitIgnoreChanges(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to commit .gitignore: %v\n", err)
-		}
-	}
-	return nil
 }
 
 // checkClaudeDep checks that the claude command is available in PATH.
@@ -918,8 +878,7 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 // creates input collector, progress logger, and runs the plan creation loop.
 // after plan creation, prompts user to continue with implementation or exit.
 func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *plan.Selector) error {
-	// ensure gitignore has progress files (check dirty, add, commit if was clean)
-	if err := ensureGitIgnored(req.GitSvc, ".ralphex/progress/", ".ralphex/progress/progress-test.txt"); err != nil {
+	if err := req.GitSvc.EnsureLocalGitignore(); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 

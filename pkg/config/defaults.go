@@ -105,6 +105,13 @@ func (d *defaultsInstaller) Install(configDir string) error {
 		return fmt.Errorf("install default agents: %w", err)
 	}
 
+	gitignorePath := filepath.Join(configDir, ".gitignore")
+	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(gitignorePath, []byte(".gitignore\nprogress/\nworktrees/\n"), 0o644); err != nil { //nolint:gosec // .gitignore needs world-readable
+			return fmt.Errorf("write .gitignore: %w", err)
+		}
+	}
+
 	return nil
 }
 
