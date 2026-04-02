@@ -956,12 +956,26 @@ def run_docker(image: str, port: str, volumes: list[str], env_vars: list[str], b
         try:
             proc.terminate()
         except ProcessLookupError:
-            pass
+            return
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
     try:
         proc.wait()
     except KeyboardInterrupt:
         _terminate_proc()
-        proc.wait()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            proc.wait()
     finally:
         run_docker._active_proc = None  # type: ignore[attr-defined]
     return proc.returncode
@@ -1075,6 +1089,14 @@ def main() -> int:
                 proc.terminate()
             except ProcessLookupError:
                 pass
+            else:
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
         _cleanup_creds()
         sys.exit(128 + signum)
 
