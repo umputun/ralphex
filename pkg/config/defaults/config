@@ -183,8 +183,8 @@ vcs_command = git
 # claude_error_patterns: patterns to detect in claude output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
 # when detected, ralphex exits gracefully with an informative message
-# default: You've hit your limit,API Error:,cannot be launched inside another Claude Code session
-claude_error_patterns = You've hit your limit,API Error:,cannot be launched inside another Claude Code session
+# default: You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in
+claude_error_patterns = You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in
 
 # codex_error_patterns: patterns to detect in codex output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
