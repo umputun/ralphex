@@ -33,7 +33,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
-	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/go-pkgz/email v0.6.0 // indirect
 	github.com/go-pkgz/lgr v0.12.2 // indirect
 	github.com/go-pkgz/repeater v1.2.0 // indirect
