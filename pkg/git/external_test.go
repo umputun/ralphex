@@ -523,6 +523,28 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"README.md"}, dirty)
 	})
+
+	t.Run("excludes plan file with different case", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+
+		// create and commit plan file with specific case
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "My-Plan.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n"), 0o600))
+		runGit(t, dir, "add", "docs/plans/My-Plan.md")
+		runGit(t, dir, "commit", "-m", "add plan")
+
+		// modify the plan file to make it dirty
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan\nupdated content\n"), 0o600))
+
+		// call with lowercase path — should still exclude it
+		dirty, err := eb.hasChangesOtherThan(filepath.Join("docs", "plans", "my-plan.md"))
+		require.NoError(t, err)
+		assert.Empty(t, dirty, "plan file with different case should be excluded")
+	})
 }
 
 func TestExternalBackend_Add(t *testing.T) {

@@ -221,6 +221,7 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 // If plan file has uncommitted changes and is the only dirty file, auto-commits it.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop").
 func (s *Service) CreateBranchForPlan(planFile, defaultBranch string) error {
+	planFile = s.resolveFilesystemCase(planFile)
 	branchName, planHasChanges, err := s.preparePlanBranch(planFile, false, defaultBranch)
 	if err != nil {
 		return err
@@ -264,6 +265,8 @@ func (s *Service) CreateBranchForPlan(planFile, defaultBranch string) error {
 // git service) so the commit lands on the feature branch rather than the default branch.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop").
 func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch string) (string, bool, error) {
+	planFile = s.resolveFilesystemCase(planFile)
+
 	// check worktree existence early, before preparePlanBranch runs hasChangesOtherThan
 	// (an existing worktree dir would show up as untracked and fail the dirty check)
 	earlyBranch := plan.ExtractBranchName(planFile)
@@ -312,6 +315,8 @@ func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch string) (string,
 // CommitPlanFile stages and commits a plan file on the current branch.
 // mainRepoRoot is the root of the main repository, used to compute the plan file's
 // relative path when the service operates inside a worktree.
+// the plan file path is resolved to actual on-disk case before staging
+// to handle case-insensitive filesystems (macOS APFS).
 func (s *Service) CommitPlanFile(planFile, mainRepoRoot string) error {
 	branchName := plan.ExtractBranchName(planFile)
 	s.log.Printf("committing plan file: %s\n", filepath.Base(planFile))
@@ -332,6 +337,7 @@ func (s *Service) CommitPlanFile(planFile, mainRepoRoot string) error {
 		return fmt.Errorf("relative plan path: %w", err)
 	}
 	localPlan := filepath.Join(s.repo.root(), relPlan)
+	localPlan = s.resolveFilesystemCase(localPlan)
 
 	if err := s.repo.add(localPlan); err != nil {
 		return fmt.Errorf("stage plan file: %w", err)
@@ -380,6 +386,35 @@ func (s *Service) copyToWorktree(srcPath, wtPath string) error {
 		return fmt.Errorf("copy file: %w", err)
 	}
 	return nil
+}
+
+// resolveFilesystemCase returns the path with the actual on-disk filename case.
+// reads the parent directory and finds a case-insensitive match for the basename.
+// falls back to the original path if the directory can't be read or no match is found.
+// this handles macOS APFS case-insensitive filesystems where git tracks one case
+// but the caller may provide a different case.
+func (s *Service) resolveFilesystemCase(path string) string {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return path
+	}
+
+	var foldMatch string
+	for _, entry := range entries {
+		if entry.Name() == base {
+			return path // exact match, no case resolution needed
+		}
+		if foldMatch == "" && strings.EqualFold(entry.Name(), base) {
+			foldMatch = filepath.Join(dir, entry.Name())
+		}
+	}
+	if foldMatch != "" {
+		return foldMatch
+	}
+	return path
 }
 
 // RemoveWorktree removes a git worktree at the given path.

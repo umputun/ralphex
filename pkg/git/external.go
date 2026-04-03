@@ -260,7 +260,7 @@ func (e *externalBackend) fileHasChanges(path string) (bool, error) {
 	return out != "", nil
 }
 
-// hasChangesOtherThan returns the list of dirty file paths (excluding the given file).
+// hasChangesOtherThan returns the list of dirty file paths (excluding the given file, case-insensitive).
 // this includes modified/deleted tracked files, staged changes, and untracked files (excluding gitignored).
 // an empty slice means no other changes.
 func (e *externalBackend) hasChangesOtherThan(path string) ([]string, error) {
@@ -286,7 +286,7 @@ func (e *externalBackend) hasChangesOtherThan(path string) ([]string, error) {
 		}
 		// extract file path from porcelain output: "XY path" or "XY path -> newpath"
 		filePath := e.extractPathFromPorcelain(line)
-		if filePath == rel {
+		if strings.EqualFold(filePath, rel) {
 			continue
 		}
 		dirty = append(dirty, filePath)

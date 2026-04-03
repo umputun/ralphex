@@ -395,6 +395,34 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, log.logs) // no branch created
 	})
+
+	t.Run("commits plan file with case-mismatched path", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// create plan file with specific case
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "Branch-Case.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Branch Case Plan"), 0o600))
+
+		// call CreateBranchForPlan with lowercase path (different case)
+		lowercasePlan := filepath.Join(plansDir, "branch-case.md")
+		err = svc.CreateBranchForPlan(lowercasePlan, "master")
+		require.NoError(t, err, "should succeed despite case mismatch in plan file path")
+
+		// verify branch created (name derived from resolved on-disk case)
+		branch, err := svc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "Branch-Case", branch)
+
+		// verify plan was committed (no uncommitted changes)
+		hasChanges, err := svc.repo.fileHasChanges(planFile)
+		require.NoError(t, err)
+		assert.False(t, hasChanges, "plan file should be committed")
+	})
 }
 
 func TestService_MovePlanToCompleted(t *testing.T) {
@@ -1134,6 +1162,39 @@ func TestService_CommitPlanFile(t *testing.T) {
 		// cleanup
 		require.NoError(t, svc.RemoveWorktree(wtPath))
 	})
+
+	t.Run("commits plan file with case-mismatched path", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// create plan file with specific case on master
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "Case-Test.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Case Test Plan"), 0o600))
+
+		// create worktree from master (plan is copied in with original case)
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile, "master")
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit)
+
+		// open worktree git service and commit plan with lowercase path (different case)
+		wtSvc, err := NewService(wtPath, log)
+		require.NoError(t, err)
+		lowercasePlan := filepath.Join(plansDir, "case-test.md")
+		err = wtSvc.CommitPlanFile(lowercasePlan, svc.Root())
+		require.NoError(t, err, "commit should succeed despite case mismatch")
+
+		// verify commit succeeded on the feature branch (branch name derived from original-case plan file)
+		wtBranch, err := wtSvc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "Case-Test", wtBranch)
+
+		// cleanup
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
 }
 
 func TestService_RemoveWorktree(t *testing.T) {
@@ -1402,4 +1463,40 @@ func TestService_CommitWithTrailer(t *testing.T) {
 		assert.Contains(t, out, "move completed plan: move-trailer.md")
 		assert.Contains(t, out, "Signed-off-by: test")
 	})
+}
+
+func TestService_resolveFilesystemCase(t *testing.T) {
+	dir := setupExternalTestRepo(t)
+	svc, err := NewService(dir, noopServiceLogger())
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T, dir string) string // returns input path
+		wantBase string                                // expected basename in result
+	}{
+		{name: "returns actual case when basename differs", setup: func(t *testing.T, dir string) string {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "Foo-Bar.md"), []byte("x"), 0o600))
+			return filepath.Join(dir, "foo-bar.md") // different case
+		}, wantBase: "Foo-Bar.md"},
+		{name: "returns original path when no match", setup: func(_ *testing.T, dir string) string {
+			return filepath.Join(dir, "nonexistent.md")
+		}, wantBase: "nonexistent.md"},
+		{name: "returns original path when file matches exactly", setup: func(t *testing.T, dir string) string {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "exact.md"), []byte("x"), 0o600))
+			return filepath.Join(dir, "exact.md")
+		}, wantBase: "exact.md"},
+		{name: "returns original path when directory unreadable", setup: func(_ *testing.T, _ string) string {
+			return "/nonexistent-dir-abc123/file.md"
+		}, wantBase: "file.md"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			input := tt.setup(t, tmpDir)
+			got := svc.resolveFilesystemCase(input)
+			assert.Equal(t, tt.wantBase, filepath.Base(got))
+		})
+	}
 }

@@ -200,10 +200,11 @@ Key files:
 - Worktree auto-removed on completion, failure, or SIGINT; branch preserved for PR
 - Only active for `ModeFull` and `ModeTasksOnly` (review/plan/external modes skip worktree)
 - `runWithWorktree()` in `cmd/ralphex/main.go` encapsulates the full lifecycle
+- Case-insensitive path handling: `CreateBranchForPlan()`, `CreateWorktreeForPlan()`, and `CommitPlanFile()` resolve plan file paths to actual on-disk case via `resolveFilesystemCase()` to handle macOS APFS case-insensitive filesystems. `hasChangesOtherThan()` uses case-insensitive comparison for plan file exclusion
 
 Key files:
 - `cmd/ralphex/main.go` - `runWithWorktree()`, `selectAndExecutePlan()`, interrupt cleanup
-- `pkg/git/service.go` - `CreateWorktreeForPlan()`, `CommitPlanFile()`, `RemoveWorktree()`
+- `pkg/git/service.go` - `CreateWorktreeForPlan()`, `CommitPlanFile()`, `RemoveWorktree()`, `resolveFilesystemCase()`
 - `pkg/git/external.go` - `addWorktree()`, `removeWorktree()`, `pruneWorktrees()` (unexported backend methods)
 
 ### Plan Creation Mode
