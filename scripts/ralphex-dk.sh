@@ -1097,6 +1097,11 @@ def main() -> int:
                         proc.kill()
                     except ProcessLookupError:
                         pass
+                    else:
+                        try:
+                            proc.wait(timeout=1)
+                        except (subprocess.TimeoutExpired, ProcessLookupError):
+                            pass
         _cleanup_creds()
         sys.exit(128 + signum)
 
