@@ -34,6 +34,8 @@ type opts struct {
 	MaxIterations         int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
 	MaxExternalIterations int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
 	ReviewPatience        int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
+	ClaudeModel           string        `long:"claude-model" description:"model for task execution (e.g., opus, sonnet, haiku)"`
+	ReviewModel           string        `long:"review-model" description:"model for review phases (falls back to --claude-model)"`
 	Review                bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
 	ExternalOnly          bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
 	CodexOnly             bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
@@ -834,6 +836,18 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		reviewPatience = o.ReviewPatience
 	}
 
+	// resolve claude model: CLI flag > config file > empty (use CLI default)
+	claudeModel := req.Config.ClaudeModel
+	if o.ClaudeModel != "" {
+		claudeModel = o.ClaudeModel
+	}
+
+	// resolve review model: CLI flag > config file > claude_model > empty
+	reviewModel := req.Config.ReviewModel
+	if o.ReviewModel != "" {
+		reviewModel = o.ReviewModel
+	}
+
 	r := processor.New(processor.Config{
 		PlanFile:              req.PlanFile,
 		ProgressPath:          log.Path(),
@@ -848,6 +862,8 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		CodexEnabled:          codexEnabled,
 		FinalizeEnabled:       req.Config.FinalizeEnabled,
 		DefaultBranch:         req.BaseRef,
+		ClaudeModel:           claudeModel,
+		ReviewModel:           reviewModel,
 		AppConfig:             req.Config,
 	}, log, holder)
 	if req.GitSvc != nil {

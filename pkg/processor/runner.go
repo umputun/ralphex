@@ -52,6 +52,8 @@ type Config struct {
 	NoColor               bool           // disable color output
 	IterationDelayMs      int            // delay between iterations in milliseconds
 	TaskRetryCount        int            // number of times to retry failed tasks
+	ClaudeModel           string         // model for task execution (empty = CLI default)
+	ReviewModel           string         // model for review phases (empty = falls back to ClaudeModel)
 	CodexEnabled          bool           // whether codex review is enabled
 	FinalizeEnabled       bool           // whether finalize step is enabled
 	DefaultBranch         string         // default branch name (detected from repo)
@@ -94,16 +96,18 @@ type GitChecker interface {
 
 // Executors groups the executor dependencies for the Runner.
 type Executors struct {
-	Claude Executor
-	Codex  Executor
-	Custom *executor.CustomExecutor
+	Claude       Executor
+	ReviewClaude Executor                // optional: separate executor for review phases (nil = use Claude)
+	Codex        Executor
+	Custom       *executor.CustomExecutor
 }
 
 // Runner orchestrates the execution loop.
 type Runner struct {
 	cfg                 Config
 	log                 Logger
-	claude              Executor
+	claude              Executor // executor for task phase
+	reviewClaude        Executor // executor for review phases (may differ in model)
 	codex               Executor
 	custom              *executor.CustomExecutor
 	git                 GitChecker
@@ -134,6 +138,29 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
 		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
 		claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout
+	}
+	claudeExec.Model = cfg.ClaudeModel
+
+	// build review executor (shares base config, may use a different model)
+	reviewModel := cfg.ReviewModel
+	if reviewModel == "" {
+		reviewModel = cfg.ClaudeModel // fall back to task model
+	}
+	var reviewExec Executor
+	if reviewModel != cfg.ClaudeModel {
+		re := &executor.ClaudeExecutor{
+			OutputHandler: claudeExec.OutputHandler,
+			Debug:         cfg.Debug,
+			Model:         reviewModel,
+		}
+		if cfg.AppConfig != nil {
+			re.Command = cfg.AppConfig.ClaudeCommand
+			re.Args = cfg.AppConfig.ClaudeArgs
+			re.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
+			re.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
+			re.IdleTimeout = cfg.AppConfig.IdleTimeout
+		}
+		reviewExec = re
 	}
 
 	// build codex executor with config values
@@ -179,7 +206,7 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		}
 	}
 
-	return NewWithExecutors(cfg, log, Executors{Claude: claudeExec, Codex: codexExec, Custom: customExec}, holder)
+	return NewWithExecutors(cfg, log, Executors{Claude: claudeExec, ReviewClaude: reviewExec, Codex: codexExec, Custom: customExec}, holder)
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
@@ -205,10 +232,17 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 		waitOnLimit = cfg.AppConfig.WaitOnLimit
 	}
 
+	// if no separate review executor, use the same as task executor
+	reviewClaude := execs.ReviewClaude
+	if reviewClaude == nil {
+		reviewClaude = execs.Claude
+	}
+
 	return &Runner{
 		cfg:            cfg,
 		log:            log,
 		claude:         execs.Claude,
+		reviewClaude:   reviewClaude,
 		codex:          execs.Codex,
 		custom:         execs.Custom,
 		phaseHolder:    holder,
@@ -475,7 +509,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 
 // runClaudeReview runs Claude review with the given prompt until REVIEW_DONE.
 func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
-	result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
+	result := r.runWithLimitRetry(ctx, r.reviewClaude.Run, prompt, "claude")
 	if result.Error != nil {
 		if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
 			return err
@@ -517,7 +551,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 		// capture HEAD hash before running claude for no-commit detection
 		headBefore := r.headHash()
 
-		result := r.runWithLimitRetry(ctx, r.claude.Run,
+		result := r.runWithLimitRetry(ctx, r.reviewClaude.Run,
 			prefix+r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt), "claude")
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
@@ -746,7 +780,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// pass output to claude for evaluation and fixing
 		r.phaseHolder.Set(status.PhaseClaudeEval)
 		r.log.PrintSection(status.NewClaudeEvalSection())
-		claudeResult := r.runWithLimitRetry(loopCtx, r.claude.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
+		claudeResult := r.runWithLimitRetry(loopCtx, r.reviewClaude.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
 
 		// restore codex phase for next iteration
 		r.phaseHolder.Set(status.PhaseCodex)
@@ -1228,7 +1262,7 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 	r.log.PrintSection(status.NewGenericSection("finalize step"))
 
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.FinalizePrompt)
-	result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
+	result := r.runWithLimitRetry(ctx, r.reviewClaude.Run, prompt, "claude")
 
 	if result.Error != nil {
 		// propagate context cancellation - user wants to abort
