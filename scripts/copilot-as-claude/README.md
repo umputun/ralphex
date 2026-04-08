@@ -49,7 +49,7 @@ Classic personal access tokens (`ghp_`) are not supported by the Copilot CLI.
 
 ## Permission model
 
-The wrapper runs Copilot with `--no-ask-user --allow-all` so task and review phases can complete unattended. `--allow-all` is Copilot's native shortcut for enabling tool, path, and URL permissions together.
+The wrapper runs Copilot with `--autopilot --no-ask-user --allow-all` so task and review phases can complete unattended across multiple model turns. `--autopilot` is Copilot's native hands-off mode for programmatic runs, `--no-ask-user` suppresses follow-up questions, and `--allow-all` enables tool, path, and URL permissions together.
 
 If you need a more restrictive policy, copy the wrapper and replace `--allow-all` with explicit `--allow-tool`, `--allow-url`, or related permission flags.
 

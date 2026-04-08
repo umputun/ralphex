@@ -60,7 +60,7 @@ if [[ "$is_review_prompt" == "1" ]]; then
     prompt="$adapter_text"$'\n\n'"$prompt"
 fi
 
-copilot_args=(-s --output-format json --stream on --no-ask-user --allow-all)
+copilot_args=(-s --output-format json --stream on --autopilot --no-ask-user --allow-all)
 [[ -n "$COPILOT_MODEL" ]] && copilot_args+=(--model "$COPILOT_MODEL")
 
 tmp_dir=$(mktemp -d)
@@ -90,7 +90,6 @@ copilot "${copilot_args[@]}" < "$prompt_file" > "$stdout_pipe" 2>"$stderr_file" 
 copilot_pid=$!
 
 seen_message_delta=$'\n'
-saw_terminal_event=0
 
 emit_text_delta() {
     local text="$1"
@@ -139,7 +138,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
             [[ -n "$event_text" ]] && emit_text_delta "$event_text"$'\n'
             ;;
         session.task_complete|session.idle|assistant.turn_end|session.shutdown)
-            saw_terminal_event=1
             ;;
     esac
 done < "$stdout_pipe"

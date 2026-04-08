@@ -68,6 +68,10 @@ assert_contains \
     "wrapper README documents token auth"
 assert_contains \
     "$REPO_ROOT/scripts/copilot-as-claude/README.md" \
+    "--autopilot --no-ask-user --allow-all" \
+    "wrapper README documents Copilot autopilot mode"
+assert_contains \
+    "$REPO_ROOT/scripts/copilot-as-claude/README.md" \
     "bash scripts/copilot-as-claude/copilot-as-claude_test.sh" \
     "wrapper README includes wrapper test command"
 
@@ -81,8 +85,12 @@ assert_contains \
     "custom providers doc explains native Copilot JSONL mode"
 assert_contains \
     "$REPO_ROOT/docs/custom-providers.md" \
-    "--no-ask-user --allow-all" \
-    "custom providers doc explains Copilot permission strategy"
+    "--autopilot --no-ask-user --allow-all" \
+    "custom providers doc explains Copilot autopilot strategy"
+assert_contains \
+    "$REPO_ROOT/docs/custom-providers.md" \
+    'Use the `--allow-all` (or `--yolo`) option' \
+    "custom providers doc references programmatic autopilot guidance"
 assert_contains \
     "$REPO_ROOT/docs/custom-providers.md" \
     "### How it differs from other included wrappers" \
@@ -105,6 +113,18 @@ assert_contains \
     "scripts/copilot-as-claude/copilot-as-claude.sh" \
     "top-level README mentions included Copilot wrapper"
 assert_contains \
+    "$REPO_ROOT/README.md" \
+    "runs Copilot in native autopilot mode" \
+    "top-level README documents Copilot autopilot behavior"
+assert_contains \
+    "$REPO_ROOT/README.md" \
+    "The included Codex and Copilot wrappers require \`jq\` on \`PATH\` for JSON translation." \
+    "top-level README documents jq requirement for included wrappers"
+assert_contains \
+    "$REPO_ROOT/README.md" \
+    "COPILOT_MODEL" \
+    "top-level README documents Copilot-specific environment variables"
+assert_contains \
     "$REPO_ROOT/CLAUDE.md" \
     "scripts/copilot-as-claude/ # GitHub Copilot CLI wrapper for Claude-compatible output" \
     "CLAUDE inventory includes Copilot wrapper directory"
@@ -112,6 +132,10 @@ assert_contains \
     "$REPO_ROOT/CLAUDE.md" \
     "scripts/copilot-as-claude/copilot-as-claude.sh" \
     "CLAUDE alternative provider docs mention Copilot wrapper path"
+assert_contains \
+    "$REPO_ROOT/CLAUDE.md" \
+    "native autopilot mode" \
+    "CLAUDE alternative provider docs mention Copilot autopilot mode"
 assert_contains \
     "$REPO_ROOT/README.md" \
     "wraps GitHub Copilot CLI" \

@@ -949,6 +949,7 @@ claude_args =
 ```
 
 Authenticate with `copilot login` or set one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`. Set `COPILOT_MODEL` to choose the model.
+The wrapper runs Copilot in native autopilot mode with `--autopilot --no-ask-user --allow-all` so task and review phases can continue across multiple model turns without manual intervention.
 
 To use the included codex wrapper:
 
@@ -960,7 +961,10 @@ claude_args =
 
 Setting `claude_args` to empty is optional. Note that default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`) may still be passed due to config fallback behavior. Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all.
 
-The wrapper supports environment variables:
+The included Codex and Copilot wrappers require `jq` on `PATH` for JSON translation.
+
+Provider-specific environment variables:
+- `COPILOT_MODEL`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` - Copilot model selection and headless authentication
 - `CODEX_MODEL` - codex model to use (default: codex default)
 - `CODEX_SANDBOX` - sandbox mode (default: `danger-full-access`)
 - `CODEX_VERBOSE` - set to `1` to include command execution output in the stream (default: `0`, only agent messages are shown)
@@ -1105,6 +1109,7 @@ claude_args =
 ```
 
 For Copilot, authenticate with `copilot login` or one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`, and set `COPILOT_MODEL` if you want to override the default model.
+The included Copilot wrapper runs Copilot in native autopilot mode with `--autopilot --no-ask-user --allow-all` for unattended task and review execution.
 
 Codex works the same way through its wrapper:
 

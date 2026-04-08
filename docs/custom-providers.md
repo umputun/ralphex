@@ -121,10 +121,13 @@ The wrapper runs Copilot with `-s --output-format json --stream on` so it can co
 
 ### Permission model
 
-The wrapper uses Copilot's native autonomy flags: `--no-ask-user --allow-all`.
+The wrapper uses Copilot's native autonomy flags: `--autopilot --no-ask-user --allow-all`.
 
+- `--autopilot` enables the multi-step autonomous execution required for unattended task/review phases
 - `--no-ask-user` prevents Copilot from pausing the run with follow-up questions
 - `--allow-all` enables tool, path, and URL permissions together, matching ralphex's unattended task/review model
+
+GitHub's programmatic autopilot guidance uses the same core pattern: "Use the `--allow-all` (or `--yolo`) option" together with `--autopilot`, optionally adding `--max-autopilot-continues` for a safety cap in CI or scripts.
 
 If you need a narrower policy, fork the wrapper and replace `--allow-all` with explicit `--allow-tool`, `--allow-url`, or related permission flags.
 
@@ -132,7 +135,7 @@ If you need a narrower policy, fork the wrapper and replace `--allow-all` with e
 
 | Wrapper | Transport | Permissions | Copilot-specific difference |
 |---|---|---|---|
-| Codex | Native JSONL | Codex sandbox/env flags | Copilot uses native `--allow-all`/`--no-ask-user` instead of Codex sandbox settings, and adds a review adapter for Claude Task-tool wording |
+| Codex | Native JSONL | Codex sandbox/env flags | Copilot uses native `--autopilot`/`--allow-all`/`--no-ask-user` instead of Codex sandbox settings, and adds a review adapter for Claude Task-tool wording |
 | OpenCode | Native JSONL | Merges `OPENCODE_CONFIG_CONTENT` with auto-allow permissions | Copilot uses built-in permission flags rather than JSON config merging |
 | Gemini | Plain text | Gemini CLI settings outside the wrapper | Copilot streams structured JSONL events, so the wrapper preserves deltas and terminal events instead of wrapping plain text lines |
 

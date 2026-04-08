@@ -194,9 +194,10 @@ if [[ -f "$TMPDIR_TEST/copilot_args" ]]; then
     if echo "$recorded_args" | grep -q -- '-s ' && \
         echo "$recorded_args" | grep -q -- '--output-format json' && \
         echo "$recorded_args" | grep -q -- '--stream on' && \
+        echo "$recorded_args" | grep -q -- '--autopilot' && \
         echo "$recorded_args" | grep -q -- '--no-ask-user' && \
         echo "$recorded_args" | grep -q -- '--allow-all'; then
-        pass "wrapper passes required Copilot JSON and autonomy flags"
+        pass "wrapper passes required Copilot JSON, autopilot, and autonomy flags"
     else
         fail "required Copilot flags missing" "args: $recorded_args"
     fi
