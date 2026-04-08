@@ -31,6 +31,22 @@ func testColors() *Colors {
 	})
 }
 
+func enableColorsForTest(c *Colors) {
+	for _, clr := range []*color.Color{
+		c.task,
+		c.review,
+		c.codex,
+		c.claudeEval,
+		c.warn,
+		c.err,
+		c.signal,
+		c.timestamp,
+		c.info,
+	} {
+		clr.EnableColor()
+	}
+}
+
 func TestNewLogger(t *testing.T) {
 	tmpDir := t.TempDir()
 	colors := testColors()
@@ -361,7 +377,9 @@ func TestLogger_PhaseColors(t *testing.T) {
 	defer func() { color.NoColor = origNoColor }()
 
 	holder := &status.PhaseHolder{}
-	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), holder)
+	colors := testColors()
+	enableColorsForTest(colors)
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, colors, holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 

@@ -51,19 +51,19 @@ Add an included wrapper around GitHub Copilot CLI so it can replace Claude Code 
 - Create: `scripts/copilot-as-claude/copilot-as-claude.sh`
 - Create: `scripts/copilot-as-claude/copilot-as-claude_test.sh`
 
-- [ ] Create `scripts/copilot-as-claude/copilot-as-claude.sh` following the existing wrapper layout and header-comment conventions
-- [ ] Read the prompt from stdin with `-p` fallback, and ignore unknown Claude flags gracefully so the wrapper works under existing `claude_args`
-- [ ] Validate that `copilot` and `jq` are available, with clear non-zero failures when they are missing
-- [ ] Pass the final prompt to `copilot` via stdin rather than `copilot -p "$prompt"` to avoid reintroducing command-line length problems inside the wrapper
-- [ ] Invoke Copilot in non-interactive JSONL mode with flags suitable for autonomous ralphex runs: `-s`, `--output-format json`, `--stream on`, `--no-ask-user`, and one explicit permission strategy aligned with current ralphex autonomy expectations
-- [ ] Translate Copilot JSONL text/completion events into Claude-compatible `content_block_delta` and `result` events, preserving `<<<RALPHEX:...>>>` signals verbatim
-- [ ] Capture stderr and emit it back into the stream so existing error/limit pattern detection continues to work
-- [ ] Preserve Copilot exit codes, emit a fallback `result` event when Copilot exits without an explicit terminal event, and forward SIGTERM to the Copilot child process
-- [ ] Detect review prompts (`<<<RALPHEX:REVIEW_DONE>>>`) and prepend a Copilot-specific adapter that translates the Claude “Task tool” instructions used in `review_first.txt` and `review_second.txt` into Copilot-compatible agent/subagent behavior
-- [ ] Create `scripts/copilot-as-claude/copilot-as-claude_test.sh` with a mock `copilot` binary that captures argv and stdin and emits configurable stdout, stderr, and exit codes
-- [ ] Cover stdin prompt handling, ignored flags, signal passthrough, stderr passthrough, valid JSON translation, fallback `result`, non-zero exit codes, SIGTERM forwarding, review-adapter injection, and permission/JSON flag construction
-- [ ] Run `bash scripts/copilot-as-claude/copilot-as-claude_test.sh`
-- [ ] Run the relevant test suite for this task and confirm it passes before starting task 2
+- [x] Create `scripts/copilot-as-claude/copilot-as-claude.sh` following the existing wrapper layout and header-comment conventions
+- [x] Read the prompt from stdin with `-p` fallback, and ignore unknown Claude flags gracefully so the wrapper works under existing `claude_args`
+- [x] Validate that `copilot` and `jq` are available, with clear non-zero failures when they are missing
+- [x] Pass the final prompt to `copilot` via stdin rather than `copilot -p "$prompt"` to avoid reintroducing command-line length problems inside the wrapper
+- [x] Invoke Copilot in non-interactive JSONL mode with flags suitable for autonomous ralphex runs: `-s`, `--output-format json`, `--stream on`, `--no-ask-user`, and one explicit permission strategy aligned with current ralphex autonomy expectations
+- [x] Translate Copilot JSONL text/completion events into Claude-compatible `content_block_delta` and `result` events, preserving `<<<RALPHEX:...>>>` signals verbatim
+- [x] Capture stderr and emit it back into the stream so existing error/limit pattern detection continues to work
+- [x] Preserve Copilot exit codes, emit a fallback `result` event when Copilot exits without an explicit terminal event, and forward SIGTERM to the Copilot child process
+- [x] Detect review prompts (`<<<RALPHEX:REVIEW_DONE>>>`) and prepend a Copilot-specific adapter that translates the Claude “Task tool” instructions used in `review_first.txt` and `review_second.txt` into Copilot-compatible agent/subagent behavior
+- [x] Create `scripts/copilot-as-claude/copilot-as-claude_test.sh` with a mock `copilot` binary that captures argv and stdin and emits configurable stdout, stderr, and exit codes
+- [x] Cover stdin prompt handling, ignored flags, signal passthrough, stderr passthrough, valid JSON translation, fallback `result`, non-zero exit codes, SIGTERM forwarding, review-adapter injection, and permission/JSON flag construction
+- [x] Run `bash scripts/copilot-as-claude/copilot-as-claude_test.sh`
+- [x] Run the relevant test suite for this task and confirm it passes before starting task 2
 
 ### Task 2: Document Copilot provider setup
 
