@@ -89,6 +89,8 @@ run_wrapper() {
 echo "running copilot-as-claude.sh tests"
 echo ""
 
+plan_prompt='plan prompt <<<RALPHEX:QUESTION>>> <<<RALPHEX:PLAN_DRAFT>>> <<<RALPHEX:PLAN_READY>>>'
+
 # ---------------------------------------------------------------------------
 # test: signal passthrough
 # ---------------------------------------------------------------------------
@@ -160,7 +162,8 @@ echo "test: stdin prompt handling and ignored flags"
 
 reset_captures
 cat > "$TMPDIR_TEST/minimal_events.jsonl" <<'EOF'
-{"type":"assistant.message_delta","data":{"messageId":"m4","deltaContent":"done"}} 
+{"type":"assistant.message_delta","data":{"messageId":"m4","deltaContent":"partial "}}
+{"type":"assistant.message","data":{"messageId":"m4","content":"done"}} 
 {"type":"session.task_complete","data":{"summary":"done","success":true}}
 EOF
 
@@ -215,6 +218,226 @@ if [[ -f "$TMPDIR_TEST/copilot_stdin" ]] && grep -q '^argument prompt$' "$TMPDIR
     pass "prompt passed to copilot via stdin"
 else
     fail "prompt was not passed via stdin" "captured: $(cat "$TMPDIR_TEST/copilot_stdin" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# test: non-plan mode emits completed assistant messages only
+# ---------------------------------------------------------------------------
+echo "test: non-plan mode suppresses delta fragments"
+
+cat > "$TMPDIR_TEST/completed_message_events.jsonl" <<'EOF'
+{"type":"assistant.message_delta","data":{"messageId":"m-complete","deltaContent":"TASK "}}
+{"type":"assistant.message_delta","data":{"messageId":"m-complete","deltaContent":"OVERVIEW "}}
+{"type":"assistant.message","data":{"messageId":"m-complete","content":"TASK OVERVIEW:\nCreate hello_world.py and tests."}}
+{"type":"session.task_complete","data":{"summary":"done","success":true}}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/completed_message_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "regular task prompt" 2>/dev/null)
+
+completed_event_count=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | 1' | wc -l | tr -d ' ')
+if [[ "$completed_event_count" == "1" ]]; then
+    pass "non-plan mode emits one completed assistant message"
+else
+    fail "expected one completed assistant message" "got: $completed_event_count"
+fi
+
+completed_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$completed_text" | grep -q '^TASK OVERVIEW:'; then
+    pass "non-plan mode preserves completed assistant message text"
+else
+    fail "completed assistant message text missing" "text: $completed_text"
+fi
+
+if [[ "$completed_text" == *"TASK OVERVIEW: Create hello_world.py and tests."* || "$completed_text" == *$'TASK OVERVIEW:\nCreate hello_world.py and tests.'* ]]; then
+    pass "non-plan mode emits consolidated text instead of token fragments"
+else
+    fail "non-plan mode output still looks fragmented" "text: $completed_text"
+fi
+
+# ---------------------------------------------------------------------------
+# test: non-plan mode stops at first assistant turn
+# ---------------------------------------------------------------------------
+echo "test: non-plan mode stops at first assistant turn"
+
+cat > "$TMPDIR_TEST/first_turn_only_events.jsonl" <<'EOF'
+{"type":"assistant.message","data":{"messageId":"turn-1","content":"Task 1 complete. Stopping here."}}
+{"type":"assistant.turn_end","data":{"turnId":"t1"}}
+{"type":"session.info","data":{"message":"Continuing autonomously (1 premium request)"}}
+{"type":"assistant.message","data":{"messageId":"turn-2","content":"Continuing with Task 2."}}
+{"type":"assistant.turn_end","data":{"turnId":"t2"}}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/first_turn_only_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "regular task prompt" 2>/dev/null)
+
+turn_messages=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$turn_messages" | grep -q 'Task 1 complete. Stopping here.'; then
+    pass "first assistant turn is preserved"
+else
+    fail "first assistant turn missing" "output: $turn_messages"
+fi
+
+if echo "$turn_messages" | grep -q 'Continuing autonomously\|Continuing with Task 2'; then
+    fail "wrapper should stop after first assistant turn" "output: $turn_messages"
+else
+    pass "wrapper truncates output after first assistant turn"
+fi
+
+set +e
+MOCK_STDOUT_FILE="$TMPDIR_TEST/first_turn_only_events.jsonl" \
+    MOCK_SLEEP_SECONDS=30 \
+    run_wrapper bash "$WRAPPER" -p "regular task prompt" >/dev/null 2>&1
+turn_exit_code=$?
+set -e
+
+if [[ $turn_exit_code -eq 0 ]]; then
+    pass "wrapper exits zero after intentional first-turn stop"
+else
+    fail "wrapper should exit zero after intentional first-turn stop" "got: $turn_exit_code"
+fi
+
+# ---------------------------------------------------------------------------
+# test: non-plan mode ignores tool-request turns before visible stopping turn
+# ---------------------------------------------------------------------------
+echo "test: non-plan mode ignores tool-request turns before visible stopping turn"
+
+cat > "$TMPDIR_TEST/ignore_tool_request_turns_events.jsonl" <<'EOF'
+{"type":"assistant.message","data":{"messageId":"visible-1","content":"Let me first examine the existing code structure:","toolRequests":[{"id":"tool-1","toolName":"read_file"}]}}
+{"type":"assistant.turn_end","data":{"turnId":"prelude"}}
+{"type":"assistant.message","data":{"messageId":"visible-2","content":"Task 1 overview and implementation."}}
+{"type":"assistant.turn_end","data":{"turnId":"visible"}}
+{"type":"session.info","data":{"message":"Continuing autonomously (1 premium request)"}}
+{"type":"assistant.message","data":{"messageId":"visible-3","content":"Continuing with Task 2."}}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/ignore_tool_request_turns_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "regular task prompt" 2>/dev/null)
+
+visible_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$visible_text" | grep -q 'Let me first examine the existing code structure:' && \
+    echo "$visible_text" | grep -q 'Task 1 overview and implementation.'; then
+    pass "wrapper preserves tool-request turn output and subsequent stopping turn output"
+else
+    fail "expected both tool-request and stopping turn output" "output: $visible_text"
+fi
+
+if echo "$visible_text" | grep -q 'Continuing autonomously\|Continuing with Task 2'; then
+    fail "wrapper should stop after first visible turn without tool requests" "output: $visible_text"
+else
+    pass "wrapper truncates after first visible turn without tool requests"
+fi
+
+# ---------------------------------------------------------------------------
+# test: plan mode stops at QUESTION boundary and suppresses deltas
+# ---------------------------------------------------------------------------
+echo "test: plan mode QUESTION boundary handling"
+
+cat > "$TMPDIR_TEST/plan_question_events.jsonl" <<'EOF'
+{"type":"assistant.message_delta","data":{"messageId":"plan-q","deltaContent":"chunk-one "}}
+{"type":"assistant.message_delta","data":{"messageId":"plan-q","deltaContent":"chunk-two "}}
+{"type":"assistant.message","data":{"messageId":"plan-q","content":"Exploration notes.\n<<<RALPHEX:QUESTION>>>\n{\"question\":\"Which mode?\",\"options\":[\"TCP\",\"UDP\"]}\n<<<RALPHEX:END>>>\nContinuing autonomously\n<<<RALPHEX:PLAN_DRAFT>>>\n# Wrong Draft\n<<<RALPHEX:END>>>"}}
+{"type":"session.info","data":{"message":"post-boundary noise"}}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_question_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$plan_prompt" 2>/dev/null)
+
+question_event_count=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | 1' | wc -l | tr -d ' ')
+if [[ "$question_event_count" == "1" ]]; then
+    pass "plan mode emits one completed assistant message for question boundary"
+else
+    fail "expected one content_block_delta event in plan mode" "got: $question_event_count"
+fi
+
+question_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$question_text" | grep -q 'chunk-one\|chunk-two'; then
+    fail "plan mode should suppress assistant.message_delta chunks" "text: $question_text"
+else
+    pass "plan mode suppresses assistant.message_delta chunks"
+fi
+
+if echo "$question_text" | grep -q '<<<RALPHEX:QUESTION>>>'; then
+    pass "plan mode preserves QUESTION block"
+else
+    fail "QUESTION block not found in plan mode output" "text: $question_text"
+fi
+
+if echo "$question_text" | grep -q 'Continuing autonomously\|Wrong Draft\|post-boundary noise'; then
+    fail "plan mode should truncate output at QUESTION boundary" "text: $question_text"
+else
+    pass "plan mode truncates output at QUESTION boundary"
+fi
+
+# ---------------------------------------------------------------------------
+# test: plan mode stops at PLAN_DRAFT boundary
+# ---------------------------------------------------------------------------
+echo "test: plan mode PLAN_DRAFT boundary handling"
+
+cat > "$TMPDIR_TEST/plan_draft_events.jsonl" <<'EOF'
+{"type":"assistant.message_delta","data":{"messageId":"plan-d","deltaContent":"draft-chunk "}}
+{"type":"assistant.message","data":{"messageId":"plan-d","content":"Draft incoming.\n<<<RALPHEX:PLAN_DRAFT>>>\n# Draft Title\n\n## Overview\nPlan content.\n<<<RALPHEX:END>>>\nextra trailing text"}}
+{"type":"session.info","data":{"message":"late noise"}}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_draft_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$plan_prompt" 2>/dev/null)
+
+draft_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$draft_text" | grep -q '<<<RALPHEX:PLAN_DRAFT>>>'; then
+    pass "plan mode preserves PLAN_DRAFT block"
+else
+    fail "PLAN_DRAFT block not found in plan mode output" "text: $draft_text"
+fi
+
+if echo "$draft_text" | grep -q 'draft-chunk\|extra trailing text\|late noise'; then
+    fail "plan mode should truncate output at PLAN_DRAFT boundary" "text: $draft_text"
+else
+    pass "plan mode truncates output at PLAN_DRAFT boundary"
+fi
+
+# ---------------------------------------------------------------------------
+# test: plan mode boundary stop exits successfully
+# ---------------------------------------------------------------------------
+echo "test: plan mode boundary stop exit code"
+
+set +e
+MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_question_events.jsonl" \
+    MOCK_SLEEP_SECONDS=30 \
+    run_wrapper bash "$WRAPPER" -p "$plan_prompt" >/dev/null 2>&1
+plan_exit_code=$?
+set -e
+
+if [[ $plan_exit_code -eq 0 ]]; then
+    pass "plan mode exits zero after intentional boundary stop"
+else
+    fail "plan mode should exit zero after intentional boundary stop" "got: $plan_exit_code"
+fi
+
+# ---------------------------------------------------------------------------
+# test: plan mode stops at PLAN_READY
+# ---------------------------------------------------------------------------
+echo "test: plan mode PLAN_READY boundary handling"
+
+cat > "$TMPDIR_TEST/plan_ready_events.jsonl" <<'EOF'
+{"type":"assistant.message","data":{"messageId":"plan-r","content":"Writing the accepted plan.\n<<<RALPHEX:PLAN_READY>>>\nContinuing autonomously\nImplemented app.py"}}
+{"type":"session.info","data":{"message":"late session noise"}}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_ready_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$plan_prompt" 2>/dev/null)
+
+ready_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$ready_text" | grep -q '<<<RALPHEX:PLAN_READY>>>'; then
+    pass "plan mode preserves PLAN_READY signal"
+else
+    fail "PLAN_READY signal not found in plan mode output" "text: $ready_text"
+fi
+
+if echo "$ready_text" | grep -q 'Continuing autonomously\|Implemented app.py\|late session noise'; then
+    fail "plan mode should truncate output at PLAN_READY" "text: $ready_text"
+else
+    pass "plan mode truncates output at PLAN_READY"
 fi
 
 # ---------------------------------------------------------------------------

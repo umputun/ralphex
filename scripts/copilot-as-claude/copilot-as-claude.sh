@@ -55,6 +55,13 @@ if [[ "$prompt" == *"<<<RALPHEX:REVIEW_DONE>>>"* ]]; then
     is_review_prompt=1
 fi
 
+is_plan_prompt=0
+if [[ "$prompt" == *"<<<RALPHEX:QUESTION>>>"* && \
+    "$prompt" == *"<<<RALPHEX:PLAN_DRAFT>>>"* && \
+    "$prompt" == *"<<<RALPHEX:PLAN_READY>>>"* ]]; then
+    is_plan_prompt=1
+fi
+
 if [[ "$is_review_prompt" == "1" ]]; then
     adapter_text=$'Ralphex review adapter for GitHub Copilot CLI:\n- The review prompts refer to Claude "Task tool" calls. In Copilot CLI, interpret those as agent delegation instructions.\n- When the prompt asks for multiple review agents in parallel, delegate them as separate sub-agents in the same turn when the model supports it.\n- If true parallel delegation is unavailable in the current Copilot session, execute every requested review role sequentially without dropping any of them.\n- Keep delegated review prompts short: each agent should inspect the diff directly, read the source files in full context, and report problems only.\n- After all delegated reviews finish, verify findings against the actual code, fix confirmed issues, rerun required tests and lint, and preserve all <<<RALPHEX:...>>> signals verbatim.'
     prompt="$adapter_text"$'\n\n'"$prompt"
@@ -89,23 +96,102 @@ trap forward_signal TERM
 copilot "${copilot_args[@]}" < "$prompt_file" > "$stdout_pipe" 2>"$stderr_file" &
 copilot_pid=$!
 
-seen_message_delta=$'\n'
-
 emit_text_delta() {
     local text="$1"
     jq -cn --arg text "$text" \
         '{type: "content_block_delta", delta: {type: "text_delta", text: $text}}'
 }
 
-mark_message_delta_seen() {
-    local message_id="$1"
-    seen_message_delta+="${message_id}"$'\n'
+extract_plan_block_for_marker() {
+    local text="$1"
+    local marker="$2"
+    local end_marker="<<<RALPHEX:END>>>"
+    local before
+    local rest
+    local body
+
+    [[ "$text" == *"$marker"* ]] || return 1
+
+    before=${text%%"$marker"*}
+    rest=${text#*"$marker"}
+    [[ "$rest" == *"$end_marker"* ]] || return 1
+
+    body=${rest%%"$end_marker"*}
+    printf '%s%s%s%s' "$before" "$marker" "$body" "$end_marker"
 }
 
-has_message_delta_seen() {
-    local message_id="$1"
-    [[ "$seen_message_delta" == *$'\n'"${message_id}"$'\n'* ]]
+extract_plan_ready_signal() {
+    local text="$1"
+    local marker="<<<RALPHEX:PLAN_READY>>>"
+    local before
+
+    [[ "$text" == *"$marker"* ]] || return 1
+
+    before=${text%%"$marker"*}
+    printf '%s%s' "$before" "$marker"
 }
+
+plan_boundary_text=""
+extract_first_plan_boundary() {
+    local text="$1"
+    local question_marker="<<<RALPHEX:QUESTION>>>"
+    local draft_marker="<<<RALPHEX:PLAN_DRAFT>>>"
+    local ready_marker="<<<RALPHEX:PLAN_READY>>>"
+    local question_text=""
+    local draft_text=""
+    local ready_text=""
+    local question_pos=-1
+    local draft_pos=-1
+    local ready_pos=-1
+    local question_before
+    local draft_before
+    local ready_before
+
+    plan_boundary_text=""
+
+    if [[ "$text" == *"$question_marker"* ]]; then
+        question_before=${text%%"$question_marker"*}
+        if question_text=$(extract_plan_block_for_marker "$text" "$question_marker"); then
+            question_pos=${#question_before}
+        fi
+    fi
+
+    if [[ "$text" == *"$draft_marker"* ]]; then
+        draft_before=${text%%"$draft_marker"*}
+        if draft_text=$(extract_plan_block_for_marker "$text" "$draft_marker"); then
+            draft_pos=${#draft_before}
+        fi
+    fi
+
+    if [[ "$text" == *"$ready_marker"* ]]; then
+        ready_before=${text%%"$ready_marker"*}
+        if ready_text=$(extract_plan_ready_signal "$text"); then
+            ready_pos=${#ready_before}
+        fi
+    fi
+
+    if [[ $question_pos -ge 0 && ( $draft_pos -lt 0 || $question_pos -le $draft_pos ) &&
+        ( $ready_pos -lt 0 || $question_pos -le $ready_pos ) ]]; then
+        plan_boundary_text="$question_text"
+        return 0
+    fi
+
+    if [[ $draft_pos -ge 0 && ( $ready_pos -lt 0 || $draft_pos -le $ready_pos ) ]]; then
+        plan_boundary_text="$draft_text"
+        return 0
+    fi
+
+    if [[ $ready_pos -ge 0 ]]; then
+        plan_boundary_text="$ready_text"
+        return 0
+    fi
+
+    return 1
+}
+
+intentional_stop=0
+turn_has_visible_message=0
+turn_has_tool_requests=0
 
 while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" ]] && continue
@@ -119,25 +205,43 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
     case "$event_type" in
         assistant.message_delta)
-            message_id=$(printf '%s\n' "$line" | jq -r '.data.messageId // empty')
-            delta_text=$(printf '%s\n' "$line" | jq -r '.data.deltaContent // empty')
-            [[ -n "$message_id" ]] && mark_message_delta_seen "$message_id"
-            [[ -n "$delta_text" ]] && emit_text_delta "$delta_text"
+            continue
             ;;
         assistant.message)
-            message_id=$(printf '%s\n' "$line" | jq -r '.data.messageId // empty')
             message_text=$(printf '%s\n' "$line" | jq -r '.data.content // empty')
+            tool_request_count=$(printf '%s\n' "$line" | jq -r '(.data.toolRequests // []) | length')
             if [[ -n "$message_text" ]]; then
-                if ! has_message_delta_seen "$message_id" || [[ "$message_text" == *"<<<RALPHEX:"* ]]; then
-                    emit_text_delta "$message_text"
+                if [[ "$is_plan_prompt" == "1" ]] && extract_first_plan_boundary "$message_text"; then
+                    emit_text_delta "$plan_boundary_text"
+                    intentional_stop=1
+                    if [[ -n "$copilot_pid" ]]; then
+                        kill -TERM "$copilot_pid" 2>/dev/null || true
+                    fi
+                    break
                 fi
+                emit_text_delta "$message_text"
+                turn_has_visible_message=1
+            fi
+            if [[ "$tool_request_count" =~ ^[0-9]+$ && "$tool_request_count" -gt 0 ]]; then
+                turn_has_tool_requests=1
             fi
             ;;
         session.error|session.warning|session.info)
             event_text=$(printf '%s\n' "$line" | jq -r '.data.message // empty')
             [[ -n "$event_text" ]] && emit_text_delta "$event_text"$'\n'
             ;;
-        session.task_complete|session.idle|assistant.turn_end|session.shutdown)
+        assistant.turn_end)
+            if [[ "$is_plan_prompt" != "1" && "$turn_has_visible_message" == "1" && "$turn_has_tool_requests" == "0" ]]; then
+                intentional_stop=1
+                if [[ -n "$copilot_pid" ]]; then
+                    kill -TERM "$copilot_pid" 2>/dev/null || true
+                fi
+                break
+            fi
+            turn_has_visible_message=0
+            turn_has_tool_requests=0
+            ;;
+        session.task_complete|session.idle|session.shutdown)
             ;;
     esac
 done < "$stdout_pipe"
@@ -146,7 +250,11 @@ copilot_exit=0
 wait "$copilot_pid" || copilot_exit=$?
 copilot_pid=""
 
-if [[ -s "$stderr_file" ]]; then
+if [[ "$intentional_stop" == "1" ]]; then
+    copilot_exit=0
+fi
+
+if [[ -s "$stderr_file" && "$intentional_stop" == "0" ]]; then
     while IFS= read -r err_line || [[ -n "$err_line" ]]; do
         [[ -z "$err_line" ]] && continue
         emit_text_delta "$err_line"$'\n'

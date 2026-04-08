@@ -117,7 +117,7 @@ Copilot checks the token variables in the order above. Fine-grained PATs must in
 
 ### Why this wrapper uses Copilot JSONL mode
 
-The wrapper runs Copilot with `-s --output-format json --stream on` so it can consume native JSONL events instead of scraping terminal text. That keeps incremental message deltas intact, gives the wrapper explicit completion events to map into Claude `result` output, and lets stderr be echoed back into the stream for existing ralphex error and limit detection.
+The wrapper runs Copilot with `-s --output-format json --stream on` so it can consume native JSONL events instead of scraping terminal text. It emits completed assistant messages rather than token deltas to keep ralphex output readable, while still using explicit completion events to map into Claude `result` output and echoing stderr back into the stream for existing error and limit detection.
 
 ### Permission model
 
@@ -137,7 +137,7 @@ If you need a narrower policy, fork the wrapper and replace `--allow-all` with e
 |---|---|---|---|
 | Codex | Native JSONL | Codex sandbox/env flags | Copilot uses native `--autopilot`/`--allow-all`/`--no-ask-user` instead of Codex sandbox settings, and adds a review adapter for Claude Task-tool wording |
 | OpenCode | Native JSONL | Merges `OPENCODE_CONFIG_CONTENT` with auto-allow permissions | Copilot uses built-in permission flags rather than JSON config merging |
-| Gemini | Plain text | Gemini CLI settings outside the wrapper | Copilot streams structured JSONL events, so the wrapper preserves deltas and terminal events instead of wrapping plain text lines |
+| Gemini | Plain text | Gemini CLI settings outside the wrapper | Copilot streams structured JSONL events, so the wrapper can emit completed assistant messages and terminal events without scraping plain text lines |
 
 ## OpenCode wrapper (included example)
 

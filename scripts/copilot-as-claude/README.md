@@ -2,6 +2,8 @@
 
 Wraps GitHub Copilot CLI to produce Claude-compatible `stream-json` output, allowing Copilot to replace Claude Code in ralphex task and review phases through the existing `claude_command` / `claude_args` path.
 
+The wrapper emits completed assistant messages rather than token deltas, which keeps task and review output readable in the ralphex progress log.
+
 ## Configuration
 
 Add to `~/.config/ralphex/config` or `.ralphex/config`:
