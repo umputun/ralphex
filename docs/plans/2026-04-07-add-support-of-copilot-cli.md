@@ -73,12 +73,12 @@ Add an included wrapper around GitHub Copilot CLI so it can replace Claude Code 
 - Modify: `README.md`
 - Modify: `CLAUDE.md`
 
-- [ ] Create `scripts/copilot-as-claude/README.md` with setup instructions, config snippet, requirements, auth options, native Copilot env vars, and the wrapper test command
-- [ ] Add a Copilot section to `docs/custom-providers.md` explaining why this wrapper uses Copilot JSONL mode, how it handles permissions, and how it differs from the Codex, Gemini, and OpenCode wrappers
-- [ ] Update `README.md` in the alternative-provider section to mention the included Copilot wrapper alongside the existing examples
-- [ ] Update `CLAUDE.md` script inventory if the new `scripts/copilot-as-claude/` directory should be reflected there
-- [ ] Add or update tests covering any documentation-linked command snippets or validation scripts used by this task
-- [ ] Run the relevant test suite for this task and confirm it passes before starting task 3
+- [x] Create `scripts/copilot-as-claude/README.md` with setup instructions, config snippet, requirements, auth options, native Copilot env vars, and the wrapper test command
+- [x] Add a Copilot section to `docs/custom-providers.md` explaining why this wrapper uses Copilot JSONL mode, how it handles permissions, and how it differs from the Codex, Gemini, and OpenCode wrappers
+- [x] Update `README.md` in the alternative-provider section to mention the included Copilot wrapper alongside the existing examples
+- [x] Update `CLAUDE.md` script inventory if the new `scripts/copilot-as-claude/` directory should be reflected there
+- [x] Add or update tests covering any documentation-linked command snippets or validation scripts used by this task
+- [x] Run the relevant test suite for this task and confirm it passes before starting task 3
 
 ### Task 3: Verify acceptance criteria
 

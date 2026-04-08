@@ -933,13 +933,28 @@ When running ralphex in Docker, your script must be accessible inside the contai
 
 ### Using Alternative Providers for Claude Phases
 
-The `claude_command` and `claude_args` config options let you replace Claude Code with any CLI that produces compatible `stream-json` output. This means codex, Gemini CLI, local LLMs, or any other tool can drive task execution and review phases — you just need a wrapper script that translates the tool's output format.
+The `claude_command` and `claude_args` config options let you replace Claude Code with any CLI that produces compatible `stream-json` output. This means codex, GitHub Copilot CLI, Gemini CLI, local LLMs, or any other tool can drive task execution and review phases — you just need a wrapper script that translates the tool's output format.
 
-A working example is included: [`scripts/codex-as-claude/codex-as-claude.sh`](https://github.com/umputun/ralphex/blob/master/scripts/codex-as-claude/codex-as-claude.sh) wraps codex to produce Claude-compatible events. To use it:
+Working examples are included:
+
+- [`scripts/codex-as-claude/codex-as-claude.sh`](https://github.com/umputun/ralphex/blob/master/scripts/codex-as-claude/codex-as-claude.sh) wraps codex to produce Claude-compatible events
+- [`scripts/copilot-as-claude/copilot-as-claude.sh`](https://github.com/umputun/ralphex/blob/master/scripts/copilot-as-claude/copilot-as-claude.sh) wraps GitHub Copilot CLI and translates its native JSONL stream into Claude-compatible events
+
+To use the included Copilot wrapper:
 
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
-claude_command = /path/to/codex-as-claude.sh
+claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
+claude_args =
+```
+
+Authenticate with `copilot login` or set one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`. Set `COPILOT_MODEL` to choose the model.
+
+To use the included codex wrapper:
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
 claude_args =
 ```
 
@@ -1080,16 +1095,25 @@ claude_args = --force --output-format stream-json
 
 Key differences: `agent` command (not `claude`), `--force` flag (not `--dangerously-skip-permissions`). Stream format and signals are compatible. *Note: this is community-tested, not officially supported. Compatibility depends on Cursor maintaining Claude Code compatibility.*
 
-**Can I use codex (or another model) for task execution instead of Claude?**
+**Can I use codex, GitHub Copilot CLI, or another model for task execution instead of Claude?**
 
-Yes. Use the included wrapper script that translates codex output to Claude's stream-json format:
+Yes. Use one of the included wrapper scripts that translate provider output to Claude's stream-json format:
 
 ```ini
-claude_command = /path/to/codex-as-claude.sh
+claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
 claude_args =
 ```
 
-Set `CODEX_MODEL` env var to choose the model. See [Using Alternative Providers](#using-alternative-providers-for-claude-phases) and [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for writing wrappers for other tools.
+For Copilot, authenticate with `copilot login` or one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`, and set `COPILOT_MODEL` if you want to override the default model.
+
+Codex works the same way through its wrapper:
+
+```ini
+claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
+claude_args =
+```
+
+Set `CODEX_MODEL` env var to choose the model. See [Using Alternative Providers](#using-alternative-providers-for-claude-phases) and [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for the included Copilot example and for writing wrappers for other tools.
 
 **How do I use multiple Claude accounts?**
 

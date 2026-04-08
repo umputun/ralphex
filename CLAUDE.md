@@ -43,6 +43,7 @@ e2e/                # playwright e2e tests for web dashboard
 scripts/            # utility scripts organized by function
 scripts/ralphex-dk/ # Docker wrapper script (Python) with tests
 scripts/codex-as-claude/ # codex wrapper for Claude-compatible output
+scripts/copilot-as-claude/ # copilot wrapper for Claude-compatible output
 scripts/gemini-as-claude/ # gemini wrapper for Claude-compatible output
 scripts/hg2git/     # Mercurial-to-git translation script with tests
 scripts/opencode/   # opencode wrapper scripts with tests
@@ -128,11 +129,16 @@ Key files:
 
 ### Alternative Providers for Claude Phases
 
-`claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible `stream-json` output. A codex wrapper script is included at `scripts/codex-as-claude/codex-as-claude.sh`.
+`claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible `stream-json` output. Included wrappers:
 
-Config: `claude_command = /path/to/codex-as-claude.sh` and optionally `claude_args =` (empty).
+- `scripts/codex-as-claude/codex-as-claude.sh`
+- `scripts/copilot-as-claude/copilot-as-claude.sh`
+
+Config: `claude_command = /path/to/<wrapper>.sh` and optionally `claude_args =` (empty).
 Note: default Claude flags may still be passed due to config fallback; wrappers should ignore unknown flags gracefully (the included script does this via `*) shift ;;`).
-Env vars: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE` (set to 1 for command output).
+Env vars:
+- Codex: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE`
+- Copilot: `COPILOT_MODEL`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`
 Documentation: `docs/custom-providers.md`
 
 ### AWS Bedrock Provider (Docker Wrapper Only)
