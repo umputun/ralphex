@@ -106,12 +106,24 @@ assert_contains \
     "top-level README mentions included Copilot wrapper"
 assert_contains \
     "$REPO_ROOT/CLAUDE.md" \
-    "scripts/copilot-as-claude/ # copilot wrapper for Claude-compatible output" \
+    "scripts/copilot-as-claude/ # GitHub Copilot CLI wrapper for Claude-compatible output" \
     "CLAUDE inventory includes Copilot wrapper directory"
 assert_contains \
     "$REPO_ROOT/CLAUDE.md" \
     "scripts/copilot-as-claude/copilot-as-claude.sh" \
     "CLAUDE alternative provider docs mention Copilot wrapper path"
+assert_contains \
+    "$REPO_ROOT/README.md" \
+    "wraps GitHub Copilot CLI" \
+    "top-level README uses final Copilot wrapper naming"
+assert_contains \
+    "$REPO_ROOT/docs/custom-providers.md" \
+    "GitHub Copilot CLI JSONL events" \
+    "custom providers doc uses final Copilot wrapper naming"
+assert_contains \
+    "$REPO_ROOT/CLAUDE.md" \
+    "GitHub Copilot CLI wrapper for Claude-compatible output" \
+    "CLAUDE inventory uses final Copilot wrapper naming"
 
 echo ""
 echo "summary: $passed passed, $failed failed, $total total"

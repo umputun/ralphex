@@ -97,6 +97,6 @@ Add an included wrapper around GitHub Copilot CLI so it can replace Claude Code 
 
 ### Task 4: Update documentation
 
-- [ ] Confirm `README.md`, `docs/custom-providers.md`, and `CLAUDE.md` all use the final wrapper path and naming consistently
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Confirm `README.md`, `docs/custom-providers.md`, and `CLAUDE.md` all use the final wrapper path and naming consistently
+- [x] Move this plan to `docs/plans/completed/`
 ---
