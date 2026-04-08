@@ -89,11 +89,11 @@ Add an included wrapper around GitHub Copilot CLI so it can replace Claude Code 
 - Verify: `README.md`
 - Verify: `CLAUDE.md`
 
-- [ ] Run `bash scripts/copilot-as-claude/copilot-as-claude_test.sh`
-- [ ] Run full project test suite: `make test`
-- [ ] Run linter: `make lint`
-- [ ] Verify `scripts/copilot-as-claude/copilot-as-claude.sh` and `scripts/copilot-as-claude/copilot-as-claude_test.sh` are executable
-- [ ] Verify test coverage meets 80%+
+- [x] Run `bash scripts/copilot-as-claude/copilot-as-claude_test.sh`
+- [x] Run full project test suite: `make test`
+- [x] Run linter: `make lint`
+- [x] Verify `scripts/copilot-as-claude/copilot-as-claude.sh` and `scripts/copilot-as-claude/copilot-as-claude_test.sh` are executable
+- [x] Verify test coverage meets 80%+ (86.2% total via `make test`)
 
 ### Task 4: Update documentation
 
