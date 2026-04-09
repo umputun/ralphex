@@ -486,7 +486,76 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# test: fallback result event
+# test: leading tab normalization
+# ---------------------------------------------------------------------------
+echo "test: leading tab normalization"
+
+cat > "$TMPDIR_TEST/tab_indented_events.jsonl" <<'EOF'
+{"type":"assistant.message","data":{"content":"\tAll tests pass. Committing.\n\t\tNested tab line.\nClean line."}}
+{"type":"assistant.turn_end"}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/tab_indented_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+combined_text=$(echo "$output" | jq -r 'select(.type == "content_block_delta") | .delta.text' 2>/dev/null | tr -d '\n')
+if echo "$combined_text" | grep -qP '^\t|\\t'; then
+    fail "leading tabs not stripped from output" "text: $combined_text"
+elif echo "$combined_text" | grep -q 'All tests pass'; then
+    pass "leading tabs stripped from assistant.message content"
+else
+    fail "expected tab-normalized text not found" "got: $combined_text"
+fi
+
+# verify clean line is preserved
+if echo "$combined_text" | grep -q 'Clean line'; then
+    pass "non-indented lines preserved after tab stripping"
+else
+    fail "non-indented line missing after tab stripping" "got: $combined_text"
+fi
+# ---------------------------------------------------------------------------
+echo "test: trailing tab normalization"
+
+cat > "$TMPDIR_TEST/trailing_tab_events.jsonl" <<'EOF'
+{"type":"assistant.message","data":{"content":"Line with trailing tab\t\nAnother line\t\t\nClean line."}}
+{"type":"assistant.turn_end"}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/trailing_tab_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+raw_text=$(echo "$output" | jq -r 'select(.type == "content_block_delta") | .delta.text' 2>/dev/null)
+if printf '%s' "$raw_text" | grep -qP '\t\n|\t$'; then
+    fail "trailing tabs not stripped from output" "raw text: $raw_text"
+elif echo "$raw_text" | grep -q 'Line with trailing tab'; then
+    pass "trailing tabs stripped from assistant.message content"
+else
+    fail "expected trailing-tab-normalized text not found" "got: $raw_text"
+fi
+
+# verify trailing tab does not appear after the line content
+if printf '%s' "$raw_text" | grep -qP '^Line with trailing tab\t'; then
+    fail "trailing tab found after 'Line with trailing tab'" "raw text: $raw_text"
+else
+    pass "trailing tab absent from end of lines"
+fi
+# ---------------------------------------------------------------------------
+echo "test: terminal cursor reset before first output and on cleanup"
+
+# verify emit_text_delta clears /dev/tty before first output
+if grep -q 'first_output_emitted' "$WRAPPER" && \
+   grep -q "(printf.*\\\\r.*\\\\033\[K.*>/dev/tty)" "$WRAPPER"; then
+    pass "emit_text_delta clears /dev/tty stray chars before first output"
+else
+    fail "emit_text_delta missing first-output /dev/tty clear" "expected: first_output_emitted guard with printf \\r\\033[K"
+fi
+
+# verify cleanup also resets terminal cursor
+if grep -A12 'cleanup()' "$WRAPPER" | grep -q "(printf.*\\\\r.*\\\\033\[K.*>/dev/tty)"; then
+    pass "cleanup resets terminal cursor on exit"
+else
+    fail "cleanup missing terminal cursor reset" "expected: (printf '\\r\\033[K' >/dev/tty) 2>/dev/null in cleanup()"
+fi
 # ---------------------------------------------------------------------------
 echo "test: fallback result event"
 
@@ -551,6 +620,19 @@ if [[ -f "$TMPDIR_TEST/copilot_stdin" ]]; then
     else
         fail "review adapter not prepended" "prompt: $captured_prompt"
     fi
+    if echo "$captured_prompt" | grep -q 'FORMATTING RULE (strict)'; then
+        pass "formatting rule included in review adapter"
+    else
+        fail "formatting rule missing from review adapter" "prompt: $captured_prompt"
+    fi
+    # formatting rule must appear before the Ralphex adapter section
+    fmt_pos=$(echo "$captured_prompt" | grep -n 'FORMATTING RULE' | head -1 | cut -d: -f1)
+    adapter_pos=$(echo "$captured_prompt" | grep -n 'Ralphex review adapter' | head -1 | cut -d: -f1)
+    if [[ -n "$fmt_pos" && -n "$adapter_pos" && "$fmt_pos" -lt "$adapter_pos" ]]; then
+        pass "formatting rule precedes adapter instructions"
+    else
+        fail "formatting rule should come before adapter instructions" "fmt_pos=$fmt_pos adapter_pos=$adapter_pos"
+    fi
 else
     fail "could not capture prompt sent to copilot"
 fi
@@ -566,6 +648,105 @@ if [[ -f "$TMPDIR_TEST/copilot_stdin" ]]; then
     else
         pass "review adapter omitted for non-review prompts"
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# test: plan adapter injection
+# ---------------------------------------------------------------------------
+echo "test: plan adapter injection"
+
+reset_captures
+MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$plan_prompt" >/dev/null 2>&1
+
+if [[ -f "$TMPDIR_TEST/copilot_stdin" ]]; then
+    captured_prompt=$(cat "$TMPDIR_TEST/copilot_stdin")
+    if echo "$captured_prompt" | grep -q 'FORMATTING RULE (strict)'; then
+        pass "plan adapter formatting rule prepended to plan prompt"
+    else
+        fail "plan adapter formatting rule not prepended" "prompt start: ${captured_prompt:0:200}"
+    fi
+    if echo "$captured_prompt" | grep -q 'plain text only'; then
+        pass "plan adapter instructs plain text for analysis"
+    else
+        fail "plan adapter plain text instruction missing" "prompt: ${captured_prompt:0:200}"
+    fi
+    if echo "$captured_prompt" | grep -q 'PLAN REVIEW RULE'; then
+        pass "plan adapter requires PLAN_DRAFT before PLAN_READY"
+    else
+        fail "plan adapter missing PLAN_DRAFT-before-PLAN_READY rule" "prompt: ${captured_prompt:0:400}"
+    fi
+    if echo "$captured_prompt" | grep -q 'existing plan file'; then
+        pass "plan adapter covers existing plan file case"
+    else
+        fail "plan adapter does not cover existing plan file case" "prompt: ${captured_prompt:0:400}"
+    fi
+    if echo "$captured_prompt" | grep -q 'Ralphex review adapter for GitHub Copilot CLI'; then
+        fail "review adapter should not be added to plan prompts"
+    else
+        pass "review adapter omitted for plan prompts"
+    fi
+else
+    fail "could not capture prompt sent to copilot"
+fi
+
+reset_captures
+MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "regular task prompt" >/dev/null 2>&1
+
+if [[ -f "$TMPDIR_TEST/copilot_stdin" ]]; then
+    captured_prompt=$(cat "$TMPDIR_TEST/copilot_stdin")
+    # plan adapter formatting rule text is distinct enough — check for the plan-specific phrasing
+    if echo "$captured_prompt" | grep -q 'before emitting.*PLAN_DRAFT'; then
+        fail "plan adapter should not be added to non-plan prompts"
+    else
+        pass "plan adapter omitted for non-plan prompts"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# test: PLAN_READY without PLAN_DRAFT touches existing plan file
+# ---------------------------------------------------------------------------
+echo "test: PLAN_READY without PLAN_DRAFT touches existing plan file"
+
+# create a plan file with an old mtime
+mkdir -p "$TMPDIR_TEST/docs/plans"
+echo "# Test Plan" > "$TMPDIR_TEST/docs/plans/test-plan.md"
+# set mtime to 1 hour ago
+touch -t "$(date -v-1H '+%Y%m%d%H%M.%S')" "$TMPDIR_TEST/docs/plans/test-plan.md"
+old_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
+
+# copilot responds with PLAN_READY referencing the plan file (no PLAN_DRAFT)
+cat > "$TMPDIR_TEST/plan_ready_only_events.jsonl" <<EOF
+{"type":"assistant.message","data":{"content":"A plan file already exists at docs/plans/test-plan.md.\n<<<RALPHEX:PLAN_READY>>>"}}
+EOF
+
+(cd "$TMPDIR_TEST" && MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_ready_only_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$plan_prompt" >/dev/null 2>&1)
+
+new_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
+if [[ "$new_mtime" -gt "$old_mtime" ]]; then
+    pass "PLAN_READY without PLAN_DRAFT touches existing plan file"
+else
+    fail "plan file mtime not updated" "old=$old_mtime new=$new_mtime"
+fi
+
+# test: fallback to newest plan file when path not in message
+touch -t "$(date -v-1H '+%Y%m%d%H%M.%S')" "$TMPDIR_TEST/docs/plans/test-plan.md"
+old_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
+
+cat > "$TMPDIR_TEST/plan_ready_nopath_events.jsonl" <<'EOF'
+{"type":"assistant.message","data":{"content":"A plan file already exists for this feature.\n<<<RALPHEX:PLAN_READY>>>"}}
+EOF
+
+(cd "$TMPDIR_TEST" && MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_ready_nopath_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$plan_prompt" >/dev/null 2>&1)
+
+new_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
+if [[ "$new_mtime" -gt "$old_mtime" ]]; then
+    pass "fallback to newest plan file when path not in message"
+else
+    fail "plan file mtime not updated in fallback case" "old=$old_mtime new=$new_mtime"
 fi
 
 # ---------------------------------------------------------------------------

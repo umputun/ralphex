@@ -63,8 +63,13 @@ if [[ "$prompt" == *"<<<RALPHEX:QUESTION>>>"* && \
 fi
 
 if [[ "$is_review_prompt" == "1" ]]; then
-    adapter_text=$'Ralphex review adapter for GitHub Copilot CLI:\n- The review prompts refer to Claude "Task tool" calls. In Copilot CLI, interpret those as agent delegation instructions.\n- When the prompt asks for multiple review agents in parallel, delegate them as separate sub-agents in the same turn when the model supports it.\n- If true parallel delegation is unavailable in the current Copilot session, execute every requested review role sequentially without dropping any of them.\n- Keep delegated review prompts short: each agent should inspect the diff directly, read the source files in full context, and report problems only.\n- After all delegated reviews finish, verify findings against the actual code, fix confirmed issues, rerun required tests and lint, and preserve all <<<RALPHEX:...>>> signals verbatim.'
+    adapter_text=$'FORMATTING RULE (strict): All output — including everything produced by sub-agents — must be plain text only. No markdown: no # or ## headers, no **bold** or *italic*, no `backtick` code spans, no ``` code fences, no --- horizontal rules. Use plain indented lists (  - item) for structure. This renders in a terminal with no markdown support; markdown syntax appears as literal characters.\n\nRalphex review adapter for GitHub Copilot CLI:\n- The review prompts refer to Claude "Task tool" calls. In Copilot CLI, interpret those as agent delegation instructions.\n- When the prompt asks for multiple review agents in parallel, delegate them as separate sub-agents in the same turn when the model supports it.\n- If true parallel delegation is unavailable in the current Copilot session, execute every requested review role sequentially without dropping any of them.\n- Keep delegated review prompts short: each agent should inspect the diff directly, read the source files in full context, and report problems only.\n- After all delegated reviews finish, verify findings against the actual code, fix confirmed issues, rerun required tests and lint, and preserve all <<<RALPHEX:...>>> signals verbatim.'
     prompt="$adapter_text"$'\n\n'"$prompt"
+fi
+
+if [[ "$is_plan_prompt" == "1" ]]; then
+    plan_adapter_text=$'FORMATTING RULE (strict): Your analysis and thinking text — everything you write before emitting <<<RALPHEX:QUESTION>>> or <<<RALPHEX:PLAN_DRAFT>>> — must be plain text only. No backticks around code names or identifiers, no # or ## headers, no **bold** or *italic*, no markdown of any kind. Refer to code names as plain words (e.g. myFunction() not `myFunction()`). The plan document body inside <<<RALPHEX:PLAN_DRAFT>>>...<<<RALPHEX:END>>> must use the plan file markdown format exactly as specified in the prompt. Preserve all <<<RALPHEX:...>>> signals verbatim.\n\nPLAN REVIEW RULE (overrides other instructions): You MUST always present a <<<RALPHEX:PLAN_DRAFT>>>...<<<RALPHEX:END>>> block for user review before emitting <<<RALPHEX:PLAN_READY>>>. If you find an existing plan file matching the request, read its full contents and present them inside a PLAN_DRAFT block. Only emit PLAN_READY after writing or rewriting the plan file on disk following user acceptance.'
+    prompt="$plan_adapter_text"$'\n\n'"$prompt"
 fi
 
 copilot_args=(-s --output-format json --stream on --autopilot --no-ask-user --allow-all)
@@ -80,6 +85,15 @@ printf '%s' "$prompt" > "$prompt_file"
 cleanup() {
     rm -f "$stderr_file" "$prompt_file" "$stdout_pipe"
     rm -rf "$tmp_dir"
+    # copilot may write tab characters or other control sequences to /dev/tty
+    # (e.g. session status indicators in --silent mode).  reset the cursor to
+    # column 0 and clear to end-of-line so those stray chars don't appear after
+    # the next prompt ralphex prints (e.g. "Continue with plan implementation?")
+    # use a subshell so that a failed >/dev/tty open (no controlling terminal)
+    # is fully suppressed — bash prints the error to the shell's own stderr
+    # before 2>/dev/null takes effect on the command, but the subshell's fd 2
+    # is redirected before any inner redirections are attempted.
+    (printf '\r\033[K' >/dev/tty) 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -98,6 +112,14 @@ copilot_pid=$!
 
 emit_text_delta() {
     local text="$1"
+    # before the first output, clear any stray characters copilot may have
+    # written directly to /dev/tty (spinner/progress indicator tab).  this must
+    # happen before ralphex's progress logger prints the first timestamped line,
+    # otherwise the stray char appears prepended to the timestamp.
+    if [[ "$first_output_emitted" == "0" ]]; then
+        first_output_emitted=1
+        (printf '\r\033[K' >/dev/tty) 2>/dev/null || true
+    fi
     jq -cn --arg text "$text" \
         '{type: "content_block_delta", delta: {type: "text_delta", text: $text}}'
 }
@@ -192,6 +214,7 @@ extract_first_plan_boundary() {
 intentional_stop=0
 turn_has_visible_message=0
 turn_has_tool_requests=0
+first_output_emitted=0
 
 while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" ]] && continue
@@ -209,9 +232,30 @@ while IFS= read -r line || [[ -n "$line" ]]; do
             ;;
         assistant.message)
             message_text=$(printf '%s\n' "$line" | jq -r '.data.content // empty')
+            # strip leading and trailing tabs from each line — Copilot indents tool-result
+            # summaries with tabs, and may also leave trailing tabs that appear as stray
+            # whitespace in the ralphex terminal display
+            [[ -n "$message_text" ]] && message_text=$(printf '%s\n' "$message_text" | sed 's/^\t\+//; s/\t\+$//')
             tool_request_count=$(printf '%s\n' "$line" | jq -r '(.data.toolRequests // []) | length')
             if [[ -n "$message_text" ]]; then
                 if [[ "$is_plan_prompt" == "1" ]] && extract_first_plan_boundary "$message_text"; then
+                    # when copilot emits PLAN_READY without PLAN_DRAFT (skipping
+                    # user review for an existing plan), touch the plan file so
+                    # its mtime updates and ralphex's FindRecent can find it —
+                    # otherwise the "Continue with plan implementation?" prompt
+                    # is skipped because FindRecent only returns files modified
+                    # after the session start time.
+                    if [[ "$plan_boundary_text" == *"<<<RALPHEX:PLAN_READY>>>"* ]] && \
+                       [[ "$plan_boundary_text" != *"<<<RALPHEX:PLAN_DRAFT>>>"* ]]; then
+                        existing_plan=$(printf '%s' "$plan_boundary_text" | grep -oE 'docs/plans/[^ ]*\.md' | head -1 || true)
+                        if [[ -z "$existing_plan" || ! -f "$existing_plan" ]]; then
+                            # path not in message — find the newest plan file
+                            existing_plan=$(find docs/plans -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1 || true)
+                        fi
+                        if [[ -n "$existing_plan" && -f "$existing_plan" ]]; then
+                            touch "$existing_plan"
+                        fi
+                    fi
                     emit_text_delta "$plan_boundary_text"
                     intentional_stop=1
                     if [[ -n "$copilot_pid" ]]; then
