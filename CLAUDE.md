@@ -209,7 +209,7 @@ Key files:
 
 ### Plan Creation Mode
 
-The `--plan "description"` flag enables interactive plan creation:
+The `--plan` flag enables interactive plan creation from either inline text or `@path/to/request.md` input. Use `@@literal` if the request itself should start with `@`:
 
 - Claude explores codebase and asks clarifying questions
 - Questions use QUESTION signal with JSON: `{"question": "...", "options": [...]}`

@@ -218,9 +218,10 @@ The `--plan` flag provides a simpler integrated experience:
 
 ```bash
 ralphex --plan "add health check endpoint"
+ralphex --plan @docs/requests/add-health-check.md
 ```
 
-Claude explores your codebase, asks clarifying questions via a terminal picker (fzf or numbered fallback), and generates a complete plan file in `docs/plans/`. When reviewing the draft, you can accept, revise with text feedback, open it in `$EDITOR` for interactive annotation, or reject it.
+Claude explores your codebase, asks clarifying questions via a terminal picker (fzf or numbered fallback), and generates a complete plan file in `docs/plans/`. `--plan` accepts either inline text or `@file`; use `@@literal` if the request itself must start with `@`. When reviewing the draft, you can accept, revise with text feedback, open it in `$EDITOR` for interactive annotation, or reject it.
 
 **Example session:**
 ```
@@ -531,6 +532,7 @@ ralphex --init
 
 # interactive plan creation
 ralphex --plan "add user authentication"
+ralphex --plan @docs/requests/add-user-authentication.md
 
 # with custom max iterations
 ralphex --max-iterations=100 docs/plans/feature.md
@@ -574,7 +576,7 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `--session-timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
 | `--idle-timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
 | `--worktree` | Run in isolated git worktree (full and tasks-only modes only) | false |
-| `--plan` | Create plan interactively (provide description) | - |
+| `--plan` | Create plan interactively (description or `@file`; use `@@` for literal leading `@`) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
 | `-p, --port` | Web dashboard port (used with `--serve`) | 8080 |
 | `-w, --watch` | Directories to watch for progress files (repeatable) | - |

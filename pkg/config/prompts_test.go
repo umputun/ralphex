@@ -74,6 +74,7 @@ func TestPromptLoader_Load_NoUserDir(t *testing.T) {
 	assert.Contains(t, prompts.Task, "{{PLAN_FILE}}")
 	assert.Contains(t, prompts.ReviewFirst, "{{GOAL}}")
 	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}")
+	assert.Contains(t, prompts.MakePlan, "{{PLAN_REQUEST_FILE}}")
 }
 
 func TestPromptLoader_Load_EmptyUserFile(t *testing.T) {
@@ -526,6 +527,7 @@ func TestPromptLoader_Load_MakePlanPrompt_FallsBackToEmbedded(t *testing.T) {
 
 	// should fall back to embedded make_plan prompt
 	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}")
+	assert.Contains(t, prompts.MakePlan, "{{PLAN_REQUEST_FILE}}")
 	assert.Contains(t, prompts.MakePlan, "{{PROGRESS_FILE}}")
 	assert.Contains(t, prompts.MakePlan, "RALPHEX:QUESTION")
 	assert.Contains(t, prompts.MakePlan, "RALPHEX:PLAN_READY")
@@ -576,6 +578,7 @@ func TestPromptLoader_Load_AllCommentedPromptsFallbackToEmbedded(t *testing.T) {
 	assert.Contains(t, prompts.ReviewSecond, "{{GOAL}}", "review_second prompt should fall back to embedded")
 	assert.Contains(t, prompts.Codex, "{{CODEX_OUTPUT}}", "codex prompt should fall back to embedded")
 	assert.Contains(t, prompts.MakePlan, "{{PLAN_DESCRIPTION}}", "make_plan prompt should fall back to embedded")
+	assert.Contains(t, prompts.MakePlan, "{{PLAN_REQUEST_FILE}}", "make_plan prompt should fall back to embedded")
 	assert.Contains(t, prompts.CustomReview, "{{DIFF_INSTRUCTION}}", "custom_review prompt should fall back to embedded")
 	assert.Contains(t, prompts.CustomEval, "{{CUSTOM_OUTPUT}}", "custom_eval prompt should fall back to embedded")
 	assert.Contains(t, prompts.CodexReview, "{{DIFF_INSTRUCTION}}", "codex_review prompt should fall back to embedded")

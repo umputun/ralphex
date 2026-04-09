@@ -355,6 +355,8 @@ func TestLogger_PhaseColors(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
+	t.Setenv("NO_COLOR", "")
+
 	// enable colors for this test
 	origNoColor := color.NoColor
 	color.NoColor = false
@@ -582,11 +584,11 @@ func TestNewLogger_FreshStartAfterCompleted(t *testing.T) {
 
 func TestGetProgressFilename(t *testing.T) {
 	tests := []struct {
-		name            string
-		planFile        string
-		planDescription string
-		mode            string
-		want            string
+		name     string
+		planFile string
+		planRef  string
+		mode     string
+		want     string
 	}{
 		{"full mode with plan", "docs/plans/feature.md", "", "full", filepath.Join(progressDir, "progress-feature.txt")},
 		{"review mode with plan", "docs/plans/feature.md", "", "review", filepath.Join(progressDir, "progress-feature-review.txt")},
@@ -595,15 +597,15 @@ func TestGetProgressFilename(t *testing.T) {
 		{"review mode no plan", "", "", "review", filepath.Join(progressDir, "progress-review.txt")},
 		{"codex-only mode no plan", "", "", "codex-only", filepath.Join(progressDir, "progress-codex.txt")},
 		{"full with date prefix", "plans/2024-01-15-refactor.md", "", "full", filepath.Join(progressDir, "progress-2024-01-15-refactor.txt")},
-		{"plan mode with description", "", "implement caching", "plan", filepath.Join(progressDir, "progress-plan-implement-caching.txt")},
-		{"plan mode with complex description", "", "Add User Authentication!", "plan", filepath.Join(progressDir, "progress-plan-add-user-authentication.txt")},
-		{"plan mode no description", "", "", "plan", filepath.Join(progressDir, "progress-plan.txt")},
+		{"plan mode with ref", "", "implement caching", "plan", filepath.Join(progressDir, "progress-plan-implement-caching.txt")},
+		{"plan mode with complex ref", "", "Add User Authentication!", "plan", filepath.Join(progressDir, "progress-plan-add-user-authentication.txt")},
+		{"plan mode no ref", "", "", "plan", filepath.Join(progressDir, "progress-plan.txt")},
 		{"plan mode with special chars", "", "fix: bug #123", "plan", filepath.Join(progressDir, "progress-plan-fix-bug-123.txt")},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := progressFilename(tc.planFile, tc.planDescription, tc.mode)
+			got := progressFilename(tc.planFile, tc.planRef, tc.mode)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -965,7 +967,7 @@ func TestLogger_LogQuestion(t *testing.T) {
 	defer func() { _ = os.Chdir(origDir) }()
 
 	holder := &status.PhaseHolder{}
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
+	l, err := NewLogger(Config{Mode: "plan", PlanRef: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -994,7 +996,7 @@ func TestLogger_LogAnswer(t *testing.T) {
 	defer func() { _ = os.Chdir(origDir) }()
 
 	holder := &status.PhaseHolder{}
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
+	l, err := NewLogger(Config{Mode: "plan", PlanRef: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -1019,7 +1021,7 @@ func TestLogger_LogDraftReview_Accept(t *testing.T) {
 	defer func() { _ = os.Chdir(origDir) }()
 
 	holder := &status.PhaseHolder{}
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
+	l, err := NewLogger(Config{Mode: "plan", PlanRef: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -1048,7 +1050,7 @@ func TestLogger_LogDraftReview_ReviseWithFeedback(t *testing.T) {
 	defer func() { _ = os.Chdir(origDir) }()
 
 	holder := &status.PhaseHolder{}
-	l, err := NewLogger(Config{Mode: "plan", PlanDescription: "test", Branch: "main", NoColor: true}, testColors(), holder)
+	l, err := NewLogger(Config{Mode: "plan", PlanRef: "test", Branch: "main", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 
@@ -1108,8 +1110,8 @@ func TestLogger_PlanModeFilename(t *testing.T) {
 		wantContent string
 	}{
 		{
-			name:        "plan mode with description",
-			cfg:         Config{Mode: "plan", PlanDescription: "implement caching", Branch: "main"},
+			name:        "plan mode with ref",
+			cfg:         Config{Mode: "plan", PlanRef: "implement caching", Branch: "main"},
 			wantBase:    "progress-plan-implement-caching.txt",
 			wantContent: "Mode: plan",
 		},

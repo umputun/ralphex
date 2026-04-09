@@ -64,6 +64,7 @@ ralphex --review --base-ref abc1234 --skip-finalize
 # interactive plan creation — Claude asks questions, generates draft,
 # user reviews with accept/revise/interactive review ($EDITOR)/reject
 ralphex --plan "add user authentication"
+ralphex --plan @docs/requests/add-user-authentication.md
 
 # initialize local .ralphex/ config in current project (commented-out defaults)
 ralphex --init
@@ -311,6 +312,7 @@ When a user asks about autonomous plan execution, implementing features with Cla
    ralphex docs/plans/feature.md           # execute a plan
    ralphex --review                        # review-only mode
    ralphex --plan "add health endpoint"    # interactive plan creation
+   ralphex --plan @docs/requests/add-health-endpoint.md
    ```
 
 6. **Claude Code skills are optional**: If user wants convenience commands:

@@ -43,6 +43,7 @@ const (
 type Config struct {
 	PlanFile              string         // path to plan file (required for full mode)
 	PlanDescription       string         // plan description for interactive plan creation mode
+	PlanRequestFile       string         // source file for plan mode request (if provided)
 	ProgressPath          string         // path to progress file
 	Mode                  Mode           // execution mode
 	MaxIterations         int            // maximum iterations for task phase
@@ -1020,7 +1021,7 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 
 	r.phaseHolder.Set(status.PhasePlan)
 	r.log.PrintRaw("starting interactive plan creation\n")
-	r.log.Print("plan request: %s", r.cfg.PlanDescription)
+	r.logPlanRequest()
 
 	// plan iterations use 20% of max_iterations
 	maxPlanIterations := max(minPlanIterations, r.cfg.MaxIterations/planIterationDivisor)
@@ -1110,6 +1111,14 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("max plan iterations (%d) reached without completion", maxPlanIterations)
+}
+
+func (r *Runner) logPlanRequest() {
+	if r.cfg.PlanRequestFile != "" {
+		r.log.Print("plan request file: %s", r.cfg.PlanRequestFile)
+		return
+	}
+	r.log.Print("plan request: %s", r.cfg.PlanDescription)
 }
 
 // handlePatternMatchError checks if err is a PatternMatchError or LimitPatternError and logs appropriate messages.

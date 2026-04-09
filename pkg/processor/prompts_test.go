@@ -185,13 +185,15 @@ func TestRunner_buildCodexEvaluationPrompt_CustomPrompt(t *testing.T) {
 
 func TestRunner_replacePromptVariables(t *testing.T) {
 	tests := []struct {
-		name         string
-		input        string
-		planFile     string
-		progressPath string
-		expected     string
+		name            string
+		input           string
+		planFile        string
+		planRequestFile string
+		progressPath    string
+		expected        string
 	}{
 		{name: "plan file variable", input: "Plan: {{PLAN_FILE}}", planFile: "docs/plans/test.md", progressPath: "", expected: "Plan: docs/plans/test.md"},
+		{name: "plan request file variable", input: "Request: {{PLAN_REQUEST_FILE}}", planFile: "", planRequestFile: "/tmp/request.md", progressPath: "", expected: "Request: /tmp/request.md"},
 		{name: "progress file variable", input: "Progress: {{PROGRESS_FILE}}", planFile: "docs/plans/test.md", progressPath: "prog.txt", expected: "Progress: prog.txt"},
 		{name: "goal variable", input: "Goal: {{GOAL}}", planFile: "docs/plans/test.md", progressPath: "", expected: "Goal: implementation of plan at docs/plans/test.md"},
 		{name: "multiple variables", input: "{{PLAN_FILE}} -> {{PROGRESS_FILE}}", planFile: "docs/plans/test.md", progressPath: "p.txt", expected: "docs/plans/test.md -> p.txt"},
@@ -200,7 +202,11 @@ func TestRunner_replacePromptVariables(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &Runner{cfg: Config{PlanFile: tc.planFile, ProgressPath: tc.progressPath}}
+			r := &Runner{cfg: Config{
+				PlanFile:        tc.planFile,
+				PlanRequestFile: tc.planRequestFile,
+				ProgressPath:    tc.progressPath,
+			}}
 			result := r.replacePromptVariables(tc.input)
 			assert.Equal(t, tc.expected, result)
 		})
@@ -630,6 +636,7 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 		appCfg := testAppConfig(t)
 		r := &Runner{cfg: Config{
 			PlanDescription: "add user authentication with OAuth",
+			PlanRequestFile: "/tmp/request.md",
 			ProgressPath:    "progress-plan-test.txt",
 			AppConfig:       appCfg,
 		}, log: newMockLogger("")}
@@ -638,9 +645,11 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 
 		// verify template substitution
 		assert.Contains(t, prompt, "add user authentication with OAuth")
+		assert.Contains(t, prompt, "/tmp/request.md")
 		assert.Contains(t, prompt, "progress-plan-test.txt")
 		// verify no unsubstituted variables
 		assert.NotContains(t, prompt, "{{PLAN_DESCRIPTION}}")
+		assert.NotContains(t, prompt, "{{PLAN_REQUEST_FILE}}")
 		assert.NotContains(t, prompt, "{{PROGRESS_FILE}}")
 	})
 
@@ -655,6 +664,7 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 		prompt := r.buildPlanPrompt()
 
 		assert.Contains(t, prompt, "add feature")
+		assert.Contains(t, prompt, "(request provided directly)")
 		assert.Contains(t, prompt, "(no progress file available)")
 	})
 
@@ -687,21 +697,23 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 		assert.Contains(t, prompt, "QUESTION")
 		assert.Contains(t, prompt, "PLAN_READY")
 		assert.Contains(t, prompt, "docs/plans/")
+		assert.Contains(t, prompt, "Request file:")
 	})
 
 	t.Run("custom prompt", func(t *testing.T) {
 		appCfg := &config.Config{
-			MakePlanPrompt: "Create plan for: {{PLAN_DESCRIPTION}}\nLog: {{PROGRESS_FILE}}",
+			MakePlanPrompt: "Create plan for: {{PLAN_DESCRIPTION}}\nRequest: {{PLAN_REQUEST_FILE}}\nLog: {{PROGRESS_FILE}}",
 		}
 		r := &Runner{cfg: Config{
 			PlanDescription: "custom feature",
+			PlanRequestFile: "/tmp/custom.md",
 			ProgressPath:    "custom-progress.txt",
 			AppConfig:       appCfg,
 		}, log: newMockLogger("")}
 
 		prompt := r.buildPlanPrompt()
 
-		assert.Equal(t, "Create plan for: custom feature\nLog: custom-progress.txt", prompt)
+		assert.Equal(t, "Create plan for: custom feature\nRequest: /tmp/custom.md\nLog: custom-progress.txt", prompt)
 	})
 }
 

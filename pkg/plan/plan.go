@@ -169,7 +169,7 @@ func ExtractBranchName(planFile string) string {
 // returns empty string if user cancels (Ctrl+C or Ctrl+D).
 func PromptDescription(ctx context.Context, r io.Reader, colors *progress.Colors) string {
 	colors.Info().Printf("no plans found. what would you like to implement?\n")
-	colors.Info().Printf("(enter description or press Ctrl+C/Ctrl+D to cancel): ")
+	colors.Info().Printf("(enter description, @file, or @@literal; press Ctrl+C/Ctrl+D to cancel): ")
 
 	reader := bufio.NewReader(r)
 	line, err := input.ReadLineWithContext(ctx, reader)

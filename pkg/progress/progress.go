@@ -129,11 +129,11 @@ type Logger struct {
 
 // Config holds logger configuration.
 type Config struct {
-	PlanFile        string // plan filename (used to derive progress filename)
-	PlanDescription string // plan description for plan mode (used for filename)
-	Mode            string // execution mode: full, review, codex-only, plan
-	Branch          string // current git branch
-	NoColor         bool   // disable color output (sets color.NoColor globally)
+	PlanFile string // plan filename (used to derive progress filename)
+	PlanRef  string // short plan request reference for plan mode (used for filename)
+	Mode     string // execution mode: full, review, codex-only, plan
+	Branch   string // current git branch
+	NoColor  bool   // disable color output (sets color.NoColor globally)
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
@@ -148,7 +148,7 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		color.NoColor = true
 	}
 
-	progressPath := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode)
+	progressPath := progressFilename(cfg.PlanFile, cfg.PlanRef, cfg.Mode)
 
 	// resolve to absolute path so Logger.Path() works from any CWD (e.g. after worktree chdir)
 	if absPath, absErr := filepath.Abs(progressPath); absErr == nil {
@@ -604,10 +604,10 @@ func isProgressCompleted(f *os.File, size int64) bool {
 const progressDir = ".ralphex/progress"
 
 // progressFilename returns progress file path based on plan and mode.
-func progressFilename(planFile, planDescription, mode string) string {
-	// plan mode uses sanitized plan description
-	if mode == "plan" && planDescription != "" {
-		sanitized := sanitizePlanName(planDescription)
+func progressFilename(planFile, planRef, mode string) string {
+	// plan mode uses a short request reference
+	if mode == "plan" && planRef != "" {
+		sanitized := sanitizePlanName(planRef)
 		return filepath.Join(progressDir, fmt.Sprintf("progress-plan-%s.txt", sanitized))
 	}
 

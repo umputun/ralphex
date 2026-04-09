@@ -44,7 +44,7 @@ type opts struct {
 	IdleTimeout           time.Duration `long:"idle-timeout" description:"kill claude session after no output for this duration (e.g. 5m, 10m)"`
 	SkipFinalize          bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
 	Worktree              bool          `long:"worktree" description:"run in isolated git worktree"`
-	PlanDescription       string        `long:"plan" description:"create plan interactively (enter plan description)"`
+	PlanDescription       string        `long:"plan" description:"create plan interactively (description or @file; use @@ for literal leading @)"`
 	Debug                 bool          `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor               bool          `long:"no-color" description:"disable color output"`
 	Version               bool          `short:"v" long:"version" description:"print version and exit"`
@@ -113,6 +113,7 @@ func (stderrLog) Print(format string, args ...any) {
 type startupInfo struct {
 	PlanFile        string
 	PlanDescription string // used for plan mode instead of PlanFile
+	PlanRequestFile string // used for file-backed plan mode requests
 	Branch          string
 	Mode            processor.Mode
 	MaxIterations   int
@@ -123,6 +124,7 @@ type startupInfo struct {
 type executePlanRequest struct {
 	PlanFile      string
 	MainPlanFile  string // original plan path in main repo (worktree mode); empty in normal mode
+	PlanRequest   plan.Request
 	Mode          processor.Mode
 	GitSvc        *git.Service
 	MainGitSvc    *git.Service // main repo service for cross-boundary ops (worktree mode); nil in normal mode
@@ -225,6 +227,15 @@ func run(ctx context.Context, o opts) error {
 		return err
 	}
 
+	planRequest := plan.Request{}
+	if o.PlanDescription != "" {
+		var err error
+		planRequest, err = resolvePlanRequest(o.PlanDescription)
+		if err != nil {
+			return err
+		}
+	}
+
 	// load config first to get custom command paths
 	cfg, err := config.Load(o.ConfigDir)
 	if err != nil {
@@ -287,6 +298,7 @@ func run(ctx context.Context, o opts) error {
 	// plan mode has different flow - doesn't require plan file selection
 	if mode == processor.ModePlan {
 		return runPlanMode(ctx, o, executePlanRequest{
+			PlanRequest:   planRequest,
 			Mode:          processor.ModePlan,
 			GitSvc:        gitSvc,
 			Config:        cfg,
@@ -370,9 +382,23 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 		return true, nil // user canceled
 	}
 
+	resolvedRequest, err := resolvePlanRequest(description)
+	if err != nil {
+		return true, err
+	}
+
 	o.PlanDescription = description
+	req.PlanRequest = resolvedRequest
 	req.Mode = processor.ModePlan
 	return true, runPlanMode(ctx, o, req, selector)
+}
+
+func resolvePlanRequest(raw string) (plan.Request, error) {
+	req, err := plan.ResolveRequest(raw)
+	if err != nil {
+		return plan.Request{}, fmt.Errorf("resolve plan request: %w", err)
+	}
+	return req, nil
 }
 
 // progressLogResult holds the result of progress logger setup.
@@ -859,7 +885,11 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 func printStartupInfo(info startupInfo, colors *progress.Colors) {
 	if info.Mode == processor.ModePlan {
 		colors.Info().Printf("starting interactive plan creation\n")
-		colors.Info().Printf("request: %s\n", info.PlanDescription)
+		if info.PlanRequestFile != "" {
+			colors.Info().Printf("request file: %s\n", toRelPath(info.PlanRequestFile))
+		} else {
+			colors.Info().Printf("request: %s\n", info.PlanDescription)
+		}
 		colors.Info().Printf("branch: %s (max %d iterations)\n", info.Branch, info.MaxIterations)
 		colors.Info().Printf("progress log: %s\n\n", toRelPath(info.ProgressPath))
 		return
@@ -882,6 +912,16 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 
+	planRequest := req.PlanRequest
+	if planRequest.Text == "" && o.PlanDescription != "" {
+		var err error
+		planRequest, err = resolvePlanRequest(o.PlanDescription)
+		if err != nil {
+			return err
+		}
+	}
+	req.PlanRequest = planRequest
+
 	branch := getCurrentBranch(req.GitSvc)
 
 	// create shared phase holder (single source of truth for current phase)
@@ -889,10 +929,10 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	// create progress logger for plan mode
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanDescription: o.PlanDescription,
-		Mode:            string(processor.ModePlan),
-		Branch:          branch,
-		NoColor:         o.NoColor,
+		PlanRef: planRequest.Ref,
+		Mode:    string(processor.ModePlan),
+		Branch:  branch,
+		NoColor: o.NoColor,
 	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
@@ -907,7 +947,8 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	// print startup info for plan mode
 	printStartupInfo(startupInfo{
-		PlanDescription: o.PlanDescription,
+		PlanDescription: planRequest.Text,
+		PlanRequestFile: planRequest.File,
 		Branch:          branch,
 		Mode:            processor.ModePlan,
 		MaxIterations:   maxIter,
@@ -922,7 +963,8 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	// create and configure runner
 	r := processor.New(processor.Config{
-		PlanDescription:  o.PlanDescription,
+		PlanDescription:  planRequest.Text,
+		PlanRequestFile:  planRequest.File,
 		ProgressPath:     baseLog.Path(),
 		Mode:             processor.ModePlan,
 		MaxIterations:    maxIter,

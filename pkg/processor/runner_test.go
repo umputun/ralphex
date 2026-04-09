@@ -681,6 +681,40 @@ func TestRunner_RunPlan_Success(t *testing.T) {
 	assert.Len(t, claude.RunCalls(), 1)
 }
 
+func TestRunner_RunPlan_LogsRequestFile(t *testing.T) {
+	log := newMockLogger("progress-plan.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "plan created", Signal: status.PlanReady},
+	})
+	codex := newMockExecutor(nil)
+	inputCollector := newMockInputCollector(nil)
+
+	cfg := processor.Config{
+		Mode:             processor.ModePlan,
+		PlanDescription:  "file-backed request content",
+		PlanRequestFile:  "/tmp/request.md",
+		MaxIterations:    50,
+		IterationDelayMs: 1,
+		AppConfig:        testAppConfig(t),
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	r.SetInputCollector(inputCollector)
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+
+	foundRequestFileLog := false
+	for _, call := range log.PrintCalls() {
+		if call.Format == "plan request file: %s" {
+			foundRequestFileLog = true
+			require.Len(t, call.Args, 1)
+			assert.Equal(t, "/tmp/request.md", call.Args[0])
+		}
+		assert.NotEqual(t, "plan request: %s", call.Format)
+	}
+	assert.True(t, foundRequestFileLog, "expected plan request file log entry")
+}
+
 func TestRunner_RunPlan_WithQuestion(t *testing.T) {
 	log := newMockLogger("progress-plan.txt")
 	questionSignal := `Let me ask a question.

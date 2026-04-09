@@ -99,6 +99,36 @@ func TestPromptPlanDescription(t *testing.T) {
 	})
 }
 
+func TestResolvePlanRequest(t *testing.T) {
+	t.Run("plain text request", func(t *testing.T) {
+		req, err := resolvePlanRequest("add caching")
+		require.NoError(t, err)
+		assert.Equal(t, "add caching", req.Text)
+		assert.Equal(t, "add caching", req.Ref)
+		assert.Empty(t, req.File)
+	})
+
+	t.Run("file-backed request", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		requestPath := filepath.Join(tmpDir, "requests", "cache.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(requestPath), 0o700))
+		require.NoError(t, os.WriteFile(requestPath, []byte("implement cache layer"), 0o600))
+
+		req, err := resolvePlanRequest("@" + requestPath)
+		require.NoError(t, err)
+		assert.Equal(t, "implement cache layer", req.Text)
+		assert.Regexp(t, `^cache-[0-9a-f]{8}$`, req.Ref)
+		assert.Equal(t, requestPath, req.File)
+	})
+
+	t.Run("literal leading at sign", func(t *testing.T) {
+		req, err := resolvePlanRequest("@@mention-based feature")
+		require.NoError(t, err)
+		assert.Equal(t, "@mention-based feature", req.Text)
+		assert.Equal(t, "@mention-based feature", req.Ref)
+	})
+}
+
 func TestDetermineMode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -117,6 +147,7 @@ func TestDetermineMode(t *testing.T) {
 		{name: "tasks_only_takes_precedence_over_external", opts: opts{TasksOnly: true, ExternalOnly: true}, expected: processor.ModeTasksOnly},
 		{name: "tasks_only_takes_precedence_over_review", opts: opts{TasksOnly: true, Review: true}, expected: processor.ModeTasksOnly},
 		{name: "plan_flag", opts: opts{PlanDescription: "add caching"}, expected: processor.ModePlan},
+		{name: "plan_flag_with_file_input", opts: opts{PlanDescription: "@requests/add-caching.md"}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_review", opts: opts{PlanDescription: "add caching", Review: true}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_codex", opts: opts{PlanDescription: "add caching", CodexOnly: true}, expected: processor.ModePlan},
 		{name: "plan_takes_precedence_over_external", opts: opts{PlanDescription: "add caching", ExternalOnly: true}, expected: processor.ModePlan},
@@ -714,6 +745,7 @@ func TestValidateFlags(t *testing.T) {
 	}{
 		{name: "no_flags_is_valid", opts: opts{}, wantErr: false},
 		{name: "plan_flag_only_is_valid", opts: opts{PlanDescription: "add feature"}, wantErr: false},
+		{name: "plan_flag_with_request_file_is_valid", opts: opts{PlanDescription: "@requests/add-feature.md"}, wantErr: false},
 		{name: "plan_file_only_is_valid", opts: opts{PlanFile: "docs/plans/test.md"}, wantErr: false},
 		{name: "both_plan_and_planfile_conflicts", opts: opts{PlanDescription: "add feature", PlanFile: "docs/plans/test.md"}, wantErr: true, errMsg: "conflicts"},
 		{name: "negative_wait_is_invalid", opts: opts{Wait: -30 * time.Minute}, wantErr: true, errMsg: "non-negative"},

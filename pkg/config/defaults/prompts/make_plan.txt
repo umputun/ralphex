@@ -4,11 +4,13 @@
 #
 # available variables:
 #   {{PLAN_DESCRIPTION}} - user's original request for what to implement
+#   {{PLAN_REQUEST_FILE}} - source file for the request, or fallback text if provided directly
 #   {{PROGRESS_FILE}} - path to progress file with Q&A history
 #   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
 #   {{PLANS_DIR}} - plans directory (default: docs/plans)
 
 You are helping create an implementation plan for: {{PLAN_DESCRIPTION}}
+Request file: {{PLAN_REQUEST_FILE}}
 
 Progress log: {{PROGRESS_FILE}} (contains previous Q&A from this session)
 
@@ -104,7 +106,7 @@ This step executes ONLY after the user accepts your draft (progress file contain
 
 Write the accepted plan to disk:
 
-1. Create a plan file at {{PLANS_DIR}}/YYYY-MM-DD-<slug>.md where <slug> is derived from the description
+1. Create a plan file at {{PLANS_DIR}}/YYYY-MM-DD-<slug>.md where <slug> is derived from the request, using the request file basename as a hint when a file was provided
 2. Use this structure:
 
 ---
