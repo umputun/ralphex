@@ -211,6 +211,61 @@ extract_first_plan_boundary() {
     return 1
 }
 
+parse_copilot_event() {
+    local line="$1"
+
+    event_type=""
+    message_text=""
+    tool_request_count="0"
+    event_text=""
+
+    {
+        IFS= read -r -d '' event_type &&
+            IFS= read -r -d '' message_text &&
+            IFS= read -r -d '' tool_request_count &&
+            IFS= read -r -d '' event_text
+    } < <(
+        printf '%s\n' "$line" | jq -j '
+            def strip_edge_tabs:
+                split("\n")
+                | map(gsub("^\\t+"; "") | gsub("\\t+$"; ""))
+                | join("\n");
+
+            (.type // ""), "\u0000",
+            (.data.content // "" | strip_edge_tabs), "\u0000",
+            ((.data.toolRequests? // []) | if type == "array" then length else 0 end | tostring), "\u0000",
+            (.data.message // ""), "\u0000"
+        ' 2>/dev/null
+    )
+}
+
+touch_existing_plan_for_ready() {
+    local text="$1"
+    local existing_plan=""
+    local candidate=""
+
+    [[ -d docs/plans ]] || return 0
+
+    while IFS= read -r -d '' candidate; do
+        if [[ "$text" == *"$candidate"* ]]; then
+            existing_plan="$candidate"
+            break
+        fi
+    done < <(find docs/plans -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null)
+
+    if [[ -z "$existing_plan" ]]; then
+        while IFS= read -r -d '' candidate; do
+            if [[ -z "$existing_plan" || "$candidate" -nt "$existing_plan" ]]; then
+                existing_plan="$candidate"
+            fi
+        done < <(find docs/plans -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null)
+    fi
+
+    if [[ -n "$existing_plan" && -f "$existing_plan" ]]; then
+        touch "$existing_plan"
+    fi
+}
+
 intentional_stop=0
 turn_has_visible_message=0
 turn_has_tool_requests=0
@@ -219,24 +274,16 @@ first_output_emitted=0
 while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" ]] && continue
 
-    if ! printf '%s\n' "$line" | jq -e . >/dev/null 2>&1; then
+    if ! parse_copilot_event "$line"; then
         emit_text_delta "$line"$'\n'
         continue
     fi
-
-    event_type=$(printf '%s\n' "$line" | jq -r '.type // empty')
 
     case "$event_type" in
         assistant.message_delta)
             continue
             ;;
         assistant.message)
-            message_text=$(printf '%s\n' "$line" | jq -r '.data.content // empty')
-            # strip leading and trailing tabs from each line — Copilot indents tool-result
-            # summaries with tabs, and may also leave trailing tabs that appear as stray
-            # whitespace in the ralphex terminal display
-            [[ -n "$message_text" ]] && message_text=$(printf '%s\n' "$message_text" | sed 's/^\t\+//; s/\t\+$//')
-            tool_request_count=$(printf '%s\n' "$line" | jq -r '(.data.toolRequests // []) | length')
             if [[ -n "$message_text" ]]; then
                 if [[ "$is_plan_prompt" == "1" ]] && extract_first_plan_boundary "$message_text"; then
                     # when copilot emits PLAN_READY without PLAN_DRAFT (skipping
@@ -247,14 +294,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
                     # after the session start time.
                     if [[ "$plan_boundary_text" == *"<<<RALPHEX:PLAN_READY>>>"* ]] && \
                        [[ "$plan_boundary_text" != *"<<<RALPHEX:PLAN_DRAFT>>>"* ]]; then
-                        existing_plan=$(printf '%s' "$plan_boundary_text" | grep -oE 'docs/plans/[^ ]*\.md' | head -1 || true)
-                        if [[ -z "$existing_plan" || ! -f "$existing_plan" ]]; then
-                            # path not in message — find the newest plan file
-                            existing_plan=$(find docs/plans -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1 || true)
-                        fi
-                        if [[ -n "$existing_plan" && -f "$existing_plan" ]]; then
-                            touch "$existing_plan"
-                        fi
+                        touch_existing_plan_for_ready "$plan_boundary_text"
                     fi
                     emit_text_delta "$plan_boundary_text"
                     intentional_stop=1
@@ -271,7 +311,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
             fi
             ;;
         session.error|session.warning|session.info)
-            event_text=$(printf '%s\n' "$line" | jq -r '.data.message // empty')
             [[ -n "$event_text" ]] && emit_text_delta "$event_text"$'\n'
             ;;
         assistant.turn_end)

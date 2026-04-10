@@ -156,6 +156,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# test: non-JSON line passthrough
+# ---------------------------------------------------------------------------
+echo "test: non-JSON line passthrough"
+
+cat > "$TMPDIR_TEST/non_json_events.jsonl" <<'EOF'
+raw progress line from copilot
+{"type":"session.task_complete","data":{"summary":"done","success":true}}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/non_json_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+raw_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$raw_text" | grep -q 'raw progress line from copilot'; then
+    pass "non-JSON lines are emitted as text deltas"
+else
+    fail "non-JSON line was not emitted" "got: $output"
+fi
+
+# ---------------------------------------------------------------------------
 # test: prompt via stdin and ignored flags
 # ---------------------------------------------------------------------------
 echo "test: stdin prompt handling and ignored flags"
@@ -498,8 +518,10 @@ EOF
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/tab_indented_events.jsonl" \
     run_wrapper bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
+tab_char=$'\t'
+escaped_tab='\t'
 combined_text=$(echo "$output" | jq -r 'select(.type == "content_block_delta") | .delta.text' 2>/dev/null | tr -d '\n')
-if echo "$combined_text" | grep -qP '^\t|\\t'; then
+if [[ "$combined_text" == *"$tab_char"* || "$combined_text" == *"$escaped_tab"* ]]; then
     fail "leading tabs not stripped from output" "text: $combined_text"
 elif echo "$combined_text" | grep -q 'All tests pass'; then
     pass "leading tabs stripped from assistant.message content"
@@ -525,7 +547,14 @@ output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/trailing_tab_events.jsonl" \
     run_wrapper bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 raw_text=$(echo "$output" | jq -r 'select(.type == "content_block_delta") | .delta.text' 2>/dev/null)
-if printf '%s' "$raw_text" | grep -qP '\t\n|\t$'; then
+has_trailing_tab=0
+while IFS= read -r text_line || [[ -n "$text_line" ]]; do
+    if [[ "$text_line" == *"$tab_char" ]]; then
+        has_trailing_tab=1
+        break
+    fi
+done <<< "$raw_text"
+if [[ "$has_trailing_tab" -eq 1 ]]; then
     fail "trailing tabs not stripped from output" "raw text: $raw_text"
 elif echo "$raw_text" | grep -q 'Line with trailing tab'; then
     pass "trailing tabs stripped from assistant.message content"
@@ -534,7 +563,8 @@ else
 fi
 
 # verify trailing tab does not appear after the line content
-if printf '%s' "$raw_text" | grep -qP '^Line with trailing tab\t'; then
+first_raw_line=${raw_text%%$'\n'*}
+if [[ "$first_raw_line" == *"$tab_char" ]]; then
     fail "trailing tab found after 'Line with trailing tab'" "raw text: $raw_text"
 else
     pass "trailing tab absent from end of lines"
@@ -711,29 +741,33 @@ echo "test: PLAN_READY without PLAN_DRAFT touches existing plan file"
 
 # create a plan file with an old mtime
 mkdir -p "$TMPDIR_TEST/docs/plans"
-echo "# Test Plan" > "$TMPDIR_TEST/docs/plans/test-plan.md"
-# set mtime to 1 hour ago
-touch -t "$(date -v-1H '+%Y%m%d%H%M.%S')" "$TMPDIR_TEST/docs/plans/test-plan.md"
-old_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
+plan_with_space="$TMPDIR_TEST/docs/plans/test plan.md"
+older_plan="$TMPDIR_TEST/docs/plans/older-plan.md"
+mtime_reference="$TMPDIR_TEST/mtime_reference"
+echo "# Test Plan" > "$plan_with_space"
+echo "# Older Plan" > "$older_plan"
+touch -t 200001010000 "$plan_with_space"
+touch -t 199901010000 "$older_plan"
+touch -t 200101010000 "$mtime_reference"
 
 # copilot responds with PLAN_READY referencing the plan file (no PLAN_DRAFT)
-cat > "$TMPDIR_TEST/plan_ready_only_events.jsonl" <<EOF
-{"type":"assistant.message","data":{"content":"A plan file already exists at docs/plans/test-plan.md.\n<<<RALPHEX:PLAN_READY>>>"}}
+cat > "$TMPDIR_TEST/plan_ready_only_events.jsonl" <<'EOF'
+{"type":"assistant.message","data":{"content":"A plan file already exists at [test plan](docs/plans/test plan.md).\n<<<RALPHEX:PLAN_READY>>>"}}
 EOF
 
 (cd "$TMPDIR_TEST" && MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_ready_only_events.jsonl" \
     run_wrapper bash "$WRAPPER" -p "$plan_prompt" >/dev/null 2>&1)
 
-new_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
-if [[ "$new_mtime" -gt "$old_mtime" ]]; then
+if [[ "$plan_with_space" -nt "$mtime_reference" ]]; then
     pass "PLAN_READY without PLAN_DRAFT touches existing plan file"
 else
-    fail "plan file mtime not updated" "old=$old_mtime new=$new_mtime"
+    fail "plan file mtime not updated" "plan file is not newer than reference marker"
 fi
 
 # test: fallback to newest plan file when path not in message
-touch -t "$(date -v-1H '+%Y%m%d%H%M.%S')" "$TMPDIR_TEST/docs/plans/test-plan.md"
-old_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
+touch -t 200001010000 "$plan_with_space"
+touch -t 199901010000 "$older_plan"
+touch -t 200101010000 "$mtime_reference"
 
 cat > "$TMPDIR_TEST/plan_ready_nopath_events.jsonl" <<'EOF'
 {"type":"assistant.message","data":{"content":"A plan file already exists for this feature.\n<<<RALPHEX:PLAN_READY>>>"}}
@@ -742,11 +776,10 @@ EOF
 (cd "$TMPDIR_TEST" && MOCK_STDOUT_FILE="$TMPDIR_TEST/plan_ready_nopath_events.jsonl" \
     run_wrapper bash "$WRAPPER" -p "$plan_prompt" >/dev/null 2>&1)
 
-new_mtime=$(stat -f '%m' "$TMPDIR_TEST/docs/plans/test-plan.md")
-if [[ "$new_mtime" -gt "$old_mtime" ]]; then
+if [[ "$plan_with_space" -nt "$mtime_reference" ]]; then
     pass "fallback to newest plan file when path not in message"
 else
-    fail "plan file mtime not updated in fallback case" "old=$old_mtime new=$new_mtime"
+    fail "plan file mtime not updated in fallback case" "plan file is not newer than reference marker"
 fi
 
 # ---------------------------------------------------------------------------
