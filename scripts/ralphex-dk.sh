@@ -856,7 +856,12 @@ def handle_update_script(script_path: Path) -> int:
 
 
 def schedule_cleanup(creds_temp: Optional[Path]) -> None:
-    """schedule credentials temp file deletion after a delay."""
+    """schedule credentials temp file deletion after a delay.
+
+    the delay needs to cover container cold-start (baseimage init + init-docker.sh cp)
+    on Docker Desktop / OrbStack, which can exceed 10s on slower hosts. 60s is a safer
+    ceiling while still limiting host-side exposure of the plaintext creds file.
+    """
     if not creds_temp:
         return
 
@@ -866,7 +871,7 @@ def schedule_cleanup(creds_temp: Optional[Path]) -> None:
         except OSError:
             pass
 
-    t = threading.Timer(10.0, _remove)
+    t = threading.Timer(60.0, _remove)
     t.daemon = True
     t.start()
 
@@ -1054,6 +1059,22 @@ def main() -> int:
     # extract macOS credentials (needed for volume mounts)
     # skip when using bedrock provider (uses AWS credentials instead)
     creds_temp = None if provider == "bedrock" else extract_macos_credentials(claude_home)
+
+    # fail fast on macOS if there are no credentials at all: no on-disk file AND
+    # keychain extraction returned None. starting the container would surface a
+    # confusing "Not logged in" inside claude later.
+    if (
+        provider != "bedrock"
+        and platform.system() == "Darwin"
+        and creds_temp is None
+        and not (claude_home / ".credentials.json").exists()
+    ):
+        print(
+            f"error: no Claude credentials found (neither {claude_home}/.credentials.json "
+            "nor macOS keychain). run 'claude' on the host to authenticate first.",
+            file=sys.stderr,
+        )
+        return 1
 
     # merge env var entries with CLI -E/--env flags (env first, CLI appends)
     extra_env = merge_env_flags(parsed.env)

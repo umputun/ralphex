@@ -360,6 +360,31 @@ class TestScheduleCleanup(unittest.TestCase):
         """schedule_cleanup with None should not raise."""
         schedule_cleanup(None)
 
+    def test_uses_60s_delay(self) -> None:
+        """schedule_cleanup should arm the timer with a 60s delay to cover slow container cold-start."""
+        fd, tmp_path = tempfile.mkstemp()
+        os.close(fd)
+        p = Path(tmp_path)
+        captured_delay: list[float] = []
+
+        class _FakeTimer:
+            def __init__(self, delay: float, fn: object) -> None:
+                captured_delay.append(delay)
+                self.daemon = False
+
+            def start(self) -> None:
+                pass
+
+        orig_timer = threading.Timer
+        threading.Timer = _FakeTimer  # type: ignore[misc,assignment]
+        try:
+            schedule_cleanup(p)
+        finally:
+            threading.Timer = orig_timer  # type: ignore[misc]
+            p.unlink(missing_ok=True)
+
+        self.assertEqual(captured_delay, [60.0])
+
 class TestBuildDockerCmd(unittest.TestCase):
     def test_creds_volume_mount_without_selinux(self) -> None:
         """build_volumes should include creds temp mount when provided."""
@@ -945,6 +970,7 @@ class TestMainArgparse(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             captured_env: list[str] = []
@@ -973,6 +999,7 @@ class TestMainArgparse(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             captured_volumes: list[str] = []
@@ -1001,6 +1028,7 @@ class TestMainArgparse(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             captured_args: list[str] = []
@@ -1027,6 +1055,7 @@ class TestMainArgparse(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             captured_args: list[str] = []
@@ -1055,6 +1084,7 @@ class TestMainArgparse(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             captured_args: list[str] = []
@@ -1081,6 +1111,7 @@ class TestMainArgparse(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             captured_args: list[str] = []
@@ -1115,6 +1146,7 @@ class TestMainArgparse(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             captured_env: list[str] = []
@@ -1173,6 +1205,7 @@ class TestHelpFlag(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             docker_calls: list[list[str]] = []
@@ -1224,6 +1257,7 @@ class TestHelpFlag(EnvTestCase):
         try:
             claude_dir = tmp / ".claude"
             claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
             os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
 
             def fake_run(cmd: list[str], **kwargs: object) -> unittest.mock.Mock:
@@ -1758,6 +1792,8 @@ class TestBedrockSkipKeychain(EnvTestCase):
         import io
         captured_stderr = io.StringIO()
         fake_claude_dir = tempfile.mkdtemp()
+        # place a fake credentials.json so fail-fast doesn't trigger on macOS
+        (Path(fake_claude_dir) / ".credentials.json").write_text("{}")
         try:
             with unittest.mock.patch("sys.stderr", captured_stderr):
                 with unittest.mock.patch("ralphex_dk.run_docker", side_effect=fake_run_docker):
@@ -1774,6 +1810,101 @@ class TestBedrockSkipKeychain(EnvTestCase):
         self.assertEqual(result, 0)
         # extract_macos_credentials SHOULD be called for default provider
         self.assertEqual(extract_calls[0], 1)
+
+    def test_fails_fast_on_macos_when_no_credentials(self) -> None:
+        """on macOS, default provider with no on-disk creds and failed keychain extraction exits with 1."""
+        run_calls = [0]
+
+        def fake_run_docker(
+            image: str, port: int, volumes: list[str], extra_env: list[str],
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None, **kwargs: object,
+        ) -> int:
+            run_calls[0] += 1
+            return 0
+
+        captured_stderr = io.StringIO()
+        fake_claude_dir = tempfile.mkdtemp()
+        # no .credentials.json on disk
+        try:
+            with unittest.mock.patch("sys.stderr", captured_stderr):
+                with unittest.mock.patch("ralphex_dk.platform.system", return_value="Darwin"):
+                    with unittest.mock.patch("ralphex_dk.run_docker", side_effect=fake_run_docker):
+                        with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                            sys.argv = ["ralphex-dk", "plan.md"]
+                            os.environ["CLAUDE_CONFIG_DIR"] = fake_claude_dir
+                            try:
+                                result = main()
+                            finally:
+                                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        finally:
+            shutil.rmtree(fake_claude_dir, ignore_errors=True)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(run_calls[0], 0)
+        err = captured_stderr.getvalue()
+        self.assertIn("no Claude credentials found", err)
+        self.assertIn("keychain", err)
+
+    def test_no_fail_fast_when_credentials_on_disk(self) -> None:
+        """on macOS, default provider with on-disk creds proceeds even if extraction returns None."""
+        run_calls = [0]
+
+        def fake_run_docker(
+            image: str, port: int, volumes: list[str], extra_env: list[str],
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None, **kwargs: object,
+        ) -> int:
+            run_calls[0] += 1
+            return 0
+
+        captured_stderr = io.StringIO()
+        fake_claude_dir = tempfile.mkdtemp()
+        (Path(fake_claude_dir) / ".credentials.json").write_text("{}")
+        try:
+            with unittest.mock.patch("sys.stderr", captured_stderr):
+                with unittest.mock.patch("ralphex_dk.platform.system", return_value="Darwin"):
+                    with unittest.mock.patch("ralphex_dk.run_docker", side_effect=fake_run_docker):
+                        with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                            sys.argv = ["ralphex-dk", "plan.md"]
+                            os.environ["CLAUDE_CONFIG_DIR"] = fake_claude_dir
+                            try:
+                                result = main()
+                            finally:
+                                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        finally:
+            shutil.rmtree(fake_claude_dir, ignore_errors=True)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(run_calls[0], 1)
+
+    def test_no_fail_fast_on_non_darwin(self) -> None:
+        """on non-Darwin, no fail-fast even when extraction returns None and no creds on disk."""
+        run_calls = [0]
+
+        def fake_run_docker(
+            image: str, port: int, volumes: list[str], extra_env: list[str],
+            bind_port: bool, ralphex_args: list[str], docker_gid: int | None = None, **kwargs: object,
+        ) -> int:
+            run_calls[0] += 1
+            return 0
+
+        captured_stderr = io.StringIO()
+        fake_claude_dir = tempfile.mkdtemp()
+        try:
+            with unittest.mock.patch("sys.stderr", captured_stderr):
+                with unittest.mock.patch("ralphex_dk.platform.system", return_value="Linux"):
+                    with unittest.mock.patch("ralphex_dk.run_docker", side_effect=fake_run_docker):
+                        with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                            sys.argv = ["ralphex-dk", "plan.md"]
+                            os.environ["CLAUDE_CONFIG_DIR"] = fake_claude_dir
+                            try:
+                                result = main()
+                            finally:
+                                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        finally:
+            shutil.rmtree(fake_claude_dir, ignore_errors=True)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(run_calls[0], 1)
 
     def test_startup_message_shows_bedrock_mode(self) -> None:
         """startup output includes 'bedrock' and 'keychain skipped'."""
@@ -2241,6 +2372,7 @@ class TestDryRun(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--dry-run"]
 
@@ -2276,6 +2408,7 @@ class TestDryRun(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--dry-run", "-E", "FOO"]
 
@@ -2300,6 +2433,7 @@ class TestDryRun(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--dry-run", "-E", "FOO=bar"]
 
@@ -2323,6 +2457,7 @@ class TestDryRun(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--dry-run", "-E", "API_KEY=secret123"]
 
@@ -2347,6 +2482,7 @@ class TestDryRun(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             # API_KEY without =value - inherited form, should NOT trigger warning
             sys.argv = ["ralphex-dk", "--dry-run", "-E", "API_KEY"]
@@ -2373,6 +2509,7 @@ class TestDryRun(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--dry-run"]
 
@@ -2448,6 +2585,7 @@ class TestDockerSocketMount(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             argv = ["ralphex-dk"]
             if docker_flag:
@@ -2561,15 +2699,24 @@ class TestDockerSocketMount(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--docker", "plan.md"]
+
+            real_exists = os.path.exists
+
+            def fake_exists(path: object) -> bool:
+                # only intercept socket path lookups, let everything else through
+                if isinstance(path, str) and path.endswith("docker.sock"):
+                    return False
+                return real_exists(path)
 
             with unittest.mock.patch("ralphex_dk.Path.home", return_value=tmp):
                 with unittest.mock.patch("ralphex_dk.os.getcwd", return_value=str(tmp)):
                     with unittest.mock.patch.dict(os.environ, {"PWD": str(tmp)}, clear=False):
                         with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
                             with unittest.mock.patch("ralphex_dk.run_docker", side_effect=lambda *a, **kw: 0):
-                                with unittest.mock.patch("ralphex_dk.os.path.exists", return_value=False):
+                                with unittest.mock.patch("ralphex_dk.os.path.exists", side_effect=fake_exists):
                                     with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
                                         result = main()
 
@@ -2595,6 +2742,7 @@ class TestDockerSocketMount(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--docker", "plan.md"]
 
@@ -2706,6 +2854,7 @@ class TestDockerLinuxWarning(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--docker", "plan.md"]
 
@@ -2772,6 +2921,7 @@ class TestDryRunDocker(EnvTestCase):
             tmp = Path(tmpdir)
             claude_home = tmp / ".claude"
             claude_home.mkdir()
+            (claude_home / ".credentials.json").write_text("{}")
 
             sys.argv = ["ralphex-dk", "--dry-run", "--docker"]
 
