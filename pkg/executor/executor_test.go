@@ -585,6 +585,7 @@ func TestMatchPattern(t *testing.T) {
 		{name: "whitespace in pattern", output: "rate  limit", patterns: []string{"rate  limit"}, want: "rate  limit"},
 		{name: "multiline output", output: "line1\nYou've hit your limit\nline3", patterns: []string{"hit your limit"}, want: "hit your limit"},
 		{name: "api error 500", output: `API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, patterns: []string{"API Error:"}, want: "API Error:"},
+		{name: "not logged in", output: "Not logged in · Please run /login", patterns: []string{"Not logged in"}, want: "Not logged in"},
 	}
 
 	for _, tc := range tests {
@@ -645,6 +646,15 @@ func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
 			wantPattern: "rate limit",
 			wantHelpCmd: "claude /usage",
 			wantOutput:  "rate limit and quota exceeded",
+		},
+		{
+			name:        "not logged in detected as error",
+			output:      "Not logged in \u00b7 Please run /login\n",
+			patterns:    []string{"Not logged in"},
+			wantError:   true,
+			wantPattern: "Not logged in",
+			wantHelpCmd: "claude /usage",
+			wantOutput:  "Not logged in \u00b7 Please run /login\n",
 		},
 	}
 

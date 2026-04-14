@@ -311,7 +311,7 @@ project/
 ### Error Pattern Detection
 
 Configurable patterns detect rate limit and quota errors in claude/codex output:
-- `claude_error_patterns`: comma-separated patterns for claude (default: "You've hit your limit,API Error:,cannot be launched inside another Claude Code session")
+- `claude_error_patterns`: comma-separated patterns for claude (default: "You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in")
 - `codex_error_patterns`: comma-separated patterns for codex (default: "Rate limit,quota exceeded")
 - Matching is case-insensitive substring search
 - Whitespace is trimmed from each pattern

@@ -23,13 +23,13 @@ func FromSlogHandler(h slog.Handler) L {
 // SetupWithSlog sets up the global logger with a slog logger
 func SetupWithSlog(logger *slog.Logger) {
 	options := []Option{SlogHandler(logger.Handler())}
-	
+
 	// check if the slog handler is enabled for debug level
 	// if so, enable debug mode in lgr to prevent filtering
 	if logger.Handler().Enabled(context.Background(), slog.LevelDebug) {
 		options = append(options, Debug)
 	}
-	
+
 	Setup(options...)
 }
 
@@ -59,12 +59,6 @@ func (h *lgrSlogHandler) Handle(_ context.Context, record slog.Record) error {
 	// build message with attributes
 	msg := record.Message
 
-	// add time if record has it, otherwise current time is used by lgr
-	var timeStr string
-	if !record.Time.IsZero() {
-		timeStr = record.Time.Format("2006/01/02 15:04:05.000 ")
-	}
-
 	// format attributes as key=value pairs
 	var attrs strings.Builder
 	if len(h.attrs) > 0 || record.NumAttrs() > 0 {
@@ -82,8 +76,8 @@ func (h *lgrSlogHandler) Handle(_ context.Context, record slog.Record) error {
 		return true
 	})
 
-	// combine everything into final message
-	logMsg := fmt.Sprintf("%s%s %s%s", timeStr, level, msg, attrs.String())
+	// combine level prefix and message; lgr.Logf adds its own timestamp and level formatting
+	logMsg := fmt.Sprintf("%s %s%s", level, msg, attrs.String())
 	h.lgr.Logf(logMsg)
 	return nil
 }

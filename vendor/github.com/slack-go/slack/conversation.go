@@ -29,6 +29,7 @@ type Conversation struct {
 	IsPrivate          bool     `json:"is_private"`
 	IsReadOnly         bool     `json:"is_read_only"`
 	IsMpIM             bool     `json:"is_mpim"`
+	IsUserDeleted      bool     `json:"is_user_deleted"`
 	Unlinked           int      `json:"unlinked"`
 	NameNormalized     string   `json:"name_normalized"`
 	NumMembers         int      `json:"num_members"`
@@ -353,12 +354,14 @@ func (api *Client) InviteUsersToConversationContext(ctx context.Context, channel
 	return response.Channel, response.Err()
 }
 
-// The following functions are for inviting users to a channel but setting the `force`
-// parameter to true. We have added this so that we don't break the existing API.
-//
-// IMPORTANT: If we ever get here for _another_ parameter, we should consider refactoring
-// this to be more flexible.
-//
+/**********************************************************************************
+The following functions are for inviting users to a channel but setting the `force`
+parameter to true. We have added this so that we don't break the existing API.
+
+IMPORTANT: If we ever get here for _another_ parameter, we should consider refactoring
+this to be more flexible.
+*/
+
 // ForceInviteUsersToConversation invites users to a channel but sets the `force`
 // parameter to true.
 //

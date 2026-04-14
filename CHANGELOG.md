@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.26.3 - 2026-04-08
+
+### Improved
+
+- Bump github.com/go-jose/go-jose/v3 from 3.0.4 to 3.0.5 #264 @app/dependabot
+- Update all dependencies 3f4d7d44
+- Document agent fallback behavior in CLAUDE.md and llms.txt 1c898c15
+- Clarify agent customization and disable mechanism in README b4e03548
+
+### Fixed
+
+- Prevent indefinite hang on Windows when child processes hold pipes open #273 @stanurkov
+- Add "Not logged in" to default Claude error patterns #269 @nnemirovsky
+- Case-insensitive path handling for worktree plan commits on macOS #266 @umputun
+
 ## v0.26.2 - 2026-03-31
 
 ### Improved

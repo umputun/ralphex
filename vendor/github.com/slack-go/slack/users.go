@@ -49,6 +49,7 @@ type UserProfile struct {
 	HuddleState             string                              `json:"huddle_state,omitempty"`
 	HuddleStateExpirationTS int                                 `json:"huddle_state_expiration_ts,omitempty"`
 	StartDate               string                              `json:"start_date,omitempty"`
+	GuestInvitedBy          string                              `json:"guest_invited_by,omitempty"`
 	Team                    string                              `json:"team"`
 	Fields                  UserProfileCustomFields             `json:"fields,omitempty"`
 }
@@ -80,7 +81,7 @@ func (fields *UserProfileCustomFields) UnmarshalJSON(b []byte) error {
 // MarshalJSON is the implementation of the json.Marshaler interface.
 func (fields UserProfileCustomFields) MarshalJSON() ([]byte, error) {
 	if len(fields.fields) == 0 {
-		return []byte("[]"), nil
+		return []byte("{}"), nil
 	}
 	return json.Marshal(fields.fields)
 }
@@ -122,6 +123,7 @@ type User struct {
 	ID                     string         `json:"id"`
 	TeamID                 string         `json:"team_id"`
 	Name                   string         `json:"name"`
+	Username               string         `json:"username,omitempty"`
 	Deleted                bool           `json:"deleted"`
 	Color                  string         `json:"color"`
 	RealName               string         `json:"real_name"`
@@ -137,9 +139,11 @@ type User struct {
 	IsUltraRestricted      bool           `json:"is_ultra_restricted"`
 	IsStranger             bool           `json:"is_stranger"`
 	IsAppUser              bool           `json:"is_app_user"`
+	IsConnectorBot         bool           `json:"is_connector_bot"`
+	IsWorkflowBot          bool           `json:"is_workflow_bot"`
 	IsInvitedUser          bool           `json:"is_invited_user"`
 	IsEmailConfirmed       bool           `json:"is_email_confirmed"`
-	Has2FA                 bool           `json:"has_2fa"`
+	Has2FA                 *bool          `json:"has_2fa,omitempty"`
 	TwoFactorType          *string        `json:"two_factor_type"`
 	HasFiles               bool           `json:"has_files"`
 	Presence               string         `json:"presence"`
@@ -178,7 +182,7 @@ type UserIdentity struct {
 }
 
 // EnterpriseUser is present when a user is part of Slack Enterprise Grid
-// https://api.slack.com/types/user#enterprise_grid_user_objects
+// https://docs.slack.dev/reference/objects/user-object/#fields
 type EnterpriseUser struct {
 	ID             string   `json:"id"`
 	EnterpriseID   string   `json:"enterprise_id"`
@@ -602,6 +606,54 @@ func (api *Client) SetUserRealNameContextWithUser(ctx context.Context, user, rea
 	return response.Err()
 }
 
+// SetUserProfile sets the profile for the provided user.
+// For more information see the SetUserProfileContext documentation.
+func (api *Client) SetUserProfile(user string, profile *UserProfile) error {
+	return api.SetUserProfileContext(context.Background(), user, profile)
+}
+
+// SetUserProfileContext sets the profile for the provided user with a custom context.
+//
+// The profile parameter is serialized as-is. Fields present in the JSON (including
+// zero-value fields without an omitempty tag, such as RealName and DisplayName) will
+// be updated by Slack. To avoid unintended changes, retrieve the current profile with
+// GetUserProfile, modify the desired fields, and pass the result.
+//
+// For setting individual fields, prefer the targeted methods: SetUserRealName,
+// SetUserCustomStatus, SetUserCustomFields.
+//
+// If a workspace admin has mapped custom profile fields to standard fields (e.g.
+// title), the custom field takes precedence. Update the custom field via
+// SetUserCustomFields instead.
+//
+// The user parameter is required when setting another user's profile (admin only,
+// paid plans). Pass an empty string to modify the authenticated user's own profile.
+//
+// Slack API docs: https://docs.slack.dev/reference/methods/users.profile.set/
+func (api *Client) SetUserProfileContext(ctx context.Context, user string, profile *UserProfile) error {
+	profileJSON, err := json.Marshal(profile)
+	if err != nil {
+		return err
+	}
+
+	values := url.Values{
+		"token":   {api.token},
+		"profile": {string(profileJSON)},
+	}
+
+	// optional field. It should not be set if empty
+	if user != "" {
+		values["user"] = []string{user}
+	}
+
+	response := &userResponseFull{}
+	if err = api.postMethod(ctx, "users.profile.set", values, response); err != nil {
+		return err
+	}
+
+	return response.Err()
+}
+
 // SetUserCustomFields sets Custom Profile fields on the provided users account.
 // For more information see the SetUserCustomFieldsContext documentation.
 func (api *Client) SetUserCustomFields(userID string, customFields map[string]UserProfileCustomField) error {
@@ -645,7 +697,7 @@ func (api *Client) SetUserCustomFieldsContext(ctx context.Context, userID string
 	}
 
 	response := &userResponseFull{}
-	if err := postForm(ctx, api.httpclient, APIURL+"users.profile.set", values, response, api); err != nil {
+	if _, err := postForm(ctx, api.httpclient, APIURL+"users.profile.set", values, response, api); err != nil {
 		return err
 	}
 
@@ -678,16 +730,16 @@ func (api *Client) SetUserCustomStatusWithUser(user, statusText, statusEmoji str
 //
 // Slack API docs: https://api.slack.com/methods/users.profile.set
 func (api *Client) SetUserCustomStatusContextWithUser(ctx context.Context, user, statusText, statusEmoji string, statusExpiration int64) error {
-	// XXX(theckman): this anonymous struct is for making requests to the Slack
-	// API for setting and unsetting a User's Custom Status/Emoji. To change
-	// these values we must provide a JSON document as the profile POST field.
+	// This anonymous struct is for making requests to the Slack API for setting and
+	// unsetting a User's Custom Status/Emoji. To change these values we must provide a
+	// JSON document as the profile POST field.
 	//
-	// We use an anonymous struct over UserProfile because to unset the values
-	// on the User's profile we cannot use the `json:"omitempty"` tag. This is
-	// because an empty string ("") is what's used to unset the values. Check
-	// out the API docs for more details:
+	// We use an anonymous struct over UserProfile because to unset the values on the
+	// User's profile we cannot use the `json:"omitempty"` tag. This is because an empty
+	// string ("") is what's used to unset the values. Check out the API docs for more
+	// details:
 	//
-	// - https://api.slack.com/docs/presence-and-status#custom_status
+	// - https://docs.slack.dev/apis/web-api/user-presence-and-status/#custom-status
 	profile, err := json.Marshal(
 		&struct {
 			StatusText       string `json:"status_text"`
