@@ -1200,3 +1200,28 @@ func TestClaudeExecutor_Run_PatternInSecondToLastBlock(t *testing.T) {
 	require.ErrorAs(t, result.Error, &limitErr)
 	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
 }
+
+func TestClaudeExecutor_Run_ModelFlag(t *testing.T) {
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`
+
+	var capturedArgs []string
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+			capturedArgs = args
+			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		},
+	}
+
+	t.Run("model set injects --model flag", func(t *testing.T) {
+		e := &ClaudeExecutor{Model: "sonnet", cmdRunner: mock}
+		e.Run(context.Background(), "test")
+		assert.Contains(t, capturedArgs, "--model")
+		assert.Contains(t, capturedArgs, "sonnet")
+	})
+
+	t.Run("model empty does not inject --model flag", func(t *testing.T) {
+		e := &ClaudeExecutor{cmdRunner: mock}
+		e.Run(context.Background(), "test")
+		assert.NotContains(t, capturedArgs, "--model")
+	})
+}

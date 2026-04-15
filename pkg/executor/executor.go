@@ -191,6 +191,7 @@ type streamEvent struct {
 type ClaudeExecutor struct {
 	Command       string            // command to execute, defaults to "claude"
 	Args          string            // additional arguments (space-separated), defaults to standard args
+	Model         string            // model override (e.g., "opus", "sonnet", "haiku"); empty = CLI default
 	OutputHandler func(text string) // called for each text chunk, can be nil
 	Debug         bool              // enable debug output
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
@@ -216,6 +217,10 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 			"--output-format", "stream-json",
 			"--verbose",
 		}
+	}
+	// inject --model flag if a model override is configured
+	if e.Model != "" {
+		args = append(args, "--model", e.Model)
 	}
 	// always append --print to enable non-interactive mode; mirrors old -p flag that was
 	// always appended. wrapper scripts ignore unknown flags via '*) shift ;;' catch-all.

@@ -2171,3 +2171,99 @@ func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {
 	// local should override global completely (not merge)
 	assert.Equal(t, []string{"local pattern"}, values.ClaudeLimitPatterns)
 }
+
+func TestValuesLoader_Load_ClaudeModel(t *testing.T) {
+	t.Run("parse valid value", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`claude_model = sonnet`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "sonnet", values.ClaudeModel)
+	})
+
+	t.Run("not set defaults to empty", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Empty(t, values.ClaudeModel)
+	})
+
+	t.Run("full model ID accepted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`claude_model = claude-sonnet-4-5-20250929`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "claude-sonnet-4-5-20250929", values.ClaudeModel)
+	})
+}
+
+func TestValuesLoader_Load_ReviewModel(t *testing.T) {
+	t.Run("parse valid value", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`review_model = haiku`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "haiku", values.ReviewModel)
+	})
+
+	t.Run("not set defaults to empty", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Empty(t, values.ReviewModel)
+	})
+}
+
+func TestValues_mergeFrom_ClaudeModel(t *testing.T) {
+	t.Run("non-empty overrides", func(t *testing.T) {
+		dst := Values{ClaudeModel: ""}
+		src := Values{ClaudeModel: "opus"}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "opus", dst.ClaudeModel)
+	})
+
+	t.Run("empty preserves existing", func(t *testing.T) {
+		dst := Values{ClaudeModel: "opus"}
+		src := Values{ClaudeModel: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "opus", dst.ClaudeModel)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`claude_model = opus`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`claude_model = haiku`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, "haiku", values.ClaudeModel)
+	})
+}
+
+func TestValues_mergeFrom_ReviewModel(t *testing.T) {
+	t.Run("non-empty overrides", func(t *testing.T) {
+		dst := Values{ReviewModel: ""}
+		src := Values{ReviewModel: "sonnet"}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "sonnet", dst.ReviewModel)
+	})
+
+	t.Run("empty preserves existing", func(t *testing.T) {
+		dst := Values{ReviewModel: "sonnet"}
+		src := Values{ReviewModel: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "sonnet", dst.ReviewModel)
+	})
+}

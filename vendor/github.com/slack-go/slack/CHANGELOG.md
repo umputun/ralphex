@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-04-12
+
+### Added
+
+- Added missing parameters to `assistant.search.context` (`Sort`, `SortDir`, `Before`,
+  `After`, `Highlight`, `IncludeContextMessages`, `IncludeDeletedUsers`,
+  `IncludeMessageBlocks`, `IncludeArchivedChannels`, `DisableSemanticSearch`, `Modifiers`,
+  `TermClauses`) and new response types (`AssistantSearchContextFile`,
+  `AssistantSearchContextChannel`, `AssistantSearchContextMessageContext`) to match the
+  full Real-Time Search API surface.
+- Added `Underline`, `Highlight`, `ClientHighlight`, and `Unlink` fields to
+  `RichTextSectionTextStyle`. Added `Style` field to `RichTextSectionUserGroupElement`.
+- Added `BotOptional` and `UserOptional` fields to `OAuthScopes` for app manifests.
+- Added PKCE support for OAuth: `OAuthOptionCodeVerifier` option for
+  `GetOAuthV2Response`, `GenerateCodeVerifier()` and `GenerateCodeChallenge()`
+  helper functions (RFC 7636). `client_secret` is now conditionally omitted when
+  empty in both `GetOAuthV2ResponseContext` and `RefreshOAuthV2TokenContext`.
+
+### Fixed
+
+- `ChannelTypes` and `ContentTypes` now send comma-separated values instead of repeated
+  form keys, matching the convention used by every other method in the library.
+- In `socketmode` malformed JSON messages no longer force an unnecessary reconnect.
+  Instead the error is emitted and the connection continues as normal.
+
 ## [0.21.1] - 2026-04-08
 
 ### Added
@@ -489,7 +514,8 @@ for details.
 [#1196]: https://github.com/slack-go/slack/issues/1196
 [#1547]: https://github.com/slack-go/slack/pull/1547
 
-[Unreleased]: https://github.com/slack-go/slack/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/slack-go/slack/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/slack-go/slack/compare/v0.21.1...0.22.0
 [0.21.1]: https://github.com/slack-go/slack/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/slack-go/slack/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/slack-go/slack/compare/v0.19.0...v0.20.0
