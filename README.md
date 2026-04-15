@@ -950,6 +950,7 @@ claude_args =
 
 Authenticate with `copilot login` or set one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`. Set `COPILOT_MODEL` to choose the model.
 The wrapper runs Copilot in native autopilot mode with `--autopilot --no-ask-user --allow-all` so task and review phases can continue across multiple model turns without manual intervention.
+For ralphex plan creation, it switches to `--autopilot --allow-all` so clarification can surface through `<<<RALPHEX:QUESTION>>>` signals instead of being suppressed by the unattended question path.
 
 To use the included codex wrapper:
 
@@ -1110,6 +1111,7 @@ claude_args =
 
 For Copilot, authenticate with `copilot login` or one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`, and set `COPILOT_MODEL` if you want to override the default model.
 The included Copilot wrapper runs Copilot in native autopilot mode with `--autopilot --no-ask-user --allow-all` for unattended task and review execution.
+For ralphex plan creation, it switches to `--autopilot --allow-all` so clarification can surface through `<<<RALPHEX:QUESTION>>>` signals instead of being suppressed by the unattended question path.
 
 Codex works the same way through its wrapper:
 

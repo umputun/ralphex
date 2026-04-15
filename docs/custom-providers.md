@@ -127,6 +127,8 @@ The wrapper uses Copilot's native autonomy flags: `--autopilot --no-ask-user --a
 - `--no-ask-user` prevents Copilot from pausing the run with follow-up questions
 - `--allow-all` enables tool, path, and URL permissions together, matching ralphex's unattended task/review model
 
+For ralphex plan creation, the wrapper instead uses `--autopilot --allow-all` and intentionally leaves off `--no-ask-user`. Plan mode is supposed to surface clarification through `<<<RALPHEX:QUESTION>>>` signals, so the wrapper avoids the unattended question-suppression path and instructs Copilot to use signal-based questions instead of the native `ask_user` tool. It intentionally avoids Copilot's native `--mode plan`, because that tended to re-draft after user acceptance instead of writing the accepted plan and emitting `PLAN_READY`.
+
 GitHub's programmatic autopilot guidance uses the same core pattern: "Use the `--allow-all` (or `--yolo`) option" together with `--autopilot`, optionally adding `--max-autopilot-continues` for a safety cap in CI or scripts.
 
 If you need a narrower policy, fork the wrapper and replace `--allow-all` with explicit `--allow-tool`, `--allow-url`, or related permission flags.
@@ -135,7 +137,7 @@ If you need a narrower policy, fork the wrapper and replace `--allow-all` with e
 
 | Wrapper | Transport | Permissions | Copilot-specific difference |
 |---|---|---|---|
-| Codex | Native JSONL | Codex sandbox/env flags | Copilot uses native `--autopilot`/`--allow-all`/`--no-ask-user` instead of Codex sandbox settings, and adds a review adapter for Claude Task-tool wording |
+| Codex | Native JSONL | Codex sandbox/env flags | Copilot uses native `--autopilot`/`--allow-all`/`--no-ask-user` for task/review runs, switches to `--autopilot --allow-all` for plan creation, and adds adapters for Claude Task-tool wording plus signal-based plan questions |
 | OpenCode | Native JSONL | Merges `OPENCODE_CONFIG_CONTENT` with auto-allow permissions | Copilot uses built-in permission flags rather than JSON config merging |
 | Gemini | Plain text | Gemini CLI settings outside the wrapper | Copilot streams structured JSONL events, so the wrapper can emit completed assistant messages and terminal events without scraping plain text lines |
 

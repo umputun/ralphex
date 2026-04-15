@@ -139,7 +139,7 @@ Note: default Claude flags may still be passed due to config fallback; wrappers 
 Env vars:
 - Codex: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE`
 - Copilot: `COPILOT_MODEL`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`
-Copilot wrapper behavior: runs `copilot` in native autopilot mode with `--autopilot --no-ask-user --allow-all` for unattended task/review phases.
+Copilot wrapper behavior: runs `copilot` in native autopilot mode with `--autopilot --no-ask-user --allow-all` for unattended task/review phases; plan runs switch to `--autopilot --allow-all` so `QUESTION` signals can surface clarifications without native question suppression.
 Documentation: `docs/custom-providers.md`
 
 ### AWS Bedrock Provider (Docker Wrapper Only)

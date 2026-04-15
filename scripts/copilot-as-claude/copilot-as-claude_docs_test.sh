@@ -72,6 +72,10 @@ assert_contains \
     "wrapper README documents Copilot autopilot mode"
 assert_contains \
     "$REPO_ROOT/scripts/copilot-as-claude/README.md" \
+    "--autopilot --allow-all" \
+    "wrapper README documents Copilot plan-mode behavior"
+assert_contains \
+    "$REPO_ROOT/scripts/copilot-as-claude/README.md" \
     "bash scripts/copilot-as-claude/copilot-as-claude_test.sh" \
     "wrapper README includes wrapper test command"
 
@@ -87,6 +91,10 @@ assert_contains \
     "$REPO_ROOT/docs/custom-providers.md" \
     "--autopilot --no-ask-user --allow-all" \
     "custom providers doc explains Copilot autopilot strategy"
+assert_contains \
+    "$REPO_ROOT/docs/custom-providers.md" \
+    "--autopilot --allow-all" \
+    "custom providers doc explains Copilot plan-mode strategy"
 assert_contains \
     "$REPO_ROOT/docs/custom-providers.md" \
     'Use the `--allow-all` (or `--yolo`) option' \
@@ -118,6 +126,10 @@ assert_contains \
     "top-level README documents Copilot autopilot behavior"
 assert_contains \
     "$REPO_ROOT/README.md" \
+    "--autopilot --allow-all" \
+    "top-level README documents Copilot plan-mode behavior"
+assert_contains \
+    "$REPO_ROOT/README.md" \
     "The included Codex and Copilot wrappers require \`jq\` on \`PATH\` for JSON translation." \
     "top-level README documents jq requirement for included wrappers"
 assert_contains \
@@ -136,6 +148,10 @@ assert_contains \
     "$REPO_ROOT/CLAUDE.md" \
     "native autopilot mode" \
     "CLAUDE alternative provider docs mention Copilot autopilot mode"
+assert_contains \
+    "$REPO_ROOT/CLAUDE.md" \
+    "--autopilot --allow-all" \
+    "CLAUDE alternative provider docs mention Copilot plan-mode behavior"
 assert_contains \
     "$REPO_ROOT/README.md" \
     "wraps GitHub Copilot CLI" \

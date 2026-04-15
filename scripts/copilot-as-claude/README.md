@@ -1,6 +1,6 @@
 # copilot-as-claude
 
-Wraps GitHub Copilot CLI to produce Claude-compatible `stream-json` output, allowing Copilot to replace Claude Code in ralphex task and review phases through the existing `claude_command` / `claude_args` path.
+Wraps GitHub Copilot CLI to produce Claude-compatible `stream-json` output, allowing Copilot to replace Claude Code in ralphex task, review, and plan phases through the existing `claude_command` / `claude_args` path.
 
 The wrapper emits completed assistant messages rather than token deltas, which keeps task and review output readable in the ralphex progress log.
 
@@ -52,6 +52,8 @@ Classic personal access tokens (`ghp_`) are not supported by the Copilot CLI.
 ## Permission model
 
 The wrapper runs Copilot with `--autopilot --no-ask-user --allow-all` so task and review phases can complete unattended across multiple model turns. `--autopilot` is Copilot's native hands-off mode for programmatic runs, `--no-ask-user` suppresses follow-up questions, and `--allow-all` enables tool, path, and URL permissions together.
+
+For ralphex plan creation, the wrapper switches to `--autopilot --allow-all` and intentionally omits `--no-ask-user`. Plan prompts in ralphex are supposed to surface clarification through `<<<RALPHEX:QUESTION>>>` signals, so the wrapper avoids the unattended question-suppression path and tells Copilot to use signal-based questions instead of the native `ask_user` tool. The wrapper intentionally does not use Copilot's native `--mode plan`, because that tended to re-draft after user acceptance instead of writing the accepted plan and emitting `PLAN_READY`.
 
 If you need a more restrictive policy, copy the wrapper and replace `--allow-all` with explicit `--allow-tool`, `--allow-url`, or related permission flags.
 
