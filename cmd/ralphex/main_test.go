@@ -42,12 +42,20 @@ func testColors() *progress.Colors {
 	})
 }
 
-// skipIfClaudeNotAvailable skips tests that rely on the default claude executable.
-// these tests run with isolated temp config dirs, so ambient user/local config must not affect the check.
+// skipIfClaudeNotAvailable loads config (read-only) and skips test if configured claude command is not in PATH.
+// uses LoadReadOnly to avoid installing defaults to real user config directory during tests.
 func skipIfClaudeNotAvailable(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("claude"); err != nil {
-		t.Skip("claude not installed")
+	cfg, err := config.LoadReadOnly("")
+	if err != nil {
+		t.Skipf("failed to load config: %v", err)
+	}
+	claudeCmd := cfg.ClaudeCommand
+	if claudeCmd == "" {
+		claudeCmd = "claude"
+	}
+	if _, err := exec.LookPath(claudeCmd); err != nil {
+		t.Skipf("%s not installed", claudeCmd)
 	}
 }
 
