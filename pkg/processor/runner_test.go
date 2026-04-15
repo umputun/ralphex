@@ -2851,7 +2851,7 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 }
 
 func TestRunner_PostCodexReview_SkippedWhenNoFindings(t *testing.T) {
-	t.Run("codex done on first iteration skips post-codex review", func(t *testing.T) {
+	t.Run("codex dismisses all findings on first iteration skips post-codex review", func(t *testing.T) {
 		log := newMockLogger("progress.txt")
 		// codex finds something, but claude eval says "no actionable findings" → CodexDone on first iter
 		claude := newMockExecutor([]executor.Result{

@@ -730,8 +730,8 @@ type externalReviewConfig struct {
 // runExternalReviewLoop runs a generic external review tool-claude loop.
 // it terminates when no findings remain, max iterations are reached,
 // stalemate is detected (review patience), or a manual break is requested.
-// returns true if findings were found (i.e., the loop ran more than one iteration or
-// the first iteration produced findings that needed fixing).
+// returns true if findings were found, meaning claude evaluated external review output
+// and did not signal CodexDone (i.e., there were actionable issues requiring fixes).
 func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewConfig) (bool, error) {
 	maxIterations := max(minCodexIterations, r.cfg.MaxIterations/codexIterationDivisor)
 	if r.cfg.MaxExternalIterations > 0 {
