@@ -93,19 +93,24 @@ func TestRunner_RunFull_Success(t *testing.T) {
 		{Output: "task done", Signal: status.Completed},    // task phase completes
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "done", Signal: status.CodexDone},         // codex evaluation
+		{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
+		{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
 		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue in foo.go"}, // codex finds issues
+		{Output: "found issue in foo.go"}, // codex iteration 1 — finds issues
+		{Output: "no issues found"},       // codex iteration 2 — clean
 	})
 
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	cfg := processor.Config{
+		Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 50,
+		IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t),
+	}
 	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 1)
+	assert.Len(t, codex.RunCalls(), 2)
 }
 
 func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
@@ -118,7 +123,7 @@ func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 		{Output: "task done", Signal: status.Completed},
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+		// codex returns empty → no findings → post-codex review skipped
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: ""}, // codex finds nothing
@@ -136,44 +141,47 @@ func TestRunner_RunReviewOnly_Success(t *testing.T) {
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "done", Signal: status.CodexDone},         // codex evaluation
+		{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
+		{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
 		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue"},
+		{Output: "found issue"},     // codex iteration 1
+		{Output: "no issues found"}, // codex iteration 2
 	})
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 1)
+	assert.Len(t, codex.RunCalls(), 2)
 }
 
 func TestRunner_RunCodexOnly_Success(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: status.CodexDone},         // codex evaluation
+		{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
+		{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
 		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 	})
 	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue"},
+		{Output: "found issue"},     // codex iteration 1
+		{Output: "no issues found"}, // codex iteration 2
 	})
 
-	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
 	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 1)
+	assert.Len(t, codex.RunCalls(), 2)
 }
 
 func TestRunner_RunCodexOnly_NoFindings(t *testing.T) {
 	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
-	})
+	// codex returns empty → no findings → post-codex review skipped
+	claude := newMockExecutor(nil)
 	codex := newMockExecutor([]executor.Result{
 		{Output: ""}, // no findings
 	})
@@ -237,9 +245,8 @@ func TestRunner_MaxExternalIterations_DerivedFormula(t *testing.T) {
 
 func TestRunner_CodexDisabled_SkipsCodexPhase(t *testing.T) {
 	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
-	})
+	// codex disabled → no findings → post-codex review skipped
+	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
 	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
@@ -1394,8 +1401,8 @@ func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
 		{Output: "task done", Signal: status.Completed},    // task phase
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "finalize done"},                          // finalize step
+		// codex disabled → no findings → post-codex review skipped
+		{Output: "finalize done"}, // finalize step
 	})
 	codex := newMockExecutor(nil)
 
@@ -1411,8 +1418,8 @@ func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	// verify finalize step ran (5 claude calls total)
-	assert.Len(t, claude.RunCalls(), 5)
+	// verify finalize step ran (4 claude calls: task + first review + pre-codex loop + finalize)
+	assert.Len(t, claude.RunCalls(), 4)
 
 	// verify finalize section was printed
 	var foundFinalizeSection bool
@@ -1435,7 +1442,7 @@ func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
 		{Output: "task done", Signal: status.Completed},    // task phase
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
+		// codex disabled → no findings → post-codex review skipped
 	})
 	codex := newMockExecutor(nil)
 
@@ -1451,8 +1458,8 @@ func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	// verify finalize step did NOT run (only 4 claude calls)
-	assert.Len(t, claude.RunCalls(), 4)
+	// verify finalize step did NOT run (only 3 claude calls: task + first review + pre-codex loop)
+	assert.Len(t, claude.RunCalls(), 3)
 }
 
 func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
@@ -1465,8 +1472,8 @@ func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
 		{Output: "task done", Signal: status.Completed},    // task phase
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
-		{Error: errors.New("finalize error")},              // finalize fails
+		// codex disabled → no findings → post-codex review skipped
+		{Error: errors.New("finalize error")}, // finalize fails
 	})
 	codex := newMockExecutor(nil)
 
@@ -1505,8 +1512,8 @@ func TestRunner_Finalize_FailedSignalDoesNotBlockSuccess(t *testing.T) {
 		{Output: "task done", Signal: status.Completed},    // task phase
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "failed", Signal: status.Failed},          // finalize reports FAILED signal
+		// codex disabled → no findings → post-codex review skipped
+		{Output: "failed", Signal: status.Failed}, // finalize reports FAILED signal
 	})
 	codex := newMockExecutor(nil)
 
@@ -1540,8 +1547,8 @@ func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "finalize done"},                          // finalize step
+		// codex disabled → no findings → post-codex review skipped
+		{Output: "finalize done"}, // finalize step
 	})
 	codex := newMockExecutor(nil)
 
@@ -1556,15 +1563,15 @@ func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	// verify finalize ran (4 claude calls total)
-	assert.Len(t, claude.RunCalls(), 4)
+	// verify finalize ran (3 claude calls: first review + pre-codex loop + finalize)
+	assert.Len(t, claude.RunCalls(), 3)
 }
 
 func TestRunner_Finalize_RunsInCodexOnlyMode(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
-		{Output: "finalize done"},                          // finalize step
+		// codex disabled → no findings → post-codex review skipped
+		{Output: "finalize done"}, // finalize step
 	})
 	codex := newMockExecutor(nil)
 
@@ -1579,8 +1586,8 @@ func TestRunner_Finalize_RunsInCodexOnlyMode(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	// verify finalize ran (2 claude calls total)
-	assert.Len(t, claude.RunCalls(), 2)
+	// verify finalize ran (1 claude call: finalize only)
+	assert.Len(t, claude.RunCalls(), 1)
 }
 
 func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
@@ -1598,16 +1605,23 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 			name: "codex-only runs codex then review then finalize",
 			mode: processor.ModeCodexOnly,
 			claudeResults: []executor.Result{
-				{Output: "done", Signal: status.CodexDone},         // codex evaluation
+				{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
+				{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
 				{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 				{Output: "finalize done"},                          // finalize step
 			},
 			codexResults: []executor.Result{
-				{Output: "found issue"},
+				{Output: "found issue"},     // codex iteration 1
+				{Output: "no issues found"}, // codex iteration 2
 			},
-			expClaude: 3,
-			expCodex:  1,
-			expPhases: []status.Phase{status.PhaseCodex, status.PhaseClaudeEval, status.PhaseCodex, status.PhaseReview, status.PhaseFinalize},
+			expClaude: 4,
+			expCodex:  2,
+			expPhases: []status.Phase{
+				status.PhaseCodex,                         // initial codex phase
+				status.PhaseClaudeEval, status.PhaseCodex, // iter 1 eval+restore
+				status.PhaseClaudeEval, status.PhaseCodex, // iter 2 eval+restore
+				status.PhaseReview, status.PhaseFinalize,
+			},
 		},
 		{
 			name: "review-only runs first review then codex then review then finalize",
@@ -1615,18 +1629,26 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 			claudeResults: []executor.Result{
 				{Output: "review done", Signal: status.ReviewDone}, // first review
 				{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-				{Output: "done", Signal: status.CodexDone},         // codex evaluation
+				{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
+				{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
 				{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
 				{Output: "finalize done"},                          // finalize step
 			},
 			codexResults: []executor.Result{
-				{Output: "found issue"},
+				{Output: "found issue"},     // codex iteration 1
+				{Output: "no issues found"}, // codex iteration 2
 			},
-			expClaude: 5,
-			expCodex:  1,
+			expClaude: 6,
+			expCodex:  2,
 			// review phase set once at start (covers first review + pre-codex loop),
-			// then codex → claude-eval → codex (within codex loop), then review, then finalize
-			expPhases: []status.Phase{status.PhaseReview, status.PhaseCodex, status.PhaseClaudeEval, status.PhaseCodex, status.PhaseReview, status.PhaseFinalize},
+			// then codex loop (2 iterations), then review, then finalize
+			expPhases: []status.Phase{
+				status.PhaseReview,                        // first review + pre-codex loop
+				status.PhaseCodex,                         // initial codex phase
+				status.PhaseClaudeEval, status.PhaseCodex, // iter 1 eval+restore
+				status.PhaseClaudeEval, status.PhaseCodex, // iter 2 eval+restore
+				status.PhaseReview, status.PhaseFinalize,
+			},
 		},
 	}
 
@@ -1653,6 +1675,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 				Mode:            tc.mode,
 				PlanFile:        planFile,
 				MaxIterations:   50,
+				IterationDelayMs: 1,
 				CodexEnabled:    true,
 				FinalizeEnabled: true,
 				AppConfig:       testAppConfig(t),
@@ -1669,7 +1692,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 }
 
 func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
-	t.Run("prefix applied when external review enabled", func(t *testing.T) {
+	t.Run("prefix applied when external review had findings", func(t *testing.T) {
 		log := newMockLogger("progress.txt")
 
 		var capturedPrompts []string
@@ -1677,37 +1700,40 @@ func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
 			RunFunc: func(_ context.Context, prompt string) executor.Result {
 				capturedPrompts = append(capturedPrompts, prompt)
 				switch len(capturedPrompts) {
-				case 1: // codex evaluation
+				case 1: // codex eval iter 1 — findings fixed
+					return executor.Result{Output: "fixed issues"}
+				case 2: // codex eval iter 2 — no more findings
 					return executor.Result{Output: "done", Signal: status.CodexDone}
-				case 2: // post-codex review loop
+				case 3: // post-codex review loop
 					return executor.Result{Output: "review done", Signal: status.ReviewDone}
 				default:
 					return executor.Result{Error: errors.New("unexpected call")}
 				}
 			},
 		}
-		codex := newMockExecutor([]executor.Result{{Output: "found issue"}})
+		codex := newMockExecutor([]executor.Result{
+			{Output: "found issue"},     // codex iteration 1
+			{Output: "no issues found"}, // codex iteration 2
+		})
 
-		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+		cfg := processor.Config{
+			Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
+			CodexEnabled: true, AppConfig: testAppConfig(t),
+		}
 		r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
 		err := r.Run(t.Context())
 
 		require.NoError(t, err)
-		require.Len(t, capturedPrompts, 2)
-		assert.Contains(t, capturedPrompts[1], "IMPORTANT: Before starting the review, run `git status`")
-		assert.Contains(t, capturedPrompts[1], "fix: address code review findings")
+		require.Len(t, capturedPrompts, 3)
+		assert.Contains(t, capturedPrompts[2], "IMPORTANT: Before starting the review, run `git status`")
+		assert.Contains(t, capturedPrompts[2], "fix: address code review findings")
 	})
 
 	t.Run("no prefix when external review disabled", func(t *testing.T) {
 		log := newMockLogger("progress.txt")
 
-		var capturedPrompts []string
-		claude := &mocks.ExecutorMock{
-			RunFunc: func(_ context.Context, prompt string) executor.Result {
-				capturedPrompts = append(capturedPrompts, prompt)
-				return executor.Result{Output: "review done", Signal: status.ReviewDone}
-			},
-		}
+		// codex disabled → no findings → post-codex review skipped → claude not called
+		claude := newMockExecutor(nil)
 		codex := newMockExecutor(nil)
 
 		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
@@ -1715,8 +1741,7 @@ func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
 		err := r.Run(t.Context())
 
 		require.NoError(t, err)
-		require.Len(t, capturedPrompts, 1)
-		assert.NotContains(t, capturedPrompts[0], "IMPORTANT: Before starting the review, run `git status`")
+		assert.Empty(t, claude.RunCalls(), "claude should not be called when codex disabled")
 	})
 }
 
@@ -1725,8 +1750,8 @@ func TestRunner_Finalize_ContextCancellationPropagates(t *testing.T) {
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop (codex disabled)
-		{Error: context.Canceled},                          // finalize step - context canceled
+		// codex disabled → no findings → post-codex review skipped
+		{Error: context.Canceled}, // finalize step - context canceled
 	})
 	codex := newMockExecutor(nil)
 
@@ -1748,8 +1773,7 @@ func TestRunner_Finalize_ContextCancellationPropagates(t *testing.T) {
 func TestRunner_ExternalReviewTool_CodexEnabled(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone},         // codex evaluation
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "done", Signal: processor.SignalCodexDone}, // codex evaluation (no findings → post-codex review skipped)
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: "found issue"},
@@ -1774,9 +1798,8 @@ func TestRunner_ExternalReviewTool_CodexEnabled(t *testing.T) {
 
 func TestRunner_ExternalReviewTool_None(t *testing.T) {
 	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
-	})
+	// external review tool=none → no findings → post-codex review skipped
+	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
 	appCfg := testAppConfig(t)
@@ -1797,9 +1820,8 @@ func TestRunner_ExternalReviewTool_None(t *testing.T) {
 
 func TestRunner_ExternalReviewTool_BackwardCompat_CodexDisabled(t *testing.T) {
 	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
-	})
+	// codex disabled → no findings → post-codex review skipped
+	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
 	appCfg := testAppConfig(t)
@@ -1822,8 +1844,7 @@ func TestRunner_ExternalReviewTool_BackwardCompat_CodexDisabled(t *testing.T) {
 func TestRunner_ExternalReviewTool_Custom_Success(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone},         // custom evaluation
-		{Output: "review done", Signal: processor.SignalReviewDone}, // post-codex review loop
+		{Output: "done", Signal: processor.SignalCodexDone}, // custom evaluation (no findings → post-codex review skipped)
 	})
 	codex := newMockExecutor(nil)
 
@@ -1862,7 +1883,7 @@ func TestRunner_ExternalReviewTool_Custom_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, codex.RunCalls(), "codex should not be called when external_review_tool=custom")
-	assert.Len(t, claude.RunCalls(), 2, "claude should be called for evaluation and post-review")
+	assert.Len(t, claude.RunCalls(), 1, "claude should be called for evaluation only (no findings → post-codex review skipped)")
 }
 
 func TestRunner_ExternalReviewTool_Custom_NoDuplicateOutput(t *testing.T) {
@@ -1871,8 +1892,7 @@ func TestRunner_ExternalReviewTool_Custom_NoDuplicateOutput(t *testing.T) {
 	log.PrintAlignedFunc = func(text string) { printAlignedCalls = append(printAlignedCalls, text) }
 
 	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone},
-		{Output: "review done", Signal: processor.SignalReviewDone},
+		{Output: "done", Signal: processor.SignalCodexDone}, // no findings → post-codex review skipped
 	})
 	codex := newMockExecutor(nil)
 
@@ -1947,11 +1967,10 @@ func (m *mockCustomRunnerImpl) Run(_ context.Context, _, _ string) (io.Reader, f
 func TestRunner_ReviewLoop_NoCommitExit(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
-		{Output: "looked at code, nothing to fix"},         // post-codex review loop iteration - no signal
+		{Output: "looked at code, nothing to fix"},         // pre-codex review loop iteration - no signal
 	})
 	codex := newMockExecutor(nil)
 
@@ -1967,7 +1986,7 @@ func TestRunner_ReviewLoop_NoCommitExit(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 3)
+	assert.Len(t, claude.RunCalls(), 2)
 
 	// verify "no changes detected" was logged
 	var foundNoChanges bool
@@ -1983,22 +2002,20 @@ func TestRunner_ReviewLoop_NoCommitExit(t *testing.T) {
 func TestRunner_ReviewLoop_CommitDetected_ContinuesLoop(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
-		{Output: "fixed issues"},                           // post-codex review loop iteration 1 - no signal
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop iteration 2 - done
+		{Output: "fixed issues"},                           // pre-codex review loop iteration 1 - no signal
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop iteration 2 - done
 	})
 	codex := newMockExecutor(nil)
 
 	// mock git checker: hash changes between before/after calls within an iteration
 	// simulating that claude made a commit during the review
 	hashes := []string{
-		"aaaa00000000000000000000000000000000aaaa", // pre-codex loop: headBefore (REVIEW_DONE exits before headAfter)
-		"aaaa00000000000000000000000000000000aaaa", // post-codex loop iter 1: headBefore
-		"bbbb00000000000000000000000000000000bbbb", // post-codex loop iter 1: headAfter (different = commit detected)
-		"bbbb00000000000000000000000000000000bbbb", // post-codex loop iter 2: headBefore (REVIEW_DONE exits)
+		"aaaa00000000000000000000000000000000aaaa", // pre-codex loop iter 1: headBefore
+		"bbbb00000000000000000000000000000000bbbb", // pre-codex loop iter 1: headAfter (different = commit detected)
+		"bbbb00000000000000000000000000000000bbbb", // pre-codex loop iter 2: headBefore (REVIEW_DONE exits)
 	}
 	hashIdx := 0
 	gitMock := &mocks.GitCheckerMock{
@@ -2017,21 +2034,20 @@ func TestRunner_ReviewLoop_CommitDetected_ContinuesLoop(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 4)
-	assert.Len(t, gitMock.HeadHashCalls(), 4, "expected exactly 4 HeadHash calls")
+	assert.Len(t, claude.RunCalls(), 3)
+	assert.Len(t, gitMock.HeadHashCalls(), 3, "expected exactly 3 HeadHash calls")
 }
 
 func TestRunner_ReviewLoop_GitCheckerNil_SkipsNoCommitCheck(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
 	// max review iterations = max(3, 30/10) = 3 per loop
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
-		{Output: "looking at code"},                        // post-codex review loop 1
-		{Output: "looking at code"},                        // post-codex review loop 2
-		{Output: "looking at code"},                        // post-codex review loop 3
+		{Output: "looking at code"},                        // pre-codex review loop 1
+		{Output: "looking at code"},                        // pre-codex review loop 2
+		{Output: "looking at code"},                        // pre-codex review loop 3
 	})
 	codex := newMockExecutor(nil)
 
@@ -2041,21 +2057,20 @@ func TestRunner_ReviewLoop_GitCheckerNil_SkipsNoCommitCheck(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	// first review + pre-codex loop (1 iteration) + post-codex loop (3 iterations, max reached)
-	assert.Len(t, claude.RunCalls(), 5)
+	// first review + pre-codex loop (3 iterations, max reached)
+	assert.Len(t, claude.RunCalls(), 4)
 }
 
 func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled) → post-codex review loop
+	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
 	// max review iterations = max(3, 30/10) = 3 per loop
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop (exits immediately)
-		{Output: "looking at code"},                        // post-codex review loop 1
-		{Output: "looking at code"},                        // post-codex review loop 2
-		{Output: "looking at code"},                        // post-codex review loop 3
+		{Output: "looking at code"},                        // pre-codex review loop 1
+		{Output: "looking at code"},                        // pre-codex review loop 2
+		{Output: "looking at code"},                        // pre-codex review loop 3
 	})
 	codex := newMockExecutor(nil)
 
@@ -2071,8 +2086,8 @@ func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	// first review + pre-codex loop (1 iteration) + post-codex loop (3 iterations, max reached)
-	assert.Len(t, claude.RunCalls(), 5)
+	// first review + pre-codex loop (3 iterations, max reached)
+	assert.Len(t, claude.RunCalls(), 4)
 }
 
 // TestRunner_SleepWithContext_CancelDuringDelay verifies that context cancellation
@@ -2434,11 +2449,8 @@ func TestRunner_Finalize_LimitPatternWithWaitRetries(t *testing.T) {
 	claude := &mocks.ExecutorMock{
 		RunFunc: func(_ context.Context, _ string) executor.Result {
 			callCount++
+			// codex disabled → no findings → post-codex review skipped → finalize is first call
 			if callCount == 1 {
-				// first call during finalize: codex review loop (returns ReviewDone)
-				return executor.Result{Output: "review done", Signal: status.ReviewDone}
-			}
-			if callCount == 2 {
 				// finalize: limit error on first attempt
 				return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
 			}
@@ -2463,7 +2475,7 @@ func TestRunner_Finalize_LimitPatternWithWaitRetries(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	assert.Equal(t, 3, callCount, "should retry finalize after limit error")
+	assert.Equal(t, 2, callCount, "should retry finalize after limit error")
 }
 
 func TestRunner_Finalize_LimitPatternWithoutWaitLogsAndContinues(t *testing.T) {
@@ -2473,9 +2485,7 @@ func TestRunner_Finalize_LimitPatternWithoutWaitLogsAndContinues(t *testing.T) {
 	claude := &mocks.ExecutorMock{
 		RunFunc: func(_ context.Context, _ string) executor.Result {
 			callCount++
-			if callCount == 1 {
-				return executor.Result{Output: "review done", Signal: status.ReviewDone}
-			}
+			// codex disabled → no findings → post-codex review skipped → finalize is first call
 			// finalize: limit error, no wait configured
 			return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
 		},
@@ -2493,7 +2503,7 @@ func TestRunner_Finalize_LimitPatternWithoutWaitLogsAndContinues(t *testing.T) {
 	err := r.Run(t.Context())
 
 	require.NoError(t, err, "finalize limit error should not block success (best-effort)")
-	assert.Equal(t, 2, callCount, "should not retry when wait is zero")
+	assert.Equal(t, 1, callCount, "should not retry when wait is zero")
 
 	// verify limit log message (handlePatternMatchError logs "error: detected %q in %s output")
 	var foundLog bool
@@ -2766,14 +2776,10 @@ func TestRunner_ExternalReviewLoop_BreakChannel_ExitsEarly(t *testing.T) {
 	log := newMockLogger("progress.txt")
 
 	// break channel receives a value during codex execution, causing context cancellation.
-	// codex-only flow: codex run (break fires) → loop exits → post-codex claude review.
+	// codex-only flow: codex run (break fires) → loop exits → no findings → post-codex review skipped.
 	breakCh := make(chan struct{}, 1)
 
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(_ context.Context, _ string) executor.Result {
-			return executor.Result{Output: "done", Signal: status.ReviewDone}
-		},
-	}
+	claude := newMockExecutor(nil) // not called (break before eval, no findings)
 	codex := &mocks.ExecutorMock{
 		RunFunc: func(ctx context.Context, _ string) executor.Result {
 			breakCh <- struct{}{} // trigger break during codex execution
@@ -2795,8 +2801,8 @@ func TestRunner_ExternalReviewLoop_BreakChannel_ExitsEarly(t *testing.T) {
 	// codex called once (interrupted by break)
 	assert.Len(t, codex.RunCalls(), 1, "codex should run once before break interrupts it")
 
-	// claude called once for post-codex review (after break exits external loop)
-	assert.Len(t, claude.RunCalls(), 1, "claude should be called once for post-codex review")
+	// claude not called — break before eval, no findings, post-codex review skipped
+	assert.Empty(t, claude.RunCalls(), "claude should not be called when break fires before any eval")
 
 	// verify break log message
 	var foundBreak bool
@@ -2814,8 +2820,7 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 
 	// nil break channel: loop runs to completion based on CodexDone signal
 	claude := newMockExecutor([]executor.Result{
-		{Output: "no issues", Signal: status.CodexDone}, // claude eval (codex done)
-		{Output: "done", Signal: status.ReviewDone},     // post-codex review loop
+		{Output: "no issues", Signal: status.CodexDone}, // claude eval (codex done, no findings → post-codex review skipped)
 	})
 	codex := newMockExecutor([]executor.Result{
 		{Output: "found issue in foo.go:10"}, // codex iteration 1
@@ -2832,7 +2837,7 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Len(t, codex.RunCalls(), 1, "codex should run once")
-	assert.Len(t, claude.RunCalls(), 2, "claude: 1 eval + 1 post-codex review")
+	assert.Len(t, claude.RunCalls(), 1, "claude: 1 eval only (no findings → post-codex review skipped)")
 
 	// verify no break log
 	var foundBreak bool
@@ -2843,6 +2848,77 @@ func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
 		}
 	}
 	assert.False(t, foundBreak, "should not log manual break with nil channel")
+}
+
+func TestRunner_PostCodexReview_SkippedWhenNoFindings(t *testing.T) {
+	t.Run("codex done on first iteration skips post-codex review", func(t *testing.T) {
+		log := newMockLogger("progress.txt")
+		// codex finds something, but claude eval says "no actionable findings" → CodexDone on first iter
+		claude := newMockExecutor([]executor.Result{
+			{Output: "dismissed all findings", Signal: status.CodexDone},
+		})
+		codex := newMockExecutor([]executor.Result{
+			{Output: "found potential issue in foo.go:10"},
+		})
+
+		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+		r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+		err := r.Run(t.Context())
+
+		require.NoError(t, err)
+		assert.Len(t, claude.RunCalls(), 1, "claude: 1 eval only, post-codex review skipped")
+		assert.Len(t, codex.RunCalls(), 1)
+
+		// verify skip was logged
+		var foundSkip bool
+		for _, call := range log.PrintCalls() {
+			if strings.Contains(call.Format, "skipping post-codex claude review") {
+				foundSkip = true
+				break
+			}
+		}
+		assert.True(t, foundSkip, "should log that post-codex review was skipped")
+	})
+
+	t.Run("findings on first iteration runs post-codex review", func(t *testing.T) {
+		log := newMockLogger("progress.txt")
+		// codex finds issue, claude fixes it, then next codex iteration is clean
+		claude := newMockExecutor([]executor.Result{
+			{Output: "fixed the issue"},                        // codex eval iter 1 — fixed
+			{Output: "clean", Signal: status.CodexDone},        // codex eval iter 2 — done
+			{Output: "done", Signal: status.ReviewDone},        // post-codex review loop
+		})
+		codex := newMockExecutor([]executor.Result{
+			{Output: "found issue in foo.go:10"},
+			{Output: "no issues found"},
+		})
+
+		cfg := processor.Config{
+			Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
+			CodexEnabled: true, AppConfig: testAppConfig(t),
+		}
+		r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+		err := r.Run(t.Context())
+
+		require.NoError(t, err)
+		assert.Len(t, claude.RunCalls(), 3, "claude: 2 evals + 1 post-codex review")
+		assert.Len(t, codex.RunCalls(), 2)
+	})
+
+	t.Run("empty codex output skips post-codex review", func(t *testing.T) {
+		log := newMockLogger("progress.txt")
+		claude := newMockExecutor(nil) // not called
+		codex := newMockExecutor([]executor.Result{
+			{Output: ""}, // empty = no findings
+		})
+
+		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+		r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+		err := r.Run(t.Context())
+
+		require.NoError(t, err)
+		assert.Empty(t, claude.RunCalls(), "claude should not be called when codex returns empty")
+	})
 }
 
 func TestRunner_FullMode_ErrUserAborted_SkipsReview(t *testing.T) {
@@ -3272,10 +3348,10 @@ func TestRunner_SessionTimeout_ExternalReviewLoopSkipsStalemateOnTimeout(t *test
 			case 1, 2: // claude eval iterations 1,2 — block until session timeout
 				<-ctx.Done()
 				return executor.Result{Output: "partial output", Error: ctx.Err()}
-			case 3: // claude eval iteration 3 — codex done
+			case 3: // claude eval iteration 3 — codex done (no findings → post-codex review skipped)
 				return executor.Result{Output: "no issues found", Signal: status.CodexDone}
-			default: // post-codex review
-				return executor.Result{Output: "review done", Signal: status.ReviewDone}
+			default:
+				return executor.Result{Error: errors.New("unexpected call")}
 			}
 		},
 	}
@@ -3386,10 +3462,10 @@ func TestRunner_SessionTimeout_ExternalReviewKeepsBranchDiffAfterTimeout(t *test
 			case 1: // claude eval iteration 1 — block until session timeout
 				<-ctx.Done()
 				return executor.Result{Output: "partial", Error: ctx.Err()}
-			case 2: // claude eval iteration 2 — codex done
+			case 2: // claude eval iteration 2 — codex done (no findings → post-codex review skipped)
 				return executor.Result{Output: "no issues found", Signal: status.CodexDone}
 			default:
-				return executor.Result{Output: "review done", Signal: status.ReviewDone}
+				return executor.Result{Error: errors.New("unexpected call")}
 			}
 		},
 	}
