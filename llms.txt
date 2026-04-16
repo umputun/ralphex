@@ -114,7 +114,7 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 
 **Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when Claude produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and Claude can't agree on findings.
 
-**Per-phase model configuration:** `task_model` config option (or `--task-model` CLI flag) sets the model for task execution (e.g., `opus`, `sonnet`, `haiku`). `review_model` (or `--review-model`) sets the model for review phases; falls back to `task_model` if empty. When set, `--model <value>` is injected into the Claude CLI args. Only applies to the default Claude CLI — custom wrappers (`claude_command`) ignore the `--model` flag. Empty by default (uses Claude CLI's default model).
+**Per-phase model configuration:** `task_model` config option (or `--task-model` CLI flag) sets the model for task execution (e.g., `opus`, `sonnet`, `haiku`). `review_model` (or `--review-model`) sets the model for review phases; falls back to `task_model` if empty. When set, `--model <value>` is appended to the configured `claude_command`. Custom wrappers may ignore the flag (default behavior via `*) shift ;;`) or map it to their own model selection. Empty by default (uses Claude CLI's default model).
 
 ```ini
 # in ~/.config/ralphex/config

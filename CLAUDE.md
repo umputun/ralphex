@@ -71,7 +71,7 @@ docs/plans/         # plan files location
 - Multiple execution modes: full, tasks-only, review-only, external-only/codex-only, plan creation
 - `--base-ref` flag overrides default branch for review diffs (branch name or commit hash)
 - `--skip-finalize` flag disables finalize step for a single run
-- `--task-model` flag sets model for task execution (e.g., `--task-model=opus`); `--review-model` sets model for review phases (falls back to `--task-model`). Only applies to default Claude CLI, ignored by custom wrappers (`claude_command`)
+- `--task-model` flag sets model for task execution (e.g., `--task-model=opus`); `--review-model` sets model for review phases (falls back to `--task-model`). The flag is appended as `--model <value>` to the configured `claude_command`; custom wrappers may ignore it (default behavior via `*) shift ;;`) or map it to their own model selection
 - `--wait` flag enables rate limit retry with specified duration (e.g., `--wait=1h`)
 - `--session-timeout` flag sets per-session timeout for claude (e.g., `--session-timeout=30m`), kills hanging sessions
 - `--idle-timeout` flag kills claude sessions when no output is received for a specified duration (e.g., `--idle-timeout=5m`), resets on each output line
@@ -278,8 +278,8 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Precedence: CLI flags > local config > global config > embedded defaults
 - Custom prompts: `~/.config/ralphex/prompts/*.txt` or `.ralphex/prompts/*.txt`
 - Custom agents: `~/.config/ralphex/agents/*.txt` or `.ralphex/agents/*.txt`
-- `task_model` config option: model for task execution (e.g., "opus", "sonnet"). CLI flag `--task-model` takes precedence. Only applies to default Claude CLI, ignored by custom wrappers (`claude_command`). Disabled by default (empty = Claude CLI default)
-- `review_model` config option: model for review phases. Falls back to `task_model` if empty. CLI flag `--review-model` takes precedence. Only applies to default Claude CLI. Disabled by default
+- `task_model` config option: model for task execution (e.g., "opus", "sonnet"). CLI flag `--task-model` takes precedence. Appended as `--model <value>` to the configured `claude_command`; custom wrappers may ignore or implement it. Disabled by default (empty = Claude CLI default)
+- `review_model` config option: model for review phases. Falls back to `task_model` if empty. CLI flag `--review-model` takes precedence. Same wrapper behavior as `task_model`. Disabled by default
 - `default_branch` config option: override auto-detected default branch for review diffs
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
 - `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`

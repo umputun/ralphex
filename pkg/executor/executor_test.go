@@ -467,6 +467,11 @@ func TestStripFlag(t *testing.T) {
 		{name: "flag not present", args: []string{"--verbose", "--print"}, flag: "--model", want: []string{"--verbose", "--print"}},
 		{name: "flag at end with value", args: []string{"--verbose", "--model", "opus"}, flag: "--model", want: []string{"--verbose"}},
 		{name: "empty args", args: []string{}, flag: "--model", want: []string{}},
+		{name: "removes equals form", args: []string{"--verbose", "--model=opus", "--print"}, flag: "--model", want: []string{"--verbose", "--print"}},
+		{name: "removes equals form at end", args: []string{"--verbose", "--model=opus"}, flag: "--model", want: []string{"--verbose"}},
+		{name: "removes bare flag at end", args: []string{"--verbose", "--model"}, flag: "--model", want: []string{"--verbose"}},
+		{name: "removes repeated occurrences", args: []string{"--model", "opus", "--verbose", "--model=sonnet"}, flag: "--model", want: []string{"--verbose"}},
+		{name: "does not match prefix-only", args: []string{"--model-foo", "bar", "--print"}, flag: "--model", want: []string{"--model-foo", "bar", "--print"}},
 	}
 
 	for _, tc := range tests {
