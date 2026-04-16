@@ -24,8 +24,10 @@ ralphex prompts instruct the agent to emit signals like `<<<RALPHEX:COMPLETED>>>
 `ClaudeExecutor` builds the command as:
 
 ```
-<claude_command> <claude_args...> [--model <model>] --print
+<claude_command> <claude_args...> [--model <model>] [--effort <level>] --print
 ```
+
+`--model` and `--effort` are injected when `task_model`/`review_model` config provides them (via `model[:effort]` syntax). Either, both, or neither may be present. Any matching flag already in `claude_args` is stripped before injection to avoid duplicates. Wrappers that don't implement these flags will ignore them via the catch-all `*) shift ;;` pattern.
 
 The prompt is passed via stdin (not as a CLI argument). This avoids the cmd.exe 8191-character command-line limit on Windows, where large prompts (e.g., after variable expansion) can exceed the limit.
 

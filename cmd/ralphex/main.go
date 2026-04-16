@@ -34,8 +34,8 @@ type opts struct {
 	MaxIterations         int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
 	MaxExternalIterations int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
 	ReviewPatience        int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
-	TaskModel             string        `long:"task-model" description:"model for task execution (e.g., opus, sonnet, haiku)"`
-	ReviewModel           string        `long:"review-model" description:"model for review phases (falls back to --task-model)"`
+	TaskModel             string        `long:"task-model" description:"model for task execution as model[:effort] (e.g., opus, opus:high, :medium)"`
+	ReviewModel           string        `long:"review-model" description:"model for review phases as model[:effort] (falls back to --task-model)"`
 	Review                bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
 	ExternalOnly          bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
 	CodexOnly             bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`

@@ -215,6 +215,7 @@ type ClaudeExecutor struct {
 	Command       string            // command to execute, defaults to "claude"
 	Args          string            // additional arguments (space-separated), defaults to standard args
 	Model         string            // model override (e.g., "opus", "sonnet", "haiku"); empty = CLI default
+	Effort        string            // reasoning effort override (e.g., "low", "medium", "high", "xhigh", "max"); empty = CLI default
 	OutputHandler func(text string) // called for each text chunk, can be nil
 	Debug         bool              // enable debug output
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
@@ -246,6 +247,12 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	if e.Model != "" {
 		args = stripFlag(args, "--model")
 		args = append(args, "--model", e.Model)
+	}
+	// inject --effort flag if an effort override is configured;
+	// strip any existing --effort from args to avoid duplicate/conflicting flags
+	if e.Effort != "" {
+		args = stripFlag(args, "--effort")
+		args = append(args, "--effort", e.Effort)
 	}
 	// always append --print to enable non-interactive mode; mirrors old -p flag that was
 	// always appended. wrapper scripts ignore unknown flags via '*) shift ;;' catch-all.

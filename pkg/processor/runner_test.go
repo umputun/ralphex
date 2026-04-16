@@ -1672,13 +1672,13 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 			}
 
 			cfg := processor.Config{
-				Mode:            tc.mode,
-				PlanFile:        planFile,
-				MaxIterations:   50,
+				Mode:             tc.mode,
+				PlanFile:         planFile,
+				MaxIterations:    50,
 				IterationDelayMs: 1,
-				CodexEnabled:    true,
-				FinalizeEnabled: true,
-				AppConfig:       testAppConfig(t),
+				CodexEnabled:     true,
+				FinalizeEnabled:  true,
+				AppConfig:        testAppConfig(t),
 			}
 			r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, holder)
 			err := r.Run(t.Context())
@@ -2884,9 +2884,9 @@ func TestRunner_PostCodexReview_SkippedWhenNoFindings(t *testing.T) {
 		log := newMockLogger("progress.txt")
 		// codex finds issue, claude fixes it, then next codex iteration is clean
 		claude := newMockExecutor([]executor.Result{
-			{Output: "fixed the issue"},                        // codex eval iter 1 — fixed
-			{Output: "clean", Signal: status.CodexDone},        // codex eval iter 2 — done
-			{Output: "done", Signal: status.ReviewDone},        // post-codex review loop
+			{Output: "fixed the issue"},                 // codex eval iter 1 — fixed
+			{Output: "clean", Signal: status.CodexDone}, // codex eval iter 2 — done
+			{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
 		})
 		codex := newMockExecutor([]executor.Result{
 			{Output: "found issue in foo.go:10"},
@@ -3867,4 +3867,81 @@ func TestRunner_ReviewClaude_NilFallsBackToTaskExecutor(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 5, "task executor should handle all review phases when ReviewClaude is nil")
+}
+
+func TestParseModelEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		model  string
+		effort string
+	}{
+		{name: "empty", input: "", model: "", effort: ""},
+		{name: "model only", input: "opus", model: "opus", effort: ""},
+		{name: "model and effort", input: "opus:high", model: "opus", effort: "high"},
+		{name: "effort only", input: ":high", model: "", effort: "high"},
+		{name: "trailing colon", input: "opus:", model: "opus", effort: ""},
+		{name: "full model id with effort", input: "claude-sonnet-4-6:medium", model: "claude-sonnet-4-6", effort: "medium"},
+		{name: "multiple colons — split on first", input: "opus:high:extra", model: "opus", effort: "high:extra"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model, effort := processor.ParseModelEffort(tc.input)
+			assert.Equal(t, tc.model, model)
+			assert.Equal(t, tc.effort, effort)
+		})
+	}
+}
+
+func TestRunner_New_ModelEffortWiring(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	holder := &status.PhaseHolder{}
+
+	tests := []struct {
+		name         string
+		taskModel    string
+		reviewModel  string
+		wantTask     [2]string // {model, effort}
+		wantReview   [2]string
+		sameExecutor bool      // true when review falls back to task executor
+	}{
+		{name: "empty specs", taskModel: "", reviewModel: "", wantTask: [2]string{"", ""}, wantReview: [2]string{"", ""}, sameExecutor: true},
+		{name: "task model only, review empty", taskModel: "opus", reviewModel: "", wantTask: [2]string{"opus", ""}, wantReview: [2]string{"opus", ""}, sameExecutor: true},
+		{name: "task model with effort, review empty", taskModel: "opus:high", reviewModel: "", wantTask: [2]string{"opus", "high"}, wantReview: [2]string{"opus", "high"}, sameExecutor: true},
+		{name: "effort only, review empty", taskModel: ":medium", reviewModel: "", wantTask: [2]string{"", "medium"}, wantReview: [2]string{"", "medium"}, sameExecutor: true},
+		{name: "trailing colon equivalent to plain model", taskModel: "opus", reviewModel: "opus:", wantTask: [2]string{"opus", ""}, wantReview: [2]string{"opus", ""}, sameExecutor: true},
+		{name: "same model different effort — separate executor", taskModel: "opus", reviewModel: "opus:high", wantTask: [2]string{"opus", ""}, wantReview: [2]string{"opus", "high"}, sameExecutor: false},
+		{name: "different model and effort — separate executor", taskModel: "opus:high", reviewModel: "sonnet:medium", wantTask: [2]string{"opus", "high"}, wantReview: [2]string{"sonnet", "medium"}, sameExecutor: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := processor.Config{
+				Mode:          processor.ModeReview,
+				MaxIterations: 50,
+				CodexEnabled:  false,
+				TaskModel:     tc.taskModel,
+				ReviewModel:   tc.reviewModel,
+				AppConfig:     testAppConfig(t),
+			}
+			r := processor.New(cfg, log, holder)
+
+			taskExec, ok := r.TestClaudeExecutor().(*executor.ClaudeExecutor)
+			require.True(t, ok, "task executor should be *executor.ClaudeExecutor")
+			assert.Equal(t, tc.wantTask[0], taskExec.Model, "task model")
+			assert.Equal(t, tc.wantTask[1], taskExec.Effort, "task effort")
+
+			reviewExec, ok := r.TestReviewClaudeExecutor().(*executor.ClaudeExecutor)
+			require.True(t, ok, "review executor should be *executor.ClaudeExecutor")
+			assert.Equal(t, tc.wantReview[0], reviewExec.Model, "review model")
+			assert.Equal(t, tc.wantReview[1], reviewExec.Effort, "review effort")
+
+			if tc.sameExecutor {
+				assert.Same(t, taskExec, reviewExec, "review executor should be the same instance as task executor when specs equivalent")
+			} else {
+				assert.NotSame(t, taskExec, reviewExec, "review executor should be a distinct instance when specs differ")
+			}
+		})
+	}
 }
