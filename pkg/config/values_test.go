@@ -2172,34 +2172,34 @@ func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {
 	assert.Equal(t, []string{"local pattern"}, values.ClaudeLimitPatterns)
 }
 
-func TestValuesLoader_Load_ClaudeModel(t *testing.T) {
+func TestValuesLoader_Load_TaskModel(t *testing.T) {
 	t.Run("parse valid value", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfgPath := filepath.Join(tmpDir, "config")
-		require.NoError(t, os.WriteFile(cfgPath, []byte(`claude_model = sonnet`), 0o600))
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`task_model = sonnet`), 0o600))
 
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load("", cfgPath)
 		require.NoError(t, err)
-		assert.Equal(t, "sonnet", values.ClaudeModel)
+		assert.Equal(t, "sonnet", values.TaskModel)
 	})
 
 	t.Run("not set defaults to empty", func(t *testing.T) {
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load("", "")
 		require.NoError(t, err)
-		assert.Empty(t, values.ClaudeModel)
+		assert.Empty(t, values.TaskModel)
 	})
 
 	t.Run("full model ID accepted", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfgPath := filepath.Join(tmpDir, "config")
-		require.NoError(t, os.WriteFile(cfgPath, []byte(`claude_model = claude-sonnet-4-5-20250929`), 0o600))
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`task_model = claude-sonnet-4-5-20250929`), 0o600))
 
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load("", cfgPath)
 		require.NoError(t, err)
-		assert.Equal(t, "claude-sonnet-4-5-20250929", values.ClaudeModel)
+		assert.Equal(t, "claude-sonnet-4-5-20250929", values.TaskModel)
 	})
 }
 
@@ -2223,32 +2223,32 @@ func TestValuesLoader_Load_ReviewModel(t *testing.T) {
 	})
 }
 
-func TestValues_mergeFrom_ClaudeModel(t *testing.T) {
+func TestValues_mergeFrom_TaskModel(t *testing.T) {
 	t.Run("non-empty overrides", func(t *testing.T) {
-		dst := Values{ClaudeModel: ""}
-		src := Values{ClaudeModel: "opus"}
+		dst := Values{TaskModel: ""}
+		src := Values{TaskModel: "opus"}
 		dst.mergeFrom(&src)
-		assert.Equal(t, "opus", dst.ClaudeModel)
+		assert.Equal(t, "opus", dst.TaskModel)
 	})
 
 	t.Run("empty preserves existing", func(t *testing.T) {
-		dst := Values{ClaudeModel: "opus"}
-		src := Values{ClaudeModel: ""}
+		dst := Values{TaskModel: "opus"}
+		src := Values{TaskModel: ""}
 		dst.mergeFrom(&src)
-		assert.Equal(t, "opus", dst.ClaudeModel)
+		assert.Equal(t, "opus", dst.TaskModel)
 	})
 
 	t.Run("local overrides global", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		globalCfg := filepath.Join(tmpDir, "global")
 		localCfg := filepath.Join(tmpDir, "local")
-		require.NoError(t, os.WriteFile(globalCfg, []byte(`claude_model = opus`), 0o600))
-		require.NoError(t, os.WriteFile(localCfg, []byte(`claude_model = haiku`), 0o600))
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`task_model = opus`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`task_model = haiku`), 0o600))
 
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load(localCfg, globalCfg)
 		require.NoError(t, err)
-		assert.Equal(t, "haiku", values.ClaudeModel)
+		assert.Equal(t, "haiku", values.TaskModel)
 	})
 }
 
@@ -2265,5 +2265,18 @@ func TestValues_mergeFrom_ReviewModel(t *testing.T) {
 		src := Values{ReviewModel: ""}
 		dst.mergeFrom(&src)
 		assert.Equal(t, "sonnet", dst.ReviewModel)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`review_model = sonnet`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`review_model = haiku`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, "haiku", values.ReviewModel)
 	})
 }

@@ -3812,3 +3812,59 @@ func TestRunner_IdleTimeout_ReviewLoopExitsWhenSignalPresent(t *testing.T) {
 	}
 	assert.False(t, foundIdleMsg, "should NOT log idle timeout when signal is present")
 }
+
+func TestRunner_ReviewClaude_UsedForReviewPhases(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// task executor should NOT be called in review-only mode
+	taskClaude := newMockExecutor(nil)
+
+	// review executor handles all review phases
+	reviewClaude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
+		{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue"},     // codex iteration 1 — findings trigger eval + post-codex review
+		{Output: "no issues found"}, // codex iteration 2 — clean
+	})
+
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{
+		Claude: taskClaude, ReviewClaude: reviewClaude, Codex: codex,
+	}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Empty(t, taskClaude.RunCalls(), "task executor should not be called in review-only mode")
+	assert.Len(t, reviewClaude.RunCalls(), 5, "review executor should handle all review phases including codex eval")
+}
+
+func TestRunner_ReviewClaude_NilFallsBackToTaskExecutor(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	// when ReviewClaude is nil, all review calls should go to Claude (task executor)
+	claude := newMockExecutor([]executor.Result{
+		{Output: "review done", Signal: status.ReviewDone}, // first review
+		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
+		{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
+		{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
+		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue"},     // codex iteration 1 — findings trigger eval + post-codex review
+		{Output: "no issues found"}, // codex iteration 2 — clean
+	})
+
+	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{
+		Claude: claude, ReviewClaude: nil, Codex: codex,
+	}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, claude.RunCalls(), 5, "task executor should handle all review phases when ReviewClaude is nil")
+}

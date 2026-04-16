@@ -348,7 +348,7 @@ ralphex --docker --dry-run   # verify socket mount in command
 
 **AWS Bedrock support:**
 
-When `--claude-provider bedrock` or `RALPHEX_CLAUDE_PROVIDER=bedrock` is set:
+When `--claude-provider=bedrock` or `RALPHEX_CLAUDE_PROVIDER=bedrock` is set:
 - Keychain credential extraction is skipped (not needed for Bedrock auth)
 - AWS credentials are automatically exported from `AWS_PROFILE` via `aws configure export-credentials`
 - Required Bedrock env vars are passed to container: `CLAUDE_CODE_USE_BEDROCK`, `AWS_REGION`, credentials
@@ -357,13 +357,13 @@ Required environment for Bedrock:
 - `AWS_REGION` - AWS region where Bedrock is enabled
 - `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` - authentication
 
-Note: `CLAUDE_CODE_USE_BEDROCK=1` is automatically set when using `--claude-provider bedrock`.
+Note: `CLAUDE_CODE_USE_BEDROCK=1` is automatically set when using `--claude-provider=bedrock`.
 
 ```bash
 # with AWS profile (credentials exported automatically)
 export AWS_PROFILE=my-bedrock-profile
 export AWS_REGION=us-east-1
-ralphex --claude-provider bedrock docs/plans/feature.md
+ralphex --claude-provider=bedrock docs/plans/feature.md
 
 # or use env var for session-wide setting
 export RALPHEX_CLAUDE_PROVIDER=bedrock
@@ -496,7 +496,7 @@ RALPHEX_IMAGE=my-ralphex ralphex docs/plans/feature.md
 
 Example with custom port:
 ```bash
-RALPHEX_PORT=3000 ralphex --serve --port 3000 docs/plans/feature.md
+RALPHEX_PORT=3000 ralphex --serve --port=3000 docs/plans/feature.md
 ```
 
 ## Usage
@@ -542,19 +542,22 @@ ralphex --max-external-iterations=5 docs/plans/feature.md
 ralphex --review-patience=3 docs/plans/feature.md
 
 # wait and retry on rate limit (instead of exiting)
-ralphex --wait 1h docs/plans/feature.md
+ralphex --wait=1h docs/plans/feature.md
+
+# use different models for tasks vs reviews (e.g., opus for tasks, sonnet for reviews)
+ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
 
 # set per-session timeout to kill hanging claude sessions
-ralphex --session-timeout 30m docs/plans/feature.md
+ralphex --session-timeout=30m docs/plans/feature.md
 
 # kill claude session when no output for 5 minutes (idle detection)
-ralphex --idle-timeout 5m docs/plans/feature.md
+ralphex --idle-timeout=5m docs/plans/feature.md
 
 # with web dashboard
 ralphex --serve docs/plans/feature.md
 
 # web dashboard on custom port
-ralphex --serve --port 3000 docs/plans/feature.md
+ralphex --serve --port=3000 docs/plans/feature.md
 ```
 
 ### Options
@@ -570,6 +573,8 @@ ralphex --serve --port 3000 docs/plans/feature.md
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
+| `--task-model` | Model for task execution (e.g., `opus`, `sonnet`, `haiku`). Only applies to default Claude CLI | empty |
+| `--review-model` | Model for review phases (falls back to `--task-model`). Only applies to default Claude CLI | empty |
 | `--wait` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `--session-timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
 | `--idle-timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
@@ -800,6 +805,8 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 |--------|-------------|---------|
 | `claude_command` | Claude CLI command | `claude` |
 | `claude_args` | Claude CLI arguments | `--dangerously-skip-permissions --output-format stream-json --verbose` |
+| `task_model` | Model for task execution (e.g., `opus`, `sonnet`). Only applies to default Claude CLI, ignored by custom wrappers | empty |
+| `review_model` | Model for review phases. Falls back to `task_model` if empty. Only applies to default Claude CLI | empty |
 | `codex_enabled` | Enable codex review phase | `true` |
 | `codex_command` | Codex CLI command | `codex` |
 | `codex_model` | Codex model ID | `gpt-5.4` |
@@ -1084,7 +1091,7 @@ This works because ralphex only checks for the `ALL_TASKS_DONE` signal — it do
 Yes. Pro plans hit rate limits more frequently. Use `--wait` to pause and retry automatically instead of exiting:
 
 ```bash
-ralphex --wait 1h docs/plans/feature.md
+ralphex --wait=1h docs/plans/feature.md
 ```
 
 When a rate limit is detected, ralphex waits the specified duration and retries. Execution takes longer but completes unattended. You can also set `wait_on_limit = 1h` in config to make it the default.

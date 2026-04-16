@@ -17,8 +17,8 @@ import (
 type Values struct {
 	ClaudeCommand         string
 	ClaudeArgs            string
-	ClaudeModel           string // model for task execution (e.g., "opus", "sonnet", "haiku")
-	ReviewModel           string // model for review phases (falls back to ClaudeModel if empty)
+	TaskModel             string   // model for task execution (e.g., "opus", "sonnet", "haiku")
+	ReviewModel           string   // model for review phases (falls back to TaskModel if empty)
 	ClaudeErrorPatterns   []string // patterns to detect in claude output (e.g., rate limit messages)
 	CodexEnabled          bool
 	CodexEnabledSet       bool // tracks if codex_enabled was explicitly set
@@ -181,8 +181,8 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	if key, err := section.GetKey("claude_args"); err == nil {
 		values.ClaudeArgs = key.String()
 	}
-	if key, err := section.GetKey("claude_model"); err == nil {
-		values.ClaudeModel = key.String()
+	if key, err := section.GetKey("task_model"); err == nil {
+		values.TaskModel = key.String()
 	}
 	if key, err := section.GetKey("review_model"); err == nil {
 		values.ReviewModel = key.String()
@@ -423,8 +423,8 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.ClaudeArgs != "" {
 		dst.ClaudeArgs = src.ClaudeArgs
 	}
-	if src.ClaudeModel != "" {
-		dst.ClaudeModel = src.ClaudeModel
+	if src.TaskModel != "" {
+		dst.TaskModel = src.TaskModel
 	}
 	if src.ReviewModel != "" {
 		dst.ReviewModel = src.ReviewModel

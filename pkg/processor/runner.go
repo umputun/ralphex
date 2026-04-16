@@ -52,8 +52,8 @@ type Config struct {
 	NoColor               bool           // disable color output
 	IterationDelayMs      int            // delay between iterations in milliseconds
 	TaskRetryCount        int            // number of times to retry failed tasks
-	ClaudeModel           string         // model for task execution (empty = CLI default)
-	ReviewModel           string         // model for review phases (empty = falls back to ClaudeModel)
+	TaskModel             string         // model for task execution (empty = CLI default)
+	ReviewModel           string         // model for review phases (empty = falls back to TaskModel)
 	CodexEnabled          bool           // whether codex review is enabled
 	FinalizeEnabled       bool           // whether finalize step is enabled
 	DefaultBranch         string         // default branch name (detected from repo)
@@ -97,7 +97,7 @@ type GitChecker interface {
 // Executors groups the executor dependencies for the Runner.
 type Executors struct {
 	Claude       Executor
-	ReviewClaude Executor                // optional: separate executor for review phases (nil = use Claude)
+	ReviewClaude Executor // optional: separate executor for review phases (nil = use Claude)
 	Codex        Executor
 	Custom       *executor.CustomExecutor
 }
@@ -139,15 +139,15 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
 		claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout
 	}
-	claudeExec.Model = cfg.ClaudeModel
+	claudeExec.Model = cfg.TaskModel
 
 	// build review executor (shares base config, may use a different model)
 	reviewModel := cfg.ReviewModel
 	if reviewModel == "" {
-		reviewModel = cfg.ClaudeModel // fall back to task model
+		reviewModel = cfg.TaskModel // fall back to task model
 	}
 	var reviewExec Executor
-	if reviewModel != cfg.ClaudeModel {
+	if reviewModel != cfg.TaskModel {
 		re := &executor.ClaudeExecutor{
 			OutputHandler: claudeExec.OutputHandler,
 			Debug:         cfg.Debug,

@@ -456,6 +456,27 @@ func TestSplitArgs(t *testing.T) {
 	}
 }
 
+func TestStripFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		flag string
+		want []string
+	}{
+		{name: "removes flag and value", args: []string{"--verbose", "--model", "opus", "--print"}, flag: "--model", want: []string{"--verbose", "--print"}},
+		{name: "flag not present", args: []string{"--verbose", "--print"}, flag: "--model", want: []string{"--verbose", "--print"}},
+		{name: "flag at end with value", args: []string{"--verbose", "--model", "opus"}, flag: "--model", want: []string{"--verbose"}},
+		{name: "empty args", args: []string{}, flag: "--model", want: []string{}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripFlag(tc.args, tc.flag)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestFilterEnv(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1214,14 +1235,32 @@ func TestClaudeExecutor_Run_ModelFlag(t *testing.T) {
 
 	t.Run("model set injects --model flag", func(t *testing.T) {
 		e := &ClaudeExecutor{Model: "sonnet", cmdRunner: mock}
-		e.Run(context.Background(), "test")
+		result := e.Run(context.Background(), "test")
+		require.NoError(t, result.Error)
 		assert.Contains(t, capturedArgs, "--model")
 		assert.Contains(t, capturedArgs, "sonnet")
 	})
 
 	t.Run("model empty does not inject --model flag", func(t *testing.T) {
 		e := &ClaudeExecutor{cmdRunner: mock}
-		e.Run(context.Background(), "test")
+		result := e.Run(context.Background(), "test")
+		require.NoError(t, result.Error)
 		assert.NotContains(t, capturedArgs, "--model")
+	})
+
+	t.Run("model overrides existing --model in args", func(t *testing.T) {
+		e := &ClaudeExecutor{Args: "--verbose --model opus --output-format json", Model: "sonnet", cmdRunner: mock}
+		result := e.Run(context.Background(), "test")
+		require.NoError(t, result.Error)
+		assert.Contains(t, capturedArgs, "sonnet")
+		assert.NotContains(t, capturedArgs, "opus", "old --model value should be stripped")
+		// count --model occurrences — should be exactly one
+		count := 0
+		for _, a := range capturedArgs {
+			if a == "--model" {
+				count++
+			}
+		}
+		assert.Equal(t, 1, count, "should have exactly one --model flag")
 	})
 }

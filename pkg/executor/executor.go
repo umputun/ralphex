@@ -149,6 +149,20 @@ func splitArgs(s string) []string {
 	return args
 }
 
+// stripFlag removes a flag and its value from args (e.g., stripFlag(args, "--model")
+// removes both "--model" and the following element). Returns a new slice.
+func stripFlag(args []string, flag string) []string {
+	result := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == flag && i+1 < len(args) {
+			i++ // skip flag and its value
+			continue
+		}
+		result = append(result, args[i])
+	}
+	return result
+}
+
 // filterEnv returns a copy of env with specified keys removed.
 func filterEnv(env []string, keysToRemove ...string) []string {
 	result := make([]string, 0, len(env))
@@ -218,8 +232,10 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 			"--verbose",
 		}
 	}
-	// inject --model flag if a model override is configured
+	// inject --model flag if a model override is configured;
+	// strip any existing --model from args to avoid duplicate/conflicting flags
 	if e.Model != "" {
+		args = stripFlag(args, "--model")
 		args = append(args, "--model", e.Model)
 	}
 	// always append --print to enable non-interactive mode; mirrors old -p flag that was

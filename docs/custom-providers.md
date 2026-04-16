@@ -24,7 +24,7 @@ ralphex prompts instruct the agent to emit signals like `<<<RALPHEX:COMPLETED>>>
 `ClaudeExecutor` builds the command as:
 
 ```
-<claude_command> <claude_args...> --print
+<claude_command> <claude_args...> [--model <model>] --print
 ```
 
 The prompt is passed via stdin (not as a CLI argument). This avoids the cmd.exe 8191-character command-line limit on Windows, where large prompts (e.g., after variable expansion) can exceed the limit.

@@ -34,8 +34,8 @@ type opts struct {
 	MaxIterations         int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
 	MaxExternalIterations int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
 	ReviewPatience        int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
-	ClaudeModel           string        `long:"claude-model" description:"model for task execution (e.g., opus, sonnet, haiku)"`
-	ReviewModel           string        `long:"review-model" description:"model for review phases (falls back to --claude-model)"`
+	TaskModel             string        `long:"task-model" description:"model for task execution (e.g., opus, sonnet, haiku)"`
+	ReviewModel           string        `long:"review-model" description:"model for review phases (falls back to --task-model)"`
 	Review                bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
 	ExternalOnly          bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
 	CodexOnly             bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
@@ -836,13 +836,13 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		reviewPatience = o.ReviewPatience
 	}
 
-	// resolve claude model: CLI flag > config file > empty (use CLI default)
-	claudeModel := req.Config.ClaudeModel
-	if o.ClaudeModel != "" {
-		claudeModel = o.ClaudeModel
+	// resolve task model: CLI flag > config file > empty (use CLI default)
+	taskModel := req.Config.TaskModel
+	if o.TaskModel != "" {
+		taskModel = o.TaskModel
 	}
 
-	// resolve review model: CLI flag > config file > claude_model > empty
+	// resolve review model: CLI flag > config file > empty (falls back to task_model in processor)
 	reviewModel := req.Config.ReviewModel
 	if o.ReviewModel != "" {
 		reviewModel = o.ReviewModel
@@ -862,7 +862,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		CodexEnabled:          codexEnabled,
 		FinalizeEnabled:       req.Config.FinalizeEnabled,
 		DefaultBranch:         req.BaseRef,
-		ClaudeModel:           claudeModel,
+		TaskModel:             taskModel,
 		ReviewModel:           reviewModel,
 		AppConfig:             req.Config,
 	}, log, holder)
@@ -937,6 +937,12 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	startTime := time.Now()
 
 	// create and configure runner
+	// resolve task model for plan creation (same precedence as task execution)
+	planTaskModel := req.Config.TaskModel
+	if o.TaskModel != "" {
+		planTaskModel = o.TaskModel
+	}
+
 	r := processor.New(processor.Config{
 		PlanDescription:  o.PlanDescription,
 		ProgressPath:     baseLog.Path(),
@@ -946,6 +952,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		NoColor:          o.NoColor,
 		IterationDelayMs: req.Config.IterationDelayMs,
 		DefaultBranch:    req.BaseRef,
+		TaskModel:        planTaskModel,
 		AppConfig:        req.Config,
 	}, baseLog, holder)
 	r.SetInputCollector(collector)
