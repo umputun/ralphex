@@ -150,15 +150,17 @@ func splitArgs(s string) []string {
 }
 
 // stripFlag removes all occurrences of a flag and its value from args. Handles three forms:
-// "--flag value" (space-separated, skips next element), "--flag=value" (single token),
-// and a bare "--flag" with no following value. Returns a new slice.
+// "--flag value" (space-separated, skips next element only if it doesn't look like another flag),
+// "--flag=value" (single token), and a bare "--flag" with no following value. Returns a new slice.
+// The "looks like another flag" heuristic (starts with "-") preserves unrelated flags that happen
+// to follow a malformed bare "--flag" in the middle of args.
 func stripFlag(args []string, flag string) []string {
 	prefix := flag + "="
 	result := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == flag {
-			// space form: skip flag and its value (if present)
-			if i+1 < len(args) {
+			// space form: skip the next token only if it's an actual value, not another flag
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 			}
 			continue
