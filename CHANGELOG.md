@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.27.1 - 2026-04-16
+
+### Improved
+
+- Rename `claude_model`/`--claude-model` to `task_model`/`--task-model` for symmetry with `review_model`/`--review-model` #284 @umputun
+- Pass task model to plan mode (was missing in #272)
+- Clarify docs that model flags are passed to custom wrappers (may be ignored or implemented)
+
+### Fixed
+
+- `stripFlag` now handles `--flag=value` and bare `--flag` forms, prevents duplicate `--model` in `claude_args` #284 @umputun
+
 ## v0.27.0 - 2026-04-16
 
 ### New Features
