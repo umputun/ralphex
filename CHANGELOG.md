@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.27.2 - 2026-04-16
+
+### Improved
+
+- Add optional `--effort` level to `task_model` / `review_model` via `model[:effort]` syntax #285 @umputun
+
 ## v0.27.1 - 2026-04-16
 
 ### Improved
