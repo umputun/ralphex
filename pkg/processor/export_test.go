@@ -60,3 +60,14 @@ func (r *Runner) TestSetTaskPhaseOverride(fn func(ctx context.Context) error) {
 func (r *Runner) TestDrainBreakCh() {
 	r.drainBreakCh()
 }
+
+// TestClaudeExecutor returns the task-phase Claude executor for inspection.
+func (r *Runner) TestClaudeExecutor() Executor {
+	return r.claude
+}
+
+// TestReviewClaudeExecutor returns the review-phase Claude executor for inspection.
+// Returns the same value as TestClaudeExecutor when no separate review executor was built.
+func (r *Runner) TestReviewClaudeExecutor() Executor {
+	return r.reviewClaude
+}

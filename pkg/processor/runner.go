@@ -52,8 +52,8 @@ type Config struct {
 	NoColor               bool           // disable color output
 	IterationDelayMs      int            // delay between iterations in milliseconds
 	TaskRetryCount        int            // number of times to retry failed tasks
-	TaskModel             string         // model for task execution (empty = CLI default)
-	ReviewModel           string         // model for review phases (empty = falls back to TaskModel)
+	TaskModel             string         // model[:effort] spec for task execution; parsed via ParseModelEffort (empty = CLI defaults)
+	ReviewModel           string         // model[:effort] spec for review phases; empty falls back to TaskModel
 	CodexEnabled          bool           // whether codex review is enabled
 	FinalizeEnabled       bool           // whether finalize step is enabled
 	DefaultBranch         string         // default branch name (detected from repo)
@@ -139,19 +139,24 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
 		claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout
 	}
-	claudeExec.Model = cfg.TaskModel
+	taskModel, taskEffort := ParseModelEffort(cfg.TaskModel)
+	claudeExec.Model, claudeExec.Effort = taskModel, taskEffort
 
-	// build review executor (shares base config, may use a different model)
-	reviewModel := cfg.ReviewModel
-	if reviewModel == "" {
-		reviewModel = cfg.TaskModel // fall back to task model
+	// build review executor (shares base config, may use a different model or effort).
+	// compare parsed tuples rather than raw strings so equivalent specs like "opus" and
+	// "opus:" don't produce a redundant second executor.
+	reviewSpec := cfg.ReviewModel
+	if reviewSpec == "" {
+		reviewSpec = cfg.TaskModel // fall back to task model spec
 	}
+	reviewModel, reviewEffort := ParseModelEffort(reviewSpec)
 	var reviewExec Executor
-	if reviewModel != cfg.TaskModel {
+	if reviewModel != taskModel || reviewEffort != taskEffort {
 		re := &executor.ClaudeExecutor{
 			OutputHandler: claudeExec.OutputHandler,
 			Debug:         cfg.Debug,
 			Model:         reviewModel,
+			Effort:        reviewEffort,
 		}
 		if cfg.AppConfig != nil {
 			re.Command = cfg.AppConfig.ClaudeCommand
@@ -1327,4 +1332,15 @@ func needsCodexBinary(appConfig *config.Config) bool {
 	default:
 		return true // "codex" or empty (default) requires codex binary
 	}
+}
+
+// ParseModelEffort splits a "model[:effort]" spec into separate parts.
+// Used by New to parse task_model/review_model config values into the
+// ClaudeExecutor.Model and ClaudeExecutor.Effort fields.
+// Empty input returns ("", ""). Missing colon returns (s, "").
+// A leading colon (":high") returns ("", "high"); a trailing colon ("opus:") returns ("opus", "").
+// Only the first colon is treated as the separator; anything after is passed through as effort.
+func ParseModelEffort(s string) (model, effort string) {
+	model, effort, _ = strings.Cut(s, ":")
+	return model, effort
 }

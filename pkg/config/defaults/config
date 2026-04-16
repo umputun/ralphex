@@ -23,13 +23,16 @@ claude_command = claude
 claude_args = --dangerously-skip-permissions --output-format stream-json --verbose
 
 # task_model: model to use for task execution
-# available: opus, sonnet, haiku (or full model IDs like claude-sonnet-4-5-20250929)
-# leave empty to use Claude Code's default model
+# syntax: model[:effort] where model is opus/sonnet/haiku (or a full model ID like
+# claude-sonnet-4-5-20250929) and effort is low/medium/high/xhigh/max.
+# either part is optional: "opus" sets model only, ":high" sets effort only,
+# "opus:high" sets both. leave empty to use Claude CLI's defaults.
 # task_model =
 
 # review_model: model to use for review phases (first review, fix loops, finalize)
-# falls back to task_model if not set, then to Claude Code's default
-# use a cheaper/faster model (e.g., sonnet) for reviews to reduce cost
+# same model[:effort] syntax as task_model.
+# falls back to task_model if not set, then to Claude CLI's defaults.
+# use a cheaper/faster model (e.g., sonnet) or lower effort for reviews to reduce cost.
 # review_model =
 
 # ------------------------------------------------------------------------------

@@ -573,8 +573,8 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
-| `--task-model` | Model for task execution (e.g., `opus`, `sonnet`, `haiku`). Appended as `--model <value>` to `claude_command`; custom wrappers may ignore or implement it | empty |
-| `--review-model` | Model for review phases (falls back to `--task-model`). Same wrapper behavior as `--task-model` | empty |
+| `--task-model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort values: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags | empty |
+| `--review-model` | Model for review phases as `model[:effort]` (falls back to `--task-model`). Same syntax and wrapper behavior as `--task-model` | empty |
 | `--wait` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `--session-timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
 | `--idle-timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
@@ -805,8 +805,8 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 |--------|-------------|---------|
 | `claude_command` | Claude CLI command | `claude` |
 | `claude_args` | Claude CLI arguments | `--dangerously-skip-permissions --output-format stream-json --verbose` |
-| `task_model` | Model for task execution (e.g., `opus`, `sonnet`). Appended as `--model <value>` to `claude_command`; custom wrappers may ignore or implement it | empty |
-| `review_model` | Model for review phases. Falls back to `task_model` if empty. Same wrapper behavior as `task_model` | empty |
+| `task_model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags | empty |
+| `review_model` | Model for review phases as `model[:effort]`. Falls back to `task_model` if empty. Same syntax and wrapper behavior as `task_model` | empty |
 | `codex_enabled` | Enable codex review phase | `true` |
 | `codex_command` | Codex CLI command | `codex` |
 | `codex_model` | Codex model ID | `gpt-5.4` |

@@ -114,12 +114,12 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 
 **Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when Claude produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and Claude can't agree on findings.
 
-**Per-phase model configuration:** `task_model` config option (or `--task-model` CLI flag) sets the model for task execution (e.g., `opus`, `sonnet`, `haiku`). `review_model` (or `--review-model`) sets the model for review phases; falls back to `task_model` if empty. When set, `--model <value>` is appended to the configured `claude_command`. Custom wrappers may ignore the flag (default behavior via `*) shift ;;`) or map it to their own model selection. Empty by default (uses Claude CLI's default model).
+**Per-phase model configuration:** `task_model` config option (or `--task-model` CLI flag) sets the model for task execution using `model[:effort]` syntax. Examples: `opus` (model only), `opus:high` (both), `:medium` (effort only). Effort levels: `low`, `medium`, `high`, `xhigh`, `max`. `review_model` (or `--review-model`) sets the model/effort for review phases; falls back to `task_model` if empty. Parts are appended to the configured `claude_command` as `--model <m>` and/or `--effort <e>`. Custom wrappers may ignore the flags (default behavior via `*) shift ;;`) or map them to their own selection. Empty by default (uses Claude CLI's defaults).
 
 ```ini
 # in ~/.config/ralphex/config
-task_model = opus
-review_model = sonnet
+task_model = opus:high
+review_model = sonnet:medium
 ```
 
 **Manual break (Ctrl+\):** Press Ctrl+\ (SIGQUIT) to intervene during execution. In the task phase, it pauses execution and prompts "press Enter to continue, Ctrl+C to abort" — on Enter the same task re-runs with a fresh session that re-reads the plan file, so you can edit the plan mid-run. In the external review phase, it terminates the loop immediately. Not available on Windows.

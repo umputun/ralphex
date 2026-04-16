@@ -44,8 +44,8 @@ const (
 type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`
-	TaskModel     string `json:"task_model"`   // model for task execution (e.g., "opus", "sonnet")
-	ReviewModel   string `json:"review_model"` // model for review phases (falls back to TaskModel)
+	TaskModel     string `json:"task_model"`   // model[:effort] spec for task execution (e.g., "opus", "opus:high", ":medium")
+	ReviewModel   string `json:"review_model"` // model[:effort] spec for review phases (falls back to TaskModel)
 
 	CodexEnabled         bool   `json:"codex_enabled"`
 	CodexEnabledSet      bool   `json:"-"` // tracks if codex_enabled was explicitly set in config

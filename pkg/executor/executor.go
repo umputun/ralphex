@@ -150,15 +150,17 @@ func splitArgs(s string) []string {
 }
 
 // stripFlag removes all occurrences of a flag and its value from args. Handles three forms:
-// "--flag value" (space-separated, skips next element), "--flag=value" (single token),
-// and a bare "--flag" with no following value. Returns a new slice.
+// "--flag value" (space-separated, skips next element only if it doesn't look like another flag),
+// "--flag=value" (single token), and a bare "--flag" with no following value. Returns a new slice.
+// The "looks like another flag" heuristic (starts with "-") preserves unrelated flags that happen
+// to follow a malformed bare "--flag" in the middle of args.
 func stripFlag(args []string, flag string) []string {
 	prefix := flag + "="
 	result := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == flag {
-			// space form: skip flag and its value (if present)
-			if i+1 < len(args) {
+			// space form: skip the next token only if it's an actual value, not another flag
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 			}
 			continue
@@ -215,6 +217,7 @@ type ClaudeExecutor struct {
 	Command       string            // command to execute, defaults to "claude"
 	Args          string            // additional arguments (space-separated), defaults to standard args
 	Model         string            // model override (e.g., "opus", "sonnet", "haiku"); empty = CLI default
+	Effort        string            // reasoning effort override (e.g., "low", "medium", "high", "xhigh", "max"); empty = CLI default
 	OutputHandler func(text string) // called for each text chunk, can be nil
 	Debug         bool              // enable debug output
 	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
@@ -246,6 +249,12 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	if e.Model != "" {
 		args = stripFlag(args, "--model")
 		args = append(args, "--model", e.Model)
+	}
+	// inject --effort flag if an effort override is configured;
+	// strip any existing --effort from args to avoid duplicate/conflicting flags
+	if e.Effort != "" {
+		args = stripFlag(args, "--effort")
+		args = append(args, "--effort", e.Effort)
 	}
 	// always append --print to enable non-interactive mode; mirrors old -p flag that was
 	// always appended. wrapper scripts ignore unknown flags via '*) shift ;;' catch-all.
