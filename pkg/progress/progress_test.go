@@ -537,6 +537,44 @@ func TestLogger_SetFailed_SanitizesReason(t *testing.T) {
 	assert.False(t, isProgressCompleted(f, fi.Size()))
 }
 
+func TestLogger_SetFailed_SanitizesUnicodeControlChars(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+
+	// U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are Unicode control chars
+	// classified by unicode.IsControl; they must be neutralized in the footer just like
+	// ASCII CR/LF, so the footer stays a single printable line.
+	payload := "before\u2028middle\u2029after\u0085bell"
+	l.SetFailed(errors.New(payload))
+	require.NoError(t, l.Close())
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	s := string(content)
+
+	for _, r := range []rune{'\u2028', '\u2029', '\u0085'} {
+		assert.NotContains(t, s, string(r), "unicode control char %U must be sanitized", r)
+	}
+	// find the footer line and verify everything got joined into one line
+	var footer string
+	for line := range strings.SplitSeq(s, "\n") {
+		if strings.HasPrefix(line, "Failed:") {
+			footer = line
+			break
+		}
+	}
+	require.NotEmpty(t, footer)
+	assert.Contains(t, footer, "before")
+	assert.Contains(t, footer, "middle")
+	assert.Contains(t, footer, "after")
+	assert.Contains(t, footer, "bell")
+}
+
 func TestLogger_SetFailed_TruncatesLongReason(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()

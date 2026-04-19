@@ -521,8 +521,9 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		var dashErr error
 		runnerLog, dashErr = dashboard.Start(ctx)
 		if dashErr != nil {
-			plr.baseLog.SetFailed(dashErr)
-			return fmt.Errorf("start dashboard: %w", dashErr)
+			wrapped := fmt.Errorf("start dashboard: %w", dashErr)
+			plr.baseLog.SetFailed(wrapped)
+			return wrapped
 		}
 	}
 
@@ -547,14 +548,17 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	if runErr := r.Run(ctx); runErr != nil {
 		// mark logger as failed so Close writes "Failed:" footer, preserving history
 		// for restart. Applies to ErrUserAborted too — user aborts are not completions.
-		plr.baseLog.SetFailed(runErr)
+		// abort keeps the raw error in the footer (self-descriptive); real failures
+		// use the wrapped error so the footer matches what the caller sees.
 		if errors.Is(runErr, processor.ErrUserAborted) {
-			// user aborted during task phase — clean exit without success actions
+			plr.baseLog.SetFailed(runErr)
 			fmt.Fprintln(os.Stderr, "aborted by user, plan left in place")
 			return nil
 		}
+		wrapped := fmt.Errorf("runner: %w", runErr)
+		plr.baseLog.SetFailed(wrapped)
 		sendNotification(req, branch, plr.baseLog.Elapsed(), git.DiffStats{}, runErr)
-		return fmt.Errorf("runner: %w", runErr)
+		return wrapped
 	}
 
 	elapsed := plr.baseLog.Elapsed()
@@ -976,8 +980,9 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	// run the plan creation loop
 	if runErr := r.Run(ctx); runErr != nil {
-		planCreationErr = runErr
-		return fmt.Errorf("plan creation: %w", runErr)
+		wrapped := fmt.Errorf("plan creation: %w", runErr)
+		planCreationErr = wrapped
+		return wrapped
 	}
 
 	// find the newly created plan file

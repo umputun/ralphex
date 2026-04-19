@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/fatih/color"
 	"golang.org/x/term"
@@ -588,13 +589,15 @@ func (l *Logger) Close() error {
 const maxFailureReasonRunes = 200
 
 // sanitizeFailureReason prepares an error string for single-line footer output.
-// Replaces any control character (including CR/LF/tab) with a single space,
-// collapses consecutive whitespace, and rune-aware truncates to maxFailureReasonRunes.
-// Critical for isProgressCompleted integrity: the reason must not contain
-// "\n<separatorLine>\nCompleted:" which would false-positive the tail scan.
+// Replaces Unicode control chars (unicode.IsControl, covers ASCII C0 + C1 ranges)
+// and line/paragraph separators (U+2028, U+2029) with a single space, collapses
+// consecutive whitespace via strings.Fields, and rune-aware truncates to
+// maxFailureReasonRunes. Critical for isProgressCompleted integrity: the reason
+// must not contain "\n<separatorLine>\nCompleted:" which would false-positive
+// the tail scan.
 func sanitizeFailureReason(s string) string {
 	mapped := strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
 			return ' '
 		}
 		return r
