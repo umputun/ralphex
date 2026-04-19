@@ -35,6 +35,11 @@ func (r *Runner) TestHasUncompletedTasks() bool {
 	return r.hasUncompletedTasks()
 }
 
+// TestValidatePlanHasTasks exposes validatePlanHasTasks for testing.
+func (r *Runner) TestValidatePlanHasTasks() error {
+	return r.validatePlanHasTasks()
+}
+
 // TestBuildCodexPrompt exposes buildCodexPrompt for testing.
 func (r *Runner) TestBuildCodexPrompt(isFirst bool, claudeResponse string) string {
 	return r.buildCodexPrompt(isFirst, claudeResponse)

@@ -86,7 +86,7 @@ func TestRunner_RunFull_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
 	// all tasks complete - no [ ] checkboxes
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -116,7 +116,7 @@ func TestRunner_RunFull_Success(t *testing.T) {
 func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -261,7 +261,7 @@ func TestRunner_RunTasksOnly_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
 	// all tasks complete - no [ ] checkboxes
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -293,7 +293,7 @@ func TestRunner_RunTasksOnly_NoPlanFile(t *testing.T) {
 func TestRunner_RunTasksOnly_TaskPhaseError(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -313,7 +313,7 @@ func TestRunner_RunTasksOnly_TaskPhaseError(t *testing.T) {
 func TestRunner_RunTasksOnly_NoReviews(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1\n- [x] Task 2"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -340,7 +340,7 @@ func TestRunner_RunTasksOnly_NoReviews(t *testing.T) {
 func TestRunner_TaskPhase_FailedSignal(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -360,7 +360,7 @@ func TestRunner_TaskPhase_FailedSignal(t *testing.T) {
 func TestRunner_TaskPhase_MaxIterations(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -381,7 +381,7 @@ func TestRunner_TaskPhase_MaxIterations(t *testing.T) {
 func TestRunner_TaskPhase_ContextCanceled(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately
@@ -435,7 +435,7 @@ func TestRunner_CodexPhase_Error(t *testing.T) {
 func TestRunner_ClaudeExecution_Error(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -572,6 +572,96 @@ func TestRunner_HasUncompletedTasks(t *testing.T) {
 	}
 }
 
+func TestRunner_ValidatePlanHasTasks(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantError bool
+	}{
+		{name: "valid plan with task section", content: "# Plan\n### Task 1: first\n- [ ] todo", wantError: false},
+		{name: "valid plan with iteration section", content: "# Plan\n### Iteration 1: first\n- [ ] todo", wantError: false},
+		{name: "valid plan with all done checkboxes", content: "# Plan\n### Task 1: first\n- [x] done", wantError: false},
+		{name: "valid plan with task section and no checkboxes", content: "# Plan\n### Task 1: first\nsome text", wantError: false},
+		{name: "spec doc without task sections", content: "# Overview\n## Goals\n- describe architecture\n- document interfaces", wantError: true},
+		{name: "plan with only unchecked checkboxes outside task sections", content: "# Plan\n## Overview\n- [ ] not a task", wantError: true},
+		{name: "empty file", content: "", wantError: true},
+		{name: "only title", content: "# Plan", wantError: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			planFile := filepath.Join(tmpDir, "plan.md")
+			require.NoError(t, os.WriteFile(planFile, []byte(tc.content), 0o600))
+
+			log := newMockLogger("")
+			claude := newMockExecutor(nil)
+			codex := newMockExecutor(nil)
+
+			cfg := processor.Config{PlanFile: planFile}
+			r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+			err := r.TestValidatePlanHasTasks()
+			if tc.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "no executable task sections")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestRunner_ValidatePlanHasTasks_MissingFile(t *testing.T) {
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{PlanFile: "/nonexistent/plan.md"}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	err := r.TestValidatePlanHasTasks()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse plan for validation")
+}
+
+func TestRunner_RunFull_NoTaskSections(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Overview\n## Goals\n- describe architecture"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no executable task sections")
+	assert.Empty(t, claude.RunCalls(), "claude must not be invoked when plan has no task sections")
+	assert.Empty(t, codex.RunCalls(), "codex must not be invoked when plan has no task sections")
+}
+
+func TestRunner_RunTasksOnly_NoTaskSections(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Overview\n## Goals\n- describe architecture"), 0o600))
+
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no executable task sections")
+	assert.Empty(t, claude.RunCalls(), "claude must not be invoked when plan has no task sections")
+}
+
 func TestRunner_HasUncompletedTasks_CompletedDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	plansDir := filepath.Join(tmpDir, "docs", "plans")
@@ -620,7 +710,7 @@ func TestRunner_BuildCodexPrompt_CompletedDir(t *testing.T) {
 func TestRunner_TaskRetryCount_UsedCorrectly(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("progress.txt")
 
@@ -976,7 +1066,7 @@ func TestRunner_New_CodexNotInstalled_NoneReviewStillWorks(t *testing.T) {
 func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -1013,7 +1103,7 @@ func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
 	// when waitOnLimit == 0, same as PatternMatchError (logs error + help, returns error)
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [ ] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -1394,7 +1484,7 @@ func TestRunner_RunPlan_PlanDraft_WithQuestionThenDraft(t *testing.T) {
 func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -1435,7 +1525,7 @@ func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
 func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -1465,7 +1555,7 @@ func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
 func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -1505,7 +1595,7 @@ func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
 func TestRunner_Finalize_FailedSignalDoesNotBlockSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
@@ -1668,7 +1758,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 			if tc.planFile {
 				tmpDir := t.TempDir()
 				planFile = filepath.Join(tmpDir, "plan.md")
-				require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+				require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 			}
 
 			cfg := processor.Config{
@@ -2095,7 +2185,7 @@ func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
 func TestRunner_SleepWithContext_CancelDuringDelay(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("- [ ] task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
 	// use a long iteration delay to make the difference obvious
 	const longDelay = 5000 // 5 seconds
@@ -2922,6 +3012,10 @@ func TestRunner_PostCodexReview_SkippedWhenNoFindings(t *testing.T) {
 }
 
 func TestRunner_FullMode_ErrUserAborted_SkipsReview(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
+
 	log := newMockLogger("progress.txt")
 
 	claude := newMockExecutor(nil) // should not be called for review
@@ -2929,7 +3023,7 @@ func TestRunner_FullMode_ErrUserAborted_SkipsReview(t *testing.T) {
 
 	cfg := processor.Config{
 		Mode: processor.ModeFull, MaxIterations: 50, CodexEnabled: true,
-		PlanFile: "some-plan.md", AppConfig: testAppConfig(t),
+		PlanFile: planFile, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
 	r.TestSetTaskPhaseOverride(func(_ context.Context) error {
@@ -2955,6 +3049,10 @@ func TestRunner_FullMode_ErrUserAborted_SkipsReview(t *testing.T) {
 }
 
 func TestRunner_TasksOnly_ErrUserAborted_CleanExit(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
+
 	log := newMockLogger("progress.txt")
 
 	claude := newMockExecutor(nil)
@@ -2962,7 +3060,7 @@ func TestRunner_TasksOnly_ErrUserAborted_CleanExit(t *testing.T) {
 
 	cfg := processor.Config{
 		Mode: processor.ModeTasksOnly, MaxIterations: 50,
-		PlanFile: "some-plan.md", AppConfig: testAppConfig(t),
+		PlanFile: planFile, AppConfig: testAppConfig(t),
 	}
 	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
 	r.TestSetTaskPhaseOverride(func(_ context.Context) error {
@@ -3151,7 +3249,7 @@ func TestRunner_SessionTimeout_IntegrationWithLimitRetry(t *testing.T) {
 func TestRunner_SessionTimeout_TaskPhaseContinues(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 
@@ -3221,7 +3319,7 @@ func TestRunner_SessionTimeout_NonClaudeToolNotAffected(t *testing.T) {
 func TestRunner_SessionTimeout_ReviewPhaseContinues(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 
@@ -3264,7 +3362,7 @@ func TestRunner_SessionTimeout_ReviewPhaseContinues(t *testing.T) {
 func TestRunner_SessionTimeout_ReviewLoopContinuesAfterTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 
@@ -3737,7 +3835,7 @@ func TestRunner_IdleTimeout_ReviewLoopContinuesAfterTimeout(t *testing.T) {
 	// when idle timeout fires without a signal, the review loop should retry (not exit with "no changes detected")
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 
@@ -3782,7 +3880,7 @@ func TestRunner_IdleTimeout_ReviewLoopExitsWhenSignalPresent(t *testing.T) {
 	// when idle timeout fires but REVIEW_DONE signal was already emitted, review should exit normally
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n- [x] Task 1"), 0o600))
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 

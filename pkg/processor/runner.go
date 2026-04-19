@@ -303,6 +303,9 @@ func (r *Runner) runFull(ctx context.Context) error {
 	if r.cfg.PlanFile == "" {
 		return errors.New("plan file required for full mode")
 	}
+	if err := r.validatePlanHasTasks(); err != nil {
+		return err
+	}
 
 	// phase 1: task execution
 	r.phaseHolder.Set(status.PhaseTask)
@@ -418,6 +421,9 @@ func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
 func (r *Runner) runTasksOnly(ctx context.Context) error {
 	if r.cfg.PlanFile == "" {
 		return errors.New("plan file required for tasks-only mode")
+	}
+	if err := r.validatePlanHasTasks(); err != nil {
+		return err
 	}
 
 	r.phaseHolder.Set(status.PhaseTask)
@@ -899,6 +905,22 @@ func (r *Runner) drainBreakCh() {
 // including {{PREVIOUS_REVIEW_CONTEXT}} for iteration context.
 func (r *Runner) buildCodexPrompt(isFirst bool, claudeResponse string) string {
 	return r.replaceVariablesWithIteration(r.cfg.AppConfig.CodexReviewPrompt, isFirst, claudeResponse)
+}
+
+// validatePlanHasTasks returns an error if the plan file has no executable task sections.
+// guards against spec/reference docs that lack ### Task N: / ### Iteration N: headers,
+// which would otherwise cause the task loop to retry TASK_FAILED until exhaustion.
+// callers must ensure r.cfg.PlanFile is non-empty before invoking.
+func (r *Runner) validatePlanHasTasks() error {
+	path := r.resolvePlanFilePath()
+	p, err := plan.ParsePlanFile(path)
+	if err != nil {
+		return fmt.Errorf("parse plan for validation: %w", err)
+	}
+	if len(p.Tasks) == 0 {
+		return fmt.Errorf("plan file %q has no executable task sections (### Task N: or ### Iteration N:); add task sections or pass a different plan file", path)
+	}
+	return nil
 }
 
 // hasUncompletedTasks checks if any Task section has uncompleted checkboxes.
