@@ -138,9 +138,10 @@ type Config struct {
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
-// if the progress file already exists with a completion footer, it is truncated
-// and a fresh header is written. if the file exists without a completion footer
-// (interrupted run), existing log is preserved and a restart separator is written.
+// if the progress file already ends with a "Completed:" footer (successful run),
+// it is truncated and a fresh header is written. if the file ended with a "Failed:"
+// footer or has no footer (interrupted/failed run), the existing log is preserved
+// and a restart separator is written so history carries across retries (issue #288).
 // colors must be provided (created via NewColors from config).
 // holder is the shared PhaseHolder for reading the current execution phase.
 func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger, error) {
@@ -550,7 +551,7 @@ func (l *Logger) Elapsed() string {
 // SetFailed marks the logger as failed with the given reason. On Close, a "Failed:"
 // footer is written instead of "Completed:", so the restart path appends to the file
 // (preserving history) rather than truncating. Safe to call multiple times; the most
-// recent non-nil reason wins. Passing nil clears any previous failure state.
+// recent call wins (passing nil clears any previous failure state).
 func (l *Logger) SetFailed(reason error) {
 	l.runErr = reason
 }
@@ -592,26 +593,15 @@ const maxFailureReasonRunes = 200
 // Critical for isProgressCompleted integrity: the reason must not contain
 // "\n<separatorLine>\nCompleted:" which would false-positive the tail scan.
 func sanitizeFailureReason(s string) string {
-	if s == "" {
-		return "unknown error"
-	}
-	// replace control chars with spaces
-	b := make([]rune, 0, len(s))
-	for _, r := range s {
+	mapped := strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
-			b = append(b, ' ')
-			continue
+			return ' '
 		}
-		b = append(b, r)
-	}
-	// collapse whitespace runs and truncate by rune count
-	out := strings.Join(strings.Fields(string(b)), " ")
-	runes := []rune(out)
-	if len(runes) > maxFailureReasonRunes {
-		runes = runes[:maxFailureReasonRunes]
-		out = string(runes) + "..."
-	} else {
-		out = string(runes)
+		return r
+	}, s)
+	out := strings.Join(strings.Fields(mapped), " ")
+	if runes := []rune(out); len(runes) > maxFailureReasonRunes {
+		out = string(runes[:maxFailureReasonRunes]) + "..."
 	}
 	if out == "" {
 		return "unknown error"
@@ -629,9 +619,11 @@ func (l *Logger) writeStdout(format string, args ...any) {
 	fmt.Fprintf(l.stdout, format, args...)
 }
 
-// isProgressCompleted checks if a progress file has a completion footer written by Close().
+// isProgressCompleted reports whether the progress file ends with a successful "Completed:"
+// footer written by Close(). "Failed:" footers are intentionally excluded so failed/aborted
+// runs preserve history on restart (issue #288).
 // reads the last ~256 bytes from the provided file descriptor and checks for the dash separator
-// followed by "Completed:" — the exact pattern Close() writes.
+// followed by "Completed:" — the exact pattern Close() writes on success.
 // uses the already-locked fd to avoid TOCTOU path-vs-inode mismatch.
 // returns false for zero-size files or read errors.
 func isProgressCompleted(f *os.File, size int64) bool {

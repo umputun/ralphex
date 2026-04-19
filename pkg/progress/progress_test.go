@@ -546,8 +546,8 @@ func TestLogger_SetFailed_TruncatesLongReason(t *testing.T) {
 	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
 	require.NoError(t, err)
 
-	// 1000-char reason with multibyte runes at the truncation boundary
-	longReason := strings.Repeat("x", 500) + strings.Repeat("й", 500) // cyrillic, 2 bytes each
+	// pure multibyte payload so truncation at maxFailureReasonRunes lands inside a cyrillic run
+	longReason := strings.Repeat("й", maxFailureReasonRunes*2) // cyrillic, 2 bytes each
 	l.SetFailed(errors.New(longReason))
 	require.NoError(t, l.Close())
 
@@ -555,7 +555,6 @@ func TestLogger_SetFailed_TruncatesLongReason(t *testing.T) {
 	require.NoError(t, err)
 	s := string(content)
 
-	// footer line with reason must not exceed reasonable length
 	lines := strings.Split(s, "\n")
 	var footerLine string
 	for _, line := range lines {
@@ -565,9 +564,18 @@ func TestLogger_SetFailed_TruncatesLongReason(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, footerLine)
-	assert.LessOrEqual(t, len(footerLine), 400, "failed footer should truncate long reasons")
 	// truncated output must still be valid utf-8
 	assert.True(t, utf8.ValidString(footerLine), "truncated reason must not split a multibyte rune")
+	// reason is rune-capped at maxFailureReasonRunes + "..." suffix
+	reason := footerLine[strings.LastIndex(footerLine, " - ")+3:]
+	assert.True(t, strings.HasSuffix(reason, "..."), "long reason must be truncated with ellipsis")
+	assert.Equal(t, maxFailureReasonRunes, utf8.RuneCountInString(strings.TrimSuffix(reason, "...")))
+}
+
+func TestSanitizeFailureReason_OnlyControlChars(t *testing.T) {
+	// input composed purely of control characters collapses to empty, must fall back to "unknown error"
+	assert.Equal(t, "unknown error", sanitizeFailureReason("\x01\x02\x03\t\r\n"))
+	assert.Equal(t, "unknown error", sanitizeFailureReason(""))
 }
 
 func TestLogger_LogDiffStats(t *testing.T) {
