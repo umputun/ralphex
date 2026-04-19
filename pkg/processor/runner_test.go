@@ -3904,7 +3904,7 @@ func TestRunner_New_ModelEffortWiring(t *testing.T) {
 		reviewModel  string
 		wantTask     [2]string // {model, effort}
 		wantReview   [2]string
-		sameExecutor bool      // true when review falls back to task executor
+		sameExecutor bool // true when review falls back to task executor
 	}{
 		{name: "empty specs", taskModel: "", reviewModel: "", wantTask: [2]string{"", ""}, wantReview: [2]string{"", ""}, sameExecutor: true},
 		{name: "task model only, review empty", taskModel: "opus", reviewModel: "", wantTask: [2]string{"opus", ""}, wantReview: [2]string{"opus", ""}, sameExecutor: true},

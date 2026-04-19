@@ -521,6 +521,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		var dashErr error
 		runnerLog, dashErr = dashboard.Start(ctx)
 		if dashErr != nil {
+			plr.baseLog.SetFailed(dashErr)
 			return fmt.Errorf("start dashboard: %w", dashErr)
 		}
 	}
@@ -544,6 +545,9 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	if runErr := r.Run(ctx); runErr != nil {
+		// mark logger as failed so Close writes "Failed:" footer, preserving history
+		// for restart. Applies to ErrUserAborted too — user aborts are not completions.
+		plr.baseLog.SetFailed(runErr)
 		if errors.Is(runErr, processor.ErrUserAborted) {
 			// user aborted during task phase — clean exit without success actions
 			fmt.Fprintln(os.Stderr, "aborted by user, plan left in place")
@@ -589,7 +593,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 // runWithWorktree creates a worktree, creates the progress logger (before chdir so it lands
 // in the main repo), chdirs into the worktree, and runs executePlan. On return the worktree
 // is cleaned up and CWD is restored. req.WtCleanup is populated for interrupt handler use.
-func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error {
+func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err error) {
 	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile, req.DefaultBranch)
 	if err != nil {
 		return fmt.Errorf("create worktree: %w", err)
@@ -638,6 +642,11 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) error 
 		return fmt.Errorf("create progress logger: %w", err)
 	}
 	defer func() {
+		// mark failure on any error return so Close writes "Failed:" instead of "Completed:",
+		// preserving progress history across restart (issue #288)
+		if err != nil {
+			baseLog.SetFailed(err)
+		}
 		if closeErr := baseLog.Close(); closeErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", closeErr)
 		}
@@ -913,7 +922,15 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
 	}
+	// planCreationErr is scoped to the plan-creation phase only. If r.Run fails, the
+	// deferred Close writes "Failed:" so restart preserves Q&A history (issue #288).
+	// Follow-on execution errors (executePlan/runWithWorktree below) do not affect
+	// this log since plan creation already succeeded by that point.
+	var planCreationErr error
 	defer func() {
+		if planCreationErr != nil {
+			baseLog.SetFailed(planCreationErr)
+		}
 		if closeErr := baseLog.Close(); closeErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to close progress log: %v\n", closeErr)
 		}
@@ -959,6 +976,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	// run the plan creation loop
 	if runErr := r.Run(ctx); runErr != nil {
+		planCreationErr = runErr
 		return fmt.Errorf("plan creation: %w", runErr)
 	}
 

@@ -2,11 +2,13 @@ package progress
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fatih/color"
 	"github.com/stretchr/testify/assert"
@@ -462,6 +464,112 @@ func TestLogger_Close(t *testing.T) {
 	assert.Contains(t, string(content), strings.Repeat("-", 60))
 }
 
+func TestLogger_Close_AfterSetFailed_WritesFailedFooter(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+
+	l.Print("some output")
+	l.SetFailed(errors.New("Not logged in · Please run /login"))
+	require.NoError(t, l.Close())
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "Failed:")
+	assert.Contains(t, s, "Not logged in")
+	assert.NotContains(t, s, "Completed:")
+	assert.Contains(t, s, strings.Repeat("-", 60))
+}
+
+func TestLogger_Close_WithoutSetFailed_WritesCompleted(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+	l.Print("ok")
+	require.NoError(t, l.Close())
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "Completed:")
+	assert.NotContains(t, s, "Failed:")
+}
+
+func TestLogger_SetFailed_SanitizesReason(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+
+	// craft a reason that embeds the exact completion pattern — attack vector for isProgressCompleted
+	sep := strings.Repeat("-", 60)
+	payload := "git output:\n" + sep + "\nCompleted: fake completion from external tool stderr"
+	l.SetFailed(errors.New(payload))
+	require.NoError(t, l.Close())
+
+	path := l.Path()
+	content, err := os.ReadFile(path) //nolint:gosec // test path from t.TempDir
+	require.NoError(t, err)
+	s := string(content)
+
+	// sanitized reason should not contain CR/LF, so the embedded pattern is neutralized
+	assert.NotContains(t, s, sep+"\nCompleted:", "sanitization must strip newlines from failure reason")
+	assert.Contains(t, s, "Failed:")
+
+	// verify detection still returns false — the whole point of sanitization
+	f, err := os.Open(path) //nolint:gosec // test path from t.TempDir
+	require.NoError(t, err)
+	defer f.Close()
+	fi, err := f.Stat()
+	require.NoError(t, err)
+	assert.False(t, isProgressCompleted(f, fi.Size()))
+}
+
+func TestLogger_SetFailed_TruncatesLongReason(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	l, err := NewLogger(Config{Mode: "full", Branch: "test"}, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+
+	// 1000-char reason with multibyte runes at the truncation boundary
+	longReason := strings.Repeat("x", 500) + strings.Repeat("й", 500) // cyrillic, 2 bytes each
+	l.SetFailed(errors.New(longReason))
+	require.NoError(t, l.Close())
+
+	content, err := os.ReadFile(l.Path())
+	require.NoError(t, err)
+	s := string(content)
+
+	// footer line with reason must not exceed reasonable length
+	lines := strings.Split(s, "\n")
+	var footerLine string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Failed:") {
+			footerLine = line
+			break
+		}
+	}
+	require.NotEmpty(t, footerLine)
+	assert.LessOrEqual(t, len(footerLine), 400, "failed footer should truncate long reasons")
+	// truncated output must still be valid utf-8
+	assert.True(t, utf8.ValidString(footerLine), "truncated reason must not split a multibyte rune")
+}
+
 func TestLogger_LogDiffStats(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -512,6 +620,7 @@ func TestIsProgressCompleted(t *testing.T) {
 		{"completed without dash separator", "log line\nCompleted: now\n", false},
 		{"completed in log output", "[ts] task said: Completed: the migration\nmore work\n", false},
 		{"no completed substring", "some text without the keyword", false},
+		{"file with Failed footer", "some content\n" + sep + "\nFailed: 2026-01-15 10:30:00 (5m30s) - Not logged in\n", false},
 	}
 
 	for _, tc := range tests {
@@ -578,6 +687,50 @@ func TestNewLogger_FreshStartAfterCompleted(t *testing.T) {
 
 	// new content present
 	assert.Contains(t, contentStr, "second session output")
+}
+
+func TestNewLogger_RestartAfterFailure_PreservesContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	colors := testColors()
+	// plan mode — deterministic filename from plan description, the scenario from issue #288
+	cfg := Config{PlanDescription: "add user auth", Mode: "plan", Branch: "main"}
+	holder := &status.PhaseHolder{}
+
+	// first run fails mid-way
+	l1, err := NewLogger(cfg, colors, holder)
+	require.NoError(t, err)
+	l1.Print("iteration 1 output")
+	l1.Print("iteration 2 Q&A")
+	l1.SetFailed(errors.New("auth error"))
+	progressPath := l1.Path()
+	require.NoError(t, l1.Close())
+
+	// second run with same config — should NOT truncate, should append restart separator
+	l2, err := NewLogger(cfg, colors, holder)
+	require.NoError(t, err)
+	assert.Equal(t, progressPath, l2.Path())
+	l2.Print("iteration 3 after restart")
+	require.NoError(t, l2.Close())
+
+	content, err := os.ReadFile(l2.Path())
+	require.NoError(t, err)
+	s := string(content)
+
+	// previous iterations preserved
+	assert.Contains(t, s, "iteration 1 output")
+	assert.Contains(t, s, "iteration 2 Q&A")
+	// failed footer from first run preserved
+	assert.Contains(t, s, "Failed:")
+	// restart separator present
+	assert.Contains(t, s, "--- restarted at")
+	// new content appended
+	assert.Contains(t, s, "iteration 3 after restart")
+	// exactly one header (not rewritten)
+	assert.Equal(t, 1, strings.Count(s, "# Ralphex Progress Log"))
 }
 
 func TestGetProgressFilename(t *testing.T) {

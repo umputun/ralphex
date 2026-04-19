@@ -125,6 +125,7 @@ type Logger struct {
 	startTime time.Time
 	holder    *status.PhaseHolder
 	colors    *Colors
+	runErr    error // set via SetFailed to record non-success outcome for the footer
 }
 
 // Config holds logger configuration.
@@ -546,14 +547,30 @@ func (l *Logger) Elapsed() string {
 	return d.Truncate(time.Second).String()
 }
 
+// SetFailed marks the logger as failed with the given reason. On Close, a "Failed:"
+// footer is written instead of "Completed:", so the restart path appends to the file
+// (preserving history) rather than truncating. Safe to call multiple times; the most
+// recent non-nil reason wins. Passing nil clears any previous failure state.
+func (l *Logger) SetFailed(reason error) {
+	l.runErr = reason
+}
+
 // Close writes footer, releases the file lock, and closes the progress file.
+// Writes "Completed:" footer on success, or "Failed: ... - <reason>" if SetFailed
+// was called with a non-nil error.
 func (l *Logger) Close() error {
 	if l.file == nil {
 		return nil
 	}
 
 	l.writeFile("\n%s\n", separatorLine)
-	l.writeFile("Completed: %s (%s)\n", time.Now().Format("2006-01-02 15:04:05"), l.Elapsed())
+	ts := time.Now().Format("2006-01-02 15:04:05")
+	if l.runErr == nil {
+		l.writeFile("Completed: %s (%s)\n", ts, l.Elapsed())
+	} else {
+		reason := sanitizeFailureReason(l.runErr.Error())
+		l.writeFile("Failed: %s (%s) - %s\n", ts, l.Elapsed(), reason)
+	}
 
 	// release file lock before closing
 	_ = unlockFile(l.file)
@@ -563,6 +580,43 @@ func (l *Logger) Close() error {
 		return fmt.Errorf("close progress file: %w", err)
 	}
 	return nil
+}
+
+// maxFailureReasonRunes caps the failure reason written into the footer.
+// Rune-based cap avoids splitting multibyte sequences at the boundary.
+const maxFailureReasonRunes = 200
+
+// sanitizeFailureReason prepares an error string for single-line footer output.
+// Replaces any control character (including CR/LF/tab) with a single space,
+// collapses consecutive whitespace, and rune-aware truncates to maxFailureReasonRunes.
+// Critical for isProgressCompleted integrity: the reason must not contain
+// "\n<separatorLine>\nCompleted:" which would false-positive the tail scan.
+func sanitizeFailureReason(s string) string {
+	if s == "" {
+		return "unknown error"
+	}
+	// replace control chars with spaces
+	b := make([]rune, 0, len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			b = append(b, ' ')
+			continue
+		}
+		b = append(b, r)
+	}
+	// collapse whitespace runs and truncate by rune count
+	out := strings.Join(strings.Fields(string(b)), " ")
+	runes := []rune(out)
+	if len(runes) > maxFailureReasonRunes {
+		runes = runes[:maxFailureReasonRunes]
+		out = string(runes) + "..."
+	} else {
+		out = string(runes)
+	}
+	if out == "" {
+		return "unknown error"
+	}
+	return out
 }
 
 func (l *Logger) writeFile(format string, args ...any) {
