@@ -298,16 +298,16 @@ class TestDetectTimezone(unittest.TestCase):
                 os.environ["TZ"] = old
 
     def test_timezone_in_docker_cmd(self) -> None:
-        """verify TIME_ZONE env var is included in base env vars."""
+        """verify both TIME_ZONE (baseimage) and TZ (Go runtime) env vars are set."""
         old = os.environ.get("TZ")
         try:
             os.environ["TZ"] = "Asia/Tokyo"
             env_vars = build_base_env_vars()
-            # find TIME_ZONE value in the flat list (format: ["-e", "KEY=val", ...])
-            tz_values = [env_vars[i] for i in range(len(env_vars))
-                         if env_vars[i].startswith("TIME_ZONE=")]
-            self.assertTrue(len(tz_values) > 0, "TIME_ZONE not found in base env vars")
-            self.assertEqual(tz_values[0], "TIME_ZONE=Asia/Tokyo")
+            # find matching values in the flat list (format: ["-e", "KEY=val", ...])
+            time_zone_values = [e for e in env_vars if e.startswith("TIME_ZONE=")]
+            tz_values = [e for e in env_vars if e.startswith("TZ=")]
+            self.assertEqual(time_zone_values, ["TIME_ZONE=Asia/Tokyo"])
+            self.assertEqual(tz_values, ["TZ=Asia/Tokyo"])
         finally:
             if old is None:
                 os.environ.pop("TZ", None)

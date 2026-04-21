@@ -878,9 +878,13 @@ def schedule_cleanup(creds_temp: Optional[Path]) -> None:
 
 def build_base_env_vars() -> list[str]:
     """build base docker environment variable flags shared by all docker commands."""
+    tz = detect_timezone()
+    # TIME_ZONE configures baseimage's /etc/localtime; TZ is what Go's time
+    # package reads for time.Local, so both must be set for consistent timestamps.
     return [
         "-e", f"APP_UID={os.getuid()}",
-        "-e", f"TIME_ZONE={detect_timezone()}",
+        "-e", f"TIME_ZONE={tz}",
+        "-e", f"TZ={tz}",
         "-e", "SKIP_HOME_CHOWN=1",
         "-e", "INIT_QUIET=1",
         "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
