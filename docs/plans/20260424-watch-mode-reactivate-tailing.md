@@ -266,12 +266,12 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] re-read issue #283 and confirm Option B semantics match this implementation
-- [ ] run full test suite: `make test`
-- [ ] verify race-free: `go test -race ./pkg/web/...`
-- [ ] run linter: `make lint` (fix all issues — no "pre-existing" dismissals)
-- [ ] run formatter: `make fmt`
-- [ ] check coverage: `go test -cover ./pkg/web/...` — must be >=80% for touched files, ideally no regression
+- [x] re-read issue #283 and confirm Option B semantics match this implementation
+- [x] run full test suite: `make test`
+- [x] verify race-free: `go test -race ./pkg/web/...`
+- [x] run linter: `make lint` (fix all issues — no "pre-existing" dismissals)
+- [x] run formatter: `make fmt`
+- [x] check coverage: `go test -cover ./pkg/web/...` — must be >=80% for touched files, ideally no regression
 
 ### Task 7: End-to-end toy-project verification
 

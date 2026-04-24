@@ -834,7 +834,6 @@ Started: 2026-01-22 10:00:00
 		"session B should NOT be tailing - no write event arrived for its path")
 }
 
-
 func TestWatcher_Close(t *testing.T) {
 	tmpDir := t.TempDir()
 	sm := NewSessionManager()
