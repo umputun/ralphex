@@ -23,14 +23,19 @@ import (
 //	Mode: full
 //	Started: 2026-01-22 10:30:00
 //	------------------------------------------------------------
-func ParseProgressHeader(path string) (SessionMetadata, error) {
+//
+// the second return value reports whether the terminating separator line was
+// observed, which means the header is fully written. during a truncate+rewrite
+// the header is emitted across several writes, so a mid-write read can return
+// incomplete metadata (zero StartTime, missing fields); callers should use the
+// complete flag to decide whether to trust the parsed metadata.
+func ParseProgressHeader(path string) (meta SessionMetadata, complete bool, err error) {
 	f, err := os.Open(path) //nolint:gosec // path from user-controlled glob pattern, acceptable for session discovery
 	if err != nil {
-		return SessionMetadata{}, fmt.Errorf("open file: %w", err)
+		return SessionMetadata{}, false, fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 
-	var meta SessionMetadata
 	reader := bufio.NewReader(f)
 
 	for {
@@ -40,8 +45,9 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 		// stop at separator line; check readErr even when breaking
 		if line != "" && strings.HasPrefix(line, "---") {
 			if readErr != nil && !errors.Is(readErr, io.EOF) {
-				return SessionMetadata{}, fmt.Errorf("read file: %w", readErr)
+				return SessionMetadata{}, false, fmt.Errorf("read file: %w", readErr)
 			}
+			complete = true
 			break
 		}
 
@@ -62,13 +68,13 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
-				return SessionMetadata{}, fmt.Errorf("read file: %w", readErr)
+				return SessionMetadata{}, false, fmt.Errorf("read file: %w", readErr)
 			}
 			break // EOF after processing final line
 		}
 	}
 
-	return meta, nil
+	return meta, complete, nil
 }
 
 // loadProgressFileIntoSession reads a progress file and publishes events to the session's SSE server.
@@ -112,6 +118,9 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 	}
 
 	session.setLastOffset(bytesRead)
+	// record the phase the parser ended on so a later Reactivate resumes with
+	// the correct phase rather than the tailer's default (PhaseTask).
+	session.setLastPhase(phase)
 }
 
 // processProgressLine handles a single parsed progress line,

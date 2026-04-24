@@ -792,11 +792,25 @@ Started: 2026-01-22 10:30:00
 		assert.True(t, found, "should have received 'after resume' event")
 	})
 
-	t.Run("clamps offset beyond file size without panic", func(t *testing.T) {
+	t.Run("offset beyond file size falls back to reading from beginning", func(t *testing.T) {
+		// models the case where a progress file was truncated for reuse
+		// (executor drops "Completed:" files and restarts). the stored
+		// lastOffset from the previous run is larger than the new file
+		// size, so StartFromOffset must treat this as "new file generation"
+		// and read from the start rather than seeking to EOF and skipping
+		// the new run's header and early lines.
 		tmpDir := t.TempDir()
 		progressFile := filepath.Join(tmpDir, "progress-test.txt")
 
-		content := "[26-01-22 10:30:01] hello\n"
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] hello
+`
 		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
 
 		tailer := NewTailer(progressFile, TailerConfig{
@@ -804,18 +818,25 @@ Started: 2026-01-22 10:30:00
 			InitialPhase: status.PhaseTask,
 		})
 
-		// offset way past EOF should be clamped, no panic, no events
 		require.NoError(t, tailer.StartFromOffset(99999))
 		defer tailer.Stop()
 
-		select {
-		case ev := <-tailer.Events():
-			t.Fatalf("expected no events, got %+v", ev)
-		case <-time.After(100 * time.Millisecond):
+		var got string
+		timeout := time.After(500 * time.Millisecond)
+	loop:
+		for {
+			select {
+			case ev := <-tailer.Events():
+				if ev.Text == "hello" {
+					got = ev.Text
+					break loop
+				}
+			case <-timeout:
+				break loop
+			}
 		}
-
-		assert.Equal(t, int64(len(content)), tailer.Offset(),
-			"offset should be clamped to file size")
+		assert.Equal(t, "hello", got,
+			"expected tailer to read from beginning after detecting truncation")
 	})
 
 	t.Run("zero offset falls back to seek-to-end", func(t *testing.T) {
@@ -904,6 +925,306 @@ Started: 2026-01-22 10:30:00
 
 		tailer.Stop()
 	})
+}
+
+func TestTailer_Phase(t *testing.T) {
+	t.Run("phase reflects last section header processed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+--- task iteration 1 ---
+[26-01-22 10:30:01] working on task
+--- review iteration 1 ---
+[26-01-22 10:30:05] reviewing
+`
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+		require.NoError(t, tailer.Start(true))
+		defer tailer.Stop()
+
+		// consume events until both sections are seen, then check phase
+		deadline := time.After(500 * time.Millisecond)
+		var sawReview bool
+		for !sawReview {
+			select {
+			case ev := <-tailer.Events():
+				if ev.Phase == status.PhaseReview {
+					sawReview = true
+				}
+			case <-deadline:
+				t.Fatalf("tailer never advanced to review phase; got phase=%q", tailer.Phase())
+			}
+		}
+		assert.Equal(t, status.PhaseReview, tailer.Phase(),
+			"tailer phase should reflect last section header")
+	})
+
+	t.Run("phase defaults to configured initial phase before any section", func(t *testing.T) {
+		tailer := NewTailer("/tmp/nonexistent", TailerConfig{
+			InitialPhase: status.PhaseCodex,
+		})
+		assert.Equal(t, status.PhaseCodex, tailer.Phase())
+	})
+}
+
+func TestTailer_StartFromOffset_TruncationResetsStalePhase(t *testing.T) {
+	// models the Reactivate-after-truncation case: the previous run ended in
+	// PhaseCodex, Session.lastPhase was captured, startTailerLocked seeded
+	// InitialPhase=PhaseCodex into the new tailer, then the progress file was
+	// truncated for a fresh run. StartFromOffset's truncation fallback must
+	// reset the parser phase so pre-section lines in the new file carry
+	// PhaseTask, not the stale PhaseCodex.
+	tmpDir := t.TempDir()
+	progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+	content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] starting task execution phase
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+	tailer := NewTailer(progressFile, TailerConfig{
+		PollInterval: 10 * time.Millisecond,
+		InitialPhase: status.PhaseCodex, // stale phase from previous run
+	})
+
+	require.NoError(t, tailer.StartFromOffset(99999))
+	defer tailer.Stop()
+
+	var got Event
+	timeout := time.After(500 * time.Millisecond)
+loop:
+	for {
+		select {
+		case ev := <-tailer.Events():
+			if ev.Text == "starting task execution phase" {
+				got = ev
+				break loop
+			}
+		case <-timeout:
+			break loop
+		}
+	}
+	require.Equal(t, "starting task execution phase", got.Text,
+		"expected tailer to emit fresh-file line after truncation fallback")
+	assert.Equal(t, status.PhaseTask, got.Phase,
+		"truncation fallback must reset stale phase to PhaseTask for fresh file")
+}
+
+func TestTailer_PendingSection_Accessor(t *testing.T) {
+	t.Run("returns pending section and phase when deferred", func(t *testing.T) {
+		// file ends with a section header but no subsequent line, so the
+		// section event remains pending inside the tailer until the next line.
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] before section
+--- review iteration 2 ---
+`
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+		require.NoError(t, tailer.Start(true))
+		defer tailer.Stop()
+
+		// wait until the tailer has consumed the whole file
+		expected := int64(len(content))
+		require.Eventually(t, func() bool { return tailer.Offset() == expected },
+			2*time.Second, 20*time.Millisecond, "tailer should advance to EOF")
+
+		// drain any deferred events that did fire (e.g. "before section") so
+		// we can later confirm pendingSection was not flushed
+		drainEvents(tailer, 80*time.Millisecond)
+
+		section, phase := tailer.PendingSection()
+		assert.Equal(t, "review iteration 2", section,
+			"expected deferred section header to remain pending")
+		assert.Equal(t, status.PhaseReview, phase,
+			"expected pending phase to reflect the deferred section header")
+	})
+
+	t.Run("returns empty when nothing pending", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+		require.NoError(t, os.WriteFile(progressFile, []byte(""), 0o600))
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+		})
+		require.NoError(t, tailer.Start(true))
+		defer tailer.Stop()
+
+		section, phase := tailer.PendingSection()
+		assert.Empty(t, section)
+		assert.Empty(t, phase)
+	})
+}
+
+func TestTailer_StartFromOffset_PreservesPendingSection(t *testing.T) {
+	// models the flock-race recovery path: a previous tailer read a section
+	// header (pendingSection set) but was stopped before the next line
+	// arrived. the resumed tailer must emit the pending section/task-start
+	// events when new content arrives, instead of silently dropping them.
+	tmpDir := t.TempDir()
+	progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+	header := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] pre-section line
+--- task iteration 7 ---
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(header), 0o600))
+
+	// simulate resume: pending section pre-seeded via config
+	tailer := NewTailer(progressFile, TailerConfig{
+		PollInterval:   10 * time.Millisecond,
+		InitialPhase:   status.PhaseTask,
+		PendingSection: "task iteration 7",
+		PendingPhase:   status.PhaseTask,
+	})
+	require.NoError(t, tailer.StartFromOffset(int64(len(header))))
+	defer tailer.Stop()
+
+	// nothing should arrive until a new line appears
+	select {
+	case ev := <-tailer.Events():
+		t.Fatalf("unexpected event before new line: %+v", ev)
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	// append a timestamped line after the pending section header
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test file path
+	require.NoError(t, err)
+	_, err = f.WriteString("[26-01-22 10:30:02] post-section line\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	var sawTaskStart, sawSection, sawPostLine bool
+	timeout := time.After(1 * time.Second)
+loop:
+	for !sawTaskStart || !sawSection || !sawPostLine {
+		select {
+		case ev := <-tailer.Events():
+			switch ev.Type { //nolint:exhaustive // only interested in these event types
+			case EventTypeTaskStart:
+				assert.Equal(t, 7, ev.TaskNum)
+				assert.Equal(t, status.PhaseTask, ev.Phase)
+				sawTaskStart = true
+			case EventTypeSection:
+				assert.Equal(t, "task iteration 7", ev.Section)
+				sawSection = true
+			case EventTypeOutput:
+				if ev.Text == "post-section line" {
+					sawPostLine = true
+				}
+			}
+		case <-timeout:
+			break loop
+		}
+	}
+	assert.True(t, sawTaskStart, "expected TaskStart event for pending section")
+	assert.True(t, sawSection, "expected Section event for pending section")
+	assert.True(t, sawPostLine, "expected post-section output event")
+}
+
+func TestTailer_StartFromOffset_NoPendingSectionDoesNotDefer(t *testing.T) {
+	// regression guard: when config.PendingSection is empty, StartFromOffset
+	// must behave as before - deferSections=false, section headers parsed
+	// inline. previously this was unconditional; now it's gated by config.
+	tmpDir := t.TempDir()
+	progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+	header := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] before offset
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(header), 0o600))
+
+	tailer := NewTailer(progressFile, TailerConfig{
+		PollInterval: 10 * time.Millisecond,
+		InitialPhase: status.PhaseTask,
+		// intentionally no PendingSection
+	})
+	require.NoError(t, tailer.StartFromOffset(int64(len(header))))
+	defer tailer.Stop()
+
+	// append a section header followed by a line - section should emit
+	// immediately (not deferred) because no pending-section carryover.
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test file path
+	require.NoError(t, err)
+	_, err = f.WriteString("--- task iteration 3 ---\n[26-01-22 10:30:02] after\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// collect up to 5 events or until we see the expected ones
+	var sawSection, sawOutput bool
+	timeout := time.After(500 * time.Millisecond)
+loop:
+	for !sawSection || !sawOutput {
+		select {
+		case ev := <-tailer.Events():
+			if ev.Type == EventTypeSection && ev.Section == "task iteration 3" {
+				sawSection = true
+			}
+			if ev.Type == EventTypeOutput && ev.Text == "after" {
+				sawOutput = true
+			}
+		case <-timeout:
+			break loop
+		}
+	}
+	assert.True(t, sawSection, "expected Section event to fire inline when no pending carryover")
+	assert.True(t, sawOutput, "expected output event after the section header")
+}
+
+// drainEvents consumes any events waiting on the tailer's channel for the
+// given window, discarding them. used by tests that need to inspect tailer
+// state (e.g. PendingSection) without stalling on the event buffer.
+func drainEvents(tailer *Tailer, window time.Duration) {
+	deadline := time.After(window)
+	for {
+		select {
+		case <-tailer.Events():
+		case <-deadline:
+			return
+		}
+	}
 }
 
 func TestNormalizeTokenSignal(t *testing.T) {

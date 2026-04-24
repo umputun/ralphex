@@ -29,8 +29,9 @@ Started: 2026-01-22 10:30:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete, "separator observed, header should be marked complete")
 
 		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
 		assert.Equal(t, "feature-branch", meta.Branch)
@@ -51,8 +52,9 @@ Started: 2026-01-22 11:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete)
 
 		assert.Equal(t, "(no plan - review only)", meta.PlanPath)
 		assert.Equal(t, "review", meta.Mode)
@@ -68,8 +70,9 @@ Branch: main
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete, "separator present → complete even with missing fields")
 
 		assert.Empty(t, meta.PlanPath)
 		assert.Equal(t, "main", meta.Branch)
@@ -78,8 +81,29 @@ Branch: main
 	})
 
 	t.Run("returns error for missing file", func(t *testing.T) {
-		_, err := ParseProgressHeader("/nonexistent/path")
+		_, _, err := ParseProgressHeader("/nonexistent/path")
 		assert.Error(t, err)
+	})
+
+	t.Run("reports incomplete when separator not yet written", func(t *testing.T) {
+		// models a mid-write observation: header lines written but terminating
+		// separator still pending. updateSession must not clobber previously
+		// stored metadata with the partial parse returned here.
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.False(t, complete, "no separator → header should be marked incomplete")
+		assert.True(t, meta.StartTime.IsZero(), "Started: not yet written")
+		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath, "already-written fields still parsed")
 	})
 }
 
@@ -423,8 +447,9 @@ Started: 2026-01-22 10:30:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete)
 
 		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
 		assert.Equal(t, "feature-branch", meta.Branch)
@@ -445,8 +470,9 @@ Started: 2026-01-22 10:30:00
 			"[26-01-22 10:30:05] " + hugeLine + "\n"
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete)
 
 		assert.Equal(t, "docs/plans/huge.md", meta.PlanPath)
 		assert.Equal(t, "huge-branch", meta.Branch)

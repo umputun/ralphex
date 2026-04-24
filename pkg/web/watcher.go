@@ -213,6 +213,15 @@ func (w *Watcher) handleProgressFileChange(path string) {
 }
 
 // startTailingIfNeeded starts tailing for a session if it's active and not already tailing.
+// delegates to SessionManager.activateSession so the Reactivate-vs-StartTailing(true)
+// choice is based on whether lastOffset has already been captured. this matters for
+// the RefreshStates/Discover race: RefreshStates can set state=completed and call
+// StopTailing, and a concurrent Write-event-driven Discover can flip state back to
+// active while the old tailer is still being stopped. handleStateTransition's
+// `!IsTailing()` guard then skips activateSession, leaving the session in
+// "active but not tailing" with lastOffset captured. the next write event reaches
+// this function — using StartTailing(true) would replay from byte 0 and duplicate
+// events the previous tailer already published; Reactivate resumes from lastOffset.
 func (w *Watcher) startTailingIfNeeded(id string) {
 	session := w.sm.Get(id)
 	if session == nil {
@@ -221,9 +230,7 @@ func (w *Watcher) startTailingIfNeeded(id string) {
 	if session.GetState() != SessionStateActive || session.IsTailing() {
 		return
 	}
-	if err := session.StartTailing(true); err != nil {
-		log.Printf("[WARN] failed to start tailing for session %s: %v", id, err)
-	}
+	w.sm.activateSession(session)
 }
 
 // refreshLoop periodically checks for session state changes (active->completed).

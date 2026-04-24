@@ -1,7 +1,9 @@
 package web
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tmaxmax/go-sse"
+
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 func TestNewSession(t *testing.T) {
@@ -382,6 +386,79 @@ Started: 2026-01-22 10:30:00
 
 		assert.Equal(t, int64(42), s.getLastOffset(), "stopping without a tailer must not overwrite lastOffset")
 	})
+
+	t.Run("drains buffered events into SSE before returning", func(t *testing.T) {
+		// regression test: before the StopTailing drain fix, events that the
+		// tailer had read (and whose bytes were accounted for in tailer.Offset)
+		// but not yet drained by feedEvents could be silently dropped when
+		// stopTailCh was closed. with the drain, every event the tailer produced
+		// must be visible on the SSE stream by the time StopTailing returns, and
+		// lastOffset must equal the file size — this is the guarantee Reactivate
+		// relies on to avoid a gap across stop/reactivate cycles.
+		tmpDir := t.TempDir()
+		progressFile := tmpDir + "/progress-test.txt"
+
+		// seed with header and one line so the SSE server has an event in its
+		// replay buffer when we subscribe — without it, http.Do blocks waiting
+		// for response headers that Joe only flushes on the first event.
+		initial := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:00] seed line
+`
+		require.NoError(t, os.WriteFile(progressFile, []byte(initial), 0o600))
+
+		s := NewSession("test", progressFile)
+		defer s.Close()
+
+		require.NoError(t, s.StartTailing(true))
+		require.Eventually(t, func() bool {
+			return s.GetTailer() != nil && s.GetTailer().Offset() == int64(len(initial))
+		}, 2*time.Second, 20*time.Millisecond, "tailer should read seed content")
+
+		events, cleanup := subscribeSSEEvents(t, s)
+		defer cleanup()
+
+		// drain replay of seed line so only live-post-subscription events remain
+		_ = drainChannel(events, 200*time.Millisecond)
+
+		// append many lines in one write to maximize the chance of events being
+		// queued in eventCh when StopTailing fires
+		const lineCount = 200
+		var body strings.Builder
+		for i := range lineCount {
+			fmt.Fprintf(&body, "[26-01-22 10:30:%02d] line %d\n", i%60, i)
+		}
+		f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test path from t.TempDir
+		require.NoError(t, err)
+		_, err = f.WriteString(body.String())
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+
+		expected := int64(len(initial) + body.Len())
+		require.Eventually(t, func() bool {
+			return s.GetTailer() != nil && s.GetTailer().Offset() == expected
+		}, 2*time.Second, 20*time.Millisecond, "tailer should read appended content")
+
+		// stop — with the drain fix, every event the tailer pushed to eventCh
+		// must be published to SSE before StopTailing returns.
+		s.StopTailing()
+		require.Equal(t, expected, s.getLastOffset(), "lastOffset must equal bytes read after StopTailing")
+
+		delivered := drainChannel(events, 1500*time.Millisecond)
+		outputs := 0
+		for _, ev := range delivered {
+			if strings.Contains(ev, "\"type\":\"output\"") && strings.Contains(ev, "\"text\":\"line ") {
+				outputs++
+			}
+		}
+		assert.Equal(t, lineCount, outputs,
+			"every line the tailer read must be published to SSE — no drops between offset advance and feedEvents drain")
+	})
 }
 
 func TestSession_Reactivate_ResumesFromOffset(t *testing.T) {
@@ -519,6 +596,165 @@ func TestSession_Reactivate_FailedStartLeavesStateUnchanged(t *testing.T) {
 	assert.Equal(t, SessionStateCompleted, s.GetState())
 	assert.False(t, s.IsTailing())
 	assert.Nil(t, s.GetTailer())
+}
+
+func TestSession_Reactivate_PreservesPhase(t *testing.T) {
+	// regression test for codex finding: resuming mid-phase must carry over
+	// the parser phase so new lines are tagged correctly, rather than defaulting
+	// to PhaseTask until the next section header.
+	tmpDir := t.TempDir()
+	progressFile := tmpDir + "/progress-test.txt"
+
+	content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+--- task iteration 1 ---
+[26-01-22 10:30:01] task line
+--- review iteration 1 ---
+[26-01-22 10:30:02] review line
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+	s := NewSession("test", progressFile)
+	defer s.Close()
+
+	// start from beginning, let the tailer process the full file so its
+	// internal phase advances to review.
+	require.NoError(t, s.StartTailing(true))
+	expected := int64(len(content))
+	require.Eventually(t, func() bool {
+		return s.GetTailer() != nil && s.GetTailer().Offset() == expected
+	}, 2*time.Second, 20*time.Millisecond, "tailer should reach EOF")
+
+	// stop captures offset and phase. StopTailing is synchronous and drains
+	// feedEvents, so the tailer phase observed here is the committed one.
+	s.StopTailing()
+	require.Equal(t, status.PhaseReview, s.getLastPhase(),
+		"StopTailing must capture the tailer's current phase")
+
+	// simulate flock-race recovery: state was flipped to completed, then a
+	// write event arrives with a new line (no new section header).
+	s.SetState(SessionStateCompleted)
+	events, cleanup := subscribeSSEEvents(t, s)
+	defer cleanup()
+
+	// drain any replay from the pre-stop tailer so we only inspect post-reactivate events
+	_ = drainChannel(events, 200*time.Millisecond)
+
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test file path
+	require.NoError(t, err)
+	_, err = f.WriteString("[26-01-22 10:30:03] still in review\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	require.NoError(t, s.Reactivate())
+
+	// the post-reactivate line must carry PhaseReview, not the tailer's default
+	postReactivate := drainChannel(events, 800*time.Millisecond)
+	var sawStillInReview bool
+	for _, ev := range postReactivate {
+		if strings.Contains(ev, "still in review") {
+			sawStillInReview = true
+			assert.Contains(t, ev, "\"phase\":\""+string(status.PhaseReview)+"\"",
+				"post-reactivate event must carry preserved phase")
+		}
+	}
+	assert.True(t, sawStillInReview, "should have received the post-reactivate event; got %v", postReactivate)
+}
+
+func TestSession_Reactivate_PreservesPendingSection(t *testing.T) {
+	// regression test: StopTailing must capture the tailer's deferred section
+	// state (a section header read from the file but whose section/task-start
+	// event has not yet been emitted because emission is deferred until the
+	// next timestamped/output line arrives). Reactivate must then re-seed a
+	// fresh tailer with that pending state so the section event still fires
+	// on the next line instead of being silently dropped across the restart.
+	tmpDir := t.TempDir()
+	progressFile := tmpDir + "/progress-test.txt"
+
+	// file ends with a section header - the section event is deferred inside
+	// the tailer and will only fire when the next line is read.
+	initial := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] before section
+--- task iteration 5 ---
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(initial), 0o600))
+
+	s := NewSession("test", progressFile)
+	defer s.Close()
+
+	require.NoError(t, s.StartTailing(true))
+	expected := int64(len(initial))
+	require.Eventually(t, func() bool {
+		return s.GetTailer() != nil && s.GetTailer().Offset() == expected
+	}, 2*time.Second, 20*time.Millisecond, "tailer should reach EOF")
+
+	// wait for the tailer's pending section to be set (consumed the section
+	// header but not yet the following line, so pendingSection is populated)
+	require.Eventually(t, func() bool {
+		name, _ := s.GetTailer().PendingSection()
+		return name == "task iteration 5"
+	}, 2*time.Second, 20*time.Millisecond, "tailer should have deferred section before stop")
+
+	// stop captures lastOffset AND pending section state into the session
+	s.StopTailing()
+	require.Eventually(t, func() bool { return !s.IsTailing() }, time.Second, 10*time.Millisecond)
+	require.Equal(t, "task iteration 5", s.lastPendingSection,
+		"StopTailing must capture pending section name")
+	require.Equal(t, status.PhaseTask, s.lastPendingPhase,
+		"StopTailing must capture pending section phase")
+
+	// simulate flock-race recovery: state flipped to completed, then subscribe
+	// to SSE so we catch the events published after reactivation.
+	s.SetState(SessionStateCompleted)
+	events, cleanup := subscribeSSEEvents(t, s)
+	defer cleanup()
+
+	// drain any replay from before reactivation (the "before section" line was
+	// already published by the pre-stop tailer and lives in the replay buffer)
+	preReactivate := drainChannel(events, 200*time.Millisecond)
+	for _, ev := range preReactivate {
+		require.NotContains(t, ev, "\"section\":\"task iteration 5\"",
+			"precondition: section event must not have been published before reactivate")
+	}
+
+	// append the first line of iteration 5 - the write event plus the tailer
+	// reading it should flush the deferred section.
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test file path
+	require.NoError(t, err)
+	_, err = f.WriteString("[26-01-22 10:30:02] first line of iteration 5\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	require.NoError(t, s.Reactivate())
+
+	// collect post-reactivate events via SSE
+	postReactivate := drainChannel(events, 800*time.Millisecond)
+	var sawTaskStart, sawSection, sawOutput bool
+	for _, ev := range postReactivate {
+		if strings.Contains(ev, "\"type\":\"task_start\"") && strings.Contains(ev, "\"task_num\":5") {
+			sawTaskStart = true
+		}
+		if strings.Contains(ev, "\"type\":\"section\"") && strings.Contains(ev, "\"section\":\"task iteration 5\"") {
+			sawSection = true
+		}
+		if strings.Contains(ev, "first line of iteration 5") {
+			sawOutput = true
+		}
+	}
+	assert.True(t, sawTaskStart, "expected TaskStart event for deferred section; got %v", postReactivate)
+	assert.True(t, sawSection, "expected Section event for deferred section; got %v", postReactivate)
+	assert.True(t, sawOutput, "expected output event for new post-reactivate line; got %v", postReactivate)
 }
 
 func TestAllEventsReplayer_Replay(t *testing.T) {

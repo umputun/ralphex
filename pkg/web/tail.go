@@ -19,6 +19,16 @@ import (
 type TailerConfig struct {
 	PollInterval time.Duration // how often to check for new content (default: 100ms)
 	InitialPhase status.Phase  // phase to use for events (default: PhaseTask)
+
+	// PendingSection and PendingPhase carry over a deferred section that was
+	// read by a previous tailer but not yet emitted (a section header whose
+	// section/task-start event is pending the next timestamped/output line).
+	// only honored by StartFromOffset: when PendingSection is non-empty, the
+	// resumed tailer starts with deferSections=true and emits the pending
+	// section event when the next line arrives, matching the original tailer's
+	// behavior across a restart (e.g. after a flock-race Reactivate).
+	PendingSection string
+	PendingPhase   status.Phase
 }
 
 // DefaultTailerConfig returns default configuration.
@@ -128,24 +138,51 @@ func (t *Tailer) Offset() int64 {
 	return t.offset
 }
 
+// Phase returns the tailer's current parser phase.
+// callers can persist this across tailer restarts (e.g., reactivation) so
+// lines emitted after resume carry the correct phase without waiting for
+// the next section header.
+func (t *Tailer) Phase() status.Phase {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.phase
+}
+
+// PendingSection returns any section header that has been read but whose
+// section/task-start event has not yet been emitted (because deferred
+// emission is waiting for the next timestamped/output line). returns the
+// section name and the parsed phase for that section, or zero values if
+// nothing is pending. callers can persist this across tailer restarts so
+// the deferred section event is not lost when a tailer is stopped between
+// reading the section header and reading the following line.
+func (t *Tailer) PendingSection() (string, status.Phase) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.pendingSection, t.pendingPhase
+}
+
 // StartFromOffset begins tailing the file seeking to the given byte offset.
 // if offset <= 0, behaves like Start(false) (seeks to end).
-// if offset exceeds file size, it is clamped to file size (no spurious replay).
+// if offset exceeds current file size the file has been truncated/replaced
+// (progress logger reuses "Completed:" files by truncating them for a fresh
+// run), so the method resets to the beginning of the new file via Start(true)
+// and the caller's stored lastOffset is discarded for this resume. in that
+// case the parser phase is also reset to the default (status.PhaseTask) so a
+// stale phase seeded from a previous run's config.InitialPhase does not leak
+// into the fresh file's pre-section-header lines.
 // the caller must guarantee offset points past the header block; offset>0 disables
 // header detection, so a misplaced offset may leave subsequent header lines treated as output.
+// if config.PendingSection is set, the resumed tailer preserves the deferred
+// section so its section/task-start event fires on the next line instead of
+// being dropped across the restart.
 // note: Tailer is not reusable after Stop() - create a new instance instead.
 func (t *Tailer) StartFromOffset(offset int64) error {
 	if offset <= 0 {
 		return t.Start(false)
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.running {
-		return nil
-	}
-
+	// open the file and inspect size before taking t.mu so a truncation
+	// fallback can delegate to Start(true) without nested locking.
 	f, err := os.Open(t.path)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
@@ -157,18 +194,46 @@ func (t *Tailer) StartFromOffset(offset int64) error {
 		return fmt.Errorf("stat file: %w", err)
 	}
 
-	clamped := min(offset, stat.Size())
-
-	if _, err := f.Seek(clamped, io.SeekStart); err != nil {
+	if offset > stat.Size() {
+		// file was truncated/replaced since offset was recorded; start over
+		// from the beginning of the new file contents. reset the parser phase
+		// to the default so a stale phase from the previous run (seeded via
+		// config.InitialPhase for the resume case) does not color lines
+		// emitted before the new run's first section header.
 		f.Close()
-		return fmt.Errorf("seek to offset %d: %w", clamped, err)
+		t.mu.Lock()
+		t.phase = status.PhaseTask
+		t.mu.Unlock()
+		return t.Start(true)
 	}
 
-	t.offset = clamped
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.running {
+		f.Close()
+		return nil
+	}
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		f.Close()
+		return fmt.Errorf("seek to offset %d: %w", offset, err)
+	}
+
+	t.offset = offset
 	t.inHeader = false
-	t.deferSections = false
-	t.pendingSection = ""
-	t.pendingPhase = ""
+	if t.config.PendingSection != "" {
+		// carry over a deferred section from a previous tailer so its
+		// section/task-start event is emitted when the next line arrives,
+		// instead of being silently lost across the restart.
+		t.deferSections = true
+		t.pendingSection = t.config.PendingSection
+		t.pendingPhase = t.config.PendingPhase
+	} else {
+		t.deferSections = false
+		t.pendingSection = ""
+		t.pendingPhase = ""
+	}
 
 	t.file = f
 	t.reader = bufio.NewReader(f)

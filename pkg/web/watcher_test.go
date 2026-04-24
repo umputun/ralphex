@@ -14,6 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tmaxmax/go-sse"
+
+	"github.com/umputun/ralphex/pkg/progress"
+	"github.com/umputun/ralphex/pkg/status"
 )
 
 // resolveSymlinks resolves symlinks in the given path for test comparison.
@@ -830,6 +833,80 @@ Started: 2026-01-22 10:00:00
 		"session B should NOT be reactivated - no write event arrived for its path")
 	assert.False(t, sessionB.IsTailing(),
 		"session B should NOT be tailing - no write event arrived for its path")
+}
+
+// TestWatcher_StartTailingIfNeededReactivatesWithStoredOffset verifies the fix
+// for the RefreshStates/Discover race where handleStateTransition skipped
+// activateSession because IsTailing() was transiently true during StopTailing.
+// the race leaves the session in "active but not tailing" with lastOffset
+// captured. on the next write event startTailingIfNeeded must resume from the
+// stored offset, not replay from byte 0 (StartTailing(true)) — otherwise every
+// event the previous tailer published would be re-emitted into the SSE stream.
+func TestWatcher_StartTailingIfNeededReactivatesWithStoredOffset(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.md")
+	require.NoError(t, os.WriteFile(planPath, []byte("# plan"), 0o600))
+
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	holder := &status.PhaseHolder{}
+	logger, err := progress.NewLogger(progress.Config{
+		PlanFile: planPath,
+		Mode:     "full",
+		Branch:   "main",
+	}, testColors(), holder)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = logger.Close() })
+
+	progressPath := logger.Path()
+
+	// seed the progress file with content so there is a non-trivial offset
+	// to resume from.
+	appendF, err := os.OpenFile(progressPath, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test-controlled path
+	require.NoError(t, err)
+	_, err = appendF.WriteString("[26-01-22 10:00:01] pre-race line\n")
+	require.NoError(t, err)
+	require.NoError(t, appendF.Close())
+
+	preRaceSize, err := os.Stat(progressPath)
+	require.NoError(t, err)
+
+	// construct the state the RefreshStates/Discover race leaves behind:
+	//   - state = active (Discover flipped completed->active on write)
+	//   - tailer = nil (RefreshStates finished StopTailing after Discover's
+	//     IsTailing() check had already returned true)
+	//   - lastOffset > 0 (StopTailing captured the previous tailer's offset)
+	id := sessionIDFromPath(progressPath)
+	session := NewSession(id, progressPath)
+	session.SetState(SessionStateActive)
+	require.True(t, session.MarkLoadedIfNot())
+	session.setLastOffset(preRaceSize.Size())
+
+	sm := NewSessionManager()
+	sm.Register(session)
+
+	w, err := NewWatcher([]string{dir}, sm)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+
+	// invoke startTailingIfNeeded directly - models the next Write-event pass
+	// through handleProgressFileChange after the race.
+	w.startTailingIfNeeded(id)
+
+	require.Eventually(t, func() bool {
+		return session.IsTailing() && session.GetTailer() != nil
+	}, time.Second, 10*time.Millisecond, "tailer should be running after reactivation")
+
+	tailerOffset := session.GetTailer().Offset()
+	assert.GreaterOrEqual(t, tailerOffset, preRaceSize.Size(),
+		"tailer must resume from stored lastOffset, not byte 0; got %d, want >= %d",
+		tailerOffset, preRaceSize.Size())
+
+	// state must remain active
+	assert.Equal(t, SessionStateActive, session.GetState())
 }
 
 func TestWatcher_Close(t *testing.T) {
