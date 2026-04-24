@@ -67,6 +67,7 @@ docs/plans/         # plan files location
 - Streaming output with timestamps
 - Progress logging to files
 - Progress file locking (flock) for active session detection
+- Watch-mode dashboard reactivates completed sessions on fsnotify Write events, resuming tailing from the recorded `Session.lastOffset` — recovery path for the flock race in `RefreshStates` that can prematurely mark a still-running session as completed (issue #283). `Session.Reactivate()` is idempotent and scoped to the exact path that received the write; `loadProgressFileIntoSession` records `lastOffset` after the initial load so reactivation does not re-emit already-replayed events
 - Progress file fresh start: files ending in a `Completed:` footer are truncated on reuse; files ending in a `Failed:` footer (written when `Logger.SetFailed` was called before `Close`) or with no footer preserve existing content and write a `--- restarted at ... ---` separator, so retried failed/aborted runs keep history (issue #288). `SetFailed` is called in `cmd/ralphex/main.go` for `r.Run` errors (including `ErrUserAborted`), dashboard start errors, and any error return from `runWithWorktree`
 - Multiple execution modes: full, tasks-only, review-only, external-only/codex-only, plan creation
 - `--base-ref` flag overrides default branch for review diffs (branch name or commit hash)

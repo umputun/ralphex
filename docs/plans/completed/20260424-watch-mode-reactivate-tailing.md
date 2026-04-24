@@ -289,10 +289,10 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 **Files:**
 - Modify: `CLAUDE.md` (only if an existing section describes watcher/session-state behavior)
 
-- [ ] `grep -n "watch" CLAUDE.md` and `grep -n "RefreshStates\|session" CLAUDE.md`; if an existing section describes the affected behavior, append a one-line note about reactivation-on-write. Do NOT add a new section speculatively
-- [ ] `grep -rn "watch mode\|RefreshStates\|flock" docs/` — if any existing doc describes the flock-based detection, update to mention the recovery path
-- [ ] update this plan file: mark all tasks `[x]`
-- [ ] move plan: `mkdir -p docs/plans/completed && git mv docs/plans/20260424-watch-mode-reactivate-tailing.md docs/plans/completed/`
+- [x] `grep -n "watch" CLAUDE.md` and `grep -n "RefreshStates\|session" CLAUDE.md`; if an existing section describes the affected behavior, append a one-line note about reactivation-on-write. Do NOT add a new section speculatively
+- [x] `grep -rn "watch mode\|RefreshStates\|flock" docs/` — if any existing doc describes the flock-based detection, update to mention the recovery path
+- [x] update this plan file: mark all tasks `[x]`
+- [x] move plan: `mkdir -p docs/plans/completed && git mv docs/plans/20260424-watch-mode-reactivate-tailing.md docs/plans/completed/`
 
 ## Post-Completion
 
