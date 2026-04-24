@@ -681,6 +681,58 @@ Started: 2026-01-22 10:30:00
 		assert.False(t, stopping, "stopping flag must be cleared after StopTailing returns")
 		assert.Nil(t, tailer, "tailer pointer must be nil after StopTailing returns")
 	})
+
+	t.Run("concurrent stoptailing calls do not clobber a reactivated tailer", func(t *testing.T) {
+		// regression test: without stopMu serialization, two concurrent
+		// StopTailing calls could both capture the same tailer reference.
+		// the second caller would skip the (already-nil-swapped) feedDone wait,
+		// reach the final critical section first, clear stopping/tailer, and
+		// allow a Reactivate to start a NEW tailer — which the first caller
+		// would then nil out when its drain finally completed, leaving the
+		// session in "active state but no tailer running."
+		tmpDir := t.TempDir()
+		progressFile := tmpDir + "/progress-test.txt"
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] line one
+`
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		s := NewSession("test", progressFile)
+		defer s.Close()
+
+		require.NoError(t, s.StartTailing(true))
+		require.Eventually(t, func() bool {
+			return s.GetTailer() != nil && s.GetTailer().Offset() == int64(len(content))
+		}, 2*time.Second, 20*time.Millisecond)
+
+		// fire two StopTailing calls concurrently; stopMu must serialize them
+		// so the second observes s.tailer == nil and is a no-op.
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); s.StopTailing() }()
+		go func() { defer wg.Done(); s.StopTailing() }()
+		wg.Wait()
+
+		s.mu.RLock()
+		stopping := s.stopping
+		tailer := s.tailer
+		offset := s.lastOffset
+		s.mu.RUnlock()
+		assert.False(t, stopping, "stopping flag cleared after both StopTailing calls return")
+		assert.Nil(t, tailer, "tailer pointer nil after concurrent StopTailing")
+		assert.Equal(t, int64(len(content)), offset, "lastOffset preserved at the captured value, not clobbered by the second caller")
+
+		// a Reactivate after the concurrent stop must start a real tailer that
+		// is NOT subsequently clobbered by a still-draining StopTailing goroutine.
+		require.NoError(t, s.Reactivate())
+		require.NotNil(t, s.GetTailer(), "Reactivate must start a tailer that survives the prior concurrent stop")
+	})
 }
 
 func TestSession_Reactivate_PreservesPhase(t *testing.T) {

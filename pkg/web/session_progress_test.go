@@ -269,30 +269,38 @@ func TestSessionManager_LoadProgressFileIntoSession_RecordsOffset(t *testing.T) 
 		assert.Equal(t, int64(0), session.getLastOffset(), "empty file must record zero offset")
 	})
 
-	t.Run("no trailing newline offset equals file size", func(t *testing.T) {
+	t.Run("partial trailing line skipped to avoid mid-write corruption", func(t *testing.T) {
+		// the loader runs on the flock-race recovery path where the writer is
+		// still active; a trailing line without a newline is a mid-write
+		// fragment. counting and publishing it would advance lastOffset past
+		// the partial bytes, so a later Reactivate would resume mid-line and
+		// emit the suffix as a separate event after the writer completes the
+		// line. lastOffset must point to the end of the last fully-terminated
+		// line, NOT to file size.
 		dir := t.TempDir()
-		path := filepath.Join(dir, "progress-no-newline.txt")
+		path := filepath.Join(dir, "progress-partial.txt")
 
-		content := "# Ralphex Progress Log\n" +
+		header := "# Ralphex Progress Log\n" +
 			"Plan: docs/plan.md\n" +
 			"Branch: main\n" +
 			"Mode: full\n" +
 			"Started: 2026-01-22 10:00:00\n" +
 			"------------------------------------------------------------\n" +
 			"\n" +
-			"[26-01-22 10:00:01] first line\n" +
-			"[26-01-22 10:00:02] last line without newline"
-		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+			"[26-01-22 10:00:01] first line\n"
+		partial := "[26-01-22 10:00:02] last line without newline"
+		require.NoError(t, os.WriteFile(path, []byte(header+partial), 0o600))
 
 		m := NewSessionManager()
 		defer m.Close()
-		session := NewSession("test-no-newline", path)
+		session := NewSession("test-partial", path)
 		defer session.Close()
 
 		m.loadProgressFileIntoSession(path, session)
 
-		assert.Equal(t, int64(len(content)), session.getLastOffset(),
-			"lastOffset must equal total byte size when final line lacks a newline")
+		assert.Equal(t, int64(len(header)), session.getLastOffset(),
+			"lastOffset must skip the partial trailing line so a later "+
+				"Reactivate resumes from the end of the last complete line")
 	})
 
 	t.Run("missing file leaves lastOffset unchanged", func(t *testing.T) {

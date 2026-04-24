@@ -97,8 +97,18 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 
 	for {
 		line, readErr := reader.ReadString('\n')
+		// a partial trailing line (no newline delimiter) means the writer is
+		// mid-write — the flock-race recovery path is the realistic case where
+		// loader is invoked on a still-being-written file. counting and
+		// publishing the partial would advance lastOffset past the partial
+		// bytes; a later Reactivate would then resume reading the suffix of
+		// the writer's eventual completed line as if it were a separate event,
+		// reintroducing the corruption this PR is meant to eliminate.
+		if readErr != nil && line != "" {
+			break
+		}
 		// count raw bytes including the delimiter before trimming, so LF, CRLF,
-		// and the final no-trailing-newline read all count correctly
+		// and the final empty read all count correctly
 		bytesRead += int64(len(line))
 		line = trimLineEnding(line)
 

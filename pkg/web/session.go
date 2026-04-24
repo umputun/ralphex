@@ -68,6 +68,14 @@ const defaultTopic = "events"
 type Session struct {
 	mu sync.RWMutex
 
+	// stopMu serializes concurrent StopTailing invocations so that two callers
+	// cannot both observe s.tailer != nil, capture the same tailer reference,
+	// and race in the final critical section. without this, the second caller
+	// could clear stopping/tailer fields before the first caller's feedEvents
+	// drain completes — letting a Reactivate slip in on a stale lastOffset and
+	// then having the first caller's final lock clobber the new tailer.
+	stopMu sync.Mutex
+
 	// set once at creation, immutable after
 	ID   string      // unique identifier (derived from progress filename)
 	Path string      // full path to progress file
@@ -434,9 +442,16 @@ func (s *Session) Reactivate() error {
 // see a clean slate.
 //
 // if no tailer is running, all last* fields are preserved. safe to call
-// concurrently and repeatedly; if two StopTailing calls race, the second
-// observes s.tailer==nil and returns without touching captured fields.
+// concurrently and repeatedly; concurrent calls are serialized via stopMu so
+// the second caller observes s.tailer==nil after the first finishes and returns
+// without touching captured fields.
 func (s *Session) StopTailing() {
+	// serialize concurrent StopTailing calls; the unlocked drain window
+	// (between the first and final mu critical sections) cannot otherwise
+	// safely overlap, see stopMu doc on Session.
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+
 	s.mu.Lock()
 	if s.tailer == nil {
 		s.mu.Unlock()
