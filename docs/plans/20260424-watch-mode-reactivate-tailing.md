@@ -132,16 +132,16 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 **Files:**
 - Modify: `pkg/web/watcher_test.go`
 
-- [ ] add test `TestWatcher_ResumesStreamingAfterFlockRace`:
-  - [ ] create a temp dir + progress file, write the standard header and some initial lines
-  - [ ] create SessionManager + Watcher (real fsnotify), start with context
-  - [ ] wait for initial discovery (poll session state until non-nil, sanity check)
-  - [ ] simulate the flock race: force the session state to `SessionStateCompleted` via `session.SetState(SessionStateCompleted)` and stop tailing via `session.StopTailing()` (this models what `RefreshStates` does when TryLockFile transiently succeeds)
-  - [ ] append new lines to the progress file
-  - [ ] assert within a generous timeout (~500ms) that the session state returns to `SessionStateActive` and the new lines arrive via SSE — tests poll for state and consume from `session.SSE` subscription or use the tail/event interface existing tests use
-  - [ ] run the test: `go test ./pkg/web/... -run TestWatcher_ResumesStreamingAfterFlockRace` — **MUST FAIL on master** (this confirms the bug is reproducible)
-- [ ] document the expected failure in the test with a comment referencing issue #283
-- [ ] **Do NOT commit the failing test as a separate commit** — it would land a red commit on the branch and break bisect. Keep the test uncommitted (or bundle with Task 5 commit) until it passes. If TDD hygiene is desired, `t.Skip` the test in its own commit then un-skip in Task 5
+- [x] add test `TestWatcher_ResumesStreamingAfterFlockRace`:
+  - [x] create a temp dir + progress file, write the standard header and some initial lines
+  - [x] create SessionManager + Watcher (real fsnotify), start with context
+  - [x] wait for initial discovery (poll session state until non-nil, sanity check)
+  - [x] simulate the flock race: force the session state to `SessionStateCompleted` via `session.SetState(SessionStateCompleted)` and stop tailing via `session.StopTailing()` (this models what `RefreshStates` does when TryLockFile transiently succeeds)
+  - [x] append new lines to the progress file
+  - [x] assert within a generous timeout (~500ms) that the session state returns to `SessionStateActive` and the new lines arrive via SSE — tests poll for state and consume from `session.SSE` subscription or use the tail/event interface existing tests use
+  - [x] run the test: `go test ./pkg/web/... -run TestWatcher_ResumesStreamingAfterFlockRace` — **MUST FAIL on master** (this confirms the bug is reproducible)
+- [x] document the expected failure in the test with a comment referencing issue #283
+- [x] **Do NOT commit the failing test as a separate commit** — it would land a red commit on the branch and break bisect. Keep the test uncommitted (or bundle with Task 5 commit) until it passes. If TDD hygiene is desired, `t.Skip` the test in its own commit then un-skip in Task 5
 
 ### Task 1: Expose offset and seek-to-offset on Tailer
 

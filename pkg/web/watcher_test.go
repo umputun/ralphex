@@ -496,6 +496,67 @@ Started: 2026-01-22 10:00:00
 	assert.Equal(t, "new-plan.md", session.GetMetadata().PlanPath)
 }
 
+// TestWatcher_ResumesStreamingAfterFlockRace is the TDD reproduction test for issue #283.
+// It simulates the flock race where RefreshStates transiently marks a running session as
+// completed (because TryLockFile briefly succeeds), then appends new progress lines to the
+// file and expects the watcher to reactivate the session so streaming resumes.
+//
+// Expected to FAIL on master (before the fix in Task 5) and PASS once the reactivation
+// logic in Watcher.handleProgressFileChange is implemented. Skipped for now so the
+// initial commit stays green; un-skipped in Task 5 after the fix lands.
+func TestWatcher_ResumesStreamingAfterFlockRace(t *testing.T) {
+	t.Skip("issue #283: reactivation-on-write not implemented yet — un-skip in Task 5")
+
+	tmpDir := t.TempDir()
+	progressFile := filepath.Join(tmpDir, "progress-reactivate-test.txt")
+	header := `# Ralphex Progress Log
+Plan: reactivate-plan.md
+Branch: reactivate-branch
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+[26-01-22 10:00:01] initial line 1
+[26-01-22 10:00:02] initial line 2
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(header), 0o600))
+
+	sm := NewSessionManager()
+	w, err := NewWatcher([]string{tmpDir}, sm)
+	require.NoError(t, err)
+
+	ctx := t.Context()
+	go func() { _ = w.Start(ctx) }()
+
+	// wait for initial discovery
+	sessionID := sessionIDFromPath(progressFile)
+	require.Eventually(t, func() bool {
+		return sm.Get(sessionID) != nil
+	}, time.Second, 10*time.Millisecond, "session should be discovered")
+
+	session := sm.Get(sessionID)
+	require.NotNil(t, session)
+
+	// simulate the flock race: force state to completed and stop tailing
+	// (models what RefreshStates does when TryLockFile transiently succeeds)
+	session.SetState(SessionStateCompleted)
+	session.StopTailing()
+	assert.Eventually(t, func() bool { return !session.IsTailing() }, time.Second, 10*time.Millisecond)
+	require.Equal(t, SessionStateCompleted, session.GetState())
+
+	// append new lines — simulates the still-running executor writing after the race
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test-controlled path from t.TempDir
+	require.NoError(t, err)
+	_, err = f.WriteString("[26-01-22 10:00:03] line after reactivation\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// expect watcher to reactivate the session on the Write event
+	assert.Eventually(t, func() bool {
+		return session.GetState() == SessionStateActive && session.IsTailing()
+	}, 2*time.Second, 20*time.Millisecond, "session should reactivate and resume tailing after write")
+}
+
 func TestWatcher_Close(t *testing.T) {
 	tmpDir := t.TempDir()
 	sm := NewSessionManager()
