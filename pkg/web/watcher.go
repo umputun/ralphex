@@ -193,6 +193,23 @@ func (w *Watcher) handleProgressFileChange(path string) {
 	for _, id := range ids {
 		w.startTailingIfNeeded(id)
 	}
+
+	// recover from the RefreshStates flock race: if the session for the written
+	// path is still marked completed (flock briefly observed unlocked) but new
+	// bytes just arrived, reactivate it so streaming resumes. scoped to the
+	// exact written path so other completed sessions in the same directory are
+	// not affected. gated on IsLoaded to avoid racing the initial loader.
+	id := sessionIDFromPath(path)
+	session := w.sm.Get(id)
+	if session == nil {
+		return
+	}
+	if session.GetState() != SessionStateCompleted || !session.IsLoaded() {
+		return
+	}
+	if err := session.Reactivate(); err != nil {
+		log.Printf("[WARN] failed to reactivate session %s: %v", id, err)
+	}
 }
 
 // startTailingIfNeeded starts tailing for a session if it's active and not already tailing.

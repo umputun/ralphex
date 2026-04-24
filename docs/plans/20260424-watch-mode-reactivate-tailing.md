@@ -244,25 +244,25 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 - Modify: `pkg/web/watcher.go`
 - Modify: `pkg/web/watcher_test.go`
 
-- [ ] in `handleProgressFileChange(path)`, after the `Discover` call and the `startTailingIfNeeded` loop:
-  - [ ] look up the session for this path: `id := sessionIDFromPath(path); session := w.sm.Get(id)`
-  - [ ] if session != nil and `session.GetState() == SessionStateCompleted` and `session.IsLoaded()`:
-    - [ ] call `session.Reactivate()`, log any error at WARN level
-  - [ ] the `IsLoaded()` check ensures `loadProgressFileIntoSession` has finished (lastOffset is set) before we reactivate — avoids the race where a mid-load write triggers reactivation with lastOffset=0
-- [ ] keep existing `startTailingIfNeeded(id)` loop unchanged — it handles fresh-active-from-Discover; Reactivate handles the completed case
-- [ ] this design means the post-Discover sequence handles:
+- [x] in `handleProgressFileChange(path)`, after the `Discover` call and the `startTailingIfNeeded` loop:
+  - [x] look up the session for this path: `id := sessionIDFromPath(path); session := w.sm.Get(id)`
+  - [x] if session != nil and `session.GetState() == SessionStateCompleted` and `session.IsLoaded()`:
+    - [x] call `session.Reactivate()`, log any error at WARN level
+  - [x] the `IsLoaded()` check ensures `loadProgressFileIntoSession` has finished (lastOffset is set) before we reactivate — avoids the race where a mid-load write triggers reactivation with lastOffset=0
+- [x] keep existing `startTailingIfNeeded(id)` loop unchanged — it handles fresh-active-from-Discover; Reactivate handles the completed case
+- [x] this design means the post-Discover sequence handles:
   - already-active session: no-op (startTailingIfNeeded sees tailing, skips; Reactivate sees not-completed, skips)
   - Discover flipped completed→active: startTailingIfNeeded starts tailing (from start)
   - Discover kept completed, write event occurred: Reactivate resumes from lastOffset
-- [ ] add test: `TestWatcher_ReactivatesCompletedSessionOnWrite`:
-  - [ ] create progress file, pre-populate with initial content
-  - [ ] start watcher, wait for initial discovery to load content (state=completed, lastOffset > 0)
-  - [ ] append new lines to file (triggers fsnotify Write)
-  - [ ] assert state transitions to `active` and NEW lines arrive via SSE (subscribe and consume events) — verify that the pre-existing content is NOT re-emitted after reactivation
-- [ ] add test: `TestWatcher_DoesNotReactivateActiveSession` — session already active + tailing, write event should not spawn duplicate tailer. Assertion: subscribe to SSE, write a line, verify exactly one event arrives (no duplication). Do NOT rely on tailer pointer identity or goroutine counts — those helpers don't exist and would add test-only APIs
-- [ ] add test: `TestWatcher_OnlyReactivatesWrittenPath` — create two progress files in same dir, both completed; write to one only; verify only that session is reactivated, the other stays completed
-- [ ] run tests: `go test ./pkg/web/... -run Watcher` must pass before next task
-- [ ] **re-run the Task 0 reproduction test** `TestWatcher_ResumesStreamingAfterFlockRace` — it must now pass (this is the green half of red-green-refactor for the bug fix)
+- [x] add test: `TestWatcher_ReactivatesCompletedSessionOnWrite`:
+  - [x] create progress file, pre-populate with initial content
+  - [x] start watcher, wait for initial discovery to load content (state=completed, lastOffset > 0)
+  - [x] append new lines to file (triggers fsnotify Write)
+  - [x] assert state transitions to `active` and NEW lines arrive via SSE (subscribe and consume events) — verify that the pre-existing content is NOT re-emitted after reactivation
+- [x] add test: `TestWatcher_DoesNotReactivateActiveSession` — session already active + tailing, write event should not spawn duplicate tailer. Assertion: subscribe to SSE, write a line, verify exactly one event arrives (no duplication). Do NOT rely on tailer pointer identity or goroutine counts — those helpers don't exist and would add test-only APIs
+- [x] add test: `TestWatcher_OnlyReactivatesWrittenPath` — create two progress files in same dir, both completed; write to one only; verify only that session is reactivated, the other stays completed
+- [x] run tests: `go test ./pkg/web/... -run Watcher` must pass before next task
+- [x] **re-run the Task 0 reproduction test** `TestWatcher_ResumesStreamingAfterFlockRace` — it must now pass (this is the green half of red-green-refactor for the bug fix)
 
 ### Task 6: Verify acceptance criteria
 
