@@ -219,7 +219,7 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 - Modify: `pkg/web/session_progress.go`
 - Modify: `pkg/web/session_progress_test.go`
 
-- [ ] in `loadProgressFileIntoSession`, accumulate bytes read during the loop:
+- [x] in `loadProgressFileIntoSession`, accumulate bytes read during the loop:
   ```go
   var bytesRead int64
   for {
@@ -231,12 +231,12 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
   }
   session.setLastOffset(bytesRead)
   ```
-- [ ] **Key detail:** count `len(line)` BEFORE `trimLineEnding` — `ReadString('\n')` returns the delimiter included, so the raw length covers LF, CRLF, and no-trailing-newline (final partial read on EOF) correctly. Do NOT compute offset by summing trimmed length + constant — CRLF would be undercounted by 1 byte
-- [ ] add test: `TestLoadProgressFileIntoSession_RecordsOffset_LF` — load file with `\n`-only endings, verify `getLastOffset()` equals file byte size
-- [ ] add test: `TestLoadProgressFileIntoSession_RecordsOffset_CRLF` — load file with `\r\n` endings, verify offset equals byte size (critical regression guard)
-- [ ] add test: `TestLoadProgressFileIntoSession_EmptyFile` — verify offset is 0 (no regression)
-- [ ] add test: `TestLoadProgressFileIntoSession_NoTrailingNewline` — last line lacks `\n`, verify offset still equals byte size
-- [ ] run tests: `go test ./pkg/web/... -run Load` must pass before next task
+- [x] **Key detail:** count `len(line)` BEFORE `trimLineEnding` — `ReadString('\n')` returns the delimiter included, so the raw length covers LF, CRLF, and no-trailing-newline (final partial read on EOF) correctly. Do NOT compute offset by summing trimmed length + constant — CRLF would be undercounted by 1 byte
+- [x] add test: `TestLoadProgressFileIntoSession_RecordsOffset_LF` — load file with `\n`-only endings, verify `getLastOffset()` equals file byte size
+- [x] add test: `TestLoadProgressFileIntoSession_RecordsOffset_CRLF` — load file with `\r\n` endings, verify offset equals byte size (critical regression guard)
+- [x] add test: `TestLoadProgressFileIntoSession_EmptyFile` — verify offset is 0 (no regression)
+- [x] add test: `TestLoadProgressFileIntoSession_NoTrailingNewline` — last line lacks `\n`, verify offset still equals byte size
+- [x] run tests: `go test ./pkg/web/... -run Load` must pass before next task
 
 ### Task 5: Reactivate on write in Watcher
 

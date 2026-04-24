@@ -74,6 +74,8 @@ func ParseProgressHeader(path string) (SessionMetadata, error) {
 // loadProgressFileIntoSession reads a progress file and publishes events to the session's SSE server.
 // used for completed sessions that were discovered after they finished.
 // errors are silently ignored since this is best-effort loading.
+// records the total bytes consumed into session.lastOffset so a later Reactivate()
+// can resume tailing from after the loaded content instead of re-emitting it.
 func (m *SessionManager) loadProgressFileIntoSession(path string, session *Session) {
 	f, err := os.Open(path) //nolint:gosec // path from user-controlled glob pattern, acceptable for session discovery
 	if err != nil {
@@ -85,9 +87,13 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 	inHeader := true
 	phase := status.PhaseTask
 	var pendingSection string // section header waiting for first timestamped event
+	var bytesRead int64
 
 	for {
 		line, readErr := reader.ReadString('\n')
+		// count raw bytes including the delimiter before trimming, so LF, CRLF,
+		// and the final no-trailing-newline read all count correctly
+		bytesRead += int64(len(line))
 		line = trimLineEnding(line)
 
 		if line != "" {
@@ -104,6 +110,8 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 	if pendingSection != "" {
 		m.emitPendingSection(session, pendingSection, phase, time.Now())
 	}
+
+	session.setLastOffset(bytesRead)
 }
 
 // processProgressLine handles a single parsed progress line,

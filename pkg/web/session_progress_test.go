@@ -177,6 +177,114 @@ Started: 2026-01-22 10:00:00
 	})
 }
 
+func TestSessionManager_LoadProgressFileIntoSession_RecordsOffset(t *testing.T) {
+	t.Run("LF endings offset equals file size", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-lf.txt")
+
+		content := "# Ralphex Progress Log\n" +
+			"Plan: docs/plan.md\n" +
+			"Branch: main\n" +
+			"Mode: full\n" +
+			"Started: 2026-01-22 10:00:00\n" +
+			"------------------------------------------------------------\n" +
+			"\n" +
+			"[26-01-22 10:00:01] first line\n" +
+			"[26-01-22 10:00:02] second line\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-lf", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(len(content)), session.getLastOffset(),
+			"lastOffset must equal total byte size for LF-terminated content")
+	})
+
+	t.Run("CRLF endings offset equals file size", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-crlf.txt")
+
+		content := "# Ralphex Progress Log\r\n" +
+			"Plan: docs/plan.md\r\n" +
+			"Branch: main\r\n" +
+			"Mode: full\r\n" +
+			"Started: 2026-01-22 10:00:00\r\n" +
+			"------------------------------------------------------------\r\n" +
+			"\r\n" +
+			"[26-01-22 10:00:01] first line\r\n" +
+			"[26-01-22 10:00:02] second line\r\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-crlf", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(len(content)), session.getLastOffset(),
+			"lastOffset must equal total byte size for CRLF-terminated content (regression guard)")
+	})
+
+	t.Run("empty file records zero offset", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-empty.txt")
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-empty", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(0), session.getLastOffset(), "empty file must record zero offset")
+	})
+
+	t.Run("no trailing newline offset equals file size", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-no-newline.txt")
+
+		content := "# Ralphex Progress Log\n" +
+			"Plan: docs/plan.md\n" +
+			"Branch: main\n" +
+			"Mode: full\n" +
+			"Started: 2026-01-22 10:00:00\n" +
+			"------------------------------------------------------------\n" +
+			"\n" +
+			"[26-01-22 10:00:01] first line\n" +
+			"[26-01-22 10:00:02] last line without newline"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-no-newline", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(len(content)), session.getLastOffset(),
+			"lastOffset must equal total byte size when final line lacks a newline")
+	})
+
+	t.Run("missing file leaves lastOffset unchanged", func(t *testing.T) {
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-missing", "/nonexistent/progress.txt")
+		defer session.Close()
+
+		session.setLastOffset(42)
+		m.loadProgressFileIntoSession("/nonexistent/progress.txt", session)
+
+		assert.Equal(t, int64(42), session.getLastOffset(),
+			"missing file must not overwrite pre-existing lastOffset")
+	})
+}
+
 func TestSessionManager_EmitPendingSection(t *testing.T) {
 	t.Run("task iteration section emits task_start event", func(t *testing.T) {
 		dir := t.TempDir()
