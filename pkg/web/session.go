@@ -86,6 +86,11 @@ type Session struct {
 
 	// loaded tracks whether historical data has been loaded into the SSE server
 	loaded bool
+
+	// lastOffset is the byte offset into the progress file of the last byte
+	// already ingested (via the loader or a previous tailer). used by Reactivate
+	// to resume tailing without re-emitting events into the SSE replay buffer.
+	lastOffset int64
 }
 
 // NewSession creates a new session for the given progress file path.
@@ -240,8 +245,13 @@ func (s *Session) StartTailing(fromStart bool) error {
 }
 
 // StopTailing stops the tailer and event feeder goroutine.
+// captures the tailer's current byte offset into lastOffset before stopping,
+// so a subsequent Reactivate can resume from the exact byte where tailing stopped.
 func (s *Session) StopTailing() {
 	s.mu.Lock()
+	if s.tailer != nil {
+		s.lastOffset = s.tailer.Offset()
+	}
 	if s.stopTailCh != nil {
 		close(s.stopTailCh)
 		s.stopTailCh = nil
@@ -252,6 +262,22 @@ func (s *Session) StopTailing() {
 	if tailer != nil {
 		tailer.Stop()
 	}
+}
+
+// getLastOffset returns the byte offset of the last ingested content.
+// package-internal accessor, thread-safe.
+func (s *Session) getLastOffset() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastOffset
+}
+
+// setLastOffset updates the byte offset of the last ingested content.
+// package-internal accessor, thread-safe.
+func (s *Session) setLastOffset(offset int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastOffset = offset
 }
 
 // IsTailing returns whether the session is currently tailing its progress file.

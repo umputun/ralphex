@@ -169,9 +169,9 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 - Modify: `pkg/web/session.go`
 - Modify: `pkg/web/session_test.go`
 
-- [ ] add private `lastOffset int64` field on `Session` (guarded by `s.mu`)
-- [ ] add **unexported** `getLastOffset() int64` and `setLastOffset(offset int64)` accessors (thread-safe). Keep them unexported — tests are in-package, loader and StopTailing are in the same package. Per the user's convention: do not export without an out-of-package caller
-- [ ] modify `StopTailing()` — before nilling `stopTailCh`, capture `tailer.Offset()` and store in `s.lastOffset` (under the same write lock). Pseudocode:
+- [x] add private `lastOffset int64` field on `Session` (guarded by `s.mu`)
+- [x] add **unexported** `getLastOffset() int64` and `setLastOffset(offset int64)` accessors (thread-safe). Keep them unexported — tests are in-package, loader and StopTailing are in the same package. Per the user's convention: do not export without an out-of-package caller
+- [x] modify `StopTailing()` — before nilling `stopTailCh`, capture `tailer.Offset()` and store in `s.lastOffset` (under the same write lock). Pseudocode:
   ```go
   s.mu.Lock()
   if s.tailer != nil {
@@ -182,9 +182,9 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
   s.mu.Unlock()
   if tailer != nil { tailer.Stop() }
   ```
-- [ ] add test: `TestSession_LastOffset` — verifies get/set thread-safety via concurrent goroutines (use the in-package unexported names)
-- [ ] add test: `TestSession_StopTailingCapturesOffset` — start tailing, write lines, wait for ingest (poll until events received), stop, verify `getLastOffset()` > 0 and roughly matches bytes written
-- [ ] run tests: `go test ./pkg/web/... -run Session` must pass before next task
+- [x] add test: `TestSession_LastOffset` — verifies get/set thread-safety via concurrent goroutines (use the in-package unexported names)
+- [x] add test: `TestSession_StopTailingCapturesOffset` — start tailing, write lines, wait for ingest (poll until events received), stop, verify `getLastOffset()` > 0 and roughly matches bytes written
+- [x] run tests: `go test ./pkg/web/... -run Session` must pass before next task
 
 ### Task 3: Add Session.Reactivate() method
 

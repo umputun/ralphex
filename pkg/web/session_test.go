@@ -2,6 +2,7 @@ package web
 
 import (
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -279,6 +280,104 @@ Started: 2026-01-22 10:30:00
 		s.StopTailing()
 
 		assert.False(t, s.IsTailing())
+	})
+}
+
+func TestSession_LastOffset(t *testing.T) {
+	t.Run("default is zero", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+		assert.Equal(t, int64(0), s.getLastOffset())
+	})
+
+	t.Run("set and get", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		s.setLastOffset(1234)
+		assert.Equal(t, int64(1234), s.getLastOffset())
+
+		s.setLastOffset(0)
+		assert.Equal(t, int64(0), s.getLastOffset())
+	})
+
+	t.Run("concurrent access is safe", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		const workers = 20
+		const iterations = 200
+
+		var wg sync.WaitGroup
+		wg.Add(workers * 2)
+
+		for i := range workers {
+			go func(base int64) {
+				defer wg.Done()
+				for j := range iterations {
+					s.setLastOffset(base + int64(j))
+				}
+			}(int64(i) * 1000)
+		}
+		for range workers {
+			go func() {
+				defer wg.Done()
+				for range iterations {
+					_ = s.getLastOffset()
+				}
+			}()
+		}
+
+		wg.Wait()
+		// final value is non-deterministic but must be within the written range
+		final := s.getLastOffset()
+		assert.GreaterOrEqual(t, final, int64(0))
+	})
+}
+
+func TestSession_StopTailingCapturesOffset(t *testing.T) {
+	t.Run("captures offset from running tailer", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := tmpDir + "/progress-test.txt"
+
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] line one
+[26-01-22 10:30:02] line two
+[26-01-22 10:30:03] line three
+`
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		s := NewSession("test", progressFile)
+		defer s.Close()
+
+		require.NoError(t, s.StartTailing(true))
+
+		// wait until the tailer has consumed the whole file
+		expected := int64(len(content))
+		require.Eventually(t, func() bool {
+			return s.GetTailer() != nil && s.GetTailer().Offset() == expected
+		}, 2*time.Second, 20*time.Millisecond, "tailer should advance to EOF")
+
+		s.StopTailing()
+		assert.Eventually(t, func() bool { return !s.IsTailing() }, time.Second, 10*time.Millisecond)
+
+		assert.Equal(t, expected, s.getLastOffset(), "lastOffset should match bytes read before stop")
+	})
+
+	t.Run("nil tailer leaves lastOffset unchanged", func(t *testing.T) {
+		s := NewSession("test", "/tmp/test.txt")
+		defer s.Close()
+
+		s.setLastOffset(42)
+		s.StopTailing()
+
+		assert.Equal(t, int64(42), s.getLastOffset(), "stopping without a tailer must not overwrite lastOffset")
 	})
 }
 
