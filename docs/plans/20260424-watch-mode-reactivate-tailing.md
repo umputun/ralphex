@@ -149,19 +149,19 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 - Modify: `pkg/web/tail.go`
 - Modify: `pkg/web/tail_test.go`
 
-- [ ] add `(t *Tailer) Offset() int64` method returning `t.offset` under `t.mu`
-- [ ] add `(t *Tailer) StartFromOffset(offset int64) error`:
-  - [ ] if offset <= 0, treat as "seek to end" (same as `Start(false)` path) — documented in godoc, makes callers robust for fresh sessions
-  - [ ] open file, `Stat` to get size, clamp offset to `min(offset, fileSize)` to avoid seeking past EOF
-  - [ ] seek to clamped offset, set `t.offset = clampedOffset`, `t.inHeader = false` (offset>0 means we're past the header — if caller violates this contract, worst case is header detection breaks on rare edge cases; godoc warns)
-  - [ ] set `t.deferSections = false`, clear pending section state
-  - [ ] set `t.running = true`, init `stopCh`/`doneCh`, launch `tailLoop`
-- [ ] keep existing `Start(fromStart bool) error` unchanged to avoid breaking other callers
-- [ ] add test: `TestTailer_Offset` — writes lines, reads partial, verifies `Offset()` reflects bytes consumed (including LF and CRLF line endings)
-- [ ] add test: `TestTailer_StartFromOffset` — pre-writes content, starts tailer from middle, verifies only post-offset lines emit
-- [ ] add test: `TestTailer_StartFromOffset_BeyondFileSize` — offset > file size, verifies offset is clamped, no panic, no spurious events
-- [ ] add test: `TestTailer_StartFromOffset_ZeroFallsBack` — offset <= 0 behaves like `Start(false)`, seeks to end
-- [ ] run tests: `go test ./pkg/web/... -run Tailer` must pass before next task
+- [x] add `(t *Tailer) Offset() int64` method returning `t.offset` under `t.mu`
+- [x] add `(t *Tailer) StartFromOffset(offset int64) error`:
+  - [x] if offset <= 0, treat as "seek to end" (same as `Start(false)` path) — documented in godoc, makes callers robust for fresh sessions
+  - [x] open file, `Stat` to get size, clamp offset to `min(offset, fileSize)` to avoid seeking past EOF
+  - [x] seek to clamped offset, set `t.offset = clampedOffset`, `t.inHeader = false` (offset>0 means we're past the header — if caller violates this contract, worst case is header detection breaks on rare edge cases; godoc warns)
+  - [x] set `t.deferSections = false`, clear pending section state
+  - [x] set `t.running = true`, init `stopCh`/`doneCh`, launch `tailLoop`
+- [x] keep existing `Start(fromStart bool) error` unchanged to avoid breaking other callers
+- [x] add test: `TestTailer_Offset` — writes lines, reads partial, verifies `Offset()` reflects bytes consumed (including LF and CRLF line endings)
+- [x] add test: `TestTailer_StartFromOffset` — pre-writes content, starts tailer from middle, verifies only post-offset lines emit
+- [x] add test: `TestTailer_StartFromOffset_BeyondFileSize` — offset > file size, verifies offset is clamped, no panic, no spurious events
+- [x] add test: `TestTailer_StartFromOffset_ZeroFallsBack` — offset <= 0 behaves like `Start(false)`, seeks to end
+- [x] run tests: `go test ./pkg/web/... -run Tailer` must pass before next task
 
 ### Task 2: Track last-read offset on Session
 

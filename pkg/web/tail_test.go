@@ -658,6 +658,254 @@ func TestIsPriorityEvent(t *testing.T) {
 	}
 }
 
+func TestTailer_Offset(t *testing.T) {
+	t.Run("offset reflects bytes consumed with LF endings", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] line one
+[26-01-22 10:30:02] line two
+`
+		err := os.WriteFile(progressFile, []byte(content), 0o600)
+		require.NoError(t, err)
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+		require.NoError(t, tailer.Start(true))
+		defer tailer.Stop()
+
+		// wait for events to be consumed
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if tailer.Offset() == int64(len(content)) {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		assert.Equal(t, int64(len(content)), tailer.Offset(),
+			"offset should match raw file size including LF bytes")
+	})
+
+	t.Run("offset reflects bytes consumed with CRLF endings", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		// deliberately use CRLF line endings
+		content := "# Ralphex Progress Log\r\n" +
+			"Plan: test.md\r\n" +
+			"------------------------------------------------------------\r\n" +
+			"\r\n" +
+			"[26-01-22 10:30:01] line one\r\n" +
+			"[26-01-22 10:30:02] line two\r\n"
+
+		err := os.WriteFile(progressFile, []byte(content), 0o600)
+		require.NoError(t, err)
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+		require.NoError(t, tailer.Start(true))
+		defer tailer.Stop()
+
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if tailer.Offset() == int64(len(content)) {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		assert.Equal(t, int64(len(content)), tailer.Offset(),
+			"offset should include CR+LF bytes, not just LF")
+	})
+
+	t.Run("offset is zero before start", func(t *testing.T) {
+		tailer := NewTailer("/tmp/nonexistent", DefaultTailerConfig())
+		assert.Equal(t, int64(0), tailer.Offset())
+	})
+}
+
+func TestTailer_StartFromOffset(t *testing.T) {
+	t.Run("resumes from byte offset and only emits new content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		prefix := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] before resume
+`
+		err := os.WriteFile(progressFile, []byte(prefix), 0o600)
+		require.NoError(t, err)
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+		require.NoError(t, tailer.StartFromOffset(int64(len(prefix))))
+		defer tailer.Stop()
+
+		// nothing pre-existing should appear
+		select {
+		case ev := <-tailer.Events():
+			t.Fatalf("unexpected event before append: %+v", ev)
+		case <-time.After(80 * time.Millisecond):
+		}
+
+		// append new content
+		f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test file path
+		require.NoError(t, err)
+		_, err = f.WriteString("[26-01-22 10:30:02] after resume\n")
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+
+		var found bool
+		timeout := time.After(500 * time.Millisecond)
+	loop:
+		for !found {
+			select {
+			case ev := <-tailer.Events():
+				assert.NotEqual(t, "before resume", ev.Text,
+					"pre-offset content should not be emitted")
+				if ev.Text == "after resume" {
+					found = true
+				}
+			case <-timeout:
+				break loop
+			}
+		}
+		assert.True(t, found, "should have received 'after resume' event")
+	})
+
+	t.Run("clamps offset beyond file size without panic", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		content := "[26-01-22 10:30:01] hello\n"
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+
+		// offset way past EOF should be clamped, no panic, no events
+		require.NoError(t, tailer.StartFromOffset(99999))
+		defer tailer.Stop()
+
+		select {
+		case ev := <-tailer.Events():
+			t.Fatalf("expected no events, got %+v", ev)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		assert.Equal(t, int64(len(content)), tailer.Offset(),
+			"offset should be clamped to file size")
+	})
+
+	t.Run("zero offset falls back to seek-to-end", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] existing line
+`
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+		require.NoError(t, tailer.StartFromOffset(0))
+		defer tailer.Stop()
+
+		// existing content should not be emitted (seek to end)
+		select {
+		case ev := <-tailer.Events():
+			t.Fatalf("unexpected event: %+v", ev)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		// appended content should appear
+		f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test file path
+		require.NoError(t, err)
+		_, err = f.WriteString("[26-01-22 10:30:02] new line\n")
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+
+		select {
+		case ev := <-tailer.Events():
+			assert.Equal(t, "new line", ev.Text)
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("expected 'new line' event")
+		}
+	})
+
+	t.Run("negative offset falls back to seek-to-end", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+
+		content := "[26-01-22 10:30:01] preexisting\n"
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		tailer := NewTailer(progressFile, TailerConfig{
+			PollInterval: 10 * time.Millisecond,
+			InitialPhase: status.PhaseTask,
+		})
+		require.NoError(t, tailer.StartFromOffset(-42))
+		defer tailer.Stop()
+
+		select {
+		case ev := <-tailer.Events():
+			t.Fatalf("unexpected event on negative-offset start: %+v", ev)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+
+	t.Run("fails on non-existent file", func(t *testing.T) {
+		tailer := NewTailer("/nonexistent/file.txt", DefaultTailerConfig())
+
+		err := tailer.StartFromOffset(10)
+		require.Error(t, err)
+		assert.False(t, tailer.IsRunning())
+	})
+
+	t.Run("start is idempotent", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := filepath.Join(tmpDir, "progress-test.txt")
+		require.NoError(t, os.WriteFile(progressFile, []byte("hello\n"), 0o600))
+
+		tailer := NewTailer(progressFile, TailerConfig{PollInterval: 10 * time.Millisecond})
+
+		require.NoError(t, tailer.StartFromOffset(1))
+		// second call while running should be a no-op
+		require.NoError(t, tailer.StartFromOffset(3))
+
+		tailer.Stop()
+	})
+}
+
 func TestNormalizeTokenSignal(t *testing.T) {
 	tests := []struct {
 		input    string

@@ -120,6 +120,67 @@ func (t *Tailer) Start(fromStart bool) error {
 	return nil
 }
 
+// Offset returns the current byte offset into the tailed file.
+// safe to call concurrently with tailer operations.
+func (t *Tailer) Offset() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.offset
+}
+
+// StartFromOffset begins tailing the file seeking to the given byte offset.
+// if offset <= 0, behaves like Start(false) (seeks to end).
+// if offset exceeds file size, it is clamped to file size (no spurious replay).
+// the caller must guarantee offset points past the header block; offset>0 disables
+// header detection, so a misplaced offset may leave subsequent header lines treated as output.
+// note: Tailer is not reusable after Stop() - create a new instance instead.
+func (t *Tailer) StartFromOffset(offset int64) error {
+	if offset <= 0 {
+		return t.Start(false)
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.running {
+		return nil
+	}
+
+	f, err := os.Open(t.path)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+
+	stat, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return fmt.Errorf("stat file: %w", err)
+	}
+
+	clamped := min(offset, stat.Size())
+
+	if _, err := f.Seek(clamped, io.SeekStart); err != nil {
+		f.Close()
+		return fmt.Errorf("seek to offset %d: %w", clamped, err)
+	}
+
+	t.offset = clamped
+	t.inHeader = false
+	t.deferSections = false
+	t.pendingSection = ""
+	t.pendingPhase = ""
+
+	t.file = f
+	t.reader = bufio.NewReader(f)
+	t.running = true
+	t.stopCh = make(chan struct{})
+	t.doneCh = make(chan struct{})
+
+	go t.tailLoop()
+
+	return nil
+}
+
 // Stop stops the tailer and closes resources.
 // blocks until the tail loop has fully stopped.
 // safe to call multiple times concurrently.
