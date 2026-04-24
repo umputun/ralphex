@@ -663,7 +663,6 @@ Started: 2026-01-22 10:00:00
 	// drain the replay (initial published lines)
 	replayed := drainChannel(events, 300*time.Millisecond)
 	require.NotEmpty(t, replayed, "SSE replay should contain initial events")
-	preCount := len(replayed)
 
 	// append a new line - simulates a still-running executor writing after a flock race
 	newLine := "[26-01-22 10:00:03] line after reactivate\n"
@@ -692,7 +691,6 @@ Started: 2026-01-22 10:00:00
 		require.NotContains(t, ev, "initial line beta", "pre-existing content must not be re-emitted")
 	}
 	assert.Equal(t, 1, newLineMatches, "new line should be delivered exactly once")
-	assert.GreaterOrEqual(t, preCount, 1, "replay should include the initial events")
 }
 
 func TestWatcher_DoesNotReactivateActiveSession(t *testing.T) {

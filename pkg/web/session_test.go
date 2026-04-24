@@ -329,9 +329,12 @@ func TestSession_LastOffset(t *testing.T) {
 		}
 
 		wg.Wait()
-		// final value is non-deterministic but must be within the written range
+		// final value is non-deterministic but must be one of the written values:
+		// writer i writes base+j where base = i*1000 and j in [0, iterations),
+		// so final % 1000 must be < iterations and final / 1000 must be < workers.
 		final := s.getLastOffset()
-		assert.GreaterOrEqual(t, final, int64(0))
+		assert.Less(t, final%1000, int64(iterations), "final must be a value written by some worker")
+		assert.Less(t, final/1000, int64(workers), "final must come from a known worker")
 	})
 }
 

@@ -233,8 +233,9 @@ const (
 // startTailerLocked creates and starts a new tailer according to mode.
 // the caller MUST hold s.mu as a write lock. on success, the new tailer is
 // stored on the session and a feedEvents goroutine is launched; the goroutine
-// acquires its own RLock and is safe because the caller releases s.mu after
-// this helper returns. on error, no state is mutated.
+// blocks on s.mu.RLock() until the caller releases s.mu, then picks up the
+// newly assigned s.tailer/s.stopTailCh. on error, s.tailer and s.stopTailCh
+// are left unchanged.
 func (s *Session) startTailerLocked(mode tailerStartMode, offset int64) error {
 	tailer := NewTailer(s.Path, DefaultTailerConfig())
 
@@ -281,10 +282,11 @@ func (s *Session) StartTailing(fromStart bool) error {
 // e.g. after a flock race in RefreshStates that briefly observed the progress
 // file as unlocked. it resumes from the stored lastOffset so events already
 // in the SSE replay buffer (from the loader or a previous tailer) are not
-// re-emitted. on success, the session state is flipped back to active.
+// re-emitted. on success, the session state is flipped to active.
 //
-// idempotent: if a tailer is already running, returns nil without changing
-// state. on tailer-start failure, returns the error and leaves state unchanged.
+// idempotent: if a tailer is already running, returns nil and leaves the
+// state as-is (the caller is responsible for having checked it). on
+// tailer-start failure, returns the error and leaves state unchanged.
 //
 // callers should verify the session is in the SessionStateCompleted state and
 // IsLoaded() before invoking this method; the watcher gates it that way to
@@ -314,6 +316,7 @@ func (s *Session) Reactivate() error {
 // StopTailing stops the tailer and event feeder goroutine.
 // captures the tailer's current byte offset into lastOffset before stopping,
 // so a subsequent Reactivate can resume from the exact byte where tailing stopped.
+// if no tailer is running, lastOffset is preserved.
 func (s *Session) StopTailing() {
 	s.mu.Lock()
 	if s.tailer != nil {
