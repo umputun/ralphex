@@ -119,6 +119,17 @@ type Session struct {
 	// it. empty string means nothing is pending.
 	lastPendingSection string
 	lastPendingPhase   status.Phase
+
+	// stopping is true while StopTailing is mid-flight (between the first
+	// locked section that captures tailer/stopCh/feedDone and the final
+	// locked section that records lastOffset/lastPhase). during that window
+	// s.mu is released so tailer.Stop() and feedEvents drain can run without
+	// blocking other readers; without this flag a concurrent Reactivate /
+	// StartTailing would see s.tailer.IsRunning()==false (tailer stopped)
+	// with a STALE s.lastOffset (not yet captured) and start a new tailer
+	// from the wrong byte position, duplicating or losing events in the
+	// exact flock-race recovery path this PR is meant to fix.
+	stopping bool
 }
 
 // NewSession creates a new session for the given progress file path.
@@ -333,10 +344,16 @@ func (s *Session) startTailerLocked(mode tailerStartMode, offset int64) error {
 
 // StartTailing begins tailing the progress file and feeding events to SSE clients.
 // if fromStart is true, reads from the beginning of the file.
-// does nothing if already tailing.
+// does nothing if already tailing, or if StopTailing is currently in progress
+// (caller must retry once stopping finishes — the watcher naturally does this
+// on the next Write event).
 func (s *Session) StartTailing(fromStart bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.stopping {
+		return nil // StopTailing mid-flight; caller retries on next event
+	}
 
 	if s.tailer != nil && s.tailer.IsRunning() {
 		return nil // already tailing
@@ -359,12 +376,22 @@ func (s *Session) StartTailing(fromStart bool) error {
 // state as-is (the caller is responsible for having checked it). on
 // tailer-start failure, returns the error and leaves state unchanged.
 //
+// if StopTailing is currently in progress on another goroutine, returns nil
+// without starting a new tailer. lastOffset has not yet been captured at that
+// point, so starting now would use a stale offset and duplicate/lose events.
+// the watcher will re-call Reactivate on the next Write event, which lands
+// after StopTailing completes and observes the correct lastOffset.
+//
 // callers should verify the session is in the SessionStateCompleted state and
 // IsLoaded() before invoking this method; the watcher gates it that way to
 // avoid racing with the initial progress-file loader.
 func (s *Session) Reactivate() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.stopping {
+		return nil // StopTailing mid-flight; watcher retries on next Write event
+	}
 
 	if s.tailer != nil && s.tailer.IsRunning() {
 		return nil
@@ -399,10 +426,23 @@ func (s *Session) Reactivate() error {
 // while their bytes are already accounted for in tailer.Offset(), creating a
 // gap in the SSE stream after Reactivate resumes from lastOffset.
 //
+// concurrency: the s.stopping flag is set under s.mu for the entire duration
+// of tailer.Stop()+feedEvents drain, so a concurrent Reactivate/StartTailing
+// that acquires s.mu during the unlocked drain window observes stopping=true
+// and returns without starting a new tailer on a stale lastOffset. the final
+// locked section clears stopping and nils out s.tailer so subsequent calls
+// see a clean slate.
+//
 // if no tailer is running, all last* fields are preserved. safe to call
-// concurrently and repeatedly.
+// concurrently and repeatedly; if two StopTailing calls race, the second
+// observes s.tailer==nil and returns without touching captured fields.
 func (s *Session) StopTailing() {
 	s.mu.Lock()
+	if s.tailer == nil {
+		s.mu.Unlock()
+		return
+	}
+	s.stopping = true
 	tailer := s.tailer
 	stopCh := s.stopTailCh
 	feedDone := s.feedDoneCh
@@ -412,9 +452,7 @@ func (s *Session) StopTailing() {
 
 	// stop the tailer first so no more events are pushed into eventCh.
 	// tailer.Stop() is idempotent and blocks until the tail loop has exited.
-	if tailer != nil {
-		tailer.Stop()
-	}
+	tailer.Stop()
 
 	// signal feedEvents to drain any remaining buffered events and exit.
 	// stopCh is only closed once because it was nil-swapped under the lock.
@@ -429,13 +467,13 @@ func (s *Session) StopTailing() {
 		<-feedDone
 	}
 
-	if tailer != nil {
-		s.mu.Lock()
-		s.lastOffset = tailer.Offset()
-		s.lastPhase = tailer.Phase()
-		s.lastPendingSection, s.lastPendingPhase = tailer.PendingSection()
-		s.mu.Unlock()
-	}
+	s.mu.Lock()
+	s.lastOffset = tailer.Offset()
+	s.lastPhase = tailer.Phase()
+	s.lastPendingSection, s.lastPendingPhase = tailer.PendingSection()
+	s.tailer = nil
+	s.stopping = false
+	s.mu.Unlock()
 }
 
 // getLastOffset returns the byte offset of the last ingested content.

@@ -598,6 +598,91 @@ func TestSession_Reactivate_FailedStartLeavesStateUnchanged(t *testing.T) {
 	assert.Nil(t, s.GetTailer())
 }
 
+func TestSession_Reactivate_SkipsWhileStopping(t *testing.T) {
+	// regression test: StopTailing releases s.mu during the tailer.Stop() +
+	// feedEvents drain phase. without the stopping flag, a concurrent
+	// Reactivate call acquiring s.mu during that window would observe
+	// s.tailer.IsRunning()==false (Stop already returned) with lastOffset
+	// not yet captured, start a new tailer from stale byte position, and
+	// duplicate or lose events — the exact failure mode the flock-race
+	// recovery path is meant to avoid.
+	t.Run("reactivate is a no-op when stopping flag is set", func(t *testing.T) {
+		s := NewSession("test", "/nonexistent/ralphex-stopping-path.txt")
+		defer s.Close()
+
+		s.setLastOffset(100)
+		s.SetState(SessionStateCompleted)
+
+		// simulate StopTailing mid-flight by asserting the stopping flag under lock
+		s.mu.Lock()
+		s.stopping = true
+		s.mu.Unlock()
+
+		// Reactivate must return nil without starting a tailer or flipping state.
+		// if it ignored the stopping flag, startTailerLocked would fail to open
+		// the non-existent path and return an error — proving that the guard
+		// runs before any work that could touch a stale lastOffset.
+		err := s.Reactivate()
+		require.NoError(t, err)
+		assert.Nil(t, s.GetTailer(), "no tailer must be created while stopping")
+		assert.Equal(t, SessionStateCompleted, s.GetState(), "state must not flip to active while stopping")
+
+		// clear flag and confirm reactivate resumes normal behavior (path missing → error)
+		s.mu.Lock()
+		s.stopping = false
+		s.mu.Unlock()
+
+		err = s.Reactivate()
+		require.Error(t, err, "after stopping clears, Reactivate resumes normal path and surfaces tailer-start errors")
+	})
+
+	t.Run("starttailing is a no-op when stopping flag is set", func(t *testing.T) {
+		s := NewSession("test", "/nonexistent/ralphex-stopping-start.txt")
+		defer s.Close()
+
+		s.mu.Lock()
+		s.stopping = true
+		s.mu.Unlock()
+
+		err := s.StartTailing(true)
+		require.NoError(t, err, "StartTailing must no-op under stopping flag, not surface tailer-start errors")
+		assert.Nil(t, s.GetTailer(), "no tailer must be created while stopping")
+	})
+
+	t.Run("stoptailing clears stopping flag and tailer pointer", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		progressFile := tmpDir + "/progress-test.txt"
+
+		content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] line
+`
+		require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+		s := NewSession("test", progressFile)
+		defer s.Close()
+
+		require.NoError(t, s.StartTailing(true))
+		require.Eventually(t, func() bool {
+			return s.GetTailer() != nil && s.GetTailer().Offset() == int64(len(content))
+		}, 2*time.Second, 20*time.Millisecond)
+
+		s.StopTailing()
+
+		s.mu.RLock()
+		stopping := s.stopping
+		tailer := s.tailer
+		s.mu.RUnlock()
+		assert.False(t, stopping, "stopping flag must be cleared after StopTailing returns")
+		assert.Nil(t, tailer, "tailer pointer must be nil after StopTailing returns")
+	})
+}
+
 func TestSession_Reactivate_PreservesPhase(t *testing.T) {
 	// regression test for codex finding: resuming mid-phase must carry over
 	// the parser phase so new lines are tagged correctly, rather than defaulting
