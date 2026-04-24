@@ -221,6 +221,44 @@ func (s *Session) MarkLoadedIfNot() bool {
 	return true
 }
 
+// tailerStartMode selects how startTailerLocked begins tailing.
+type tailerStartMode int
+
+const (
+	modeFromStart tailerStartMode = iota // read from beginning of file
+	modeFromEnd                          // seek to end (only new writes are emitted)
+	modeResume                           // resume from a stored byte offset
+)
+
+// startTailerLocked creates and starts a new tailer according to mode.
+// the caller MUST hold s.mu as a write lock. on success, the new tailer is
+// stored on the session and a feedEvents goroutine is launched; the goroutine
+// acquires its own RLock and is safe because the caller releases s.mu after
+// this helper returns. on error, no state is mutated.
+func (s *Session) startTailerLocked(mode tailerStartMode, offset int64) error {
+	tailer := NewTailer(s.Path, DefaultTailerConfig())
+
+	var err error
+	switch mode {
+	case modeFromStart:
+		err = tailer.Start(true)
+	case modeFromEnd:
+		err = tailer.Start(false)
+	case modeResume:
+		err = tailer.StartFromOffset(offset)
+	default:
+		return fmt.Errorf("unknown tailer start mode: %d", mode)
+	}
+	if err != nil {
+		return err
+	}
+
+	s.tailer = tailer
+	s.stopTailCh = make(chan struct{})
+	go s.feedEvents()
+	return nil
+}
+
 // StartTailing begins tailing the progress file and feeding events to SSE clients.
 // if fromStart is true, reads from the beginning of the file.
 // does nothing if already tailing.
@@ -232,15 +270,44 @@ func (s *Session) StartTailing(fromStart bool) error {
 		return nil // already tailing
 	}
 
-	s.tailer = NewTailer(s.Path, DefaultTailerConfig())
-	if err := s.tailer.Start(fromStart); err != nil {
-		s.tailer = nil
+	mode := modeFromEnd
+	if fromStart {
+		mode = modeFromStart
+	}
+	return s.startTailerLocked(mode, 0)
+}
+
+// Reactivate resumes tailing a session that was previously marked completed,
+// e.g. after a flock race in RefreshStates that briefly observed the progress
+// file as unlocked. it resumes from the stored lastOffset so events already
+// in the SSE replay buffer (from the loader or a previous tailer) are not
+// re-emitted. on success, the session state is flipped back to active.
+//
+// idempotent: if a tailer is already running, returns nil without changing
+// state. on tailer-start failure, returns the error and leaves state unchanged.
+//
+// callers should verify the session is in the SessionStateCompleted state and
+// IsLoaded() before invoking this method; the watcher gates it that way to
+// avoid racing with the initial progress-file loader.
+func (s *Session) Reactivate() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.tailer != nil && s.tailer.IsRunning() {
+		return nil
+	}
+
+	offset := s.lastOffset
+	mode := modeFromEnd
+	if offset > 0 {
+		mode = modeResume
+	}
+
+	if err := s.startTailerLocked(mode, offset); err != nil {
 		return err
 	}
 
-	s.stopTailCh = make(chan struct{})
-	go s.feedEvents()
-
+	s.state = SessionStateActive
 	return nil
 }
 

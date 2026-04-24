@@ -381,6 +381,143 @@ Started: 2026-01-22 10:30:00
 	})
 }
 
+func TestSession_Reactivate_ResumesFromOffset(t *testing.T) {
+	tmpDir := t.TempDir()
+	progressFile := tmpDir + "/progress-test.txt"
+
+	header := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+`
+	initial := "[26-01-22 10:30:01] line one\n[26-01-22 10:30:02] line two\n"
+	require.NoError(t, os.WriteFile(progressFile, []byte(header+initial), 0o600))
+
+	s := NewSession("test", progressFile)
+	defer s.Close()
+
+	// start from beginning, wait for tailer to consume the whole file
+	require.NoError(t, s.StartTailing(true))
+	expected := int64(len(header + initial))
+	require.Eventually(t, func() bool {
+		return s.GetTailer() != nil && s.GetTailer().Offset() == expected
+	}, 2*time.Second, 20*time.Millisecond, "tailer should reach EOF")
+
+	// stop - this captures lastOffset
+	s.StopTailing()
+	require.Eventually(t, func() bool { return !s.IsTailing() }, time.Second, 10*time.Millisecond)
+	require.Equal(t, expected, s.getLastOffset())
+
+	// simulate watcher seeing completed state, then reactivating after new write
+	s.SetState(SessionStateCompleted)
+
+	// append new content after stop - these lines MUST appear
+	newLines := "[26-01-22 10:30:03] line three\n[26-01-22 10:30:04] line four\n"
+	f, err := os.OpenFile(progressFile, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test file path
+	require.NoError(t, err)
+	_, err = f.WriteString(newLines)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	require.NoError(t, s.Reactivate())
+
+	// state flipped to active, tailer running
+	assert.Equal(t, SessionStateActive, s.GetState())
+	assert.True(t, s.IsTailing())
+
+	// tailer advanced to new EOF
+	finalExpected := expected + int64(len(newLines))
+	require.Eventually(t, func() bool {
+		return s.GetTailer() != nil && s.GetTailer().Offset() == finalExpected
+	}, 2*time.Second, 20*time.Millisecond, "tailer should resume and reach new EOF")
+
+	// stop to capture offset again; confirms we really resumed from the stored offset
+	s.StopTailing()
+	require.Eventually(t, func() bool { return !s.IsTailing() }, time.Second, 10*time.Millisecond)
+	assert.Equal(t, finalExpected, s.getLastOffset())
+}
+
+func TestSession_Reactivate_Idempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	progressFile := tmpDir + "/progress-test.txt"
+
+	content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:01] line one
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+	s := NewSession("test", progressFile)
+	defer s.Close()
+
+	s.setLastOffset(int64(len(content)))
+	s.SetState(SessionStateCompleted)
+
+	require.NoError(t, s.Reactivate())
+	first := s.GetTailer()
+	require.NotNil(t, first)
+	require.True(t, first.IsRunning())
+
+	// second call must not replace the running tailer
+	require.NoError(t, s.Reactivate())
+	second := s.GetTailer()
+	assert.Same(t, first, second, "reactivate must be idempotent while tailer is running")
+	assert.True(t, second.IsRunning())
+}
+
+func TestSession_Reactivate_OnClosedSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	progressFile := tmpDir + "/progress-test.txt"
+	content := `# Ralphex Progress Log
+Plan: test.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+`
+	require.NoError(t, os.WriteFile(progressFile, []byte(content), 0o600))
+
+	s := NewSession("test", progressFile)
+	s.setLastOffset(int64(len(content)))
+	s.SetState(SessionStateCompleted)
+
+	// close the session - removes the underlying file scenario is simulated next
+	s.Close()
+
+	// delete the progress file to force tailer start failure
+	require.NoError(t, os.Remove(progressFile))
+
+	// reactivate on a closed session whose file is gone should return an error
+	// and must not panic or flip state to active
+	err := s.Reactivate()
+	require.Error(t, err)
+	assert.Equal(t, SessionStateCompleted, s.GetState())
+}
+
+func TestSession_Reactivate_FailedStartLeavesStateUnchanged(t *testing.T) {
+	s := NewSession("test", "/nonexistent/ralphex-reactivate-path.txt")
+	defer s.Close()
+
+	s.SetState(SessionStateCompleted)
+	s.setLastOffset(100)
+
+	err := s.Reactivate()
+	require.Error(t, err)
+
+	// state stays completed, no tailer stored
+	assert.Equal(t, SessionStateCompleted, s.GetState())
+	assert.False(t, s.IsTailing())
+	assert.Nil(t, s.GetTailer())
+}
+
 func TestAllEventsReplayer_Replay(t *testing.T) {
 	t.Run("empty LastEventID is replaced with 0", func(t *testing.T) {
 		// create a FiniteReplayer and wrap it in allEventsReplayer

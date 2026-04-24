@@ -192,26 +192,26 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 - Modify: `pkg/web/session.go`
 - Modify: `pkg/web/session_test.go`
 
-- [ ] define private enum `tailerStartMode` with values `modeFromStart`, `modeFromEnd`, `modeResume` (type int, const block)
-- [ ] extract a private helper `startTailerLocked(mode tailerStartMode, offset int64) error` with **lock-held contract** (caller must hold `s.mu` write lock). Behavior:
+- [x] define private enum `tailerStartMode` with values `modeFromStart`, `modeFromEnd`, `modeResume` (type int, const block)
+- [x] extract a private helper `startTailerLocked(mode tailerStartMode, offset int64) error` with **lock-held contract** (caller must hold `s.mu` write lock). Behavior:
   - create new `Tailer` at `s.Path`
   - dispatch on mode: `modeFromStart` → `tailer.Start(true)`, `modeFromEnd` → `tailer.Start(false)`, `modeResume` → `tailer.StartFromOffset(offset)`
   - on error, return error; do not store tailer or allocate stopTailCh
   - on success, set `s.tailer`, create `s.stopTailCh = make(chan struct{})`, launch `go s.feedEvents()` (goroutine acquires its own RLock; safe because caller unlocks after return)
-- [ ] refactor existing `StartTailing(fromStart bool) error` to use `startTailerLocked(modeFromStart or modeFromEnd, 0)` — keep public signature and behavior identical, existing tests still pass
-- [ ] add `Reactivate() error` on `Session`:
-  - [ ] `s.mu.Lock(); defer s.mu.Unlock()`
-  - [ ] if `s.tailer != nil && s.tailer.IsRunning()`, return nil (idempotent)
-  - [ ] capture `offset := s.lastOffset`
-  - [ ] choose mode: if `offset > 0` use `modeResume`, else use `modeFromEnd` (NOT `modeFromStart` — that would re-emit the whole file if lastOffset was never set; `modeFromEnd` is safe because the loader already loaded historical content into SSE replay)
-  - [ ] call `startTailerLocked(mode, offset)` — if it returns error, return it without touching state
-  - [ ] on success: `s.state = SessionStateActive` (only after tailer confirmed started — avoids lying about state if tailer-start fails)
-- [ ] add godoc on `Reactivate` explaining: called when a completed session receives a write event; resumes from `lastOffset` to avoid duplicating events already in SSE replay buffer
-- [ ] add test: `TestSession_Reactivate_ResumesFromOffset` — start tailing, stop (records offset), write more lines, Reactivate, verify SSE receives only new lines (no duplicates from before stop)
-- [ ] add test: `TestSession_Reactivate_Idempotent` — call Reactivate twice in quick succession, verify only one tailer exists and no duplicate events
-- [ ] add test: `TestSession_Reactivate_OnClosedSession` — call after Close, verify graceful error (no panic) and state not flipped to active
-- [ ] add test: `TestSession_Reactivate_FailedStartLeavesStateUnchanged` — use a session with non-existent path, verify Reactivate returns error and state stays completed
-- [ ] run tests: `go test ./pkg/web/... -run Session` must pass before next task
+- [x] refactor existing `StartTailing(fromStart bool) error` to use `startTailerLocked(modeFromStart or modeFromEnd, 0)` — keep public signature and behavior identical, existing tests still pass
+- [x] add `Reactivate() error` on `Session`:
+  - [x] `s.mu.Lock(); defer s.mu.Unlock()`
+  - [x] if `s.tailer != nil && s.tailer.IsRunning()`, return nil (idempotent)
+  - [x] capture `offset := s.lastOffset`
+  - [x] choose mode: if `offset > 0` use `modeResume`, else use `modeFromEnd` (NOT `modeFromStart` — that would re-emit the whole file if lastOffset was never set; `modeFromEnd` is safe because the loader already loaded historical content into SSE replay)
+  - [x] call `startTailerLocked(mode, offset)` — if it returns error, return it without touching state
+  - [x] on success: `s.state = SessionStateActive` (only after tailer confirmed started — avoids lying about state if tailer-start fails)
+- [x] add godoc on `Reactivate` explaining: called when a completed session receives a write event; resumes from `lastOffset` to avoid duplicating events already in SSE replay buffer
+- [x] add test: `TestSession_Reactivate_ResumesFromOffset` — start tailing, stop (records offset), write more lines, Reactivate, verify SSE receives only new lines (no duplicates from before stop)
+- [x] add test: `TestSession_Reactivate_Idempotent` — call Reactivate twice in quick succession, verify only one tailer exists and no duplicate events
+- [x] add test: `TestSession_Reactivate_OnClosedSession` — call after Close, verify graceful error (no panic) and state not flipped to active
+- [x] add test: `TestSession_Reactivate_FailedStartLeavesStateUnchanged` — use a session with non-existent path, verify Reactivate returns error and state stays completed
+- [x] run tests: `go test ./pkg/web/... -run Session` must pass before next task
 
 ### Task 4: Record offset after loadProgressFileIntoSession
 
