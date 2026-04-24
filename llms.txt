@@ -169,8 +169,8 @@ ralphex --dry-run docs/plans/feature.md
 ```
 
 **Environment variables:**
-- `RALPHEX_IMAGE` - Docker image (default: `ghcr.io/umputun/ralphex-go:latest`)
-- `RALPHEX_PORT` - Web dashboard port with `--serve` (default: `8080`)
+- `RALPHEX_IMAGE` - Docker image (default: `ghcr.io/umputun/ralphex-go:latest`). CLI flag: `--image`
+- `RALPHEX_PORT` - Web dashboard port with `--serve` (default: `8080`). CLI flag: `--port`
 - `RALPHEX_CONFIG_DIR` - Custom config directory (default: `~/.config/ralphex`). Overrides global config location for prompts, agents, and settings
 - `CLAUDE_CONFIG_DIR` - Claude config directory (default: `~/.claude`). Use for alternate Claude installations (e.g., `~/.claude2`). Works with both Docker wrapper and non-Docker usage.
 - `RALPHEX_EXTRA_VOLUMES` - Extra volume mounts, comma-separated (e.g., `/data:/mnt/data:ro,/models:/mnt/models`)

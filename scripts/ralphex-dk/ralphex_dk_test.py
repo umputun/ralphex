@@ -930,6 +930,32 @@ class TestBuildParser(unittest.TestCase):
         self.assertFalse(args.update_script)
         self.assertEqual(unknown, ["--up"])
 
+    def test_image_flag(self) -> None:
+        """--image flag is parsed correctly."""
+        parser = build_parser()
+        args, unknown = parser.parse_known_args(["--image", "my/img:tag"])
+        self.assertEqual(args.image, "my/img:tag")
+        self.assertEqual(unknown, [])
+
+    def test_image_flag_default_none(self) -> None:
+        """--image default is None (so env/default fallback can apply)."""
+        parser = build_parser()
+        args, _ = parser.parse_known_args([])
+        self.assertIsNone(args.image)
+
+    def test_port_flag(self) -> None:
+        """--port flag is parsed correctly."""
+        parser = build_parser()
+        args, unknown = parser.parse_known_args(["--port", "9090"])
+        self.assertEqual(args.port, "9090")
+        self.assertEqual(unknown, [])
+
+    def test_port_flag_default_none(self) -> None:
+        """--port default is None (so env/default fallback can apply)."""
+        parser = build_parser()
+        args, _ = parser.parse_known_args([])
+        self.assertIsNone(args.port)
+
 class TestMainArgparse(EnvTestCase):
     """tests for main() argparse integration."""
     env_vars = ["RALPHEX_IMAGE", "RALPHEX_PORT", "RALPHEX_EXTRA_ENV",
@@ -1174,6 +1200,65 @@ class TestMainArgparse(EnvTestCase):
             self.assertIn("=invalid", warning)
         finally:
             shutil.rmtree(tmp)
+
+    def _run_main_capturing_image_port(self, argv: list[str]) -> tuple[str, str]:
+        """run main() with claude dir set up and capture resolved image/port."""
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            claude_dir = tmp / ".claude"
+            claude_dir.mkdir()
+            (claude_dir / ".credentials.json").write_text("{}")
+            os.environ["CLAUDE_CONFIG_DIR"] = str(claude_dir)
+
+            captured: dict[str, str] = {}
+
+            def fake_run_docker(image: str, port: str, volumes: list[str],
+                                env_vars: list[str], bind_port: bool, args: list[str],
+                                docker_gid: int | None = None, **kwargs: object) -> int:
+                captured["image"] = image
+                captured["port"] = port
+                return 0
+
+            with unittest.mock.patch("ralphex_dk.run_docker", side_effect=fake_run_docker):
+                with unittest.mock.patch("ralphex_dk.extract_macos_credentials", return_value=None):
+                    sys.argv = argv
+                    result = main()
+            self.assertEqual(result, 0)
+            return captured["image"], captured["port"]
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_image_port_defaults(self) -> None:
+        """without flag or env, image and port fall back to defaults."""
+        image, port = self._run_main_capturing_image_port(["ralphex-dk", "plan.md"])
+        self.assertEqual(image, DEFAULT_IMAGE)
+        self.assertEqual(port, DEFAULT_PORT)
+
+    def test_image_port_from_env(self) -> None:
+        """env vars provide image and port when CLI flags absent."""
+        os.environ["RALPHEX_IMAGE"] = "env-image:tag"
+        os.environ["RALPHEX_PORT"] = "7070"
+        image, port = self._run_main_capturing_image_port(["ralphex-dk", "plan.md"])
+        self.assertEqual(image, "env-image:tag")
+        self.assertEqual(port, "7070")
+
+    def test_image_port_cli_flags(self) -> None:
+        """CLI flags set image and port."""
+        image, port = self._run_main_capturing_image_port(
+            ["ralphex-dk", "--image", "cli-image:tag", "--port", "9090", "plan.md"],
+        )
+        self.assertEqual(image, "cli-image:tag")
+        self.assertEqual(port, "9090")
+
+    def test_image_port_cli_overrides_env(self) -> None:
+        """CLI flags take precedence over env vars."""
+        os.environ["RALPHEX_IMAGE"] = "env-image:tag"
+        os.environ["RALPHEX_PORT"] = "7070"
+        image, port = self._run_main_capturing_image_port(
+            ["ralphex-dk", "--image", "cli-image:tag", "--port", "9090", "plan.md"],
+        )
+        self.assertEqual(image, "cli-image:tag")
+        self.assertEqual(port, "9090")
 
 class TestHelpFlag(EnvTestCase):
     """tests for --help flag handling."""
