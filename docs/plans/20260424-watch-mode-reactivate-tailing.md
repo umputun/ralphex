@@ -275,14 +275,14 @@ The feedEvents goroutine acquires its own `RLock` once running — no deadlock b
 
 ### Task 7: End-to-end toy-project verification
 
-- [ ] build fresh binary: `make build`
-- [ ] prepare toy project: `./scripts/internal/prep-toy-test.sh`
-- [ ] terminal A: start watch-mode dashboard — `.bin/ralphex -s -w /tmp/ralphex-test`
-- [ ] terminal B: from `/tmp/ralphex-test`, run `.../ralphex docs/plans/fix-issues.md` (without `-s`)
-- [ ] open dashboard in browser, confirm live log streaming
-- [ ] leave running past the 5-second `RefreshStates` tick; confirm streaming does NOT freeze mid-run
-- [ ] confirm session flips back to active after any transient "completed" (check browser devtools or sidebar)
-- [ ] kill executor mid-run; confirm tailing stops cleanly (no zombie tailers) and session shows completed
+- [x] build fresh binary: `make build`
+- [x] prepare toy project: `./scripts/internal/prep-toy-test.sh`
+- [x] terminal A: start watch-mode dashboard — `.bin/ralphex -s -w /tmp/ralphex-test`
+- [x] terminal B: from `/tmp/ralphex-test`, run `.../ralphex docs/plans/fix-issues.md` (without `-s`)
+- [x] open dashboard in browser, confirm live log streaming
+- [x] leave running past the 5-second `RefreshStates` tick; confirm streaming does NOT freeze mid-run
+- [x] confirm session flips back to active after any transient "completed" (check browser devtools or sidebar)
+- [x] kill executor mid-run; confirm tailing stops cleanly (no zombie tailers) and session shows completed
 
 ### Task 8: [Final] Update documentation
 
