@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ralphex - Autonomous Claude Code Loop for Plan Execution and Code Review</title>
-    <meta name="description" content="ralphex is an autonomous Claude Code loop that executes implementation plans task by task, then runs multi-agent code review. The ralph loop, evolved.">
-    <meta name="keywords" content="ralphex, ralph loop, claude code, autonomous coding, AI code review, claude code loop, plan execution, AI agent, code automation">
+    <title>ralphex - The Extended Ralph Loop for Claude Code, codex, and More</title>
+    <meta name="description" content="ralphex is the extended ralph loop: an autonomous orchestrator of coding agents (Claude Code, codex, GitHub Copilot CLI) that executes implementation plans task by task, then runs multi-agent code review.">
+    <meta name="keywords" content="ralphex, ralph loop, ralph-loop, ralph loop claude code, ralph loop codex, claude code, codex, autonomous coding agent, AI code review, plan execution, AI agent orchestrator, code automation">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://ralphex.com/">
 
     <!-- Open Graph -->
     <meta property="og:type" content="website">
-    <meta property="og:title" content="ralphex - Autonomous Claude Code Loop for Plan Execution">
-    <meta property="og:description" content="The ralph loop, evolved. Autonomous task execution and multi-agent code review for Claude Code. Write a plan, start ralphex, walk away.">
+    <meta property="og:title" content="ralphex - The Extended Ralph Loop for Claude Code and codex">
+    <meta property="og:description" content="The extended ralph loop. Autonomous orchestrator of coding agents (Claude Code, codex, Copilot CLI) for plan execution and multi-agent code review. Write a plan, start ralphex, walk away.">
     <meta property="og:url" content="https://ralphex.com/">
     <meta property="og:image" content="https://ralphex.com/assets/ralphex-og.png">
     <meta property="og:site_name" content="ralphex">
@@ -20,8 +20,8 @@
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@umputun">
-    <meta name="twitter:title" content="ralphex - Autonomous Claude Code Loop">
-    <meta name="twitter:description" content="The ralph loop, evolved. Autonomous plan execution and multi-agent code review for Claude Code.">
+    <meta name="twitter:title" content="ralphex - The Extended Ralph Loop">
+    <meta name="twitter:description" content="The extended ralph loop. Autonomous orchestrator of coding agents (Claude Code, codex, Copilot CLI) for plan execution and multi-agent code review.">
     <meta name="twitter:image" content="https://ralphex.com/assets/ralphex-og.png">
 
     <link rel="icon" type="image/png" href="favicon.png">
@@ -32,12 +32,12 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "ralphex",
-        "alternateName": "ralph loop",
-        "description": "Autonomous Claude Code loop for plan execution and multi-agent code review. Executes implementation plans task by task in fresh Claude sessions, then runs parallel AI code reviews. The ralph loop, evolved.",
+        "alternateName": ["ralph loop", "ralph-loop", "extended ralph loop"],
+        "description": "The extended ralph loop. ralphex is an autonomous orchestrator of coding agents (Claude Code, codex, GitHub Copilot CLI) that executes implementation plans task by task, then runs parallel multi-agent code review.",
         "url": "https://ralphex.com",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Linux, Windows",
-        "keywords": "ralph loop, claude code, autonomous coding, AI code review, plan execution, AI agent",
+        "keywords": "ralph loop, ralph-loop, claude code, codex, autonomous coding agent, AI code review, plan execution, AI agent orchestrator",
         "offers": {
             "@type": "Offer",
             "price": "0",
@@ -50,6 +50,56 @@
         },
         "codeRepository": "https://github.com/umputun/ralphex",
         "license": "https://opensource.org/licenses/MIT"
+    }
+    </script>
+
+    <!-- FAQ Schema -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "Is ralphex the ralph loop for Claude Code?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes, ralphex is an extended ralph loop. The original ralph loop, popularized by Geoffrey Huntley, runs the same prompt against an agent until the work is done. ralphex keeps that core idea but adds structured plans, per-task fresh sessions, and a multi-phase review pipeline. It works as a ralph loop for Claude Code out of the box, and supports codex, GitHub Copilot CLI, Cursor CLI, and other compatible agents through wrapper scripts."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Can I run ralphex with codex instead of Claude Code?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. ralphex ships with a codex-as-claude wrapper script that translates codex output into ralphex's stream-json protocol. Point claude_command at the wrapper in your config and ralphex drives codex through the same task and review loop. The same approach works for GitHub Copilot CLI, Cursor CLI, or any agent with a compatible streaming output."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is ralphex an autonomous coding agent?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Not quite. ralphex is an autonomous orchestrator of coding agents - it doesn't write code itself. It drives an underlying agent (Claude Code, codex, Copilot CLI) through a structured plan, runs tests, commits work, and coordinates multi-phase reviews."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Can I run ralphex code review without executing tasks?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. ralphex --review runs the full multi-agent review pipeline on changes already on the current branch. This works regardless of how the changes were made: Claude Code's plan mode, manual edits, another AI agent, or any other workflow."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What if codex isn't installed?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The codex external review phase is optional. If codex isn't installed, ralphex skips it automatically and runs only the Claude-based review phases."
+                }
+            }
+        ]
     }
     </script>
 
@@ -968,6 +1018,7 @@
             <a href="#planning">Planning</a>
             <a href="#customize">Customize</a>
             <a href="#install">Install</a>
+            <a href="#faq">FAQ</a>
             <a href="https://github.com/umputun/ralphex" target="_blank">GitHub</a>
             <a href="docs/" class="btn-docs">Documentation</a>
         </div>
@@ -1066,13 +1117,16 @@
     <section class="answer-block" style="max-width:900px; margin:0 auto; padding:0 2rem 5rem;">
         <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:16px; padding:3rem 3.5rem; position:relative;">
             <div style="position:absolute; top:-1px; left:2rem; right:2rem; height:1px; background:linear-gradient(90deg, transparent, var(--teal-dim), transparent);"></div>
-            <h2 style="font-size:1.6rem; font-weight:600; margin-bottom:1.25rem; color:var(--teal); letter-spacing:-0.02em; font-family:'JetBrains Mono',monospace;">What is ralphex?</h2>
+            <h2 style="font-size:1.6rem; font-weight:600; margin-bottom:1.25rem; color:var(--teal); letter-spacing:-0.02em; font-family:'JetBrains Mono',monospace;">What is ralphex? The extended ralph loop.</h2>
             <p style="color:var(--text-secondary); font-size:1.15rem; line-height:1.8;">
-                An autonomous coding loop for Claude Code that takes the ralph loop concept further.
-                It reads an implementation plan, executes tasks one by one in fresh Claude sessions, then runs
-                multi-agent code review with five specialized AI agents in parallel. Unlike a simple ralph loop
-                that re-runs the same prompt, ralphex manages structured plans, commits after each task,
-                and orchestrates multi-phase reviews including optional GPT-5 cross-validation.
+                ralphex is an autonomous orchestrator of coding agents &mdash; the extended ralph loop.
+                It doesn't write code itself; it drives Claude Code, codex, GitHub Copilot CLI, or any
+                compatible agent through a structured plan. Tasks execute one by one in fresh agent
+                sessions, followed by multi-agent code review with five specialized AI reviewers in
+                parallel. Unlike a simple ralph loop that re-runs the same prompt until it works,
+                ralphex manages structured plans, commits after each task, and orchestrates multi-phase
+                reviews including optional GPT-5 cross-validation through codex. Use it as a ralph loop
+                for Claude Code, a ralph loop for codex, or with any agent that produces compatible output.
             </p>
         </div>
     </section>
@@ -1446,6 +1500,83 @@
     ├── simplification.txt
     └── documentation.txt</code></pre>
             </div>
+        </div>
+    </section>
+
+    <section class="faq" id="faq" style="max-width:900px; margin:0 auto; padding:0 2rem 5rem;">
+        <div class="section-header animate-on-scroll" style="text-align:center; margin-bottom:3rem;">
+            <h2 style="font-size:2.5rem; letter-spacing:-0.02em;">Frequently Asked Questions</h2>
+            <p style="color:var(--text-secondary); margin-top:0.75rem;">Common questions about ralphex, the ralph loop, and supported agents</p>
+        </div>
+
+        <div class="faq-list" style="display:flex; flex-direction:column; gap:1.25rem;">
+
+            <details class="faq-item animate-on-scroll" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:1.5rem 1.75rem;">
+                <summary style="cursor:pointer; font-weight:600; color:var(--teal); font-family:'JetBrains Mono',monospace; font-size:1.05rem; list-style:none;">Is ralphex the ralph loop for Claude Code?</summary>
+                <p style="margin-top:1rem; color:var(--text-secondary); line-height:1.7;">
+                    Yes &mdash; ralphex is an extended ralph loop. The original ralph loop, popularized by
+                    Geoffrey Huntley, runs the same prompt against an agent until the work is done. ralphex
+                    keeps that core idea but adds structured plans, per-task fresh sessions, and a
+                    multi-phase review pipeline. It works as a ralph loop for Claude Code out of the box,
+                    and supports codex, GitHub Copilot CLI, Cursor CLI, and other compatible agents through
+                    wrapper scripts.
+                </p>
+            </details>
+
+            <details class="faq-item animate-on-scroll" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:1.5rem 1.75rem;">
+                <summary style="cursor:pointer; font-weight:600; color:var(--teal); font-family:'JetBrains Mono',monospace; font-size:1.05rem; list-style:none;">Can I run ralphex with codex instead of Claude Code?</summary>
+                <p style="margin-top:1rem; color:var(--text-secondary); line-height:1.7;">
+                    Yes. ralphex ships with a <code>codex-as-claude</code> wrapper script that translates
+                    codex output into ralphex's stream-json protocol. Point <code>claude_command</code> at
+                    the wrapper in your config and ralphex drives codex through the same task and review
+                    loop. The same approach works for GitHub Copilot CLI, Cursor CLI, or any agent with a
+                    compatible streaming output. See the
+                    <a href="https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md" style="color:var(--teal);" target="_blank">custom providers documentation</a>
+                    for details.
+                </p>
+            </details>
+
+            <details class="faq-item animate-on-scroll" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:1.5rem 1.75rem;">
+                <summary style="cursor:pointer; font-weight:600; color:var(--teal); font-family:'JetBrains Mono',monospace; font-size:1.05rem; list-style:none;">Is ralphex an autonomous coding agent?</summary>
+                <p style="margin-top:1rem; color:var(--text-secondary); line-height:1.7;">
+                    Not quite. ralphex is an autonomous <em>orchestrator</em> of coding agents &mdash; it
+                    doesn't write code itself. It drives an underlying agent (Claude Code, codex, Copilot
+                    CLI) through a structured plan, runs tests, commits work, and coordinates multi-phase
+                    reviews. The agent does the writing; ralphex provides the loop, the discipline, and
+                    the cross-validation.
+                </p>
+            </details>
+
+            <details class="faq-item animate-on-scroll" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:1.5rem 1.75rem;">
+                <summary style="cursor:pointer; font-weight:600; color:var(--teal); font-family:'JetBrains Mono',monospace; font-size:1.05rem; list-style:none;">Can I run ralphex code review without executing tasks?</summary>
+                <p style="margin-top:1rem; color:var(--text-secondary); line-height:1.7;">
+                    Yes &mdash; <code>ralphex --review</code> runs the full multi-agent review pipeline on
+                    changes already on the current branch. This works regardless of how the changes were
+                    made: Claude Code's plan mode, manual edits, another AI agent, or any other workflow.
+                    No plan file is required; if you provide one it adds context for the reviewers.
+                </p>
+            </details>
+
+            <details class="faq-item animate-on-scroll" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:1.5rem 1.75rem;">
+                <summary style="cursor:pointer; font-weight:600; color:var(--teal); font-family:'JetBrains Mono',monospace; font-size:1.05rem; list-style:none;">What if codex isn't installed?</summary>
+                <p style="margin-top:1rem; color:var(--text-secondary); line-height:1.7;">
+                    The codex external review phase is optional &mdash; if codex isn't installed, ralphex
+                    skips it automatically and runs only the Claude-based review phases. You can also use
+                    <code>--external-only</code> to run just the codex cross-validation pass on existing
+                    branch changes.
+                </p>
+            </details>
+
+            <details class="faq-item animate-on-scroll" style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:1.5rem 1.75rem;">
+                <summary style="cursor:pointer; font-weight:600; color:var(--teal); font-family:'JetBrains Mono',monospace; font-size:1.05rem; list-style:none;">Where is ralphex on GitHub?</summary>
+                <p style="margin-top:1rem; color:var(--text-secondary); line-height:1.7;">
+                    The source for ralphex lives at
+                    <a href="https://github.com/umputun/ralphex" style="color:var(--teal);" target="_blank">github.com/umputun/ralphex</a>.
+                    Issues, discussions, and releases are all there. The project is open source under the
+                    MIT license.
+                </p>
+            </details>
+
         </div>
     </section>
 
