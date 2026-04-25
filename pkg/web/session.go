@@ -300,10 +300,11 @@ const (
 
 // startTailerLocked creates and starts a new tailer according to mode.
 // the caller MUST hold s.mu as a write lock. on success, the new tailer is
-// stored on the session and a feedEvents goroutine is launched; the goroutine
-// blocks on s.mu.RLock() until the caller releases s.mu, then picks up the
-// newly assigned s.tailer/s.stopTailCh. on error, s.tailer and s.stopTailCh
-// are left unchanged.
+// stored on the session, stopTailCh and feedDoneCh are allocated, and a
+// feedEvents goroutine is launched. the goroutine receives tailer, stopCh,
+// and feedDone as arguments captured at spawn time, so it does not depend on
+// reading session fields after launch and does not need to acquire s.mu.
+// on error, s.tailer, s.stopTailCh, and s.feedDoneCh are left unchanged.
 //
 // for modeResume and modeFromEnd, the tailer is pre-seeded with s.lastPhase
 // (if set) so lines emitted after resume carry the correct phase. modeFromStart

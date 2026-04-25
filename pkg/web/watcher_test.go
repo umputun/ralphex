@@ -710,6 +710,14 @@ Started: 2026-01-22 10:00:00
 `
 	require.NoError(t, os.WriteFile(progressFile, []byte(initial), 0o600))
 
+	// hold an exclusive flock on the progress file so IsActive() reports true
+	// (cross-process detection via TryLockFile). without this, w.Start's initial
+	// DiscoverRecursive would call updateSession -> IsActive=false -> flip the
+	// session to completed and stop tailing, defeating the test's premise.
+	// unix-only; skips on windows.
+	releaseLock := holdFileLockForTest(t, progressFile)
+	defer releaseLock()
+
 	sm := NewSessionManager()
 	sessionID := sessionIDFromPath(progressFile)
 
@@ -736,8 +744,13 @@ Started: 2026-01-22 10:00:00
 	ctx := t.Context()
 	go func() { _ = w.Start(ctx) }()
 
-	// allow initial startup (watcher may trigger one Discover cycle)
+	// allow initial startup; with the flock held, DiscoverRecursive's
+	// updateSession sees IsActive=true and leaves the active+tailing session
+	// untouched, so the tailer started above continues to own the file.
 	time.Sleep(150 * time.Millisecond)
+	require.Equal(t, SessionStateActive, session.GetState(),
+		"watcher startup must not flip an actively tailing session")
+	require.True(t, session.IsTailing(), "tailer must remain running after Discover")
 
 	events, cleanup := subscribeSSEEvents(t, session)
 	defer cleanup()
