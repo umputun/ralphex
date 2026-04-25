@@ -403,7 +403,10 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
     # permission errors when SKIP_HOME_CHOWN=1 leaves /home/app unwritable
     # to the remapped APP_UID
     ralphex_config = home / ".config" / "ralphex"
-    ralphex_config.mkdir(parents=True, exist_ok=True)
+    try:
+        ralphex_config.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SystemExit(f"error: failed to create config directory {ralphex_config}: {exc}")
     add(resolve_path(ralphex_config), "/home/app/.config/ralphex")
     add_symlink_targets(ralphex_config)
 
