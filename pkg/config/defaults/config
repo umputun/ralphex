@@ -99,6 +99,17 @@ external_review_tool = codex
 # finalize_enabled = false
 
 # ------------------------------------------------------------------------------
+# plan move behavior
+# ------------------------------------------------------------------------------
+
+# move_plan_on_completion: whether to move completed plan file into
+# docs/plans/completed/ on success. set to false for workflows that
+# manage plan file lifecycle externally (e.g. spec-driven tooling with
+# separate archive steps).
+# default: true
+# move_plan_on_completion = true
+
+# ------------------------------------------------------------------------------
 # worktree isolation
 # ------------------------------------------------------------------------------
 

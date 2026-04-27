@@ -190,9 +190,9 @@ Embedded template (insert near `finalize_enabled` block around line 86 in `pkg/c
 **Files:**
 - Modify: `pkg/config/defaults/config`
 
-- [ ] add commented-out `move_plan_on_completion` block near the `finalize_enabled` block (line ~86), following the surrounding comment style (what it does, when to change, default, then commented option)
-- [ ] existing `defaults_test.go` already verifies the all-commented fallback (`TestShouldOverwrite/all_commented` at line 993, plus `stripComments` checks at line 873+) — no new regression test needed
-- [ ] run `go test ./pkg/config/...` — must pass before task 5
+- [x] add commented-out `move_plan_on_completion` block near the `finalize_enabled` block (line ~86), following the surrounding comment style (what it does, when to change, default, then commented option)
+- [x] existing `defaults_test.go` already verifies the all-commented fallback (`TestShouldOverwrite/all_commented` at line 993, plus `stripComments` checks at line 873+) — no new regression test needed
+- [x] run `go test ./pkg/config/...` — must pass before task 5
 
 ### Task 5: Verify acceptance criteria
 
