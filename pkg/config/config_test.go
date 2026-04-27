@@ -409,6 +409,7 @@ codex_sandbox = none
 iteration_delay_ms = 500
 task_retry_count = 5
 plans_dir = my/plans
+move_plan_on_completion = false
 `
 	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
 
@@ -427,6 +428,8 @@ plans_dir = my/plans
 	assert.Equal(t, 500, cfg.IterationDelayMs)
 	assert.Equal(t, 5, cfg.TaskRetryCount)
 	assert.Equal(t, "my/plans", cfg.PlansDir)
+	assert.False(t, cfg.MovePlanOnCompletion)
+	assert.True(t, cfg.MovePlanOnCompletionSet)
 }
 
 // --- local config tests ---
