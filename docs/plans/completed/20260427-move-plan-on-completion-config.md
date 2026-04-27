@@ -211,11 +211,11 @@ Embedded template (insert near `finalize_enabled` block around line 86 in `pkg/c
 - Modify: `llms.txt`
 - Modify: `README.md`
 
-- [ ] add a line to the `Configuration` section of project `CLAUDE.md`: `move_plan_on_completion` config option controls whether completed plans move to `docs/plans/completed/` on success, default `true`. Disable for workflows that manage plan lifecycle externally (spec-driven tooling with separate archive steps)
-- [ ] add the same option to `llms.txt` in the existing configuration-options list (alphabetical-ish with neighbouring options)
-- [ ] add a new "Plan Move Behavior (optional)" subsection to `README.md` immediately after the existing "Finalize Step (optional)" section (line ~161), modeled on the same structure: one-line description, "How to enable/disable" with the INI key and default (`true`), and one sentence on when to disable (external plan-lifecycle workflows with separate archive steps)
-- [ ] do NOT update CHANGELOG (per CLAUDE.md workflow rule: CHANGELOG updates are release-process only)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] add a line to the `Configuration` section of project `CLAUDE.md`: `move_plan_on_completion` config option controls whether completed plans move to `docs/plans/completed/` on success, default `true`. Disable for workflows that manage plan lifecycle externally (spec-driven tooling with separate archive steps)
+- [x] add the same option to `llms.txt` in the existing configuration-options list (alphabetical-ish with neighbouring options)
+- [x] add a new "Plan Move Behavior (optional)" subsection to `README.md` immediately after the existing "Finalize Step (optional)" section (line ~161), modeled on the same structure: one-line description, "How to enable/disable" with the INI key and default (`true`), and one sentence on when to disable (external plan-lifecycle workflows with separate archive steps)
+- [x] do NOT update CHANGELOG (per CLAUDE.md workflow rule: CHANGELOG updates are release-process only)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

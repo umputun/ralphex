@@ -290,6 +290,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - `wait_on_limit` config option: duration to wait before retrying on rate limit (e.g., "1h", "30m"). CLI flag `--wait` takes precedence. Disabled by default
 - `session_timeout` config option: per-session timeout for claude (e.g., "30m", "1h"). Kills hanging sessions and continues to next iteration. CLI flag `--session-timeout` takes precedence. Disabled by default
 - `idle_timeout` config option: kills claude sessions when no output for specified duration (e.g., "5m"). Resets on each output line, only fires when session goes silent. CLI flag `--idle-timeout` takes precedence. Disabled by default
+- `move_plan_on_completion` config option: controls whether completed plans move to `docs/plans/completed/` on success. Default `true`. Disable for workflows that manage plan lifecycle externally (spec-driven tooling with separate archive steps)
 
 ### Local Project Config (.ralphex/)
 

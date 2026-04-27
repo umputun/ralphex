@@ -162,6 +162,16 @@ Set `finalize_enabled = true` in `~/.config/ralphex/config` or `.ralphex/config`
 
 Edit `~/.config/ralphex/prompts/finalize.txt` (or `.ralphex/prompts/finalize.txt`) to change what happens after reviews. Examples: push to remote, send notifications, run deployment scripts, or any post-completion automation. Template variables like `{{DEFAULT_BRANCH}}` are available.
 
+### Plan Move Behavior (optional)
+
+After successful execution, ralphex moves the plan file into `docs/plans/completed/`. Enabled by default.
+
+**How to disable:**
+
+Set `move_plan_on_completion = false` in `~/.config/ralphex/config` or `.ralphex/config`. Default is `true`.
+
+**When to disable:** workflows that manage plan file lifecycle externally (e.g. spec-driven tooling where the plan lives inside a bundle that a separate archive step consumes) should opt out so ralphex doesn't fight the external tool's file layout.
+
 ### Review-Only Mode
 
 Review-only mode (`--review`) runs the full review pipeline (Phase 2 → Phase 3 → Phase 4) on changes already present on the current branch. This is useful when changes were made outside ralphex — via Claude Code's built-in plan mode, manual edits, other AI agents, or any other workflow.
@@ -820,6 +830,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `iteration_delay_ms` | Delay between iterations | `2000` |
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
+| `move_plan_on_completion` | Move completed plan file into `docs/plans/completed/` on success (disable for external plan-lifecycle workflows) | `true` |
 | `use_worktree` | Run each plan in an isolated git worktree (full and tasks-only modes only) | `false` |
 | `plans_dir` | Plans directory | `docs/plans` |
 | `default_branch` | Override auto-detected default branch for review diffs | auto-detect |

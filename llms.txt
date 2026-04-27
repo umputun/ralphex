@@ -138,6 +138,8 @@ review_model = sonnet:medium
 
 **Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit` (claude), `Rate limit,quota exceeded` (codex).
 
+**Plan move behavior:** `move_plan_on_completion` config option controls whether completed plans move to `docs/plans/completed/` on success. Default `true` (existing behavior). Set to `false` for workflows that manage plan file lifecycle externally, such as spec-driven tooling with separate archive steps.
+
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 
 Run `ralphex --init` to create local `.ralphex/` project config with commented-out defaults.
