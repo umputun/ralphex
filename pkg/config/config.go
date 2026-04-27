@@ -71,6 +71,9 @@ type Config struct {
 	FinalizeEnabled    bool `json:"finalize_enabled"`
 	FinalizeEnabledSet bool `json:"-"` // tracks if finalize_enabled was explicitly set in config
 
+	MovePlanOnCompletion    bool `json:"move_plan_on_completion"`
+	MovePlanOnCompletionSet bool `json:"-"` // tracks if move_plan_on_completion was explicitly set in config
+
 	WorktreeEnabled    bool `json:"worktree_enabled"`
 	WorktreeEnabledSet bool `json:"-"` // tracks if use_worktree was explicitly set in config
 
@@ -273,49 +276,57 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		return nil, fmt.Errorf("load agents: %w", err)
 	}
 
+	// move_plan_on_completion defaults to true when not explicitly set
+	movePlan := values.MovePlanOnCompletion
+	if !values.MovePlanOnCompletionSet {
+		movePlan = true
+	}
+
 	// assemble config
 	c := &Config{
-		ClaudeCommand:         values.ClaudeCommand,
-		ClaudeArgs:            values.ClaudeArgs,
-		TaskModel:             values.TaskModel,
-		ReviewModel:           values.ReviewModel,
-		CodexEnabled:          values.CodexEnabled,
-		CodexEnabledSet:       values.CodexEnabledSet,
-		CodexCommand:          values.CodexCommand,
-		CodexModel:            values.CodexModel,
-		CodexReasoningEffort:  values.CodexReasoningEffort,
-		CodexTimeoutMs:        values.CodexTimeoutMs,
-		CodexTimeoutMsSet:     values.CodexTimeoutMsSet,
-		CodexSandbox:          values.CodexSandbox,
-		ExternalReviewTool:    values.ExternalReviewTool,
-		CustomReviewScript:    values.CustomReviewScript,
-		IterationDelayMs:      values.IterationDelayMs,
-		IterationDelayMsSet:   values.IterationDelayMsSet,
-		TaskRetryCount:        values.TaskRetryCount,
-		TaskRetryCountSet:     values.TaskRetryCountSet,
-		MaxIterations:         values.MaxIterations,
-		MaxIterationsSet:      values.MaxIterationsSet,
-		MaxExternalIterations: values.MaxExternalIterations,
-		ReviewPatience:        values.ReviewPatience,
-		FinalizeEnabled:       values.FinalizeEnabled,
-		FinalizeEnabledSet:    values.FinalizeEnabledSet,
-		WorktreeEnabled:       values.WorktreeEnabled,
-		WorktreeEnabledSet:    values.WorktreeEnabledSet,
-		PlansDir:              values.PlansDir,
-		DefaultBranch:         values.DefaultBranch,
-		VcsCommand:            values.VcsCommand,
-		CommitTrailer:         values.CommitTrailer,
-		WatchDirs:             values.WatchDirs,
-		ClaudeErrorPatterns:   values.ClaudeErrorPatterns,
-		CodexErrorPatterns:    values.CodexErrorPatterns,
-		ClaudeLimitPatterns:   values.ClaudeLimitPatterns,
-		CodexLimitPatterns:    values.CodexLimitPatterns,
-		WaitOnLimit:           values.WaitOnLimit,
-		WaitOnLimitSet:        values.WaitOnLimitSet,
-		SessionTimeout:        values.SessionTimeout,
-		SessionTimeoutSet:     values.SessionTimeoutSet,
-		IdleTimeout:           values.IdleTimeout,
-		IdleTimeoutSet:        values.IdleTimeoutSet,
+		ClaudeCommand:           values.ClaudeCommand,
+		ClaudeArgs:              values.ClaudeArgs,
+		TaskModel:               values.TaskModel,
+		ReviewModel:             values.ReviewModel,
+		CodexEnabled:            values.CodexEnabled,
+		CodexEnabledSet:         values.CodexEnabledSet,
+		CodexCommand:            values.CodexCommand,
+		CodexModel:              values.CodexModel,
+		CodexReasoningEffort:    values.CodexReasoningEffort,
+		CodexTimeoutMs:          values.CodexTimeoutMs,
+		CodexTimeoutMsSet:       values.CodexTimeoutMsSet,
+		CodexSandbox:            values.CodexSandbox,
+		ExternalReviewTool:      values.ExternalReviewTool,
+		CustomReviewScript:      values.CustomReviewScript,
+		IterationDelayMs:        values.IterationDelayMs,
+		IterationDelayMsSet:     values.IterationDelayMsSet,
+		TaskRetryCount:          values.TaskRetryCount,
+		TaskRetryCountSet:       values.TaskRetryCountSet,
+		MaxIterations:           values.MaxIterations,
+		MaxIterationsSet:        values.MaxIterationsSet,
+		MaxExternalIterations:   values.MaxExternalIterations,
+		ReviewPatience:          values.ReviewPatience,
+		FinalizeEnabled:         values.FinalizeEnabled,
+		FinalizeEnabledSet:      values.FinalizeEnabledSet,
+		MovePlanOnCompletion:    movePlan,
+		MovePlanOnCompletionSet: values.MovePlanOnCompletionSet,
+		WorktreeEnabled:         values.WorktreeEnabled,
+		WorktreeEnabledSet:      values.WorktreeEnabledSet,
+		PlansDir:                values.PlansDir,
+		DefaultBranch:           values.DefaultBranch,
+		VcsCommand:              values.VcsCommand,
+		CommitTrailer:           values.CommitTrailer,
+		WatchDirs:               values.WatchDirs,
+		ClaudeErrorPatterns:     values.ClaudeErrorPatterns,
+		CodexErrorPatterns:      values.CodexErrorPatterns,
+		ClaudeLimitPatterns:     values.ClaudeLimitPatterns,
+		CodexLimitPatterns:      values.CodexLimitPatterns,
+		WaitOnLimit:             values.WaitOnLimit,
+		WaitOnLimitSet:          values.WaitOnLimitSet,
+		SessionTimeout:          values.SessionTimeout,
+		SessionTimeoutSet:       values.SessionTimeoutSet,
+		IdleTimeout:             values.IdleTimeout,
+		IdleTimeoutSet:          values.IdleTimeoutSet,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,

@@ -166,11 +166,11 @@ Embedded template (insert near `finalize_enabled` block around line 86 in `pkg/c
 - Modify: `pkg/config/config.go`
 - Modify: `pkg/config/config_test.go`
 
-- [ ] write failing table-driven test: default (not set) yields `true`, explicit `true` yields `true`, explicit `false` yields `false`
-- [ ] run test — confirm it fails as expected
-- [ ] add `MovePlanOnCompletion bool` (with `json:"move_plan_on_completion"`) and `MovePlanOnCompletionSet bool` (`json:"-"`) fields to `Config` struct near `FinalizeEnabled`
-- [ ] precompute effective default into a local `movePlan` before the struct literal at line ~270 (see Technical Details for exact form), then assign `MovePlanOnCompletion: movePlan` and `MovePlanOnCompletionSet: values.MovePlanOnCompletionSet` inside the literal
-- [ ] run `go test ./pkg/config/...` — all tests must pass before task 3
+- [x] write failing table-driven test: default (not set) yields `true`, explicit `true` yields `true`, explicit `false` yields `false`
+- [x] run test — confirm it fails as expected
+- [x] add `MovePlanOnCompletion bool` (with `json:"move_plan_on_completion"`) and `MovePlanOnCompletionSet bool` (`json:"-"`) fields to `Config` struct near `FinalizeEnabled`
+- [x] precompute effective default into a local `movePlan` before the struct literal at line ~270 (see Technical Details for exact form), then assign `MovePlanOnCompletion: movePlan` and `MovePlanOnCompletionSet: values.MovePlanOnCompletionSet` inside the literal
+- [x] run `go test ./pkg/config/...` — all tests must pass before task 3
 
 ### Task 3: Extract `shouldMovePlan` predicate and guard the move call
 
