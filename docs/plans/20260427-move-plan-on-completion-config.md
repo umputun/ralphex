@@ -196,13 +196,13 @@ Embedded template (insert near `finalize_enabled` block around line 86 in `pkg/c
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] `make test` passes (unit tests with coverage)
-- [ ] `make lint` passes (no new golangci-lint issues)
-- [ ] `make fmt` — code is formatted
-- [ ] coverage on touched files ≥ 80% per CLAUDE.md
-- [ ] `GOOS=windows GOARCH=amd64 go build ./...` succeeds (no Unix-specific paths introduced)
-- [ ] toy-project smoke test per CLAUDE.md: run `./scripts/internal/prep-toy-test.sh`, then add a plain INI entry `move_plan_on_completion = false` (not just uncommenting the template) to `/tmp/ralphex-test/.ralphex/config`, execute a plan, and verify the plan file stays in `docs/plans/` rather than `docs/plans/completed/`
-- [ ] toy-project smoke test with default config (no override): verify plan still moves to `completed/` (back-compat)
+- [x] `make test` passes (unit tests with coverage)
+- [x] `make lint` passes (no new golangci-lint issues)
+- [x] `make fmt` — code is formatted
+- [x] coverage on touched files ≥ 80% per CLAUDE.md
+- [x] `GOOS=windows GOARCH=amd64 go build ./...` succeeds (no Unix-specific paths introduced)
+- [x] toy-project smoke test per CLAUDE.md: run `./scripts/internal/prep-toy-test.sh`, then add a plain INI entry `move_plan_on_completion = false` (not just uncommenting the template) to `/tmp/ralphex-test/.ralphex/config`, execute a plan, and verify the plan file stays in `docs/plans/` rather than `docs/plans/completed/`
+- [x] toy-project smoke test with default config (no override): verify plan still moves to `completed/` (back-compat)
 
 ### Task 6: Final — update documentation and move plan
 
