@@ -29,8 +29,9 @@ Started: 2026-01-22 10:30:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete, "separator observed, header should be marked complete")
 
 		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
 		assert.Equal(t, "feature-branch", meta.Branch)
@@ -51,8 +52,9 @@ Started: 2026-01-22 11:00:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete)
 
 		assert.Equal(t, "(no plan - review only)", meta.PlanPath)
 		assert.Equal(t, "review", meta.Mode)
@@ -68,8 +70,9 @@ Branch: main
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete, "separator present → complete even with missing fields")
 
 		assert.Empty(t, meta.PlanPath)
 		assert.Equal(t, "main", meta.Branch)
@@ -78,8 +81,29 @@ Branch: main
 	})
 
 	t.Run("returns error for missing file", func(t *testing.T) {
-		_, err := ParseProgressHeader("/nonexistent/path")
+		_, _, err := ParseProgressHeader("/nonexistent/path")
 		assert.Error(t, err)
+	})
+
+	t.Run("reports incomplete when separator not yet written", func(t *testing.T) {
+		// models a mid-write observation: header lines written but terminating
+		// separator still pending. updateSession must not clobber previously
+		// stored metadata with the partial parse returned here.
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.False(t, complete, "no separator → header should be marked incomplete")
+		assert.True(t, meta.StartTime.IsZero(), "Started: not yet written")
+		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath, "already-written fields still parsed")
 	})
 }
 
@@ -174,6 +198,122 @@ Started: 2026-01-22 10:00:00
 		assert.Equal(t, 3, stats.Files)
 		assert.Equal(t, 10, stats.Additions)
 		assert.Equal(t, 4, stats.Deletions)
+	})
+}
+
+func TestSessionManager_LoadProgressFileIntoSession_RecordsOffset(t *testing.T) {
+	t.Run("LF endings offset equals file size", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-lf.txt")
+
+		content := "# Ralphex Progress Log\n" +
+			"Plan: docs/plan.md\n" +
+			"Branch: main\n" +
+			"Mode: full\n" +
+			"Started: 2026-01-22 10:00:00\n" +
+			"------------------------------------------------------------\n" +
+			"\n" +
+			"[26-01-22 10:00:01] first line\n" +
+			"[26-01-22 10:00:02] second line\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-lf", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(len(content)), session.getLastOffset(),
+			"lastOffset must equal total byte size for LF-terminated content")
+	})
+
+	t.Run("CRLF endings offset equals file size", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-crlf.txt")
+
+		content := "# Ralphex Progress Log\r\n" +
+			"Plan: docs/plan.md\r\n" +
+			"Branch: main\r\n" +
+			"Mode: full\r\n" +
+			"Started: 2026-01-22 10:00:00\r\n" +
+			"------------------------------------------------------------\r\n" +
+			"\r\n" +
+			"[26-01-22 10:00:01] first line\r\n" +
+			"[26-01-22 10:00:02] second line\r\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-crlf", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(len(content)), session.getLastOffset(),
+			"lastOffset must equal total byte size for CRLF-terminated content (regression guard)")
+	})
+
+	t.Run("empty file records zero offset", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-empty.txt")
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-empty", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(0), session.getLastOffset(), "empty file must record zero offset")
+	})
+
+	t.Run("partial trailing line skipped to avoid mid-write corruption", func(t *testing.T) {
+		// the loader runs on the flock-race recovery path where the writer is
+		// still active; a trailing line without a newline is a mid-write
+		// fragment. counting and publishing it would advance lastOffset past
+		// the partial bytes, so a later Reactivate would resume mid-line and
+		// emit the suffix as a separate event after the writer completes the
+		// line. lastOffset must point to the end of the last fully-terminated
+		// line, NOT to file size.
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-partial.txt")
+
+		header := "# Ralphex Progress Log\n" +
+			"Plan: docs/plan.md\n" +
+			"Branch: main\n" +
+			"Mode: full\n" +
+			"Started: 2026-01-22 10:00:00\n" +
+			"------------------------------------------------------------\n" +
+			"\n" +
+			"[26-01-22 10:00:01] first line\n"
+		partial := "[26-01-22 10:00:02] last line without newline"
+		require.NoError(t, os.WriteFile(path, []byte(header+partial), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-partial", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		assert.Equal(t, int64(len(header)), session.getLastOffset(),
+			"lastOffset must skip the partial trailing line so a later "+
+				"Reactivate resumes from the end of the last complete line")
+	})
+
+	t.Run("missing file leaves lastOffset unchanged", func(t *testing.T) {
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-missing", "/nonexistent/progress.txt")
+		defer session.Close()
+
+		session.setLastOffset(42)
+		m.loadProgressFileIntoSession("/nonexistent/progress.txt", session)
+
+		assert.Equal(t, int64(42), session.getLastOffset(),
+			"missing file must not overwrite pre-existing lastOffset")
 	})
 }
 
@@ -315,8 +455,9 @@ Started: 2026-01-22 10:30:00
 `
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete)
 
 		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
 		assert.Equal(t, "feature-branch", meta.Branch)
@@ -337,8 +478,9 @@ Started: 2026-01-22 10:30:00
 			"[26-01-22 10:30:05] " + hugeLine + "\n"
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-		meta, err := ParseProgressHeader(path)
+		meta, complete, err := ParseProgressHeader(path)
 		require.NoError(t, err)
+		assert.True(t, complete)
 
 		assert.Equal(t, "docs/plans/huge.md", meta.PlanPath)
 		assert.Equal(t, "huge-branch", meta.Branch)

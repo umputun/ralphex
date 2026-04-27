@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -434,6 +435,391 @@ Started: 2026-01-22 10:00:00
 
 	// verify the session is marked as loaded (content was published to SSE server)
 	assert.True(t, session.IsLoaded(), "completed session should be marked as loaded")
+}
+
+// TestSessionManager_UpdateSession_CompletedToActiveResumesFromOffset verifies
+// that when updateSession observes a completed -> active transition on a session
+// with content already ingested (lastOffset > 0), it resumes from the stored
+// offset via Reactivate rather than re-tailing the whole file from byte 0.
+// this is the flock-race recovery path: RefreshStates falsely marks a live
+// session completed and captures the offset, then Discover sees the flock
+// re-held and flips the state back to active.
+func TestSessionManager_UpdateSession_CompletedToActiveResumesFromOffset(t *testing.T) {
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.md")
+	require.NoError(t, os.WriteFile(planPath, []byte("# plan"), 0o600))
+
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	holder := &status.PhaseHolder{}
+	logger, err := progress.NewLogger(progress.Config{
+		PlanFile: planPath,
+		Mode:     "full",
+		Branch:   "main",
+	}, testColors(), holder)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = logger.Close() })
+
+	progressPath := logger.Path()
+
+	// write some content into the progress file so there is a non-trivial
+	// offset to resume from.
+	f, err := os.OpenFile(progressPath, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // test-controlled path
+	require.NoError(t, err)
+	_, err = f.WriteString("[26-01-22 10:00:01] early line\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	preRaceSize, err := os.Stat(progressPath)
+	require.NoError(t, err)
+
+	// set up a completed+loaded session with the pre-race offset, as if
+	// RefreshStates had just observed a transient flock release and stopped
+	// the tailer.
+	id := sessionIDFromPath(progressPath)
+	session := NewSession(id, progressPath)
+	session.SetState(SessionStateCompleted)
+	require.True(t, session.MarkLoadedIfNot())
+	session.setLastOffset(preRaceSize.Size())
+
+	m := NewSessionManager()
+	m.Register(session)
+
+	// the logger still holds the flock, so IsActive returns true.
+	active, err := IsActive(progressPath)
+	require.NoError(t, err)
+	require.True(t, active, "logger should still hold the flock")
+
+	// drive updateSession directly - this is the entry point for the
+	// completed -> active transition that the flock race exposes.
+	require.NoError(t, m.updateSession(session))
+
+	assert.Equal(t, SessionStateActive, session.GetState(),
+		"session should transition back to active")
+
+	// tailer must have resumed from the stored lastOffset, not rewound to 0.
+	require.Eventually(t, func() bool {
+		return session.IsTailing() && session.GetTailer() != nil
+	}, time.Second, 10*time.Millisecond, "tailer should be running after transition")
+
+	tailerOffset := session.GetTailer().Offset()
+	assert.GreaterOrEqual(t, tailerOffset, preRaceSize.Size(),
+		"tailer offset must be at or past the stored lastOffset; got %d, want >= %d",
+		tailerOffset, preRaceSize.Size())
+}
+
+// TestSessionManager_UpdateSession_CompletedKeepsOffsetSkipsLoader verifies that
+// when updateSession observes a completed session whose lastOffset > 0 (content
+// already ingested by a prior tailer) and the flock races false a second time
+// so newState stays completed, the historical-file loader is NOT run. otherwise
+// the loader would re-emit every event the tailer already published, duplicating
+// them in the SSE replay buffer. exercises the tailer-first / loader-second race
+// path that sits alongside the loader-first / tailer-second race the plan calls
+// out in its Concurrent loadProgressFileIntoSession design note.
+func TestSessionManager_UpdateSession_CompletedKeepsOffsetSkipsLoader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress-completed-with-offset.txt")
+
+	content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- Task 1 ---
+[26-01-22 10:00:01] early line
+[26-01-22 10:00:02] another line
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	// model the state that a RefreshStates flock race would leave behind for
+	// an active session that was being tailed from the start:
+	//   - state = completed (RefreshStates saw a transient flock release)
+	//   - loaded = false (StartTailing(true) never marks loaded)
+	//   - lastOffset > 0 (StopTailing captured the tailer's byte offset)
+	id := sessionIDFromPath(path)
+	session := NewSession(id, path)
+	session.SetState(SessionStateCompleted)
+	const preRaceOffset int64 = 100
+	session.setLastOffset(preRaceOffset)
+	require.False(t, session.IsLoaded())
+
+	m := NewSessionManager()
+	m.Register(session)
+	t.Cleanup(func() { m.Close() })
+
+	// file is not locked, so IsActive returns false - this models the second
+	// flock race where updateSession observes the file as completed again.
+	active, err := IsActive(path)
+	require.NoError(t, err)
+	require.False(t, active, "file must not be locked to reproduce the race")
+
+	require.NoError(t, m.updateSession(session))
+
+	assert.Equal(t, SessionStateCompleted, session.GetState(),
+		"newState must stay completed when IsActive races false")
+	assert.True(t, session.IsLoaded(),
+		"session must be marked loaded so the watcher's Reactivate gate can fire")
+	assert.Equal(t, preRaceOffset, session.getLastOffset(),
+		"loader must not run: it would overwrite lastOffset with the file size and re-emit events")
+}
+
+// TestSessionManager_UpdateSession_DetectsFileRestart verifies that when a
+// progress file is reused by a new ralphex run (truncated + re-initialized
+// with a new Started: timestamp), updateSession resets per-run state so the
+// subsequent loader or tailer reads the fresh file from byte 0 rather than
+// seeking to the stale offset from the previous run. this closes the
+// truncation race where the new run can grow past the old offset before
+// StartFromOffset's `offset > fileSize` check would fire.
+func TestSessionManager_UpdateSession_DetectsFileRestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress-restart.txt")
+
+	// simulate previous run: session has stored metadata, lastOffset > 0,
+	// loaded=true. then the progress file is rewritten with new content
+	// whose header carries a different Started: timestamp, and (critically)
+	// the new file has ALREADY grown past the previous lastOffset, so the
+	// offset>size fallback in StartFromOffset would not trigger.
+	oldContent := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+[26-01-22 10:00:01] run 1 line
+`
+	require.NoError(t, os.WriteFile(path, []byte(oldContent), 0o600))
+
+	id := sessionIDFromPath(path)
+	session := NewSession(id, path)
+	// establish stored metadata from the original file before it gets rewritten
+	m := NewSessionManager()
+	m.Register(session)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, m.updateSession(session))
+	require.Equal(t, "2026-01-22 10:00:00",
+		session.GetMetadata().StartTime.Format("2006-01-02 15:04:05"),
+		"precondition: stored metadata reflects run 1 header")
+	require.True(t, session.IsLoaded(), "precondition: run 1 content loaded")
+	run1Offset := session.getLastOffset()
+	require.Positive(t, run1Offset, "precondition: run 1 recorded an offset")
+
+	// rewrite the file with run 2 content (truncate + new header + enough
+	// bytes so the new file exceeds run1Offset without hitting offset>size).
+	var newContent strings.Builder
+	newContent.WriteString(`# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 11:00:00
+------------------------------------------------------------
+
+`)
+	for i := 0; newContent.Len() <= int(run1Offset)+200; i++ {
+		fmt.Fprintf(&newContent, "[26-01-22 11:00:%02d] run 2 line %d\n", i%60, i)
+	}
+	require.NoError(t, os.WriteFile(path, []byte(newContent.String()), 0o600))
+	stat, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Greater(t, stat.Size(), run1Offset,
+		"precondition: new file has grown past run1Offset to defeat offset>size fallback")
+
+	// drive updateSession again - this models the watcher picking up a Write
+	// event after the file restart.
+	require.NoError(t, m.updateSession(session))
+
+	assert.Equal(t, "2026-01-22 11:00:00",
+		session.GetMetadata().StartTime.Format("2006-01-02 15:04:05"),
+		"metadata should reflect the new run's header")
+	assert.Equal(t, stat.Size(), session.getLastOffset(),
+		"after restart detection, loader should re-run on fresh file and record new offset")
+	assert.True(t, session.IsLoaded(),
+		"session remains marked loaded after loader processes the new run")
+}
+
+// TestSessionManager_UpdateSession_PartialHeaderPreservesMetadata verifies that
+// a mid-write observation of a truncate+rewrite (header lines streaming in, but
+// terminating separator not yet written) does NOT clobber the previously stored
+// StartTime. writeHeader issues several writes and fsnotify can deliver a Write
+// event between them; if updateSession replaced stored metadata with the zero
+// StartTime from that partial read, the next event with the full header would
+// compare against a zero oldMeta.StartTime and skip the restart reset, leaving
+// stale lastOffset/loaded in place for the new run.
+func TestSessionManager_UpdateSession_PartialHeaderPreservesMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress-partial.txt")
+
+	// run 1: full header seen, metadata + offset recorded
+	run1Content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+[26-01-22 10:00:01] run 1 line
+`
+	require.NoError(t, os.WriteFile(path, []byte(run1Content), 0o600))
+
+	id := sessionIDFromPath(path)
+	session := NewSession(id, path)
+	m := NewSessionManager()
+	m.Register(session)
+	t.Cleanup(func() { m.Close() })
+	require.NoError(t, m.updateSession(session))
+	require.Equal(t, "2026-01-22 10:00:00",
+		session.GetMetadata().StartTime.Format("2006-01-02 15:04:05"))
+	run1Offset := session.getLastOffset()
+	require.Positive(t, run1Offset)
+
+	// simulate a mid-write observation: header lines but no separator yet.
+	// Started: is still missing at this point — writeHeader writes lines in
+	// order, so a Write event between writeFile("Mode:") and writeFile("Started:")
+	// delivers this exact content.
+	partial := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+`
+	require.NoError(t, os.WriteFile(path, []byte(partial), 0o600))
+	require.NoError(t, m.updateSession(session))
+
+	// the partial parse must NOT have overwritten the run 1 StartTime; otherwise
+	// the next event cannot detect the restart.
+	assert.Equal(t, "2026-01-22 10:00:00",
+		session.GetMetadata().StartTime.Format("2006-01-02 15:04:05"),
+		"partial header parse must not clobber previously stored StartTime")
+
+	// now the full run 2 header lands. restart detection must fire here and
+	// reset per-run state (lastOffset, loaded) before the loader runs on the
+	// new content.
+	var run2 strings.Builder
+	run2.WriteString(`# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 11:00:00
+------------------------------------------------------------
+
+`)
+	// grow past run1Offset so the StartFromOffset>size fallback cannot rescue us
+	for i := 0; run2.Len() <= int(run1Offset)+200; i++ {
+		fmt.Fprintf(&run2, "[26-01-22 11:00:%02d] run 2 line %d\n", i%60, i)
+	}
+	require.NoError(t, os.WriteFile(path, []byte(run2.String()), 0o600))
+	stat, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Greater(t, stat.Size(), run1Offset)
+
+	require.NoError(t, m.updateSession(session))
+
+	assert.Equal(t, "2026-01-22 11:00:00",
+		session.GetMetadata().StartTime.Format("2006-01-02 15:04:05"),
+		"metadata should reflect the new run once the full header is visible")
+	assert.Equal(t, stat.Size(), session.getLastOffset(),
+		"restart reset must run so loader re-ingests from byte 0, recording the new file size")
+}
+
+// TestSessionManager_UpdateSession_PartialHeaderSkipsLoader verifies that a
+// fresh-discovery observation of a partial header (no separator yet written)
+// does NOT invoke loadProgressFileIntoSession and does NOT mark the session
+// loaded. without the headerComplete gate, the loader would record a
+// lastOffset pointing inside the unfinished header; a later Reactivate
+// triggered by the rest of the header arriving would then resume mid-header
+// and emit the remaining header lines as output events. this is primarily
+// a Windows concern (IsActive is a no-op so every new discovery is marked
+// completed immediately), but the gate also protects Unix against the rare
+// race where IsActive momentarily returns false mid-write.
+func TestSessionManager_UpdateSession_PartialHeaderSkipsLoader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress-partial-new.txt")
+
+	// simulate a mid-write observation: header lines streaming in but the
+	// terminating separator not yet written. writeHeader issues several
+	// writeFile calls, and fsnotify can deliver a Write event between any two
+	// of them.
+	partial := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+`
+	require.NoError(t, os.WriteFile(path, []byte(partial), 0o600))
+
+	id := sessionIDFromPath(path)
+	session := NewSession(id, path)
+	m := NewSessionManager()
+	m.Register(session)
+	t.Cleanup(func() { m.Close() })
+
+	require.NoError(t, m.updateSession(session))
+
+	// partial-header discovery must not load or set an offset; otherwise a later
+	// Reactivate would resume inside the header.
+	assert.False(t, session.IsLoaded(),
+		"partial-header discovery must not mark session loaded")
+	assert.Zero(t, session.getLastOffset(),
+		"partial-header discovery must not record a lastOffset inside the header")
+
+	// once the full header arrives, the loader must run and record the correct
+	// offset (total file size) since header lines are skipped but still counted
+	// toward bytesRead.
+	full := partial + `Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+[26-01-22 10:00:01] first content line
+`
+	require.NoError(t, os.WriteFile(path, []byte(full), 0o600))
+	require.NoError(t, m.updateSession(session))
+
+	assert.True(t, session.IsLoaded(),
+		"session must be marked loaded once header is complete")
+	stat, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, stat.Size(), session.getLastOffset(),
+		"lastOffset must match total file size after full-header load")
+}
+
+// TestSessionManager_UpdateSession_SameStartTimeNoReset verifies that repeated
+// updateSession calls on the same run (same Started: timestamp) do not reset
+// per-run state. this is the normal flock-race recovery path: updateSession
+// must be a no-op for stored state when the file has not been restarted.
+func TestSessionManager_UpdateSession_SameStartTimeNoReset(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "progress-same.txt")
+
+	content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+[26-01-22 10:00:01] some line
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	id := sessionIDFromPath(path)
+	session := NewSession(id, path)
+	m := NewSessionManager()
+	m.Register(session)
+	t.Cleanup(func() { m.Close() })
+
+	require.NoError(t, m.updateSession(session))
+	offset1 := session.getLastOffset()
+	require.Positive(t, offset1)
+	require.True(t, session.IsLoaded())
+
+	// second updateSession with the file unchanged: per-run state must be preserved
+	require.NoError(t, m.updateSession(session))
+	assert.Equal(t, offset1, session.getLastOffset(),
+		"lastOffset must not change when Started: timestamp is unchanged")
+	assert.True(t, session.IsLoaded(),
+		"loaded flag must remain set when Started: timestamp is unchanged")
 }
 
 func TestSessionManager_EvictOldCompleted(t *testing.T) {

@@ -135,7 +135,46 @@ func (m *SessionManager) DiscoverRecursive(root string) ([]string, error) {
 
 // updateSession refreshes a session's state and metadata from its progress file.
 // handles starting/stopping tailing based on state transitions.
+//
+// the header's Started: timestamp is compared against the previously stored
+// metadata to detect a new ralphex run that reused the progress file (truncate
+// + rewrite). when a restart is detected, per-run state (lastOffset, loaded,
+// phase, pending section, diff stats) is reset before the state-transition
+// path runs, so the subsequent loader / tailer reads the fresh file from byte
+// 0 rather than seeking to the stale offset from the previous run. this
+// closes the truncation race where StartFromOffset's `offset > fileSize` check
+// misses the case where the new run has already grown past the old offset.
+//
+// the restart check and stored-metadata update are both gated on the header
+// being complete (terminating separator observed). a mid-write read can return
+// incomplete metadata with a zero StartTime; overwriting the stored value with
+// that zero would erase the previous run's StartTime and defeat the restart
+// detection on a later event when the full header is finally visible.
 func (m *SessionManager) updateSession(session *Session) error {
+	// parse header first so we can detect a new ralphex run that reused this
+	// progress file. a changed "Started:" timestamp means the file was
+	// truncated and re-initialized: the stored lastOffset is from the
+	// previous run and no longer corresponds to current content.
+	meta, headerComplete, err := ParseProgressHeader(session.Path)
+	if err != nil {
+		return fmt.Errorf("parse header: %w", err)
+	}
+	if headerComplete {
+		oldMeta := session.GetMetadata()
+		if !oldMeta.StartTime.IsZero() && !meta.StartTime.IsZero() &&
+			!oldMeta.StartTime.Equal(meta.StartTime) {
+			// new run on same file: stop any ongoing tailer (captures no useful
+			// offset since the file was replaced), then reset per-run state so
+			// handleStateTransition / MarkLoadedIfNot pick up the fresh content
+			// from byte 0 regardless of how far the new run has grown.
+			if session.IsTailing() {
+				session.StopTailing()
+			}
+			session.resetForNewRun()
+		}
+		session.SetMetadata(meta)
+	}
+
 	prevState := session.GetState()
 
 	// check if file is locked (active session)
@@ -151,31 +190,31 @@ func (m *SessionManager) updateSession(session *Session) error {
 	session.SetState(newState)
 
 	// handle state transitions for tailing
-	if prevState != newState {
-		if newState == SessionStateActive && !session.IsTailing() {
-			// session became active, start tailing from beginning to capture existing content
-			if tailErr := session.StartTailing(true); tailErr != nil {
-				log.Printf("[WARN] failed to start tailing for session %s: %v", session.ID, tailErr)
-			}
-		} else if newState == SessionStateCompleted && session.IsTailing() {
-			// session completed, stop tailing
-			session.StopTailing()
-		}
-	}
+	m.handleStateTransition(session, prevState, newState)
 
-	// for completed sessions that haven't been loaded yet, load the file content once
+	// for completed sessions that haven't been loaded yet, load the file content once.
 	// this handles sessions discovered after they finished.
 	// MarkLoadedIfNot is atomic to prevent double-loading from concurrent goroutines.
-	if newState == SessionStateCompleted && session.MarkLoadedIfNot() {
-		m.loadProgressFileIntoSession(session.Path, session)
+	// the lastOffset==0 guard prevents re-reading content a previous tailer already
+	// ingested: an active session tailed from the start can be marked completed by a
+	// RefreshStates flock race that captures the tailer's offset into lastOffset; if
+	// IsActive races false a second time here, newState stays completed and the
+	// loader would otherwise re-emit events the tailer has already published. we
+	// still mark the session loaded in that case so the watcher's IsLoaded gate
+	// allows Reactivate to resume tailing from the captured offset.
+	//
+	// gated on headerComplete so that a mid-write discovery (e.g. Windows, where
+	// IsActive is always false, or a rare Unix race where IsActive momentarily
+	// returns false) does not mark the session loaded and record a lastOffset
+	// pointing inside an unfinished header. without this gate, a later Reactivate
+	// would resume from mid-header and emit the remaining header lines as output
+	// events. the loader will run on a later updateSession call once the header
+	// separator is visible.
+	if newState == SessionStateCompleted && headerComplete && session.MarkLoadedIfNot() {
+		if session.getLastOffset() == 0 {
+			m.loadProgressFileIntoSession(session.Path, session)
+		}
 	}
-
-	// parse metadata from file header
-	meta, err := ParseProgressHeader(session.Path)
-	if err != nil {
-		return fmt.Errorf("parse header: %w", err)
-	}
-	session.SetMetadata(meta)
 
 	// update last modified time
 	info, err := os.Stat(session.Path)
@@ -185,6 +224,45 @@ func (m *SessionManager) updateSession(session *Session) error {
 	session.SetLastModified(info.ModTime())
 
 	return nil
+}
+
+// handleStateTransition starts or stops tailing for a session whose state just
+// changed. when a session becomes active with content already ingested
+// (lastOffset > 0), resumption goes through Reactivate so the SSE replay buffer
+// is not filled with duplicates; fresh-active sessions read from the beginning.
+// completed→no-op and active→active transitions do nothing.
+func (m *SessionManager) handleStateTransition(session *Session, prevState, newState SessionState) {
+	if prevState == newState {
+		return
+	}
+	switch {
+	case newState == SessionStateActive && !session.IsTailing():
+		m.activateSession(session)
+	case newState == SessionStateCompleted && session.IsTailing():
+		session.StopTailing()
+	}
+}
+
+// activateSession starts tailing for a session that just became active.
+// chooses between Reactivate (resume from stored offset) and StartTailing(true)
+// (read from the beginning) based on whether content has already been ingested.
+func (m *SessionManager) activateSession(session *Session) {
+	if session.getLastOffset() > 0 {
+		// content already in SSE replay (loader ran previously, or a
+		// previous tailer captured an offset before StopTailing). resume
+		// from the stored offset to avoid re-emitting events. this covers
+		// the flock-race recovery path: RefreshStates falsely marks a live
+		// session completed and captures the tailer offset; a later Write
+		// event triggers this transition back to active.
+		if err := session.Reactivate(); err != nil {
+			log.Printf("[WARN] failed to reactivate session %s: %v", session.ID, err)
+		}
+		return
+	}
+	// fresh discovery of an active session, read from the beginning
+	if err := session.StartTailing(true); err != nil {
+		log.Printf("[WARN] failed to start tailing for session %s: %v", session.ID, err)
+	}
 }
 
 // Get returns a session by ID, or nil if not found.
