@@ -178,12 +178,12 @@ Embedded template (insert near `finalize_enabled` block around line 86 in `pkg/c
 - Modify: `cmd/ralphex/main.go`
 - Modify: `cmd/ralphex/main_test.go`
 
-- [ ] write failing table-driven `TestShouldMovePlan` in `main_test.go` next to `TestModeRequiresBranch` (line ~988): cases for (a) empty PlanFile → false, (b) mode doesn't require branch → false, (c) `Config.MovePlanOnCompletion=false` → false, (d) all conditions true → true
-- [ ] run test — confirm it fails (function doesn't exist yet)
-- [ ] add `shouldMovePlan(req executePlanRequest) bool` helper in `main.go` (see Technical Details for form)
-- [ ] replace the condition at line 532 with `if shouldMovePlan(req) {`
-- [ ] verify `req.Config` is non-nil at this call site in all callers (it is — set in all `executePlanRequest` constructions found by grep)
-- [ ] run `go test ./cmd/ralphex/...` — all tests must pass before task 4
+- [x] write failing table-driven `TestShouldMovePlan` in `main_test.go` next to `TestModeRequiresBranch` (line ~988): cases for (a) empty PlanFile → false, (b) mode doesn't require branch → false, (c) `Config.MovePlanOnCompletion=false` → false, (d) all conditions true → true
+- [x] run test — confirm it fails (function doesn't exist yet)
+- [x] add `shouldMovePlan(req executePlanRequest) bool` helper in `main.go` (see Technical Details for form)
+- [x] replace the condition at line 532 with `if shouldMovePlan(req) {`
+- [x] verify `req.Config` is non-nil at this call site in all callers (it is — set in all `executePlanRequest` constructions found by grep)
+- [x] run `go test ./cmd/ralphex/...` — all tests must pass before task 4
 
 ### Task 4: Update embedded config template
 

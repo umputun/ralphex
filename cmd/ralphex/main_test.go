@@ -1075,6 +1075,69 @@ func TestModeRequiresBranch(t *testing.T) {
 	}
 }
 
+func TestShouldMovePlan(t *testing.T) {
+	// tests the shouldMovePlan predicate used to guard the plan move call.
+	// all three conditions must be true: non-empty plan file, mode requires branch, and config opts in.
+	tests := []struct {
+		name     string
+		req      executePlanRequest
+		expected bool
+	}{
+		{
+			name: "empty_plan_file",
+			req: executePlanRequest{
+				PlanFile: "",
+				Mode:     processor.ModeFull,
+				Config:   &config.Config{MovePlanOnCompletion: true},
+			},
+			expected: false,
+		},
+		{
+			name: "mode_does_not_require_branch",
+			req: executePlanRequest{
+				PlanFile: "docs/plans/x.md",
+				Mode:     processor.ModeReview,
+				Config:   &config.Config{MovePlanOnCompletion: true},
+			},
+			expected: false,
+		},
+		{
+			name: "move_plan_on_completion_false",
+			req: executePlanRequest{
+				PlanFile: "docs/plans/x.md",
+				Mode:     processor.ModeFull,
+				Config:   &config.Config{MovePlanOnCompletion: false},
+			},
+			expected: false,
+		},
+		{
+			name: "all_conditions_true_full_mode",
+			req: executePlanRequest{
+				PlanFile: "docs/plans/x.md",
+				Mode:     processor.ModeFull,
+				Config:   &config.Config{MovePlanOnCompletion: true},
+			},
+			expected: true,
+		},
+		{
+			name: "all_conditions_true_tasks_only",
+			req: executePlanRequest{
+				PlanFile: "docs/plans/x.md",
+				Mode:     processor.ModeTasksOnly,
+				Config:   &config.Config{MovePlanOnCompletion: true},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := shouldMovePlan(tc.req)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
 func TestStderrLog(t *testing.T) {
 	// verify stderrLog has Print method with correct signature
 	var log stderrLog

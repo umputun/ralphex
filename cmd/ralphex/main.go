@@ -574,7 +574,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// move completed plan to completed/ directory.
 	// use MainGitSvc+MainPlanFile when available (worktree mode) because the plan file is in the main repo.
-	if req.PlanFile != "" && modeRequiresBranch(req.Mode) {
+	if shouldMovePlan(req) {
 		moveSvc := req.GitSvc
 		movePlanFile := req.PlanFile
 		if req.MainGitSvc != nil {
@@ -811,6 +811,13 @@ func makePauseHandler(stdin io.Reader, stdout io.Writer) func(ctx context.Contex
 			return false
 		}
 	}
+}
+
+// shouldMovePlan returns true when a completed plan file should be moved to the
+// completed/ directory: plan file is set, mode requires a branch, and the user
+// has not opted out via move_plan_on_completion=false.
+func shouldMovePlan(req executePlanRequest) bool {
+	return req.PlanFile != "" && modeRequiresBranch(req.Mode) && req.Config.MovePlanOnCompletion
 }
 
 // validateFlags checks for conflicting CLI flags.
