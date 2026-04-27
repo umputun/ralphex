@@ -152,13 +152,13 @@ Embedded template (insert near `finalize_enabled` block around line 86 in `pkg/c
 - Modify: `pkg/config/values.go`
 - Modify: `pkg/config/values_test.go`
 
-- [ ] write failing table-driven test cases for load: key absent (Set=false), explicit true, explicit false, invalid value (returns error)
-- [ ] write failing table-driven test cases for merge: src set overrides dst, src unset preserves dst
-- [ ] run tests — confirm they fail as expected
-- [ ] add `MovePlanOnCompletion bool` and `MovePlanOnCompletionSet bool` to the `Values` struct near the `FinalizeEnabled` fields
-- [ ] add INI loader block for `move_plan_on_completion` next to the `finalize_enabled` block (line ~277); return error on non-bool value
-- [ ] add merge block in `mergeExtraFrom` next to the `FinalizeEnabledSet` block (line ~443)
-- [ ] run `go test ./pkg/config/...` — all tests must pass before task 2
+- [x] write failing table-driven test cases for load: key absent (Set=false), explicit true, explicit false, invalid value (returns error)
+- [x] write failing table-driven test cases for merge: src set overrides dst, src unset preserves dst
+- [x] run tests — confirm they fail as expected
+- [x] add `MovePlanOnCompletion bool` and `MovePlanOnCompletionSet bool` to the `Values` struct near the `FinalizeEnabled` fields
+- [x] add INI loader block for `move_plan_on_completion` next to the `finalize_enabled` block (line ~277); return error on non-bool value
+- [x] add merge block in `mergeExtraFrom` next to the `FinalizeEnabledSet` block (line ~443)
+- [x] run `go test ./pkg/config/...` — all tests must pass before task 2
 
 ### Task 2: Propagate `MovePlanOnCompletion` to `Config` struct and apply runtime default
 

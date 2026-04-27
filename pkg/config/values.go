@@ -15,47 +15,49 @@ import (
 // set in config. This allows distinguishing explicit false/0 from "not set", enabling
 // proper merge behavior where local config can override global config with zero values.
 type Values struct {
-	ClaudeCommand         string
-	ClaudeArgs            string
-	TaskModel             string   // model for task execution (e.g., "opus", "sonnet", "haiku")
-	ReviewModel           string   // model for review phases (falls back to TaskModel if empty)
-	ClaudeErrorPatterns   []string // patterns to detect in claude output (e.g., rate limit messages)
-	CodexEnabled          bool
-	CodexEnabledSet       bool // tracks if codex_enabled was explicitly set
-	CodexCommand          string
-	CodexModel            string
-	CodexReasoningEffort  string
-	CodexTimeoutMs        int
-	CodexTimeoutMsSet     bool // tracks if codex_timeout_ms was explicitly set
-	CodexSandbox          string
-	CodexErrorPatterns    []string // patterns to detect in codex output (e.g., rate limit messages)
-	ClaudeLimitPatterns   []string // patterns to detect rate limits in claude output (for wait+retry)
-	CodexLimitPatterns    []string // patterns to detect rate limits in codex output (for wait+retry)
-	WaitOnLimit           time.Duration
-	WaitOnLimitSet        bool // tracks if wait_on_limit was explicitly set
-	SessionTimeout        time.Duration
-	SessionTimeoutSet     bool          // tracks if session_timeout was explicitly set
-	IdleTimeout           time.Duration // kill session after no output for this duration
-	IdleTimeoutSet        bool          // tracks if idle_timeout was explicitly set
-	ExternalReviewTool    string        // "codex", "custom", or "none"
-	CustomReviewScript    string        // path to custom review script (when ExternalReviewTool = "custom")
-	IterationDelayMs      int
-	IterationDelayMsSet   bool // tracks if iteration_delay_ms was explicitly set
-	TaskRetryCount        int
-	TaskRetryCountSet     bool // tracks if task_retry_count was explicitly set
-	MaxIterations         int
-	MaxIterationsSet      bool // tracks if max_iterations was explicitly set
-	MaxExternalIterations int  // override external review iteration limit (0 = auto)
-	ReviewPatience        int  // terminate external review after N unchanged rounds (0 = disabled)
-	FinalizeEnabled       bool
-	FinalizeEnabledSet    bool // tracks if finalize_enabled was explicitly set
-	WorktreeEnabled       bool
-	WorktreeEnabledSet    bool   // tracks if use_worktree was explicitly set
-	VcsCommand            string // custom VCS command (default: "git")
-	CommitTrailer         string // trailer line to append to all commits (e.g., "Co-authored-by: ...")
-	PlansDir              string
-	DefaultBranch         string   // override auto-detected default branch
-	WatchDirs             []string // directories to watch for progress files
+	ClaudeCommand           string
+	ClaudeArgs              string
+	TaskModel               string   // model for task execution (e.g., "opus", "sonnet", "haiku")
+	ReviewModel             string   // model for review phases (falls back to TaskModel if empty)
+	ClaudeErrorPatterns     []string // patterns to detect in claude output (e.g., rate limit messages)
+	CodexEnabled            bool
+	CodexEnabledSet         bool // tracks if codex_enabled was explicitly set
+	CodexCommand            string
+	CodexModel              string
+	CodexReasoningEffort    string
+	CodexTimeoutMs          int
+	CodexTimeoutMsSet       bool // tracks if codex_timeout_ms was explicitly set
+	CodexSandbox            string
+	CodexErrorPatterns      []string // patterns to detect in codex output (e.g., rate limit messages)
+	ClaudeLimitPatterns     []string // patterns to detect rate limits in claude output (for wait+retry)
+	CodexLimitPatterns      []string // patterns to detect rate limits in codex output (for wait+retry)
+	WaitOnLimit             time.Duration
+	WaitOnLimitSet          bool // tracks if wait_on_limit was explicitly set
+	SessionTimeout          time.Duration
+	SessionTimeoutSet       bool          // tracks if session_timeout was explicitly set
+	IdleTimeout             time.Duration // kill session after no output for this duration
+	IdleTimeoutSet          bool          // tracks if idle_timeout was explicitly set
+	ExternalReviewTool      string        // "codex", "custom", or "none"
+	CustomReviewScript      string        // path to custom review script (when ExternalReviewTool = "custom")
+	IterationDelayMs        int
+	IterationDelayMsSet     bool // tracks if iteration_delay_ms was explicitly set
+	TaskRetryCount          int
+	TaskRetryCountSet       bool // tracks if task_retry_count was explicitly set
+	MaxIterations           int
+	MaxIterationsSet        bool // tracks if max_iterations was explicitly set
+	MaxExternalIterations   int  // override external review iteration limit (0 = auto)
+	ReviewPatience          int  // terminate external review after N unchanged rounds (0 = disabled)
+	FinalizeEnabled         bool
+	FinalizeEnabledSet      bool // tracks if finalize_enabled was explicitly set
+	MovePlanOnCompletion    bool
+	MovePlanOnCompletionSet bool // tracks if move_plan_on_completion was explicitly set
+	WorktreeEnabled         bool
+	WorktreeEnabledSet      bool   // tracks if use_worktree was explicitly set
+	VcsCommand              string // custom VCS command (default: "git")
+	CommitTrailer           string // trailer line to append to all commits (e.g., "Co-authored-by: ...")
+	PlansDir                string
+	DefaultBranch           string   // override auto-detected default branch
+	WatchDirs               []string // directories to watch for progress files
 
 	// notification settings
 	NotifyChannels        []string // channels to use: telegram, email, webhook, slack, custom
@@ -294,6 +296,16 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.FinalizeEnabledSet = true
 	}
 
+	// move plan on completion
+	if key, err := section.GetKey("move_plan_on_completion"); err == nil {
+		val, boolErr := key.Bool()
+		if boolErr != nil {
+			return Values{}, fmt.Errorf("invalid move_plan_on_completion: %w", boolErr)
+		}
+		values.MovePlanOnCompletion = val
+		values.MovePlanOnCompletionSet = true
+	}
+
 	// worktree settings
 	if key, err := section.GetKey("use_worktree"); err == nil {
 		val, boolErr := key.Bool()
@@ -489,6 +501,10 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	if src.FinalizeEnabledSet {
 		dst.FinalizeEnabled = src.FinalizeEnabled
 		dst.FinalizeEnabledSet = true
+	}
+	if src.MovePlanOnCompletionSet {
+		dst.MovePlanOnCompletion = src.MovePlanOnCompletion
+		dst.MovePlanOnCompletionSet = true
 	}
 	if src.WorktreeEnabledSet {
 		dst.WorktreeEnabled = src.WorktreeEnabled

@@ -165,6 +165,7 @@ func TestValuesLoader_Load_InvalidConfig(t *testing.T) {
 		{name: "invalid codex_timeout_ms", config: "codex_timeout_ms = abc", errPart: "codex_timeout_ms"},
 		{name: "invalid codex_enabled", config: "codex_enabled = maybe", errPart: "codex_enabled"},
 		{name: "invalid finalize_enabled", config: "finalize_enabled = maybe", errPart: "finalize_enabled"},
+		{name: "invalid move_plan_on_completion", config: "move_plan_on_completion = maybe", errPart: "move_plan_on_completion"},
 		{name: "negative task_retry_count", config: "task_retry_count = -1", errPart: "task_retry_count"},
 		{name: "negative codex_timeout_ms", config: "codex_timeout_ms = -100", errPart: "codex_timeout_ms"},
 		{name: "negative iteration_delay_ms", config: "iteration_delay_ms = -50", errPart: "iteration_delay_ms"},
@@ -398,6 +399,88 @@ func TestValues_mergeFrom_WorktreeEnabled(t *testing.T) {
 		dst.mergeFrom(&src)
 		assert.False(t, dst.WorktreeEnabled)
 		assert.True(t, dst.WorktreeEnabledSet)
+	})
+}
+
+func TestValuesLoader_Load_MovePlanOnCompletion(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    string
+		wantVal   bool
+		wantSet   bool
+		wantErr   bool
+		errSubstr string
+	}{
+		{name: "key absent", config: ``, wantVal: false, wantSet: false},
+		{name: "explicit true", config: `move_plan_on_completion = true`, wantVal: true, wantSet: true},
+		{name: "explicit false", config: `move_plan_on_completion = false`, wantVal: false, wantSet: true},
+		{name: "invalid value", config: `move_plan_on_completion = maybe`, wantErr: true, errSubstr: "move_plan_on_completion"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cfgPath := filepath.Join(tmpDir, "config")
+			// write an extra sentinel key so the "all-commented" fallback doesn't kick in for the empty-body case
+			body := tc.config
+			if body == "" {
+				body = "plans_dir = docs/plans"
+			}
+			require.NoError(t, os.WriteFile(cfgPath, []byte(body), 0o600))
+
+			loader := newValuesLoader(defaultsFS)
+			values, err := loader.Load("", cfgPath)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errSubstr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantVal, values.MovePlanOnCompletion)
+			assert.Equal(t, tc.wantSet, values.MovePlanOnCompletionSet)
+		})
+	}
+}
+
+func TestValuesLoader_Load_LocalOverridesMovePlanOnCompletion(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalConfig := filepath.Join(tmpDir, "global")
+	localConfig := filepath.Join(tmpDir, "local")
+
+	require.NoError(t, os.WriteFile(globalConfig, []byte(`move_plan_on_completion = true`), 0o600))
+	require.NoError(t, os.WriteFile(localConfig, []byte(`move_plan_on_completion = false`), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load(localConfig, globalConfig)
+	require.NoError(t, err)
+
+	assert.False(t, values.MovePlanOnCompletion)
+	assert.True(t, values.MovePlanOnCompletionSet)
+}
+
+func TestValues_mergeFrom_MovePlanOnCompletion(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{MovePlanOnCompletion: false, MovePlanOnCompletionSet: false}
+		src := Values{MovePlanOnCompletion: true, MovePlanOnCompletionSet: true}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.MovePlanOnCompletion)
+		assert.True(t, dst.MovePlanOnCompletionSet)
+	})
+
+	t.Run("unset flag preserves dst", func(t *testing.T) {
+		dst := Values{MovePlanOnCompletion: true, MovePlanOnCompletionSet: true}
+		src := Values{MovePlanOnCompletion: false, MovePlanOnCompletionSet: false}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.MovePlanOnCompletion)
+		assert.True(t, dst.MovePlanOnCompletionSet)
+	})
+
+	t.Run("set flag can disable", func(t *testing.T) {
+		dst := Values{MovePlanOnCompletion: true, MovePlanOnCompletionSet: true}
+		src := Values{MovePlanOnCompletion: false, MovePlanOnCompletionSet: true}
+		dst.mergeFrom(&src)
+		assert.False(t, dst.MovePlanOnCompletion)
+		assert.True(t, dst.MovePlanOnCompletionSet)
 	})
 }
 
