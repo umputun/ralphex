@@ -38,9 +38,11 @@ const (
 //   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
 //   - TaskRetryCountSet: tracks if task_retry_count was explicitly set
 //   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
+//   - MovePlanOnCompletionSet: tracks if move_plan_on_completion was explicitly set
 //   - WorktreeEnabledSet: tracks if use_worktree was explicitly set
 //   - MaxIterationsSet: tracks if max_iterations was explicitly set
 //   - WaitOnLimitSet: tracks if wait_on_limit was explicitly set
+//   - SessionTimeoutSet: tracks if session_timeout was explicitly set
 type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`

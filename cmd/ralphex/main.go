@@ -448,7 +448,9 @@ func buildNotifyResult(req executePlanRequest, branch, elapsed string, stats git
 
 // displayStats prints completion summary with optional diff statistics and paths.
 // mirrors the startup header format using displayMeta for plan/branch/progress.
-func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.DiffStats, elapsed, branch string) {
+// reflects where the plan actually lives: completed/ only when the move actually
+// succeeded; original path when the move was skipped or failed.
+func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.DiffStats, elapsed, branch string, planMoved bool) {
 	if stats.Files > 0 {
 		baseLog.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
 		req.Colors.Info().Printf("\ncompleted in %s (%d files, +%d/-%d lines)\n",
@@ -463,7 +465,10 @@ func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.Di
 		if req.MainPlanFile != "" {
 			planFile = req.MainPlanFile
 		}
-		planPath = filepath.Join(filepath.Dir(planFile), "completed", filepath.Base(planFile))
+		planPath = planFile
+		if planMoved {
+			planPath = filepath.Join(filepath.Dir(planFile), "completed", filepath.Base(planFile))
+		}
 	}
 	displayMeta(req.Colors, 2, planPath, branch, baseLog.Path())
 }
@@ -574,6 +579,8 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// move completed plan to completed/ directory.
 	// use MainGitSvc+MainPlanFile when available (worktree mode) because the plan file is in the main repo.
+	// track actual success so the completion summary reflects where the plan really lives.
+	planMoved := false
 	if shouldMovePlan(req) {
 		moveSvc := req.GitSvc
 		movePlanFile := req.PlanFile
@@ -585,10 +592,12 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		}
 		if moveErr := moveSvc.MovePlanToCompleted(movePlanFile); moveErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
+		} else {
+			planMoved = true
 		}
 	}
 
-	displayStats(req, plr.baseLog, stats, elapsed, branch)
+	displayStats(req, plr.baseLog, stats, elapsed, branch, planMoved)
 	keepDashboardAlive(ctx, o, req, plr.closeLog)
 
 	return nil
