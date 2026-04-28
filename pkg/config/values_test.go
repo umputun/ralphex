@@ -411,7 +411,9 @@ func TestValuesLoader_Load_MovePlanOnCompletion(t *testing.T) {
 		wantErr   bool
 		errSubstr string
 	}{
-		{name: "key absent", config: ``, wantVal: false, wantSet: false},
+		// "key absent" inherits the embedded default (move_plan_on_completion = true),
+		// which the loader merges in as if the user had set it explicitly.
+		{name: "key absent", config: ``, wantVal: true, wantSet: true},
 		{name: "explicit true", config: `move_plan_on_completion = true`, wantVal: true, wantSet: true},
 		{name: "explicit false", config: `move_plan_on_completion = false`, wantVal: false, wantSet: true},
 		{name: "invalid value", config: `move_plan_on_completion = maybe`, wantErr: true, errSubstr: "move_plan_on_completion"},

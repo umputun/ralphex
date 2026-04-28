@@ -823,10 +823,10 @@ func makePauseHandler(stdin io.Reader, stdout io.Writer) func(ctx context.Contex
 }
 
 // shouldMovePlan returns true when a completed plan file should be moved to the
-// completed/ directory: plan file is set, mode requires a branch, config is
-// present, and the user has not opted out via move_plan_on_completion=false.
+// completed/ directory: plan file is set, mode requires a branch, and the user
+// has not opted out via move_plan_on_completion=false.
 func shouldMovePlan(req executePlanRequest) bool {
-	return req.PlanFile != "" && modeRequiresBranch(req.Mode) && req.Config != nil && req.Config.MovePlanOnCompletion
+	return req.PlanFile != "" && modeRequiresBranch(req.Mode) && req.Config.MovePlanOnCompletion
 }
 
 // validateFlags checks for conflicting CLI flags.

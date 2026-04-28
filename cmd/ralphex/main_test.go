@@ -1171,15 +1171,6 @@ func TestShouldMovePlan(t *testing.T) {
 			},
 			expected: true,
 		},
-		{
-			name: "nil_config",
-			req: executePlanRequest{
-				PlanFile: "docs/plans/x.md",
-				Mode:     processor.ModeFull,
-				Config:   nil,
-			},
-			expected: false,
-		},
 	}
 
 	for _, tc := range tests {

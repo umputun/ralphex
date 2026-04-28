@@ -38,7 +38,6 @@ const (
 //   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
 //   - TaskRetryCountSet: tracks if task_retry_count was explicitly set
 //   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
-//   - MovePlanOnCompletionSet: tracks if move_plan_on_completion was explicitly set
 //   - WorktreeEnabledSet: tracks if use_worktree was explicitly set
 //   - MaxIterationsSet: tracks if max_iterations was explicitly set
 //   - WaitOnLimitSet: tracks if wait_on_limit was explicitly set
@@ -73,8 +72,7 @@ type Config struct {
 	FinalizeEnabled    bool `json:"finalize_enabled"`
 	FinalizeEnabledSet bool `json:"-"` // tracks if finalize_enabled was explicitly set in config
 
-	MovePlanOnCompletion    bool `json:"move_plan_on_completion"`
-	MovePlanOnCompletionSet bool `json:"-"` // tracks if move_plan_on_completion was explicitly set in config
+	MovePlanOnCompletion bool `json:"move_plan_on_completion"`
 
 	WorktreeEnabled    bool `json:"worktree_enabled"`
 	WorktreeEnabledSet bool `json:"-"` // tracks if use_worktree was explicitly set in config
@@ -278,12 +276,6 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		return nil, fmt.Errorf("load agents: %w", err)
 	}
 
-	// move_plan_on_completion defaults to true when not explicitly set
-	movePlan := values.MovePlanOnCompletion
-	if !values.MovePlanOnCompletionSet {
-		movePlan = true
-	}
-
 	// assemble config
 	c := &Config{
 		ClaudeCommand:           values.ClaudeCommand,
@@ -310,8 +302,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		ReviewPatience:          values.ReviewPatience,
 		FinalizeEnabled:         values.FinalizeEnabled,
 		FinalizeEnabledSet:      values.FinalizeEnabledSet,
-		MovePlanOnCompletion:    movePlan,
-		MovePlanOnCompletionSet: values.MovePlanOnCompletionSet,
+		MovePlanOnCompletion:    values.MovePlanOnCompletion,
 		WorktreeEnabled:         values.WorktreeEnabled,
 		WorktreeEnabledSet:      values.WorktreeEnabledSet,
 		PlansDir:                values.PlansDir,

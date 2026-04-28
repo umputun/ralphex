@@ -107,7 +107,7 @@ external_review_tool = codex
 # manage plan file lifecycle externally (e.g. spec-driven tooling with
 # separate archive steps).
 # default: true
-# move_plan_on_completion = true
+move_plan_on_completion = true
 
 # ------------------------------------------------------------------------------
 # worktree isolation
