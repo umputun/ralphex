@@ -110,6 +110,18 @@ external_review_tool = codex
 move_plan_on_completion = true
 
 # ------------------------------------------------------------------------------
+# plan parsing
+# ------------------------------------------------------------------------------
+
+# task_header_patterns: comma-separated list of markdown header templates
+# used to recognize task sections in plan files. templates use {N} for the
+# task identifier and {title} for the optional title (rest of line). set this
+# for spec-driven workflows (e.g. OpenSpec) that use different header shapes
+# such as "## 1. Phase Name".
+# default: ### Task {N}: {title}, ### Iteration {N}: {title}
+# task_header_patterns = ### Task {N}: {title}, ### Iteration {N}: {title}
+
+# ------------------------------------------------------------------------------
 # worktree isolation
 # ------------------------------------------------------------------------------
 

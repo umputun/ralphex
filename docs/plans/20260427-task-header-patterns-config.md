@@ -269,9 +269,9 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 **Files:**
 - Modify: `pkg/config/defaults/config`
 
-- [ ] add commented-out `task_header_patterns` block near related sections (plan-parsing area; if none, alongside `finalize_enabled` group), following the style: three-line header comment (what, when to change, default), then commented option line
-- [ ] existing `defaults_test.go` all-commented coverage (`TestShouldOverwrite/all_commented`) already protects the fallback path — no new regression test needed
-- [ ] run `go test ./pkg/config/...` — must pass before task 7
+- [x] add commented-out `task_header_patterns` block near related sections (plan-parsing area; if none, alongside `finalize_enabled` group), following the style: three-line header comment (what, when to change, default), then commented option line
+- [x] existing `defaults_test.go` all-commented coverage (`TestShouldOverwrite/all_commented`) already protects the fallback path — no new regression test needed
+- [x] run `go test ./pkg/config/...` — must pass before task 7
 
 ### Task 7: Verify acceptance criteria
 
