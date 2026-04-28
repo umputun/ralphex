@@ -190,14 +190,14 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 - Create: `pkg/plan/patterns.go`
 - Create: `pkg/plan/patterns_test.go`
 
-- [ ] write failing table-driven tests for `CompileTaskHeaderPattern(template string) (*regexp.Regexp, error)`: valid templates (`### Task {N}: {title}`, `## {N}. {title}`, `### Task {N}:` with no title, `##{N}` with no literals), invalid (missing `{N}`, `{N}` appearing twice, `{title}` before `{N}`, unknown `{foo}` placeholder)
-- [ ] write failing test for `CompileTaskHeaderPatterns(templates []string) ([]*regexp.Regexp, error)`: nil/empty returns compiled defaults, good list compiles all, one bad pattern fails the whole call with an error identifying the offending template
-- [ ] write failing test asserting the compiled DEFAULT patterns match the same strings as today's hard-coded regex (semantic equivalence on e.g. `### Task 1: Foo`, `### Iteration 2: Bar`, `### Task 1.2: Foo`) — use table-driven inputs
-- [ ] run tests — confirm they fail
-- [ ] implement `CompileTaskHeaderPattern` with segment scanner (loop over `{X}` tokens, validate, `regexp.QuoteMeta` literals, substitute placeholders, anchor `^...\s*$`)
-- [ ] implement `CompileTaskHeaderPatterns` plural helper, with nil/empty falling back to `DefaultTaskHeaderPatterns`
-- [ ] export `var DefaultTaskHeaderPatterns = []string{"### Task {N}: {title}", "### Iteration {N}: {title}"}`
-- [ ] run `go test ./pkg/plan/...` — all tests must pass before task 2
+- [x] write failing table-driven tests for `CompileTaskHeaderPattern(template string) (*regexp.Regexp, error)`: valid templates (`### Task {N}: {title}`, `## {N}. {title}`, `### Task {N}:` with no title, `##{N}` with no literals), invalid (missing `{N}`, `{N}` appearing twice, `{title}` before `{N}`, unknown `{foo}` placeholder)
+- [x] write failing test for `CompileTaskHeaderPatterns(templates []string) ([]*regexp.Regexp, error)`: nil/empty returns compiled defaults, good list compiles all, one bad pattern fails the whole call with an error identifying the offending template
+- [x] write failing test asserting the compiled DEFAULT patterns match the same strings as today's hard-coded regex (semantic equivalence on e.g. `### Task 1: Foo`, `### Iteration 2: Bar`, `### Task 1.2: Foo`) — use table-driven inputs
+- [x] run tests — confirm they fail
+- [x] implement `CompileTaskHeaderPattern` with segment scanner (loop over `{X}` tokens, validate, `regexp.QuoteMeta` literals, substitute placeholders, anchor `^...\s*$`)
+- [x] implement `CompileTaskHeaderPatterns` plural helper, with nil/empty falling back to `DefaultTaskHeaderPatterns`
+- [x] export `var DefaultTaskHeaderPatterns = []string{"### Task {N}: {title}", "### Iteration {N}: {title}"}`
+- [x] run `go test ./pkg/plan/...` — all tests must pass before task 2
 
 ### Task 2: Add `TaskHeaderPatterns` config field and loader
 
