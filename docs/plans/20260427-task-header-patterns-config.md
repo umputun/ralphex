@@ -275,15 +275,15 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] **safety check**: confirm no test writes to `~/.config/ralphex/` — all tests must use `t.TempDir()` per CLAUDE.md "Testing Safety Rules"; MD5-checksum `~/.config/ralphex/config` before and after `go test ./...` to verify
-- [ ] `make test` passes (unit tests with coverage)
-- [ ] `make lint` passes (no new golangci-lint issues)
-- [ ] `make fmt` — code is formatted
-- [ ] coverage on touched files ≥ 80% per CLAUDE.md
-- [ ] `GOOS=windows GOARCH=amd64 go build ./...` succeeds
-- [ ] toy-project smoke test #1 — **back-compat**: run `./scripts/internal/prep-toy-test.sh` with no config override; execute the default `docs/plans/fix-issues.md`; verify parsing and execution identical to previous behavior
-- [ ] toy-project smoke test #2 — **OpenSpec shape**: create a plan file with OpenSpec-style headers (`## 1. Phase X` + `- [ ] 1.1 ...`) in `/tmp/ralphex-test`, add `task_header_patterns = ### Task {N}: {title}, ### Iteration {N}: {title}, ## {N}. {title}` to `.ralphex/config`, run ralphex against it, confirm tasks are detected, executed, and completion signals fire
-- [ ] toy-project smoke test #3 — **bad pattern**: configure `task_header_patterns = ### Task {foo}: {title}`, run ralphex, confirm it exits cleanly with an error that names the offending template and placeholder
+- [x] **safety check**: confirm no test writes to `~/.config/ralphex/` — all tests must use `t.TempDir()` per CLAUDE.md "Testing Safety Rules"; MD5-checksum `~/.config/ralphex/config` before and after `go test ./...` to verify
+- [x] `make test` passes (unit tests with coverage)
+- [x] `make lint` passes (no new golangci-lint issues)
+- [x] `make fmt` — code is formatted
+- [x] coverage on touched files ≥ 80% per CLAUDE.md
+- [x] `GOOS=windows GOARCH=amd64 go build ./...` succeeds
+- [x] toy-project smoke test #1 — **back-compat**: run `./scripts/internal/prep-toy-test.sh` with no config override; execute the default `docs/plans/fix-issues.md`; verify parsing and execution identical to previous behavior
+- [x] toy-project smoke test #2 — **OpenSpec shape**: create a plan file with OpenSpec-style headers (`## 1. Phase X` + `- [ ] 1.1 ...`) in `/tmp/ralphex-test`, add `task_header_patterns = ### Task {N}: {title}, ### Iteration {N}: {title}, ## {N}. {title}` to `.ralphex/config`, run ralphex against it, confirm tasks are detected, executed, and completion signals fire
+- [x] toy-project smoke test #3 — **bad pattern**: configure `task_header_patterns = ### Task {foo}: {title}`, run ralphex, confirm it exits cleanly with an error that names the offending template and placeholder
 
 ### Task 8: Final — update documentation and move plan
 
