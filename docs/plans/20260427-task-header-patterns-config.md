@@ -255,14 +255,14 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 - Modify: `pkg/processor/prompts_test.go`
 - Modify: `pkg/config/defaults/prompts/task.txt`
 
-- [ ] write failing test in `prompts_test.go` for `replacePromptVariables()`: `{{TASK_HEADER_PATTERNS}}` expands to `'p1' or 'p2'` style for multi-pattern config, single pattern yields `'p1'`, empty config yields an empty string (edge case — should not happen since runtime default always populates, but defensive)
-- [ ] write failing test covering back-compat: given default patterns, a known existing phrase in task.txt (e.g. the `{{PLAN_FILE}}` reference) still expands correctly alongside the new variable
-- [ ] run tests — confirm they fail
-- [ ] add `{{TASK_HEADER_PATTERNS}}` expansion block in `replacePromptVariables()` in `pkg/processor/prompts.go` — quote each pattern with single quotes, join with ` or `, replace all occurrences
-- [ ] rewrite `pkg/config/defaults/prompts/task.txt` to use `{{TASK_HEADER_PATTERNS}}` at lines 10, 19, 42, 48 — preserve surrounding sentence structure so the default expansion reads naturally (e.g. `"Find the FIRST Task section (matching {{TASK_HEADER_PATTERNS}}) that has uncompleted checkboxes ([ ])."`)
-- [ ] for each of lines 10, 19, 42, 48 in the rewritten file, verify the full sentence still reads naturally after expansion — no orphaned punctuation, no doubled articles, no broken parens
-- [ ] manually diff the rendered output under default patterns against current task.txt content to verify no semantic regression
-- [ ] run `go test ./pkg/processor/...` — all tests must pass before task 6
+- [x] write failing test in `prompts_test.go` for `replacePromptVariables()`: `{{TASK_HEADER_PATTERNS}}` expands to `'p1' or 'p2'` style for multi-pattern config, single pattern yields `'p1'`, empty config yields an empty string (edge case — should not happen since runtime default always populates, but defensive)
+- [x] write failing test covering back-compat: given default patterns, a known existing phrase in task.txt (e.g. the `{{PLAN_FILE}}` reference) still expands correctly alongside the new variable
+- [x] run tests — confirm they fail
+- [x] add `{{TASK_HEADER_PATTERNS}}` expansion block in `replacePromptVariables()` in `pkg/processor/prompts.go` — quote each pattern with single quotes, join with ` or `, replace all occurrences
+- [x] rewrite `pkg/config/defaults/prompts/task.txt` to use `{{TASK_HEADER_PATTERNS}}` at lines 10, 19, 42, 48 — preserve surrounding sentence structure so the default expansion reads naturally (e.g. `"Find the FIRST Task section (matching {{TASK_HEADER_PATTERNS}}) that has uncompleted checkboxes ([ ])."`)
+- [x] for each of lines 10, 19, 42, 48 in the rewritten file, verify the full sentence still reads naturally after expansion — no orphaned punctuation, no doubled articles, no broken parens
+- [x] manually diff the rendered output under default patterns against current task.txt content to verify no semantic regression
+- [x] run `go test ./pkg/processor/...` — all tests must pass before task 6
 
 ### Task 6: Update embedded INI template
 

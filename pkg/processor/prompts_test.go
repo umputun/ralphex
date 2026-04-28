@@ -1145,3 +1145,103 @@ func TestRunner_replaceBaseVariables_CommitTrailer(t *testing.T) {
 		assert.Contains(t, result, "Co-authored-by: test <test@test.com>")
 	})
 }
+
+func TestRunner_replacePromptVariables_TaskHeaderPatterns(t *testing.T) {
+	tests := []struct {
+		name     string
+		patterns []string
+		input    string
+		expected string
+	}{
+		{
+			name:     "multi-pattern defaults",
+			patterns: []string{"### Task {N}: {title}", "### Iteration {N}: {title}"},
+			input:    "match {{TASK_HEADER_PATTERNS}} only",
+			expected: "match '### Task {N}: {title}' or '### Iteration {N}: {title}' only",
+		},
+		{
+			name:     "single pattern",
+			patterns: []string{"## {N}. {title}"},
+			input:    "headers: {{TASK_HEADER_PATTERNS}}",
+			expected: "headers: '## {N}. {title}'",
+		},
+		{
+			name:     "three patterns",
+			patterns: []string{"a", "b", "c"},
+			input:    "[{{TASK_HEADER_PATTERNS}}]",
+			expected: "['a' or 'b' or 'c']",
+		},
+		{
+			name:     "empty patterns slice yields empty string",
+			patterns: nil,
+			input:    "before|{{TASK_HEADER_PATTERNS}}|after",
+			expected: "before||after",
+		},
+		{
+			name:     "multiple occurrences replaced",
+			patterns: []string{"x"},
+			input:    "{{TASK_HEADER_PATTERNS}} and {{TASK_HEADER_PATTERNS}}",
+			expected: "'x' and 'x'",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			appCfg := &config.Config{TaskHeaderPatterns: tc.patterns}
+			r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+			result := r.replacePromptVariables(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestRunner_replacePromptVariables_TaskHeaderPatterns_NilAppConfig(t *testing.T) {
+	// defensive: nil AppConfig should not panic, variable should be cleared to empty
+	r := &Runner{cfg: Config{AppConfig: nil}, log: newMockLogger("")}
+	result := r.replacePromptVariables("hdr: {{TASK_HEADER_PATTERNS}}")
+	assert.Equal(t, "hdr: ", result)
+}
+
+func TestRunner_replacePromptVariables_TaskHeaderPatterns_WithOtherVars(t *testing.T) {
+	// back-compat: the new variable expands alongside existing variables
+	appCfg := &config.Config{
+		TaskHeaderPatterns: []string{"### Task {N}: {title}", "### Iteration {N}: {title}"},
+	}
+	r := &Runner{cfg: Config{
+		PlanFile:     "docs/plans/test.md",
+		ProgressPath: "progress-test.txt",
+		AppConfig:    appCfg,
+	}, log: newMockLogger("")}
+
+	prompt := "Read {{PLAN_FILE}} for a {{TASK_HEADER_PATTERNS}} section. Log: {{PROGRESS_FILE}}"
+	result := r.replacePromptVariables(prompt)
+
+	assert.Contains(t, result, "Read docs/plans/test.md")
+	assert.Contains(t, result, "'### Task {N}: {title}' or '### Iteration {N}: {title}'")
+	assert.Contains(t, result, "Log: progress-test.txt")
+	assert.NotContains(t, result, "{{TASK_HEADER_PATTERNS}}")
+	assert.NotContains(t, result, "{{PLAN_FILE}}")
+	assert.NotContains(t, result, "{{PROGRESS_FILE}}")
+}
+
+func TestRunner_replacePromptVariables_TaskHeaderPatterns_DefaultTaskPromptExpansion(t *testing.T) {
+	// verify the default task.txt prompt expands TaskHeaderPatterns naturally under default config
+	appCfg := testAppConfig(t)
+	r := &Runner{cfg: Config{
+		PlanFile:     "docs/plans/test.md",
+		ProgressPath: "progress-test.txt",
+		AppConfig:    appCfg,
+	}, log: newMockLogger("")}
+
+	prompt := r.replacePromptVariables(appCfg.TaskPrompt)
+
+	// no unsubstituted template variables
+	assert.NotContains(t, prompt, "{{TASK_HEADER_PATTERNS}}")
+	// default patterns rendered in human-readable form
+	assert.Contains(t, prompt, "'### Task {N}: {title}'")
+	assert.Contains(t, prompt, "'### Iteration {N}: {title}'")
+	// core task.txt structural markers still present (back-compat)
+	assert.Contains(t, prompt, "docs/plans/test.md")
+	assert.Contains(t, prompt, "<<<RALPHEX:ALL_TASKS_DONE>>>")
+	assert.Contains(t, prompt, "<<<RALPHEX:TASK_FAILED>>>")
+}
