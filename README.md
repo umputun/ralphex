@@ -172,6 +172,17 @@ Set `move_plan_on_completion = false` in `~/.config/ralphex/config` or `.ralphex
 
 **When to disable:** workflows that manage plan file lifecycle externally (e.g. spec-driven tooling where the plan lives inside a bundle that a separate archive step consumes) should opt out so ralphex doesn't fight the external tool's file layout.
 
+### Plan Header Patterns (optional)
+
+By default, ralphex recognizes `### Task N: ...` and `### Iteration N: ...` as task section headers. Set `task_header_patterns` to a comma-separated list of header templates to support alternative plan formats (e.g. OpenSpec-style `## 1. Phase Name`). Templates use `{N}` for the task identifier (required) and `{title}` for the optional title (rest of line, must come after `{N}`).
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+task_header_patterns = ### Task {N}: {title}, ### Iteration {N}: {title}, ## {N}. {title}
+```
+
+**When to use:** spec-driven workflows (OpenSpec etc.) whose `tasks.md` uses different header conventions than the ralphex defaults. Leaving the option unset preserves today's behavior.
+
 ### Review-Only Mode
 
 Review-only mode (`--review`) runs the full review pipeline (Phase 2 → Phase 3 → Phase 4) on changes already present on the current branch. This is useful when changes were made outside ralphex — via Claude Code's built-in plan mode, manual edits, other AI agents, or any other workflow.
@@ -831,6 +842,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
 | `move_plan_on_completion` | Move completed plan file into `docs/plans/completed/` on success (disable for external plan-lifecycle workflows) | `true` |
+| `task_header_patterns` | Comma-separated markdown header templates the plan parser recognizes as task sections. Placeholders: `{N}` (required) and `{title}` (optional) | `### Task {N}: {title}, ### Iteration {N}: {title}` |
 | `use_worktree` | Run each plan in an isolated git worktree (full and tasks-only modes only) | `false` |
 | `plans_dir` | Plans directory | `docs/plans` |
 | `default_branch` | Override auto-detected default branch for review diffs | auto-detect |

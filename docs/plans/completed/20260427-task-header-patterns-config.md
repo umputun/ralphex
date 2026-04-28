@@ -292,11 +292,11 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 - Modify: `llms.txt`
 - Modify: `README.md`
 
-- [ ] `CLAUDE.md` Configuration section: add a line for `task_header_patterns` — comma-separated list of markdown header templates; placeholders `{N}` (identifier) and `{title}` (optional, must come after `{N}`); defaults `### Task {N}: {title}, ### Iteration {N}: {title}`; use for spec-driven workflows (OpenSpec etc.) that use `## N. Phase` headers
-- [ ] `llms.txt` config-options list: add same option in the existing alphabetical-ish ordering; also add `{{TASK_HEADER_PATTERNS}}` to the template-variables list
-- [ ] `README.md`: add a new "Plan Header Patterns (optional)" subsection after "Plan Move Behavior (optional)" (added in part 1) — one-line description, INI example, and one sentence on when to use
-- [ ] do NOT update CHANGELOG (per CLAUDE.md workflow rule: CHANGELOG updates are release-process only)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] `CLAUDE.md` Configuration section: add a line for `task_header_patterns` — comma-separated list of markdown header templates; placeholders `{N}` (identifier) and `{title}` (optional, must come after `{N}`); defaults `### Task {N}: {title}, ### Iteration {N}: {title}`; use for spec-driven workflows (OpenSpec etc.) that use `## N. Phase` headers
+- [x] `llms.txt` config-options list: add same option in the existing alphabetical-ish ordering; also add `{{TASK_HEADER_PATTERNS}}` to the template-variables list
+- [x] `README.md`: add a new "Plan Header Patterns (optional)" subsection after "Plan Move Behavior (optional)" (added in part 1) — one-line description, INI example, and one sentence on when to use
+- [x] do NOT update CHANGELOG (per CLAUDE.md workflow rule: CHANGELOG updates are release-process only)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

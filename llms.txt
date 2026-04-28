@@ -109,6 +109,7 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 - `{{agent:name}}` - expands to Task tool instructions for named agent
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (in codex_review.txt and custom_review.txt)
 - `{{PREVIOUS_REVIEW_CONTEXT}}` - previous review context for external review iterations (in codex_review.txt and custom_review.txt)
+- `{{TASK_HEADER_PATTERNS}}` - quoted, `or`-joined list of configured task header templates (in task.txt); expands to e.g. `'### Task {N}: {title}' or '### Iteration {N}: {title}'` under defaults
 
 **External review iterations:** By default, external review runs up to `max(3, max_iterations/5)` iterations. Override with `max_external_iterations` config option or `--max-external-iterations` CLI flag (0 = auto).
 
@@ -139,6 +140,8 @@ review_model = sonnet:medium
 **Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit` (claude), `Rate limit,quota exceeded` (codex).
 
 **Plan move behavior:** `move_plan_on_completion` config option controls whether completed plans move to `docs/plans/completed/` on success. Default `true` (existing behavior). Set to `false` for workflows that manage plan file lifecycle externally, such as spec-driven tooling with separate archive steps.
+
+**Plan header patterns:** `task_header_patterns` config option is a comma-separated list of markdown header templates that controls which headers the plan parser recognizes as task sections. Placeholders: `{N}` (task identifier, required) and `{title}` (optional, must come after `{N}`). Default: `### Task {N}: {title}, ### Iteration {N}: {title}`. Use for spec-driven workflows (OpenSpec etc.) that use `## N. Phase` headers — e.g. `task_header_patterns = ### Task {N}: {title}, ### Iteration {N}: {title}, ## {N}. {title}`.
 
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 
