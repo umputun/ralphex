@@ -907,13 +907,22 @@ func (r *Runner) buildCodexPrompt(isFirst bool, claudeResponse string) string {
 	return r.replaceVariablesWithIteration(r.cfg.AppConfig.CodexReviewPrompt, isFirst, claudeResponse)
 }
 
+// taskHeaderPatterns returns the configured task-header templates for plan parsing.
+// returns nil when AppConfig is absent (tests), letting plan.ParsePlan fall back to defaults.
+func (r *Runner) taskHeaderPatterns() []string {
+	if r.cfg.AppConfig == nil {
+		return nil
+	}
+	return r.cfg.AppConfig.TaskHeaderPatterns
+}
+
 // validatePlanHasTasks returns an error if the plan file has no executable task sections.
 // guards against spec/reference docs that lack ### Task N: / ### Iteration N: headers,
 // which would otherwise cause the task loop to retry TASK_FAILED until exhaustion.
 // callers must ensure r.cfg.PlanFile is non-empty before invoking.
 func (r *Runner) validatePlanHasTasks() error {
 	path := r.resolvePlanFilePath()
-	p, err := plan.ParsePlanFile(path)
+	p, err := plan.ParsePlanFile(path, r.taskHeaderPatterns()...)
 	if err != nil {
 		return fmt.Errorf("parse plan for validation: %w", err)
 	}
@@ -933,7 +942,7 @@ func (r *Runner) hasUncompletedTasks() bool {
 	if path == "" {
 		return false // no plan file, nothing to complete
 	}
-	p, err := plan.ParsePlanFile(path)
+	p, err := plan.ParsePlanFile(path, r.taskHeaderPatterns()...)
 	if err != nil {
 		r.log.Print("[WARN] failed to parse plan file for completion check: %v", err)
 		return true // assume incomplete if can't read
@@ -959,7 +968,7 @@ func (r *Runner) hasUncompletedTasks() bool {
 // nextPlanTaskPosition returns the 1-indexed position of the first uncompleted task in the plan.
 // returns 0 if the plan file can't be read/parsed or no uncompleted tasks exist (caller falls back to loop counter).
 func (r *Runner) nextPlanTaskPosition() int {
-	p, err := plan.ParsePlanFile(r.resolvePlanFilePath())
+	p, err := plan.ParsePlanFile(r.resolvePlanFilePath(), r.taskHeaderPatterns()...)
 	if err != nil {
 		r.log.Print("[WARN] failed to parse plan file for task position: %v", err)
 		return 0

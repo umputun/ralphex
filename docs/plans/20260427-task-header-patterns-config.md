@@ -235,18 +235,18 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 - Modify: `pkg/processor/runner.go`
 - Modify: `pkg/web/plan.go`
 
-- [ ] write failing tests in `parse_test.go` for the new signature: no patterns arg → defaults (existing test cases continue to pass), custom pattern `## {N}. {title}` matches OpenSpec-style headers and captures `- [ ]` checkboxes beneath, mixed-pattern plan (both `### Task 1:` and `## 2. Phase`) parses all tasks in document order
-- [ ] write failing test for **closing behavior** (explicit, to prevent regressions): (a) h2 header that does NOT match any configured pattern closes the current task (unchanged from today); (b) h1 header closes the current task (unchanged); (c) h3 header that does NOT match any configured pattern does NOT close the current task (unchanged — today's parser at `pkg/plan/parse.go:97-115` only closes on h2/h1); (d) a matching custom h2 pattern (`## {N}. ...`) closes a preceding `### Task 1:` section AND opens a new task
-- [ ] write failing test: custom pattern with malformed template surfaces compile error from `ParsePlan`
-- [ ] write failing test: plan with `## 1. Phase` headers but zero `- [ ]` checkboxes produces a Plan with zero tasks (expected — matches today's "no executable tasks" behavior)
-- [ ] run tests — confirm they fail
-- [ ] change `ParsePlan(content string)` → `ParsePlan(content string, patterns ...string)`; compile patterns once at the top (empty → defaults); replace the hardcoded `taskHeaderPattern` usage with a loop over compiled patterns (first match wins)
-- [ ] change `ParsePlanFile(path string)` → `ParsePlanFile(path string, patterns ...string)` accordingly
-- [ ] remove the package-level `taskHeaderPattern` var (now compiled per-call)
-- [ ] existing test call sites in `parse_test.go` do NOT need changes — variadic makes `ParsePlan(content)` continue to compile and default
-- [ ] update `pkg/processor/runner.go:808, 834` to pass `r.cfg.TaskHeaderPatterns...` (exact field name per Task 3)
-- [ ] update `pkg/web/plan.go:15, 18` — no arg needed (variadic, falls back to defaults; web dashboard renders plans for display only)
-- [ ] run `go test ./...` and `go build ./...` — must pass before task 5
+- [x] write failing tests in `parse_test.go` for the new signature: no patterns arg → defaults (existing test cases continue to pass), custom pattern `## {N}. {title}` matches OpenSpec-style headers and captures `- [ ]` checkboxes beneath, mixed-pattern plan (both `### Task 1:` and `## 2. Phase`) parses all tasks in document order
+- [x] write failing test for **closing behavior** (explicit, to prevent regressions): (a) h2 header that does NOT match any configured pattern closes the current task (unchanged from today); (b) h1 header closes the current task (unchanged); (c) h3 header that does NOT match any configured pattern does NOT close the current task (unchanged — today's parser at `pkg/plan/parse.go:97-115` only closes on h2/h1); (d) a matching custom h2 pattern (`## {N}. ...`) closes a preceding `### Task 1:` section AND opens a new task
+- [x] write failing test: custom pattern with malformed template surfaces compile error from `ParsePlan`
+- [x] write failing test: plan with `## 1. Phase` headers but zero `- [ ]` checkboxes produces a Plan with zero tasks (expected — matches today's "no executable tasks" behavior)
+- [x] run tests — confirm they fail
+- [x] change `ParsePlan(content string)` → `ParsePlan(content string, patterns ...string)`; compile patterns once at the top (empty → defaults); replace the hardcoded `taskHeaderPattern` usage with a loop over compiled patterns (first match wins)
+- [x] change `ParsePlanFile(path string)` → `ParsePlanFile(path string, patterns ...string)` accordingly
+- [x] remove the package-level `taskHeaderPattern` var (now compiled per-call)
+- [x] existing test call sites in `parse_test.go` do NOT need changes — variadic makes `ParsePlan(content)` continue to compile and default
+- [x] update `pkg/processor/runner.go:808, 834` to pass `r.cfg.TaskHeaderPatterns...` (exact field name per Task 3)
+- [x] update `pkg/web/plan.go:15, 18` — no arg needed (variadic, falls back to defaults; web dashboard renders plans for display only)
+- [x] run `go test ./...` and `go build ./...` — must pass before task 5
 
 ### Task 5: Add `{{TASK_HEADER_PATTERNS}}` template variable and rewrite `task.txt`
 

@@ -43,7 +43,6 @@ type Plan struct {
 
 // patterns for parsing plan markdown.
 var (
-	taskHeaderPattern = regexp.MustCompile(`^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$`)
 	// allow leading whitespace for indented sub-items (e.g. "  - [ ] Unit tests")
 	checkboxPattern = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
@@ -51,8 +50,36 @@ var (
 	formatInText = regexp.MustCompile(`\[\s*[ xX]?\s*\]`)
 )
 
+// matchTaskHeader tries each compiled pattern in order and returns the
+// (taskNum, title) capture groups for the first match. ok=false if no pattern matched.
+func matchTaskHeader(line string, compiled []*regexp.Regexp) (taskID, title string, ok bool) {
+	for _, re := range compiled {
+		matches := re.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		id := ""
+		if len(matches) > 1 {
+			id = matches[1]
+		}
+		t := ""
+		if len(matches) > 2 {
+			t = matches[2]
+		}
+		return id, t, true
+	}
+	return "", "", false
+}
+
 // ParsePlan parses plan markdown content into a structured Plan.
-func ParsePlan(content string) (*Plan, error) {
+// patterns is an optional variadic list of task-header templates (e.g.
+// "### Task {N}: {title}"). If empty, DefaultTaskHeaderPatterns is used.
+func ParsePlan(content string, patterns ...string) (*Plan, error) {
+	compiled, err := CompileTaskHeaderPatterns(patterns)
+	if err != nil {
+		return nil, fmt.Errorf("compile task header patterns: %w", err)
+	}
+
 	p := &Plan{
 		Tasks: make([]Task, 0),
 	}
@@ -71,19 +98,17 @@ func ParsePlan(content string) (*Plan, error) {
 			}
 		}
 
-		// check for task header
-		if matches := taskHeaderPattern.FindStringSubmatch(line); matches != nil {
+		// check for task header (first match wins across configured patterns)
+		if id, title, matched := matchTaskHeader(line, compiled); matched {
 			// save previous task if exists
 			if currentTask != nil {
 				currentTask.Status = DetermineTaskStatus(currentTask.Checkboxes)
 				p.Tasks = append(p.Tasks, *currentTask)
 			}
 
-			taskNum := parseTaskNum(matches[1])
-
 			currentTask = &Task{
-				Number:     taskNum,
-				Title:      strings.TrimSpace(matches[2]),
+				Number:     parseTaskNum(id),
+				Title:      strings.TrimSpace(title),
 				Status:     TaskStatusPending,
 				Checkboxes: make([]Checkbox, 0),
 			}
@@ -96,7 +121,7 @@ func ParsePlan(content string) (*Plan, error) {
 		// also close on # (h1) when title already set, e.g. # Overview in plans using single hash for sections.
 		isH2 := strings.HasPrefix(line, "##") && !strings.HasPrefix(line, "###")
 		isH1AfterTitle := strings.HasPrefix(line, "#") && p.Title != "" && !strings.HasPrefix(line, "##")
-		if currentTask != nil && (isH2 || isH1AfterTitle) && !taskHeaderPattern.MatchString(line) {
+		if currentTask != nil && (isH2 || isH1AfterTitle) {
 			currentTask.Status = DetermineTaskStatus(currentTask.Checkboxes)
 			p.Tasks = append(p.Tasks, *currentTask)
 			currentTask = nil
@@ -129,12 +154,14 @@ func ParsePlan(content string) (*Plan, error) {
 }
 
 // ParsePlanFile reads and parses a plan file from disk.
-func ParsePlanFile(path string) (*Plan, error) {
+// patterns is an optional variadic list of task-header templates (e.g.
+// "### Task {N}: {title}"). If empty, DefaultTaskHeaderPatterns is used.
+func ParsePlanFile(path string, patterns ...string) (*Plan, error) {
 	content, err := os.ReadFile(path) //nolint:gosec // path is internally resolved, not from user input
 	if err != nil {
 		return nil, fmt.Errorf("read plan file: %w", err)
 	}
-	return ParsePlan(string(content))
+	return ParsePlan(string(content), patterns...)
 }
 
 // FileHasUncompletedCheckbox returns true if the file contains any uncompleted actionable checkbox (- [ ]).
