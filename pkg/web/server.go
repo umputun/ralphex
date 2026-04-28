@@ -24,11 +24,12 @@ var embeddedFS embed.FS
 
 // ServerConfig holds configuration for the web server.
 type ServerConfig struct {
-	Port     int    // port to listen on
-	Host     string // host/IP to bind to (default "127.0.0.1")
-	PlanName string // plan name to display in dashboard
-	Branch   string // git branch name
-	PlanFile string // path to plan file for /api/plan endpoint
+	Port               int      // port to listen on
+	Host               string   // host/IP to bind to (default "127.0.0.1")
+	PlanName           string   // plan name to display in dashboard
+	Branch             string   // git branch name
+	PlanFile           string   // path to plan file for /api/plan endpoint
+	TaskHeaderPatterns []string // task-header templates used to parse plans (empty = plan defaults)
 }
 
 // host returns the bind address, defaulting to "127.0.0.1" if not set.
@@ -227,7 +228,17 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 		planPath = filepath.Join(sessionDir, meta.PlanPath)
 	}
 
-	p, err := loadPlanWithFallback(planPath)
+	// prefer per-session patterns recorded in the progress header over the
+	// dashboard process's own TaskHeaderPatterns. when watching sessions from
+	// multiple repos, each session's progress file carries the template list
+	// that repo actually used, so the dashboard can parse the plan the same
+	// way the executor did. fall back to the dashboard-configured list, then
+	// to built-in defaults (handled inside loadSessionPlanWithFallback).
+	patterns := meta.TaskHeaderPatterns
+	if len(patterns) == 0 {
+		patterns = s.cfg.TaskHeaderPatterns
+	}
+	p, err := loadSessionPlanWithFallback(planPath, patterns)
 	if err != nil {
 		log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
 		http.Error(w, "unable to load plan", http.StatusInternalServerError)
@@ -247,7 +258,7 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 
 // loadPlan loads a plan from disk (with completed/ fallback).
 func (s *Server) loadPlan() (*plan.Plan, error) {
-	return loadPlanWithFallback(s.cfg.PlanFile)
+	return loadPlanWithFallback(s.cfg.PlanFile, s.cfg.TaskHeaderPatterns...)
 }
 
 // handleEvents serves the SSE stream.

@@ -917,9 +917,10 @@ func (r *Runner) taskHeaderPatterns() []string {
 }
 
 // validatePlanHasTasks returns an error if the plan file has no executable task sections.
-// guards against spec/reference docs that lack ### Task N: / ### Iteration N: headers,
-// which would otherwise cause the task loop to retry TASK_FAILED until exhaustion.
-// callers must ensure r.cfg.PlanFile is non-empty before invoking.
+// guards against spec/reference docs that lack headers matching the configured
+// task_header_patterns, which would otherwise cause the task loop to retry
+// TASK_FAILED until exhaustion. callers must ensure r.cfg.PlanFile is non-empty
+// before invoking.
 func (r *Runner) validatePlanHasTasks() error {
 	path := r.resolvePlanFilePath()
 	p, err := plan.ParsePlanFile(path, r.taskHeaderPatterns()...)
@@ -927,13 +928,17 @@ func (r *Runner) validatePlanHasTasks() error {
 		return fmt.Errorf("parse plan for validation: %w", err)
 	}
 	if len(p.Tasks) == 0 {
-		return fmt.Errorf("plan file %q has no executable task sections (### Task N: or ### Iteration N:); add task sections or pass a different plan file", path)
+		hint := r.getTaskHeaderPatternsHint()
+		if hint == "" {
+			return fmt.Errorf("plan file %q has no executable task sections; add task sections or pass a different plan file", path)
+		}
+		return fmt.Errorf("plan file %q has no executable task sections (expected headers matching %s); add task sections or pass a different plan file", path, hint)
 	}
 	return nil
 }
 
 // hasUncompletedTasks checks if any Task section has uncompleted checkboxes.
-// only Task sections (### Task N: or ### Iteration N:) are considered.
+// only sections matching the configured task_header_patterns are considered.
 // checkboxes in Success criteria, Overview, or Context are ignored for this check,
 // so the agent can output ALL_TASKS_DONE when those are verification-only.
 // for malformed plans (checkboxes without task headers), returns true if any [ ] exists.

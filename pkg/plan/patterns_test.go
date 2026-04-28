@@ -83,8 +83,18 @@ func TestCompileTaskHeaderPattern(t *testing.T) {
 				"##2": {"2", ""},
 			},
 			nonMatches: []string{
-				"## 1",
-				"### 1",
+				"##:1", // colon forbidden in {N}
+			},
+		},
+		{
+			// {N} uses `([^:]+?)\s*` to preserve the legacy `[^:]+?` behavior,
+			// so identifiers can contain whitespace — for example `Phase 1`
+			// in `### Task Phase 1: Bootstrap`. See TestDefaultPatternsMatchCanonicalInputs.
+			name:     "default task template accepts multi-word task identifiers",
+			template: "### Task {N}: {title}",
+			matches: map[string][2]string{
+				"### Task Phase 1: Bootstrap":  {"Phase 1", "Bootstrap"},
+				"### Task Phase A: Alpha Task": {"Phase A", "Alpha Task"},
 			},
 		},
 		{
@@ -146,6 +156,43 @@ func TestCompileTaskHeaderPattern(t *testing.T) {
 			template:   "### Task {N}: {foo}",
 			wantErr:    true,
 			errContain: "{foo}",
+		},
+		{
+			// typo: digit in name — must be rejected as unknown placeholder rather
+			// than silently treated as a literal.
+			name:       "placeholder with digit in name",
+			template:   "### Task {N1}: {title}",
+			wantErr:    true,
+			errContain: "{N1}",
+		},
+		{
+			// typo: underscore-digit suffix — same reason, must be rejected.
+			name:       "placeholder with underscore digit suffix",
+			template:   "### Task {N}: {title_2}",
+			wantErr:    true,
+			errContain: "{title_2}",
+		},
+		{
+			// typo: unclosed brace after {N} — previously compiled as a literal
+			// because the regex required a closing `}`. Must now surface as an error.
+			name:       "unclosed brace after N",
+			template:   "### Task {N}: {title",
+			wantErr:    true,
+			errContain: "stray",
+		},
+		{
+			// typo: stray closing brace with no opening.
+			name:       "stray closing brace",
+			template:   "### Task {N}: title}",
+			wantErr:    true,
+			errContain: "stray",
+		},
+		{
+			// typo: empty placeholder `{}` — must be rejected, not compiled as literal.
+			name:       "empty placeholder",
+			template:   "### Task {N}: {}",
+			wantErr:    true,
+			errContain: "{}",
 		},
 	}
 
@@ -245,10 +292,13 @@ func TestCompileTaskHeaderPatterns(t *testing.T) {
 	}
 }
 
-// TestDefaultPatternsMatchLegacyRegex verifies that compiled default patterns
-// match the same inputs as the previous hardcoded regex
-// ^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$
-func TestDefaultPatternsMatchLegacyRegex(t *testing.T) {
+// TestDefaultPatternsMatchCanonicalInputs verifies that compiled default patterns
+// accept the canonical header shapes used by ralphex plans, including multi-space
+// and tab separators (matching the legacy regex behavior
+// `^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$`). The template compiler
+// collapses runs of ASCII spaces/tabs in template literals into \s+ so the
+// default templates stay compatible with historical plans.
+func TestDefaultPatternsMatchCanonicalInputs(t *testing.T) {
 	legacy := regexp.MustCompile(`^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$`)
 
 	compiled, err := CompileTaskHeaderPatterns(DefaultTaskHeaderPatterns)
@@ -267,6 +317,15 @@ func TestDefaultPatternsMatchLegacyRegex(t *testing.T) {
 		{"### Task 10: Big one", true, "10", "Big one"},
 		{"### Task 1:", true, "1", ""},
 		{"### Task 1: ", true, "1", ""},
+		// legacy-compatible whitespace variants — must still match after the template-driven rewrite
+		{"###   Task 1: Foo", true, "1", "Foo"},
+		{"### Task\t1: Foo", true, "1", "Foo"},
+		{"###\tTask\t1:\tFoo", true, "1", "Foo"},
+		// legacy regex `[^:]+?` accepted whitespace before the colon; the template
+		// compiler must keep this tolerance so historical plans still parse.
+		{"### Task 1 : Foo", true, "1", "Foo"},
+		{"### Task 1\t: Foo", true, "1", "Foo"},
+		{"### Iteration 2  : Bar", true, "2", "Bar"},
 		{"## Task 1: Foo", false, "", ""},
 		{"### task 1: Foo", false, "", ""},
 		{"### Other 1: Foo", false, "", ""},

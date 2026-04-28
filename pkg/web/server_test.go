@@ -326,6 +326,49 @@ func TestServer_HandlePlan(t *testing.T) {
 		assert.Contains(t, string(body), "Completed Plan")
 	})
 
+	t.Run("uses configured task_header_patterns to parse plan", func(t *testing.T) {
+		// plan with custom openspec-style headers: without threading the
+		// configured patterns into the server the /api/plan endpoint would
+		// return an empty task list.
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+
+		tmpDir := t.TempDir()
+		planFile := filepath.Join(tmpDir, "plan.md")
+		planContent := `# Custom Plan
+
+## 1. First Phase
+
+- [ ] phase one item
+
+## 2. Second Phase
+
+- [x] phase two item
+`
+		require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0o600))
+
+		srv, err := NewServer(ServerConfig{
+			Port:               8080,
+			PlanFile:           planFile,
+			TaskHeaderPatterns: []string{"## {N}. {title}"},
+		}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "First Phase")
+		assert.Contains(t, string(body), "Second Phase")
+	})
+
 	t.Run("rejects non-GET methods", func(t *testing.T) {
 		session := NewSession("test", "/tmp/test.txt")
 		defer session.Close()
@@ -679,6 +722,125 @@ Started: 2026-01-22 10:30:00
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(body), "Completed Session Plan")
+	})
+
+	t.Run("prefers per-session task_header_patterns from progress header", func(t *testing.T) {
+		// when a dashboard watches sessions from multiple repos, each session's
+		// progress file records the task_header_patterns that repo used. those
+		// patterns must win over the dashboard process's own config so plans
+		// from differently-configured repos still parse correctly.
+		tmpDir := t.TempDir()
+
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		require.NoError(t, os.Chdir(tmpDir))
+
+		plansDir := filepath.Join(tmpDir, "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+
+		// plan uses session-specific openspec-style header
+		planContent := `# Session Plan
+
+## 1. Session Phase
+
+- [ ] Item 1
+`
+		planPath := filepath.Join(plansDir, "session-plan.md")
+		require.NoError(t, os.WriteFile(planPath, []byte(planContent), 0o600))
+
+		// progress file records its own patterns, distinct from the dashboard config below
+		progressPath := filepath.Join(tmpDir, "progress-session.txt")
+		progressContent := "# Ralphex Progress Log\n" +
+			"Plan: plans/session-plan.md\n" +
+			"Branch: main\n" +
+			"Mode: full\n" +
+			"Started: 2026-01-22 10:30:00\n" +
+			"TaskHeaderPatterns: ## {N}. {title}\n" +
+			"------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		defer sm.Close()
+		_, err = sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		// dashboard config uses a pattern that would NOT match `## 1. Session Phase`,
+		// proving the per-session pattern is the one actually applied.
+		srv, err := NewServerWithSessions(ServerConfig{
+			Port:               8080,
+			TaskHeaderPatterns: []string{"### Something {N}: {title}"},
+		}, sm)
+		require.NoError(t, err)
+
+		sessionID := sessionIDFromPath(progressPath)
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionID, http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "Session Phase", "per-session patterns should parse the plan correctly")
+	})
+
+	t.Run("falls back to default header patterns for watched sessions", func(t *testing.T) {
+		// a dashboard process configured with custom-only patterns (e.g. `## {N}. {title}`)
+		// may still be watching sessions from other repos that use the default
+		// `### Task`/`### Iteration` headers. those sessions must still parse correctly.
+		tmpDir := t.TempDir()
+
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		require.NoError(t, os.Chdir(tmpDir))
+
+		plansDir := filepath.Join(tmpDir, "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+
+		// watched plan uses the default `### Task` header, not the dashboard's custom pattern
+		planContent := `# Default-Format Plan
+
+### Task 1: Watched Task
+
+- [ ] Item 1
+`
+		planPath := filepath.Join(plansDir, "watched.md")
+		require.NoError(t, os.WriteFile(planPath, []byte(planContent), 0o600))
+
+		progressPath := filepath.Join(tmpDir, "progress-watched.txt")
+		progressContent := "# Ralphex Progress Log\nPlan: plans/watched.md\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		defer sm.Close()
+		_, err = sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{
+			Port:               8080,
+			TaskHeaderPatterns: []string{"## {N}. {title}"}, // custom-only, does NOT match ### Task
+		}, sm)
+		require.NoError(t, err)
+
+		sessionID := sessionIDFromPath(progressPath)
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionID, http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		// default pattern fallback means the task is discovered despite custom-only config
+		assert.Contains(t, string(body), "Watched Task")
 	})
 }
 

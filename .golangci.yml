@@ -142,6 +142,10 @@ linters:
           - usestdlibvars
         path: _test\.go$
       - linters:
+          - gosec
+        text: "G704: SSRF via taint analysis"
+        path: _test\.go$
+      - linters:
           - errcheck
         text: "Error return value of .*.Close.*is not checked"
       - linters:

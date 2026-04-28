@@ -692,6 +692,7 @@ Custom prompt files support variable expansion. All variables use the `{{VARIABL
 | `{{PROGRESS_FILE}}` | Path to the progress log file | `.ralphex/progress/progress-feature.txt` |
 | `{{GOAL}}` | Human-readable goal description | `implementation of plan at docs/plans/feature.md` |
 | `{{DEFAULT_BRANCH}}` | Default branch name (overridable via `--base-ref` or `default_branch` config) | `main`, `master`, `origin/main` |
+| `{{TASK_HEADER_PATTERNS}}` | Quoted, `or`-joined list of configured `task_header_patterns` templates (used in `task.txt`) | `'### Task {N}: {title}' or '### Iteration {N}: {title}'` |
 | `{{agent:name}}` | Expands to Task tool instructions for the named agent | (see below) |
 
 **Agent references:**

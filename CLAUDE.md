@@ -61,7 +61,7 @@ docs/plans/         # plan files location
 
 ## Key Patterns
 
-- Plan format: Checkboxes (`- [ ]` / `- [x]`) belong only in Task sections (`### Task N:` or `### Iteration N:`). The `Task` / `Iteration` keywords are structural tokens matched by `pkg/plan/parse.go` (`taskHeaderPattern`) and MUST stay in English even when plan content is written in another language — task titles and body text may be localized, but the section header keyword is fixed. Success criteria, Overview, and Context should not use checkboxes — they cause extra loop iterations. The task prompt handles them when present, but plan authors should avoid them.
+- Plan format: Checkboxes (`- [ ]` / `- [x]`) belong only in Task sections. By default, headers matching `### Task {N}: {title}` or `### Iteration {N}: {title}` are recognized; the `Task` / `Iteration` keywords are structural tokens and MUST stay in English even when plan content is written in another language — task titles and body text may be localized, but the default section header keywords are fixed. Recognized header shapes are configurable via `task_header_patterns` (compiled by `pkg/plan/patterns.go`, passed to `pkg/plan/parse.go` `ParsePlan`/`ParsePlanFile` as a variadic `patterns ...string`; empty falls back to `plan.DefaultTaskHeaderPatterns`). Success criteria, Overview, and Context should not use checkboxes — they cause extra loop iterations. The task prompt handles them when present, but plan authors should avoid them.
 - Signal-based completion detection (COMPLETED, FAILED, REVIEW_DONE signals) — constants in `pkg/status/`
 - Plan creation signals: QUESTION (with JSON payload) and PLAN_READY
 - Streaming output with timestamps
@@ -373,6 +373,7 @@ Implementation:
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, origin/main, etc.), overridable via `--base-ref` CLI flag or `default_branch` config option
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (first: `git diff main...HEAD`, subsequent: `git diff`)
 - `{{PREVIOUS_REVIEW_CONTEXT}}` - previous review context block for external review iterations (empty on first iteration, formatted context on subsequent)
+- `{{TASK_HEADER_PATTERNS}}` - quoted, `or`-joined list of configured `task_header_patterns` templates (used in `task.txt`)
 - `{{agent:name}}` - expands to Task tool instructions for the named agent
 
 Variables are also expanded inside agent content, so custom agents can use `{{DEFAULT_BRANCH}}` etc.

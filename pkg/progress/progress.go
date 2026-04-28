@@ -131,11 +131,12 @@ type Logger struct {
 
 // Config holds logger configuration.
 type Config struct {
-	PlanFile        string // plan filename (used to derive progress filename)
-	PlanDescription string // plan description for plan mode (used for filename)
-	Mode            string // execution mode: full, review, codex-only, plan
-	Branch          string // current git branch
-	NoColor         bool   // disable color output (sets color.NoColor globally)
+	PlanFile           string   // plan filename (used to derive progress filename)
+	PlanDescription    string   // plan description for plan mode (used for filename)
+	Mode               string   // execution mode: full, review, codex-only, plan
+	Branch             string   // current git branch
+	NoColor            bool     // disable color output (sets color.NoColor globally)
+	TaskHeaderPatterns []string // task-header templates for this run; written into the header so multi-repo dashboards can parse watched sessions' plans with the correct templates
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
@@ -219,8 +220,17 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 	}
 
 	if restart {
-		// write restart separator (matches sectionRegex in web parser)
-		l.writeFile("\n\n--- restarted at %s ---\n\n", time.Now().Format("2006-01-02 15:04:05"))
+		// write restart separator (matches sectionRegex in web parser).
+		// re-emit the current run's TaskHeaderPatterns so a dashboard reading
+		// this file after the restart picks up the NEW patterns rather than
+		// the possibly-stale or absent value from the original header. the
+		// web parser skips TaskHeaderPatterns lines, so this does not show up
+		// as content in the event stream.
+		l.writeFile("\n\n--- restarted at %s ---\n", time.Now().Format("2006-01-02 15:04:05"))
+		if patterns := sanitizePatterns(cfg.TaskHeaderPatterns); len(patterns) > 0 {
+			l.writeFile("TaskHeaderPatterns: %s\n", strings.Join(patterns, ","))
+		}
+		l.writeFile("\n")
 	} else {
 		l.writeHeader(cfg)
 	}
@@ -239,7 +249,33 @@ func (l *Logger) writeHeader(cfg Config) {
 	l.writeFile("Branch: %s\n", cfg.Branch)
 	l.writeFile("Mode: %s\n", cfg.Mode)
 	l.writeFile("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	// record per-run task_header_patterns so a dashboard watching this progress
+	// file from another process with different config can parse the plan the
+	// same way the executor did. commas inside a template would break the
+	// comma-separated parse on read, so each template is rejected if it
+	// contains a comma — project templates never legitimately need one.
+	if patterns := sanitizePatterns(cfg.TaskHeaderPatterns); len(patterns) > 0 {
+		l.writeFile("TaskHeaderPatterns: %s\n", strings.Join(patterns, ","))
+	}
 	l.writeFile("%s\n\n", separatorLine)
+}
+
+// sanitizePatterns returns patterns with leading/trailing whitespace trimmed and
+// entries containing commas or newlines dropped, since those would corrupt the
+// comma-separated single-line header encoding.
+func sanitizePatterns(patterns []string) []string {
+	out := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.ContainsAny(p, ",\n\r") {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // Path returns the progress file path.

@@ -85,6 +85,110 @@ Branch: main
 		assert.Error(t, err)
 	})
 
+	t.Run("parses task_header_patterns line", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+TaskHeaderPatterns: ### Task {N}: {title},## {N}. {title}
+------------------------------------------------------------
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Equal(t, []string{"### Task {N}: {title}", "## {N}. {title}"}, meta.TaskHeaderPatterns)
+	})
+
+	t.Run("task_header_patterns nil when header line absent", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Nil(t, meta.TaskHeaderPatterns, "absent line → nil so handleSessionPlan falls back to dashboard patterns")
+	})
+
+	t.Run("picks up TaskHeaderPatterns re-emitted at restart marker", func(t *testing.T) {
+		// the progress writer re-emits TaskHeaderPatterns next to a restart
+		// marker so retried runs advertise the current patterns even if the
+		// original header has stale or absent values. ParseProgressHeader
+		// scans the file tail for that override; the last occurrence wins.
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+------------------------------------------------------------
+
+[26-01-22 10:30:05] first run output
+
+
+--- restarted at 2026-01-22 11:00:00 ---
+TaskHeaderPatterns: ## {N}. {title}
+
+[26-01-22 11:00:05] second run output
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Equal(t, []string{"## {N}. {title}"}, meta.TaskHeaderPatterns,
+			"restart-emitted patterns must override the original header's (absent) value")
+	})
+
+	t.Run("last restart TaskHeaderPatterns occurrence wins", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+TaskHeaderPatterns: ### Task {N}: {title}
+------------------------------------------------------------
+
+[26-01-22 10:30:05] first run
+
+
+--- restarted at 2026-01-22 11:00:00 ---
+TaskHeaderPatterns: ## {N}. {title}
+
+[26-01-22 11:00:05] second run
+
+
+--- restarted at 2026-01-22 12:00:00 ---
+TaskHeaderPatterns: # {N} {title}
+
+[26-01-22 12:00:05] third run
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, _, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"# {N} {title}"}, meta.TaskHeaderPatterns)
+	})
+
 	t.Run("reports incomplete when separator not yet written", func(t *testing.T) {
 		// models a mid-write observation: header lines written but terminating
 		// separator still pending. updateSession must not clobber previously
