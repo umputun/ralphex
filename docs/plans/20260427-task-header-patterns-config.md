@@ -219,13 +219,13 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 - Modify: `pkg/config/config.go`
 - Modify: `pkg/config/config_test.go`
 
-- [ ] write failing table-driven test: default (not set) yields the built-in defaults slice, explicit list yields that list, explicit empty yields the defaults (fallback), set flag reflects whether user configured it
-- [ ] write a drift-prevention test that asserts the `pkg/config` inline default list equals `plan.DefaultTaskHeaderPatterns` element-for-element (both must stay in sync; this test catches future divergence)
-- [ ] run tests — confirm they fail
-- [ ] add `TaskHeaderPatterns []string` (with `json:"task_header_patterns"`) and `TaskHeaderPatternsSet bool` (`json:"-"`) fields to `Config` struct
-- [ ] in the `Config` builder at line ~270, precompute `headerPatterns` into a local: if `!values.TaskHeaderPatternsSet` OR all-entries-empty-after-trim → use inlined default list; else use `values.TaskHeaderPatterns`
-- [ ] assign both fields in the struct literal
-- [ ] run `go test ./pkg/config/...` — all tests must pass before task 4
+- [x] write failing table-driven test: default (not set) yields the built-in defaults slice, explicit list yields that list, explicit empty yields the defaults (fallback), set flag reflects whether user configured it
+- [x] write a drift-prevention test that asserts the `pkg/config` inline default list equals `plan.DefaultTaskHeaderPatterns` element-for-element (both must stay in sync; this test catches future divergence)
+- [x] run tests — confirm they fail
+- [x] add `TaskHeaderPatterns []string` (with `json:"task_header_patterns"`) and `TaskHeaderPatternsSet bool` (`json:"-"`) fields to `Config` struct
+- [x] in the `Config` builder at line ~270, precompute `headerPatterns` into a local: if `!values.TaskHeaderPatternsSet` OR all-entries-empty-after-trim → use inlined default list; else use `values.TaskHeaderPatterns`
+- [x] assign both fields in the struct literal
+- [x] run `go test ./pkg/config/...` — all tests must pass before task 4
 
 ### Task 4: Change parser signatures to accept patterns; update all callers
 

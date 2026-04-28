@@ -384,6 +384,73 @@ func TestLoad_MovePlanOnCompletion(t *testing.T) {
 	}
 }
 
+func TestLoad_TaskHeaderPatterns(t *testing.T) {
+	// expected default list, matching plan.DefaultTaskHeaderPatterns.
+	// drift between this literal and plan.DefaultTaskHeaderPatterns is asserted
+	// in pkg/plan/patterns_test.go TestDefaultTaskHeaderPatterns_MatchesConfigDefaults
+	// (placed there to avoid test-time import cycles between config and plan).
+	expectedDefaults := []string{
+		"### Task {N}: {title}",
+		"### Iteration {N}: {title}",
+	}
+
+	testCases := []struct {
+		name       string
+		configBody string
+		wantList   []string
+		wantSet    bool
+	}{
+		{
+			name:       "default not set yields built-in defaults",
+			configBody: "",
+			wantList:   expectedDefaults,
+			wantSet:    false,
+		},
+		{
+			name:       "explicit list yields that list",
+			configBody: "task_header_patterns = ## {N}. {title}, ### Task {N}: {title}",
+			wantList:   []string{"## {N}. {title}", "### Task {N}: {title}"},
+			wantSet:    true,
+		},
+		{
+			name:       "explicit empty yields built-in defaults (fallback)",
+			configBody: "task_header_patterns = ",
+			wantList:   expectedDefaults,
+			wantSet:    true,
+		},
+		{
+			name:       "whitespace-only entries yield defaults (fallback)",
+			configBody: "task_header_patterns = ,   ,",
+			wantList:   expectedDefaults,
+			wantSet:    true,
+		},
+		{
+			name:       "single pattern yields single-element list",
+			configBody: "task_header_patterns = ## {N}. {title}",
+			wantList:   []string{"## {N}. {title}"},
+			wantSet:    true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configDir := filepath.Join(tmpDir, "ralphex")
+			require.NoError(t, os.MkdirAll(configDir, 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+			require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(tc.configBody), 0o600))
+
+			cfg, err := Load(configDir)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.wantList, cfg.TaskHeaderPatterns)
+			assert.Equal(t, tc.wantSet, cfg.TaskHeaderPatternsSet)
+		})
+	}
+}
+
 func TestLoad_AllUserValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")

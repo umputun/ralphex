@@ -1,11 +1,15 @@
 package plan
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/umputun/ralphex/pkg/config"
 )
 
 func TestCompileTaskHeaderPattern(t *testing.T) {
@@ -306,4 +310,26 @@ func TestDefaultTaskHeaderPatterns(t *testing.T) {
 		"### Task {N}: {title}",
 		"### Iteration {N}: {title}",
 	}, DefaultTaskHeaderPatterns)
+}
+
+// TestDefaultTaskHeaderPatterns_MatchesConfigDefaults asserts that the inlined
+// default list in pkg/config matches plan.DefaultTaskHeaderPatterns element-for-element.
+// pkg/config intentionally inlines its default (rather than importing pkg/plan) to
+// keep the config package free of domain-package imports. This test catches any
+// future divergence between the two literal slices.
+func TestDefaultTaskHeaderPatterns_MatchesConfigDefaults(t *testing.T) {
+	// load a config from a temp dir with no task_header_patterns key set;
+	// the resulting cfg.TaskHeaderPatterns must equal plan.DefaultTaskHeaderPatterns.
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(""), 0o600))
+
+	cfg, err := config.Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, DefaultTaskHeaderPatterns, cfg.TaskHeaderPatterns,
+		"pkg/config inline defaults must stay in sync with plan.DefaultTaskHeaderPatterns")
 }
