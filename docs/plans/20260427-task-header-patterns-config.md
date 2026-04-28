@@ -205,13 +205,13 @@ With defaults in play, `{{TASK_HEADER_PATTERNS}}` expands to `'### Task {N}: {ti
 - Modify: `pkg/config/values.go`
 - Modify: `pkg/config/values_test.go`
 
-- [ ] write failing table-driven test cases for load: key absent (Set=false), explicit list, explicit empty string (Set=true, empty slice), single-pattern list, comma-separated list with whitespace, whitespace-only entries (e.g. `,   ,`), duplicate entries preserved in order, entries containing regex meta chars (`.`, `*`, `[`) as literals in surrounding text
-- [ ] write failing table-driven test cases for merge: src set overrides dst (including `src=[]` clearing dst), src unset preserves dst
-- [ ] run tests — confirm they fail
-- [ ] add `TaskHeaderPatterns []string` and `TaskHeaderPatternsSet bool` to `Values` struct, mirroring `ClaudeErrorPatterns`
-- [ ] add INI loader block for `task_header_patterns` (treat as comma-separated; trim each entry; drop empty entries after trim; reuse the same splitter as `claude_error_patterns` — audit and reuse)
-- [ ] add merge block in `mergeExtraFrom` (or the appropriate helper) — **guard on `src.TaskHeaderPatternsSet`, NOT on `len(src.TaskHeaderPatterns) > 0`**. The `ClaudeErrorPatterns` precedent at `pkg/config/values.go:463-464` uses `len(...) > 0` but that precedent is a latent bug: it cannot express "explicitly set to empty". Since we want fallback-to-default on empty (handled in Task 3's Config builder), the `Set` guard here is the semantically correct form. Add a brief code comment noting the deliberate deviation from the `ClaudeErrorPatterns` precedent.
-- [ ] run `go test ./pkg/config/...` — all tests must pass before task 3
+- [x] write failing table-driven test cases for load: key absent (Set=false), explicit list, explicit empty string (Set=true, empty slice), single-pattern list, comma-separated list with whitespace, whitespace-only entries (e.g. `,   ,`), duplicate entries preserved in order, entries containing regex meta chars (`.`, `*`, `[`) as literals in surrounding text
+- [x] write failing table-driven test cases for merge: src set overrides dst (including `src=[]` clearing dst), src unset preserves dst
+- [x] run tests — confirm they fail
+- [x] add `TaskHeaderPatterns []string` and `TaskHeaderPatternsSet bool` to `Values` struct, mirroring `ClaudeErrorPatterns`
+- [x] add INI loader block for `task_header_patterns` (treat as comma-separated; trim each entry; drop empty entries after trim; reuse the same splitter as `claude_error_patterns` — audit and reuse)
+- [x] add merge block in `mergeExtraFrom` (or the appropriate helper) — **guard on `src.TaskHeaderPatternsSet`, NOT on `len(src.TaskHeaderPatterns) > 0`**. The `ClaudeErrorPatterns` precedent at `pkg/config/values.go:463-464` uses `len(...) > 0` but that precedent is a latent bug: it cannot express "explicitly set to empty". Since we want fallback-to-default on empty (handled in Task 3's Config builder), the `Set` guard here is the semantically correct form. Add a brief code comment noting the deliberate deviation from the `ClaudeErrorPatterns` precedent.
+- [x] run `go test ./pkg/config/...` — all tests must pass before task 3
 
 ### Task 3: Propagate `TaskHeaderPatterns` to `Config` with runtime default
 

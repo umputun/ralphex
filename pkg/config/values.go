@@ -20,6 +20,8 @@ type Values struct {
 	TaskModel               string   // model for task execution (e.g., "opus", "sonnet", "haiku")
 	ReviewModel             string   // model for review phases (falls back to TaskModel if empty)
 	ClaudeErrorPatterns     []string // patterns to detect in claude output (e.g., rate limit messages)
+	TaskHeaderPatterns      []string // templates used to recognize task section headers (e.g., "### Task {N}: {title}")
+	TaskHeaderPatternsSet   bool     // tracks if task_header_patterns was explicitly set (allows empty to disable)
 	CodexEnabled            bool
 	CodexEnabledSet         bool // tracks if codex_enabled was explicitly set
 	CodexCommand            string
@@ -342,6 +344,13 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	values.ClaudeErrorPatterns = vl.parseCommaSeparated(section, "claude_error_patterns")
 	values.CodexErrorPatterns = vl.parseCommaSeparated(section, "codex_error_patterns")
 
+	// task header patterns (comma-separated): track explicit presence so callers
+	// can distinguish "unset, use defaults" from "explicitly set to empty".
+	if section.HasKey("task_header_patterns") {
+		values.TaskHeaderPatternsSet = true
+		values.TaskHeaderPatterns = vl.parseCommaSeparated(section, "task_header_patterns")
+	}
+
 	// limit patterns (comma-separated, same format as error patterns)
 	values.ClaudeLimitPatterns = vl.parseCommaSeparated(section, "claude_limit_patterns")
 	values.CodexLimitPatterns = vl.parseCommaSeparated(section, "codex_limit_patterns")
@@ -527,6 +536,13 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	}
 	if len(src.ClaudeErrorPatterns) > 0 {
 		dst.ClaudeErrorPatterns = src.ClaudeErrorPatterns
+	}
+	// deliberately guard on TaskHeaderPatternsSet (not len > 0) so an explicit
+	// empty value can clear a parent config; runtime default fallback is applied
+	// later in the Config builder, not here.
+	if src.TaskHeaderPatternsSet {
+		dst.TaskHeaderPatterns = src.TaskHeaderPatterns
+		dst.TaskHeaderPatternsSet = true
 	}
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
