@@ -185,6 +185,96 @@ func TestExtractBranchName(t *testing.T) {
 			planFile: "/path/to/feature",
 			want:     "feature",
 		},
+		{
+			name:     "openspec tasks.md uses parent dir",
+			planFile: "openspec/changes/add-dark-mode/tasks.md",
+			want:     "add-dark-mode",
+		},
+		{
+			name:     "openspec plan.md uses parent dir",
+			planFile: "openspec/changes/add-dark-mode/plan.md",
+			want:     "add-dark-mode",
+		},
+		{
+			name:     "openspec tasks.md strips date from parent dir",
+			planFile: "openspec/changes/2024-01-15-add-dark-mode/tasks.md",
+			want:     "add-dark-mode",
+		},
+		{
+			name:     "uppercase Tasks.md bare keeps original (dir is .)",
+			planFile: "Tasks.md",
+			want:     "Tasks",
+		},
+		{
+			name:     "nested generic dir keeps original filename",
+			planFile: "foo/tasks/tasks.md",
+			want:     "tasks",
+		},
+		{
+			name:     "bare tasks.md keeps original (dir is .)",
+			planFile: "tasks.md",
+			want:     "tasks",
+		},
+		{
+			name:     "uppercase TASKS.md bare keeps original",
+			planFile: "TASKS.md",
+			want:     "TASKS",
+		},
+		{
+			name:     "docs/plans non-generic file unchanged",
+			planFile: "docs/plans/2024-01-15-feature.md",
+			want:     "feature",
+		},
+		{
+			name:     "openspec index.md uses parent dir",
+			planFile: "openspec/changes/add-dark-mode/index.md",
+			want:     "add-dark-mode",
+		},
+		{
+			name:     "openspec readme.md uses parent dir",
+			planFile: "openspec/changes/add-dark-mode/readme.md",
+			want:     "add-dark-mode",
+		},
+		{
+			name:     "absolute bare tasks.md keeps original (dir is /)",
+			planFile: "/tasks.md",
+			want:     "tasks",
+		},
+		{
+			name:     "docs/plans/plan.md keeps original (plans is container, not identity)",
+			planFile: "docs/plans/plan.md",
+			want:     "plan",
+		},
+		{
+			name:     "docs/plans/tasks.md keeps original (plans is container, not identity)",
+			planFile: "docs/plans/tasks.md",
+			want:     "tasks",
+		},
+		{
+			name:     "numeric-leading dir name preserved (2fa-login not mangled)",
+			planFile: "openspec/changes/2fa-login/tasks.md",
+			want:     "2fa-login",
+		},
+		{
+			name:     "numeric-only dir name preserved (404-page not mangled)",
+			planFile: "openspec/changes/404-page/tasks.md",
+			want:     "404-page",
+		},
+		{
+			name:     "compact date prefix with dash stripped from parent dir",
+			planFile: "openspec/changes/20260428-add-dark-mode/tasks.md",
+			want:     "add-dark-mode",
+		},
+		{
+			name:     "pure compact date dir falls back to filename",
+			planFile: "openspec/changes/20260428/tasks.md",
+			want:     "tasks",
+		},
+		{
+			name:     "pure ISO date dir falls back to filename",
+			planFile: "openspec/changes/2024-01-15/tasks.md",
+			want:     "tasks",
+		},
 	}
 
 	for _, tt := range tests {

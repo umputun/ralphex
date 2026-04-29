@@ -45,16 +45,16 @@ Closes issue #306 (third gap; #309 covered the header-pattern gap).
 - Modify: `pkg/plan/plan.go`
 - Modify: `pkg/plan/plan_test.go`
 
-- [ ] extract `stripDatePrefix(name string) string` helper from the existing inline logic in
+- [x] extract `stripDatePrefix(name string) string` helper from the existing inline logic in
       `ExtractBranchName`
-- [ ] add package-level `genericPlanFilenames map[string]bool` with entries `tasks`, `plan`,
+- [x] add package-level `genericPlanFilenames map[string]bool` with entries `tasks`, `plan`,
       `index`, `readme`; add comment explaining these are filenames where the directory name
       carries the identity
-- [ ] in `ExtractBranchName`, after computing `branchName`, check
+- [x] in `ExtractBranchName`, after computing `branchName`, check
       `genericPlanFilenames[strings.ToLower(branchName)]`
-- [ ] on match: compute `dir := stripDatePrefix(filepath.Base(filepath.Dir(planFile)))`;
+- [x] on match: compute `dir := stripDatePrefix(filepath.Base(filepath.Dir(planFile)))`;
       return `dir` unless `dir` is empty, `.`, `/`, or itself generic (fall back to `branchName`)
-- [ ] write/update table-driven test cases in `TestExtractBranchName`:
+- [x] write/update table-driven test cases in `TestExtractBranchName`:
       - `openspec/changes/add-dark-mode/tasks.md` → `add-dark-mode`
       - `openspec/changes/add-dark-mode/plan.md` → `add-dark-mode`
       - `openspec/changes/2024-01-15-add-dark-mode/tasks.md` → `add-dark-mode` (date stripped from dir)
@@ -64,14 +64,14 @@ Closes issue #306 (third gap; #309 covered the header-pattern gap).
       - `docs/plans/2024-01-15-feature.md` → `feature` (non-generic, unchanged path)
       - `TASKS.md` (bare uppercase) → `TASKS` (case-insensitive match, dir is `.`, no fallback)
       - existing cases must continue to pass
-- [ ] run `make test` — must pass
-- [ ] run `make lint`
+- [x] run `make test` — must pass
+- [x] run `make lint`
 
 ### Task 2: Update documentation
 
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] add a sentence to the `ExtractBranchName` / git package description in CLAUDE.md noting
+- [x] add a sentence to the `ExtractBranchName` / git package description in CLAUDE.md noting
       the generic-filename fallback behaviour (one line, in the Key Patterns or Git Package API
       section)
