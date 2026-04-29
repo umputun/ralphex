@@ -325,16 +325,17 @@ project/
 
 Configurable patterns detect rate limit and quota errors in claude/codex output:
 - `claude_error_patterns`: comma-separated patterns for claude (default: "You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in")
-- `codex_error_patterns`: comma-separated patterns for codex (default: "Rate limit,quota exceeded")
+- `codex_error_patterns`: comma-separated patterns for codex (default: "Rate limit,quota exceeded,You've hit your usage limit")
 - Matching is case-insensitive substring search
 - Whitespace is trimmed from each pattern
 - For claude: patterns checked against the last 10 text blocks (not full output) to avoid false positives when analysis text mentions rate limit phrases. Context cancellation paths bypass pattern checks
-- For codex and custom executors: patterns checked only when process exits with non-zero status and context is not canceled (avoids false positives from review findings and cancellation masking)
+- For codex: patterns checked against stdout AND a live per-line scan of stderr. Stderr scanning runs inside `processStderr` on each incoming line BEFORE the 5-line / 256-rune tail truncation used for human-readable error context, so detection is eviction- and truncation-resistant. The scan is gated by `isCodexErrorLine` (matches `error:`/`fatal:`/`panic:` prefix, case-insensitive) so progress chatter — header banners, bold summaries, model thinking that may legitimately mention "rate limit" while reviewing code — cannot trigger false positives. The first matching limit/error pattern per category is recorded on `stderrResult.{limitMatch,errorMatch}` and consumed by `CodexExecutor.checkPatterns`. Priority is limit-class first across both sources, so a real prefix-gated stderr quota diagnostic cannot be downgraded to a non-retryable `PatternMatchError` by a coincidental stdout error match: `stdout limit → stderr limit → stdout error → stderr error`. Within a class, stdout wins over stderr. Patterns are evaluated only when process exits non-zero and context is not canceled. Stderr is scanned because OpenAI/ChatGPT plan-quota errors (e.g., "ERROR: You've hit your usage limit") are emitted on stderr while stdout is empty on failure
+- For custom executors: stderr is merged into stdout by the executor itself (`cmd.Stderr = cmd.Stdout`), so the same pattern check covers both streams. Patterns checked only when process exits non-zero and context is not canceled
 - On match, ralphex exits gracefully with pattern info and help command suggestion
 
 Limit patterns for wait+retry behavior:
 - `claude_limit_patterns`: comma-separated (default: "You've hit your limit")
-- `codex_limit_patterns`: comma-separated (default: "Rate limit,quota exceeded")
+- `codex_limit_patterns`: comma-separated (default: "Rate limit,quota exceeded,You've hit your usage limit")
 - `wait_on_limit`: duration string (e.g., "1h", "30m"), disabled by default
 - `--wait` CLI flag overrides `wait_on_limit` config
 - Priority: limit patterns checked first; if match AND wait > 0, wait and retry; if match AND wait == 0, fall through to error pattern behavior
