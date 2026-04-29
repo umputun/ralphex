@@ -275,6 +275,11 @@ func TestExtractBranchName(t *testing.T) {
 			planFile: "openspec/changes/2024-01-15/tasks.md",
 			want:     "tasks",
 		},
+		{
+			name:     "double-dash separator in parent dir stripped cleanly",
+			planFile: "openspec/changes/2024-01-15--feature/tasks.md",
+			want:     "feature",
+		},
 	}
 
 	for _, tt := range tests {

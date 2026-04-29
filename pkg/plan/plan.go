@@ -44,7 +44,7 @@ func stripDatePrefix(name string) string {
 }
 
 func stripDirDatePrefix(name string) string {
-	return dirDatePrefixRe.ReplaceAllString(name, "")
+	return strings.TrimLeft(dirDatePrefixRe.ReplaceAllString(name, ""), "-")
 }
 
 // ErrNoPlansFound is returned when no plan files exist in the plans directory.

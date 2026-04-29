@@ -8,16 +8,17 @@ layouts where the meaningful identity lives in the parent directory — e.g.
 `openspec/changes/add-dark-mode/tasks.md` — this produces the useless branch name `tasks`
 instead of `add-dark-mode`.
 
-Fix: when the stripped filename is a known generic name (`tasks`, `plan`, `index`, `readme`),
-fall back to the basename of the parent directory, applying the same date-prefix stripping to it.
-Match is case-insensitive.
+Fix: when the stripped filename is a known generic name (`tasks`, `plan`, `plans`, `index`, `readme`),
+fall back to the basename of the parent directory, applying date-prefix stripping to it via a
+dedicated `stripDirDatePrefix` helper (stricter regex than the file-level one). Match is case-insensitive.
 
 Closes issue #306 (third gap; #309 covered the header-pattern gap).
 
 ## Context
 
-- `pkg/plan/plan.go:159` — `ExtractBranchName` function, `datePrefixRe` pattern
-- `pkg/plan/plan_test.go:157` — `TestExtractBranchName` table-driven tests
+- `pkg/plan/plan.go` — `ExtractBranchName` function, `datePrefixRe`/`dirDatePrefixRe` patterns,
+  `stripDatePrefix`/`stripDirDatePrefix` helpers, `genericPlanFilenames` set
+- `pkg/plan/plan_test.go` — `TestExtractBranchName` table-driven tests
 - Callers: `pkg/git/service.go` — `preparePlanBranch` and `CommitPlanFile` both call
   `plan.ExtractBranchName`; no caller changes needed
 
@@ -30,7 +31,7 @@ Closes issue #306 (third gap; #309 covered the header-pattern gap).
 ## Solution Overview
 
 1. Extract the date-strip logic from `ExtractBranchName` into a private `stripDatePrefix(name)` helper so it can be reused for both the filename and the fallback directory name.
-2. Add a package-level `genericPlanFilenames` set (map[string]bool) with entries: `tasks`, `plan`, `index`, `readme`. A brief comment explains the rationale.
+2. Add a package-level `genericPlanFilenames` set (map[string]bool) with entries: `tasks`, `plan`, `plans`, `index`, `readme`. A brief comment explains the rationale.
 3. In `ExtractBranchName`, after computing the stripped filename, do a **case-insensitive** lookup:
    - If generic: compute `dir := stripDatePrefix(filepath.Base(filepath.Dir(planFile)))`. Use `dir`
      as the branch name unless `dir` is `.`, `/`, empty, or itself a generic name (nested case →
@@ -48,8 +49,8 @@ Closes issue #306 (third gap; #309 covered the header-pattern gap).
 - [x] extract `stripDatePrefix(name string) string` helper from the existing inline logic in
       `ExtractBranchName`
 - [x] add package-level `genericPlanFilenames map[string]bool` with entries `tasks`, `plan`,
-      `index`, `readme`; add comment explaining these are filenames where the directory name
-      carries the identity
+      `plans`, `index`, `readme`; add comment explaining these are filenames where the directory
+      name carries the identity
 - [x] in `ExtractBranchName`, after computing `branchName`, check
       `genericPlanFilenames[strings.ToLower(branchName)]`
 - [x] on match: compute `dir := stripDatePrefix(filepath.Base(filepath.Dir(planFile)))`;
