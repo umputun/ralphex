@@ -888,6 +888,122 @@ func TestValuesLoader_Load_ErrorPatternsOverride(t *testing.T) {
 	assert.Equal(t, []string{"local pattern"}, values.ClaudeErrorPatterns)
 }
 
+func TestValuesLoader_parseValuesFromBytes_TaskHeaderPatterns(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name        string
+		input       string
+		expected    []string
+		expectedSet bool
+	}{
+		{
+			name:        "key absent",
+			input:       "",
+			expected:    nil,
+			expectedSet: false,
+		},
+		{
+			name:        "explicit list",
+			input:       "task_header_patterns = ### Task {N}: {title}, ### Iteration {N}: {title}",
+			expected:    []string{"### Task {N}: {title}", "### Iteration {N}: {title}"},
+			expectedSet: true,
+		},
+		{
+			name:        "explicit empty string",
+			input:       "task_header_patterns = ",
+			expected:    nil,
+			expectedSet: true,
+		},
+		{
+			name:        "single-pattern list",
+			input:       "task_header_patterns = ## {N}. {title}",
+			expected:    []string{"## {N}. {title}"},
+			expectedSet: true,
+		},
+		{
+			name:        "whitespace trimmed around commas",
+			input:       "task_header_patterns =  ### Task {N}: {title} ,  ## {N}. {title} ",
+			expected:    []string{"### Task {N}: {title}", "## {N}. {title}"},
+			expectedSet: true,
+		},
+		{
+			name:        "whitespace-only entries dropped",
+			input:       "task_header_patterns = ,   ,",
+			expected:    nil,
+			expectedSet: true,
+		},
+		{
+			name:        "duplicate entries preserved in order",
+			input:       "task_header_patterns = ### Task {N}: {title}, ### Task {N}: {title}",
+			expected:    []string{"### Task {N}: {title}", "### Task {N}: {title}"},
+			expectedSet: true,
+		},
+		{
+			name:        "entries with regex meta chars as literals",
+			input:       "task_header_patterns = ### Phase {N}. {title} [draft], ## {N}* {title}",
+			expected:    []string{"### Phase {N}. {title} [draft]", "## {N}* {title}"},
+			expectedSet: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, values.TaskHeaderPatterns)
+			assert.Equal(t, tc.expectedSet, values.TaskHeaderPatternsSet)
+		})
+	}
+}
+
+func TestValues_mergeFrom_TaskHeaderPatterns(t *testing.T) {
+	t.Run("src set overrides dst", func(t *testing.T) {
+		dst := Values{
+			TaskHeaderPatterns:    []string{"dst pattern"},
+			TaskHeaderPatternsSet: true,
+		}
+		src := Values{
+			TaskHeaderPatterns:    []string{"src pattern 1", "src pattern 2"},
+			TaskHeaderPatternsSet: true,
+		}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.TaskHeaderPatterns)
+		assert.True(t, dst.TaskHeaderPatternsSet)
+	})
+
+	t.Run("src set to empty clears dst", func(t *testing.T) {
+		dst := Values{
+			TaskHeaderPatterns:    []string{"dst pattern"},
+			TaskHeaderPatternsSet: true,
+		}
+		src := Values{
+			TaskHeaderPatterns:    nil,
+			TaskHeaderPatternsSet: true,
+		}
+		dst.mergeFrom(&src)
+
+		assert.Nil(t, dst.TaskHeaderPatterns)
+		assert.True(t, dst.TaskHeaderPatternsSet)
+	})
+
+	t.Run("src unset preserves dst", func(t *testing.T) {
+		dst := Values{
+			TaskHeaderPatterns:    []string{"dst pattern"},
+			TaskHeaderPatternsSet: true,
+		}
+		src := Values{
+			TaskHeaderPatterns:    nil,
+			TaskHeaderPatternsSet: false,
+		}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"dst pattern"}, dst.TaskHeaderPatterns)
+		assert.True(t, dst.TaskHeaderPatternsSet)
+	})
+}
+
 func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "config")

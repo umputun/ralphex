@@ -45,6 +45,15 @@ func parseProgressLine(line string, inHeader bool) (ParsedLine, bool) {
 		return ParsedLine{Type: ParsedLineSkip}, true
 	}
 
+	// the progress writer re-emits "TaskHeaderPatterns: ..." next to a
+	// "--- restarted at ... ---" marker so retried runs advertise the current
+	// run's patterns. ParseProgressHeader picks this up for the dashboard;
+	// here we just suppress the line so it does not appear as plain output
+	// in the SSE event stream.
+	if strings.HasPrefix(line, "TaskHeaderPatterns: ") {
+		return ParsedLine{Type: ParsedLineSkip}, false
+	}
+
 	// check for section header (--- section name ---)
 	if matches := sectionRegex.FindStringSubmatch(line); matches != nil {
 		sectionName := matches[1]

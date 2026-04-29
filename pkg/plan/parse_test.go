@@ -347,6 +347,331 @@ Just some text, no checkboxes.
 	})
 }
 
+func TestParsePlan_CustomPatterns(t *testing.T) {
+	t.Run("OpenSpec-style ## N. Phase headers", func(t *testing.T) {
+		content := `# OpenSpec Plan
+
+## 1. Phase One
+
+- [ ] 1.1 First item
+- [x] 1.2 Second item
+
+## 2. Phase Two
+
+- [ ] 2.1 Another item
+`
+		p, err := plan.ParsePlan(content, "## {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		assert.Equal(t, 1, p.Tasks[0].Number)
+		assert.Equal(t, "Phase One", p.Tasks[0].Title)
+		require.Len(t, p.Tasks[0].Checkboxes, 2)
+		assert.Equal(t, "1.1 First item", p.Tasks[0].Checkboxes[0].Text)
+		assert.False(t, p.Tasks[0].Checkboxes[0].Checked)
+		assert.True(t, p.Tasks[0].Checkboxes[1].Checked)
+		assert.Equal(t, plan.TaskStatusActive, p.Tasks[0].Status)
+
+		assert.Equal(t, 2, p.Tasks[1].Number)
+		assert.Equal(t, "Phase Two", p.Tasks[1].Title)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+	})
+
+	t.Run("mixed patterns parse in document order", func(t *testing.T) {
+		content := `# Mixed
+
+### Task 1: First
+
+- [ ] A
+
+## 2. Phase Two
+
+- [ ] B
+
+### Iteration 3: Third
+
+- [x] C
+`
+		p, err := plan.ParsePlan(content, "### Task {N}: {title}", "### Iteration {N}: {title}", "## {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 3)
+		assert.Equal(t, 1, p.Tasks[0].Number)
+		assert.Equal(t, "First", p.Tasks[0].Title)
+		assert.Equal(t, 2, p.Tasks[1].Number)
+		assert.Equal(t, "Phase Two", p.Tasks[1].Title)
+		assert.Equal(t, 3, p.Tasks[2].Number)
+		assert.Equal(t, "Third", p.Tasks[2].Title)
+	})
+
+	t.Run("non-matching h2 closes current task (unchanged)", func(t *testing.T) {
+		// with only ### Task patterns configured, a plain ## header
+		// that doesn't match closes the current task.
+		content := `# Plan
+
+### Task 1: First
+
+- [x] done
+
+## Success criteria
+
+- [ ] outside
+`
+		p, err := plan.ParsePlan(content, "### Task {N}: {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		assert.Equal(t, plan.TaskStatusDone, p.Tasks[0].Status)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+	})
+
+	t.Run("non-matching h1 after title closes current task (unchanged)", func(t *testing.T) {
+		content := `# Plan
+
+### Task 1: First
+
+- [x] done
+
+# Overview
+
+- [ ] outside
+`
+		p, err := plan.ParsePlan(content, "### Task {N}: {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		assert.Equal(t, plan.TaskStatusDone, p.Tasks[0].Status)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+	})
+
+	t.Run("non-matching h3 does NOT close current task (unchanged)", func(t *testing.T) {
+		// free-form ### sub-note inside a task should not orphan checkboxes.
+		content := `# Plan
+
+### Task 1: First
+
+- [ ] main
+
+### A note (not a task)
+
+- [ ] still inside task
+`
+		p, err := plan.ParsePlan(content, "### Task {N}: {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 2)
+		assert.Equal(t, "main", p.Tasks[0].Checkboxes[0].Text)
+		assert.Equal(t, "still inside task", p.Tasks[0].Checkboxes[1].Text)
+	})
+
+	t.Run("matching custom h2 closes preceding h3 task and opens new task", func(t *testing.T) {
+		content := `# Plan
+
+### Task 1: First
+
+- [x] done
+
+## 2. Phase Two
+
+- [ ] phase item
+`
+		p, err := plan.ParsePlan(content, "### Task {N}: {title}", "## {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		assert.Equal(t, 1, p.Tasks[0].Number)
+		assert.Equal(t, "First", p.Tasks[0].Title)
+		assert.Equal(t, plan.TaskStatusDone, p.Tasks[0].Status)
+
+		assert.Equal(t, 2, p.Tasks[1].Number)
+		assert.Equal(t, "Phase Two", p.Tasks[1].Title)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+		assert.Equal(t, "phase item", p.Tasks[1].Checkboxes[0].Text)
+	})
+
+	t.Run("malformed template surfaces compile error", func(t *testing.T) {
+		_, err := plan.ParsePlan("# Plan\n", "### Task {foo}: {title}")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "{foo}")
+	})
+
+	t.Run("plan with matching headers but no checkboxes yields zero-checkbox tasks", func(t *testing.T) {
+		content := `# Plan
+
+## 1. Phase One
+
+just prose, no checkboxes.
+
+## 2. Phase Two
+
+also no checkboxes.
+`
+		p, err := plan.ParsePlan(content, "## {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		assert.Empty(t, p.Tasks[0].Checkboxes)
+		assert.Empty(t, p.Tasks[1].Checkboxes)
+		assert.Equal(t, plan.TaskStatusPending, p.Tasks[0].Status)
+	})
+
+	t.Run("H1 task template does not lose first task to title capture", func(t *testing.T) {
+		// custom template using a single hash header; the first line must be
+		// captured as a task, not silently consumed as the plan title.
+		content := `# 1. First Phase
+
+- [ ] first item
+
+# 2. Second Phase
+
+- [ ] second item
+`
+			p, err := plan.ParsePlan(content, "# {N}. {title}")
+			require.NoError(t, err)
+			assert.Empty(t, p.Title, "first H1 must not be consumed as plan title when it matches a task template")
+			require.Len(t, p.Tasks, 2)
+			assert.Equal(t, 1, p.Tasks[0].Number)
+			assert.Equal(t, "First Phase", p.Tasks[0].Title)
+			require.Len(t, p.Tasks[0].Checkboxes, 1)
+			assert.Equal(t, 2, p.Tasks[1].Number)
+			assert.Equal(t, "Second Phase", p.Tasks[1].Title)
+	})
+
+	t.Run("H1 task template closes preceding task on later non-task H1", func(t *testing.T) {
+		// with a custom H1 task template and no separate plan title,
+		// a later non-task "# Section" must close the current task
+		// instead of being swallowed as the plan title while checkboxes
+		// below silently attach to the preceding task.
+		content := `# 1. First Phase
+
+- [ ] first item
+
+# Overview
+
+- [ ] outside
+`
+		p, err := plan.ParsePlan(content, "# {N}. {title}")
+		require.NoError(t, err)
+		require.Len(t, p.Tasks, 1)
+		assert.Equal(t, 1, p.Tasks[0].Number)
+		assert.Equal(t, "First Phase", p.Tasks[0].Title)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+		assert.Equal(t, "first item", p.Tasks[0].Checkboxes[0].Text)
+	})
+
+	t.Run("default patterns still capture H1 plan title", func(t *testing.T) {
+		// default templates (### Task/Iteration) do not match "# Title", so the
+		// first H1 must still be captured as the plan title.
+		content := `# Plan Title
+
+### Task 1: Do Stuff
+
+- [ ] item
+`
+			p, err := plan.ParsePlan(content)
+			require.NoError(t, err)
+			assert.Equal(t, "Plan Title", p.Title)
+			require.Len(t, p.Tasks, 1)
+			assert.Equal(t, "Do Stuff", p.Tasks[0].Title)
+	})
+
+	t.Run("H1 task template: later ## subsection does NOT close task", func(t *testing.T) {
+		// with H1-level task headers, a ## subsection inside the task must remain
+		// attached (it's deeper than the task heading, so it's a sub-note).
+		content := `# 1. First Phase
+
+- [ ] main item
+
+## Details
+
+- [ ] sub item
+
+# 2. Second Phase
+
+- [ ] second main
+`
+		p, err := plan.ParsePlan(content, "# {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		assert.Equal(t, 1, p.Tasks[0].Number)
+		require.Len(t, p.Tasks[0].Checkboxes, 2)
+		assert.Equal(t, "main item", p.Tasks[0].Checkboxes[0].Text)
+		assert.Equal(t, "sub item", p.Tasks[0].Checkboxes[1].Text)
+
+		assert.Equal(t, 2, p.Tasks[1].Number)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+	})
+
+	t.Run("H4 task template: higher-level ### section closes task", func(t *testing.T) {
+		// with H4-level task headers (deeper than the default), a shallower ###
+		// section must still close the task so its checkboxes don't leak.
+		content := `# Plan
+
+#### 1. Deep Task
+
+- [ ] item inside task
+
+### Sibling Section
+
+- [ ] outside task
+`
+		p, err := plan.ParsePlan(content, "#### {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+		assert.Equal(t, "item inside task", p.Tasks[0].Checkboxes[0].Text)
+	})
+
+	t.Run("H2 task template: ### sub-note stays inside task", func(t *testing.T) {
+		// for a ## task, a deeper ### heading is a sub-note and must NOT close
+		// the task (regression guard: any sibling-same-level logic must not fire here).
+		content := `# Plan
+
+## 1. Phase One
+
+- [ ] main item
+
+### Notes
+
+- [ ] still inside task
+
+## 2. Phase Two
+
+- [ ] second
+`
+		p, err := plan.ParsePlan(content, "## {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		require.Len(t, p.Tasks[0].Checkboxes, 2)
+		assert.Equal(t, "main item", p.Tasks[0].Checkboxes[0].Text)
+		assert.Equal(t, "still inside task", p.Tasks[0].Checkboxes[1].Text)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+	})
+
+	t.Run("ParsePlanFile accepts patterns variadic", func(t *testing.T) {
+		content := `# Plan
+
+## 1. Phase One
+
+- [ ] 1.1 item
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		p, err := plan.ParsePlanFile(path, "## {N}. {title}")
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		assert.Equal(t, "Phase One", p.Tasks[0].Title)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+	})
+}
+
 func TestParsePlanFile(t *testing.T) {
 	t.Run("reads and parses file", func(t *testing.T) {
 		content := `# File Plan

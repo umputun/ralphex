@@ -14,6 +14,17 @@ import (
 //go:embed defaults/config defaults/prompts/* defaults/agents/*
 var defaultsFS embed.FS
 
+// defaultTaskHeaderPatterns is the built-in fallback list used when the user
+// has not configured task_header_patterns (or set it to all-empty entries).
+// This list is intentionally inlined here (rather than imported from pkg/plan)
+// to keep pkg/config free of domain-package imports. A drift-prevention test
+// in pkg/plan/patterns_test.go (TestDefaultTaskHeaderPatterns_MatchesConfigDefaults)
+// asserts this slice stays in sync with plan.DefaultTaskHeaderPatterns.
+var defaultTaskHeaderPatterns = []string{
+	"### Task {N}: {title}",
+	"### Iteration {N}: {title}",
+}
+
 // prompt file names
 const (
 	taskPromptFile         = "task.txt"
@@ -86,6 +97,12 @@ type Config struct {
 	// error patterns to detect in executor output (e.g., rate limit messages)
 	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
 	CodexErrorPatterns  []string `json:"codex_error_patterns"`
+
+	// task header templates used to recognize task sections in plan files.
+	// empty/unset falls back to defaultTaskHeaderPatterns (kept in sync with
+	// plan.DefaultTaskHeaderPatterns via test TestDefaultTaskHeaderPatterns_MatchesConfigDefaults).
+	TaskHeaderPatterns    []string `json:"task_header_patterns"`
+	TaskHeaderPatternsSet bool     `json:"-"` // tracks if task_header_patterns was explicitly set
 
 	// limit patterns for wait+retry behavior (overlap with error patterns is intentional)
 	ClaudeLimitPatterns []string      `json:"claude_limit_patterns"`
@@ -276,50 +293,60 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		return nil, fmt.Errorf("load agents: %w", err)
 	}
 
+	// apply runtime default for task_header_patterns: fall back to defaults when
+	// unset or when all user-supplied entries were empty after trim (parseCommaSeparated
+	// drops empties, so len == 0 covers both "explicit empty" and "all whitespace" cases).
+	headerPatterns := values.TaskHeaderPatterns
+	if !values.TaskHeaderPatternsSet || len(headerPatterns) == 0 {
+		headerPatterns = defaultTaskHeaderPatterns
+	}
+
 	// assemble config
 	c := &Config{
-		ClaudeCommand:           values.ClaudeCommand,
-		ClaudeArgs:              values.ClaudeArgs,
-		TaskModel:               values.TaskModel,
-		ReviewModel:             values.ReviewModel,
-		CodexEnabled:            values.CodexEnabled,
-		CodexEnabledSet:         values.CodexEnabledSet,
-		CodexCommand:            values.CodexCommand,
-		CodexModel:              values.CodexModel,
-		CodexReasoningEffort:    values.CodexReasoningEffort,
-		CodexTimeoutMs:          values.CodexTimeoutMs,
-		CodexTimeoutMsSet:       values.CodexTimeoutMsSet,
-		CodexSandbox:            values.CodexSandbox,
-		ExternalReviewTool:      values.ExternalReviewTool,
-		CustomReviewScript:      values.CustomReviewScript,
-		IterationDelayMs:        values.IterationDelayMs,
-		IterationDelayMsSet:     values.IterationDelayMsSet,
-		TaskRetryCount:          values.TaskRetryCount,
-		TaskRetryCountSet:       values.TaskRetryCountSet,
-		MaxIterations:           values.MaxIterations,
-		MaxIterationsSet:        values.MaxIterationsSet,
-		MaxExternalIterations:   values.MaxExternalIterations,
-		ReviewPatience:          values.ReviewPatience,
-		FinalizeEnabled:         values.FinalizeEnabled,
-		FinalizeEnabledSet:      values.FinalizeEnabledSet,
-		MovePlanOnCompletion:    values.MovePlanOnCompletion,
-		WorktreeEnabled:         values.WorktreeEnabled,
-		WorktreeEnabledSet:      values.WorktreeEnabledSet,
-		PlansDir:                values.PlansDir,
-		DefaultBranch:           values.DefaultBranch,
-		VcsCommand:              values.VcsCommand,
-		CommitTrailer:           values.CommitTrailer,
-		WatchDirs:               values.WatchDirs,
-		ClaudeErrorPatterns:     values.ClaudeErrorPatterns,
-		CodexErrorPatterns:      values.CodexErrorPatterns,
-		ClaudeLimitPatterns:     values.ClaudeLimitPatterns,
-		CodexLimitPatterns:      values.CodexLimitPatterns,
-		WaitOnLimit:             values.WaitOnLimit,
-		WaitOnLimitSet:          values.WaitOnLimitSet,
-		SessionTimeout:          values.SessionTimeout,
-		SessionTimeoutSet:       values.SessionTimeoutSet,
-		IdleTimeout:             values.IdleTimeout,
-		IdleTimeoutSet:          values.IdleTimeoutSet,
+		ClaudeCommand:         values.ClaudeCommand,
+		ClaudeArgs:            values.ClaudeArgs,
+		TaskModel:             values.TaskModel,
+		ReviewModel:           values.ReviewModel,
+		CodexEnabled:          values.CodexEnabled,
+		CodexEnabledSet:       values.CodexEnabledSet,
+		CodexCommand:          values.CodexCommand,
+		CodexModel:            values.CodexModel,
+		CodexReasoningEffort:  values.CodexReasoningEffort,
+		CodexTimeoutMs:        values.CodexTimeoutMs,
+		CodexTimeoutMsSet:     values.CodexTimeoutMsSet,
+		CodexSandbox:          values.CodexSandbox,
+		ExternalReviewTool:    values.ExternalReviewTool,
+		CustomReviewScript:    values.CustomReviewScript,
+		IterationDelayMs:      values.IterationDelayMs,
+		IterationDelayMsSet:   values.IterationDelayMsSet,
+		TaskRetryCount:        values.TaskRetryCount,
+		TaskRetryCountSet:     values.TaskRetryCountSet,
+		MaxIterations:         values.MaxIterations,
+		MaxIterationsSet:      values.MaxIterationsSet,
+		MaxExternalIterations: values.MaxExternalIterations,
+		ReviewPatience:        values.ReviewPatience,
+		FinalizeEnabled:       values.FinalizeEnabled,
+		FinalizeEnabledSet:    values.FinalizeEnabledSet,
+		MovePlanOnCompletion:  values.MovePlanOnCompletion,
+		WorktreeEnabled:       values.WorktreeEnabled,
+		WorktreeEnabledSet:    values.WorktreeEnabledSet,
+		PlansDir:              values.PlansDir,
+		DefaultBranch:         values.DefaultBranch,
+		VcsCommand:            values.VcsCommand,
+		CommitTrailer:         values.CommitTrailer,
+		WatchDirs:             values.WatchDirs,
+		ClaudeErrorPatterns:   values.ClaudeErrorPatterns,
+		CodexErrorPatterns:    values.CodexErrorPatterns,
+		TaskHeaderPatterns:    headerPatterns,
+		TaskHeaderPatternsSet: values.TaskHeaderPatternsSet,
+		ClaudeLimitPatterns:   values.ClaudeLimitPatterns,
+		CodexLimitPatterns:    values.CodexLimitPatterns,
+		WaitOnLimit:           values.WaitOnLimit,
+		WaitOnLimitSet:        values.WaitOnLimitSet,
+		SessionTimeout:        values.SessionTimeout,
+		SessionTimeoutSet:     values.SessionTimeoutSet,
+		IdleTimeout:           values.IdleTimeout,
+		IdleTimeoutSet:        values.IdleTimeoutSet,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,

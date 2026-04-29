@@ -29,6 +29,14 @@ import (
 // the header is emitted across several writes, so a mid-write read can return
 // incomplete metadata (zero StartTime, missing fields); callers should use the
 // complete flag to decide whether to trust the parsed metadata.
+//
+// after the header separator, the function also scans the remainder of the
+// file for TaskHeaderPatterns: lines emitted by the progress writer next to
+// a "--- restarted at ... ---" marker. retried runs with new patterns re-emit
+// the key next to the restart marker so the dashboard picks up current
+// patterns instead of the stale value stored in the original header. the
+// last TaskHeaderPatterns occurrence in the file wins, so restarts that
+// change patterns mid-file are reflected correctly.
 func ParseProgressHeader(path string) (meta SessionMetadata, complete bool, err error) {
 	f, err := os.Open(path) //nolint:gosec // path from user-controlled glob pattern, acceptable for session discovery
 	if err != nil {
@@ -53,28 +61,76 @@ func ParseProgressHeader(path string) (meta SessionMetadata, complete bool, err 
 
 		// parse key-value pairs (process line before checking error,
 		// as ReadString may return partial data alongside an error)
-		if val, found := strings.CutPrefix(line, "Plan: "); found {
-			meta.PlanPath = val
-		} else if val, found := strings.CutPrefix(line, "Branch: "); found {
-			meta.Branch = val
-		} else if val, found := strings.CutPrefix(line, "Mode: "); found {
-			meta.Mode = val
-		} else if val, found := strings.CutPrefix(line, "Started: "); found {
-			// header timestamps are written in local time without a zone offset
-			if t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local); parseErr == nil {
-				meta.StartTime = t
-			}
-		}
+		applyHeaderField(line, &meta)
 
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
 				return SessionMetadata{}, false, fmt.Errorf("read file: %w", readErr)
 			}
-			break // EOF after processing final line
+			return meta, complete, nil // EOF before separator
 		}
 	}
 
-	return meta, complete, nil
+	// scan the remainder for restart-marker TaskHeaderPatterns overrides.
+	// last occurrence wins so the freshest run's patterns are used.
+	for {
+		line, readErr := reader.ReadString('\n')
+		line = trimLineEnding(line)
+		if val, found := strings.CutPrefix(line, "TaskHeaderPatterns: "); found {
+			if patterns := parsePatternList(val); len(patterns) > 0 {
+				meta.TaskHeaderPatterns = patterns
+			}
+		}
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				return meta, complete, fmt.Errorf("read file: %w", readErr)
+			}
+			return meta, complete, nil
+		}
+	}
+}
+
+// applyHeaderField parses a single header line (e.g. "Plan: ...") and updates
+// the metadata in place. unknown or unmatched lines are ignored.
+func applyHeaderField(line string, meta *SessionMetadata) {
+	if val, found := strings.CutPrefix(line, "Plan: "); found {
+		meta.PlanPath = val
+		return
+	}
+	if val, found := strings.CutPrefix(line, "Branch: "); found {
+		meta.Branch = val
+		return
+	}
+	if val, found := strings.CutPrefix(line, "Mode: "); found {
+		meta.Mode = val
+		return
+	}
+	if val, found := strings.CutPrefix(line, "Started: "); found {
+		// header timestamps are written in local time without a zone offset
+		if t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local); parseErr == nil {
+			meta.StartTime = t
+		}
+		return
+	}
+	if val, found := strings.CutPrefix(line, "TaskHeaderPatterns: "); found {
+		if patterns := parsePatternList(val); len(patterns) > 0 {
+			meta.TaskHeaderPatterns = patterns
+		}
+	}
+}
+
+// parsePatternList splits a comma-separated header value into a trimmed,
+// non-empty template list. the writer (pkg/progress writeHeader) rejects
+// templates containing commas, so this split is lossless.
+func parsePatternList(val string) []string {
+	parts := strings.Split(val, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // loadProgressFileIntoSession reads a progress file and publishes events to the session's SSE server.

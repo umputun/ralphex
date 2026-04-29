@@ -29,7 +29,7 @@ func Test_defaultsFS_PromptFiles(t *testing.T) {
 		file     string
 		contains []string
 	}{
-		{file: "defaults/prompts/task.txt", contains: []string{"{{PLAN_FILE}}", "{{PROGRESS_FILE}}", "RALPHEX:ALL_TASKS_DONE", "RALPHEX:TASK_FAILED", "Success criteria", "Task sections", "### Task N:", "mark them [x]", "do not loop indefinitely"}},
+		{file: "defaults/prompts/task.txt", contains: []string{"{{PLAN_FILE}}", "{{PROGRESS_FILE}}", "RALPHEX:ALL_TASKS_DONE", "RALPHEX:TASK_FAILED", "Success criteria", "Task sections", "{{TASK_HEADER_PATTERNS}}", "mark them [x]", "do not loop indefinitely"}},
 		{file: "defaults/prompts/review_first.txt", contains: []string{"{{GOAL}}", "{{PROGRESS_FILE}}", "RALPHEX:REVIEW_DONE", "{{agent:quality}}", "{{agent:testing}}"}},
 		{file: "defaults/prompts/review_second.txt", contains: []string{"{{GOAL}}", "{{PROGRESS_FILE}}", "RALPHEX:REVIEW_DONE", "{{agent:quality}}", "{{agent:implementation}}"}},
 		{file: "defaults/prompts/codex.txt", contains: []string{"{{CODEX_OUTPUT}}", "RALPHEX:CODEX_REVIEW_DONE", "Codex reviewed"}},
@@ -380,6 +380,73 @@ func TestLoad_MovePlanOnCompletion(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.wantVal, cfg.MovePlanOnCompletion)
+		})
+	}
+}
+
+func TestLoad_TaskHeaderPatterns(t *testing.T) {
+	// expected default list, matching plan.DefaultTaskHeaderPatterns.
+	// drift between this literal and plan.DefaultTaskHeaderPatterns is asserted
+	// in pkg/plan/patterns_test.go TestDefaultTaskHeaderPatterns_MatchesConfigDefaults
+	// (placed there to avoid test-time import cycles between config and plan).
+	expectedDefaults := []string{
+		"### Task {N}: {title}",
+		"### Iteration {N}: {title}",
+	}
+
+	testCases := []struct {
+		name       string
+		configBody string
+		wantList   []string
+		wantSet    bool
+	}{
+		{
+			name:       "default not set yields built-in defaults",
+			configBody: "",
+			wantList:   expectedDefaults,
+			wantSet:    false,
+		},
+		{
+			name:       "explicit list yields that list",
+			configBody: "task_header_patterns = ## {N}. {title}, ### Task {N}: {title}",
+			wantList:   []string{"## {N}. {title}", "### Task {N}: {title}"},
+			wantSet:    true,
+		},
+		{
+			name:       "explicit empty yields built-in defaults (fallback)",
+			configBody: "task_header_patterns = ",
+			wantList:   expectedDefaults,
+			wantSet:    true,
+		},
+		{
+			name:       "whitespace-only entries yield defaults (fallback)",
+			configBody: "task_header_patterns = ,   ,",
+			wantList:   expectedDefaults,
+			wantSet:    true,
+		},
+		{
+			name:       "single pattern yields single-element list",
+			configBody: "task_header_patterns = ## {N}. {title}",
+			wantList:   []string{"## {N}. {title}"},
+			wantSet:    true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configDir := filepath.Join(tmpDir, "ralphex")
+			require.NoError(t, os.MkdirAll(configDir, 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+			require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(tc.configBody), 0o600))
+
+			cfg, err := Load(configDir)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.wantList, cfg.TaskHeaderPatterns)
+			assert.Equal(t, tc.wantSet, cfg.TaskHeaderPatternsSet)
 		})
 	}
 }

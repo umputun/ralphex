@@ -75,6 +75,68 @@ func TestNewLogger(t *testing.T) {
 	}
 }
 
+func TestNewLogger_WritesTaskHeaderPatterns(t *testing.T) {
+	tmpDir := t.TempDir()
+	colors := testColors()
+
+	tests := []struct {
+		name     string
+		patterns []string
+		want     string // empty means the line must not appear
+	}{
+		{name: "no patterns", patterns: nil, want: ""},
+		{name: "empty slice", patterns: []string{}, want: ""},
+		{name: "single pattern", patterns: []string{"### Task {N}: {title}"}, want: "TaskHeaderPatterns: ### Task {N}: {title}\n"},
+		{
+			name:     "two patterns",
+			patterns: []string{"### Task {N}: {title}", "## {N}. {title}"},
+			want:     "TaskHeaderPatterns: ### Task {N}: {title},## {N}. {title}\n",
+		},
+		{
+			// templates containing commas would corrupt the comma-separated
+			// encoding on read; they are dropped at write time instead.
+			name:     "drops pattern containing comma",
+			patterns: []string{"### Task {N}: {title}", "bad, template"},
+			want:     "TaskHeaderPatterns: ### Task {N}: {title}\n",
+		},
+		{
+			name:     "trims whitespace",
+			patterns: []string{"  ### Task {N}: {title}  "},
+			want:     "TaskHeaderPatterns: ### Task {N}: {title}\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			origDir, _ := os.Getwd()
+			require.NoError(t, os.Chdir(t.TempDir()))
+			defer func() { _ = os.Chdir(origDir) }()
+			_ = tmpDir // unused in loop body, kept for parity
+
+			holder := &status.PhaseHolder{}
+			cfg := Config{
+				PlanFile:           "docs/plans/feature.md",
+				Mode:               "full",
+				Branch:             "main",
+				TaskHeaderPatterns: tc.patterns,
+			}
+			l, err := NewLogger(cfg, colors, holder)
+			require.NoError(t, err)
+			defer l.Close()
+
+			content, err := os.ReadFile(l.Path())
+			require.NoError(t, err)
+			s := string(content)
+
+			if tc.want == "" {
+				assert.NotContains(t, s, "TaskHeaderPatterns:", "header line should be absent when no usable patterns")
+			} else {
+				assert.Contains(t, s, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewLogger_AppendOnRestart(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -127,6 +189,48 @@ func TestNewLogger_AppendOnRestart(t *testing.T) {
 
 	// header written only once
 	assert.Equal(t, 1, strings.Count(contentStr, "# Ralphex Progress Log"))
+}
+
+func TestNewLogger_RestartReEmitsTaskHeaderPatterns(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	colors := testColors()
+	holder := &status.PhaseHolder{}
+
+	// first run: no task_header_patterns configured. simulates a log written
+	// by a pre-upgrade binary or a run before patterns were customized.
+	cfg1 := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}
+	l1, err := NewLogger(cfg1, colors, holder)
+	require.NoError(t, err)
+	l1.Print("first run output")
+	require.NoError(t, unlockFile(l1.file))
+	unregisterActiveLock(l1.file.Name())
+	require.NoError(t, l1.file.Close())
+	l1.file = nil
+
+	// second run: task_header_patterns configured. restart must advertise them
+	// in the file so a dashboard parsing the log picks them up rather than the
+	// original (absent) value.
+	cfg2 := Config{
+		PlanFile:           "docs/plans/feature.md",
+		Mode:               "full",
+		Branch:             "main",
+		TaskHeaderPatterns: []string{"## {N}. {title}"},
+	}
+	l2, err := NewLogger(cfg2, colors, holder)
+	require.NoError(t, err)
+	require.NoError(t, l2.Close())
+
+	content, err := os.ReadFile(l2.Path())
+	require.NoError(t, err)
+	contentStr := string(content)
+
+	assert.Contains(t, contentStr, "--- restarted at")
+	// patterns must be present once, alongside the restart marker
+	assert.Equal(t, 1, strings.Count(contentStr, "TaskHeaderPatterns: ## {N}. {title}"))
 }
 
 func TestNewLogger_EmptyFileWritesHeader(t *testing.T) {

@@ -26,41 +26,44 @@ func ConnectHost(host string) string {
 
 // DashboardConfig holds configuration for dashboard initialization.
 type DashboardConfig struct {
-	BaseLog         Logger           // base progress logger
-	Port            int              // web server port
-	Host            string           // host/IP to bind to (default "127.0.0.1")
-	PlanFile        string           // path to plan file (empty for watch-only mode)
-	Branch          string           // current git branch
-	WatchDirs       []string         // CLI watch directories
-	ConfigWatchDirs []string         // config file watch directories
-	Colors          *progress.Colors // colors for output
+	BaseLog            Logger           // base progress logger
+	Port               int              // web server port
+	Host               string           // host/IP to bind to (default "127.0.0.1")
+	PlanFile           string           // path to plan file (empty for watch-only mode)
+	Branch             string           // current git branch
+	WatchDirs          []string         // CLI watch directories
+	ConfigWatchDirs    []string         // config file watch directories
+	Colors             *progress.Colors // colors for output
+	TaskHeaderPatterns []string         // task-header templates used to parse plans (empty = plan defaults)
 }
 
 // Dashboard manages web server and file watching for progress monitoring.
 type Dashboard struct {
-	port            int
-	host            string
-	planFile        string
-	branch          string
-	baseLog         Logger
-	watchDirs       []string
-	configWatchDirs []string
-	colors          *progress.Colors
-	holder          *status.PhaseHolder
+	port               int
+	host               string
+	planFile           string
+	branch             string
+	baseLog            Logger
+	watchDirs          []string
+	configWatchDirs    []string
+	colors             *progress.Colors
+	holder             *status.PhaseHolder
+	taskHeaderPatterns []string
 }
 
 // NewDashboard creates a new dashboard with the given configuration.
 func NewDashboard(cfg DashboardConfig, holder *status.PhaseHolder) *Dashboard {
 	return &Dashboard{
-		port:            cfg.Port,
-		host:            cfg.Host,
-		planFile:        cfg.PlanFile,
-		branch:          cfg.Branch,
-		baseLog:         cfg.BaseLog,
-		watchDirs:       cfg.WatchDirs,
-		configWatchDirs: cfg.ConfigWatchDirs,
-		colors:          cfg.Colors,
-		holder:          holder,
+		port:               cfg.Port,
+		host:               cfg.Host,
+		planFile:           cfg.PlanFile,
+		branch:             cfg.Branch,
+		baseLog:            cfg.BaseLog,
+		watchDirs:          cfg.WatchDirs,
+		configWatchDirs:    cfg.ConfigWatchDirs,
+		colors:             cfg.Colors,
+		holder:             holder,
+		taskHeaderPatterns: cfg.TaskHeaderPatterns,
 	}
 }
 
@@ -79,11 +82,12 @@ func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 	}
 
 	cfg := ServerConfig{
-		Port:     d.port,
-		Host:     d.host,
-		PlanName: planName,
-		Branch:   d.branch,
-		PlanFile: d.planFile,
+		Port:               d.port,
+		Host:               d.host,
+		PlanName:           planName,
+		Branch:             d.branch,
+		PlanFile:           d.planFile,
+		TaskHeaderPatterns: d.taskHeaderPatterns,
 	}
 
 	// determine if we should use multi-session mode
@@ -182,11 +186,12 @@ func (d *Dashboard) setupWatchMode(ctx context.Context, dirs []string) (chan err
 	}
 
 	serverCfg := ServerConfig{
-		Port:     d.port,
-		Host:     d.host,
-		PlanName: "(watch mode)",
-		Branch:   "",
-		PlanFile: "",
+		Port:               d.port,
+		Host:               d.host,
+		PlanName:           "(watch mode)",
+		Branch:             "",
+		PlanFile:           "",
+		TaskHeaderPatterns: d.taskHeaderPatterns,
 	}
 
 	srv, err := NewServerWithSessions(serverCfg, sm)

@@ -61,7 +61,7 @@ docs/plans/         # plan files location
 
 ## Key Patterns
 
-- Plan format: Checkboxes (`- [ ]` / `- [x]`) belong only in Task sections (`### Task N:` or `### Iteration N:`). The `Task` / `Iteration` keywords are structural tokens matched by `pkg/plan/parse.go` (`taskHeaderPattern`) and MUST stay in English even when plan content is written in another language — task titles and body text may be localized, but the section header keyword is fixed. Success criteria, Overview, and Context should not use checkboxes — they cause extra loop iterations. The task prompt handles them when present, but plan authors should avoid them.
+- Plan format: Checkboxes (`- [ ]` / `- [x]`) belong only in Task sections. By default, headers matching `### Task {N}: {title}` or `### Iteration {N}: {title}` are recognized; the `Task` / `Iteration` keywords are structural tokens and MUST stay in English even when plan content is written in another language — task titles and body text may be localized, but the default section header keywords are fixed. Recognized header shapes are configurable via `task_header_patterns` (compiled by `pkg/plan/patterns.go`, passed to `pkg/plan/parse.go` `ParsePlan`/`ParsePlanFile` as a variadic `patterns ...string`; empty falls back to `plan.DefaultTaskHeaderPatterns`). Success criteria, Overview, and Context should not use checkboxes — they cause extra loop iterations. The task prompt handles them when present, but plan authors should avoid them.
 - Signal-based completion detection (COMPLETED, FAILED, REVIEW_DONE signals) — constants in `pkg/status/`
 - Plan creation signals: QUESTION (with JSON payload) and PLAN_READY
 - Streaming output with timestamps
@@ -291,6 +291,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - `session_timeout` config option: per-session timeout for claude (e.g., "30m", "1h"). Kills hanging sessions and continues to next iteration. CLI flag `--session-timeout` takes precedence. Disabled by default
 - `idle_timeout` config option: kills claude sessions when no output for specified duration (e.g., "5m"). Resets on each output line, only fires when session goes silent. CLI flag `--idle-timeout` takes precedence. Disabled by default
 - `move_plan_on_completion` config option: controls whether completed plans move to `docs/plans/completed/` on success. Default `true`. Disable for workflows that manage plan lifecycle externally (spec-driven tooling with separate archive steps)
+- `task_header_patterns` config option: comma-separated list of markdown header templates controlling which headers the plan parser recognizes as task sections. Placeholders: `{N}` (task identifier, required) and `{title}` (optional, must come after `{N}`). Default: `### Task {N}: {title}, ### Iteration {N}: {title}`. Use for spec-driven workflows (OpenSpec etc.) that use `## N. Phase` headers
 
 ### Local Project Config (.ralphex/)
 
@@ -372,6 +373,7 @@ Implementation:
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, origin/main, etc.), overridable via `--base-ref` CLI flag or `default_branch` config option
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (first: `git diff main...HEAD`, subsequent: `git diff`)
 - `{{PREVIOUS_REVIEW_CONTEXT}}` - previous review context block for external review iterations (empty on first iteration, formatted context on subsequent)
+- `{{TASK_HEADER_PATTERNS}}` - quoted, `or`-joined list of configured `task_header_patterns` templates (used in `task.txt`)
 - `{{agent:name}}` - expands to Task tool instructions for the named agent
 
 Variables are also expanded inside agent content, so custom agents can use `{{DEFAULT_BRANCH}}` etc.

@@ -43,7 +43,6 @@ type Plan struct {
 
 // patterns for parsing plan markdown.
 var (
-	taskHeaderPattern = regexp.MustCompile(`^###\s+(?:Task|Iteration)\s+([^:]+?):\s*(.*)$`)
 	// allow leading whitespace for indented sub-items (e.g. "  - [ ] Unit tests")
 	checkboxPattern = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
@@ -51,56 +50,120 @@ var (
 	formatInText = regexp.MustCompile(`\[\s*[ xX]?\s*\]`)
 )
 
+// matchTaskHeader tries each compiled pattern in order and returns the
+// (taskNum, title) capture groups for the first match. ok=false if no pattern matched.
+func matchTaskHeader(line string, compiled []*regexp.Regexp) (taskID, title string, ok bool) {
+	for _, re := range compiled {
+		matches := re.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		id := ""
+		if len(matches) > 1 {
+			id = matches[1]
+		}
+		t := ""
+		if len(matches) > 2 {
+			t = matches[2]
+		}
+		return id, t, true
+	}
+	return "", "", false
+}
+
+// headingLevel returns the number of leading '#' characters on a line, or 0 if
+// the line is not a markdown heading. a line starting with '#' is considered a
+// heading regardless of whether a space follows (matching the legacy behavior
+// that used strings.HasPrefix without whitespace checks).
+func headingLevel(line string) int {
+	i := 0
+	for i < len(line) && line[i] == '#' {
+		i++
+	}
+	return i
+}
+
+// closesTask reports whether a non-task-matching heading at lineLevel should
+// close a task opened at taskLevel. strictly shallower headings always close
+// (they start a new top-level section). same-level headings close only when
+// the task lives at the top of the document tree (level 1 or 2), because at
+// those levels a same-level heading is a sibling section, not a sub-note; at
+// deeper levels a same-level non-matching heading is treated as a note inside
+// the task so its checkboxes remain attached. see parse_test.go cases
+// "non-matching h3 does NOT close current task" and
+// "H1 task template closes preceding task on later non-task H1".
+func closesTask(lineLevel, taskLevel int) bool {
+	if lineLevel <= 0 || taskLevel <= 0 {
+		return false
+	}
+	if lineLevel < taskLevel {
+		return true
+	}
+	return lineLevel == taskLevel && taskLevel <= 2
+}
+
 // ParsePlan parses plan markdown content into a structured Plan.
-func ParsePlan(content string) (*Plan, error) {
+// patterns is an optional variadic list of task-header templates (e.g.
+// "### Task {N}: {title}"). If empty, DefaultTaskHeaderPatterns is used.
+func ParsePlan(content string, patterns ...string) (*Plan, error) {
+	compiled, err := CompileTaskHeaderPatterns(patterns)
+	if err != nil {
+		return nil, fmt.Errorf("compile task header patterns: %w", err)
+	}
+
 	p := &Plan{
 		Tasks: make([]Task, 0),
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	var currentTask *Task
+	currentTaskLevel := 0 // heading level (# count) of the currently open task
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		level := headingLevel(line)
 
-		// check for plan title (first h1)
-		if p.Title == "" {
-			if matches := titlePattern.FindStringSubmatch(line); matches != nil {
-				p.Title = strings.TrimSpace(matches[1])
-				continue
-			}
-		}
-
-		// check for task header
-		if matches := taskHeaderPattern.FindStringSubmatch(line); matches != nil {
+		// check for task header first (first match wins across configured patterns).
+		// runs before the H1 title capture so a custom H1 task template like
+		// "# {N}. {title}" is not silently consumed as the plan title.
+		if id, title, matched := matchTaskHeader(line, compiled); matched {
 			// save previous task if exists
 			if currentTask != nil {
 				currentTask.Status = DetermineTaskStatus(currentTask.Checkboxes)
 				p.Tasks = append(p.Tasks, *currentTask)
 			}
 
-			taskNum := parseTaskNum(matches[1])
-
 			currentTask = &Task{
-				Number:     taskNum,
-				Title:      strings.TrimSpace(matches[2]),
+				Number:     parseTaskNum(id),
+				Title:      strings.TrimSpace(title),
 				Status:     TaskStatusPending,
 				Checkboxes: make([]Checkbox, 0),
 			}
+			currentTaskLevel = level
 			continue
 		}
 
-		// non-Task section header (e.g. ## Success criteria, ## Overview, ## Context):
-		// close current task so checkboxes below are not attached to it.
-		// only ## (h2) closes; ### and #### are subsections and must not orphan checkboxes.
-		// also close on # (h1) when title already set, e.g. # Overview in plans using single hash for sections.
-		isH2 := strings.HasPrefix(line, "##") && !strings.HasPrefix(line, "###")
-		isH1AfterTitle := strings.HasPrefix(line, "#") && p.Title != "" && !strings.HasPrefix(line, "##")
-		if currentTask != nil && (isH2 || isH1AfterTitle) && !taskHeaderPattern.MatchString(line) {
+		// non-task heading: close the current task when it starts a new section at
+		// a shallower or sibling-top-level position (see closesTask). this lets
+		// deeper headings (e.g. #### inside a ### task) stay attached to the task
+		// as sub-notes, while a ## Success criteria or # Overview still closes a
+		// ### task, and a ## Phase task is not prematurely closed by a ### note.
+		if currentTask != nil && closesTask(level, currentTaskLevel) {
 			currentTask.Status = DetermineTaskStatus(currentTask.Checkboxes)
 			p.Tasks = append(p.Tasks, *currentTask)
 			currentTask = nil
+			currentTaskLevel = 0
 			continue
+		}
+
+		// check for plan title (first h1) — only when no task header matched above
+		// and no task is open, so H1-style task templates aren't swallowed here and
+		// a later # Section doesn't retroactively become the plan title.
+		if p.Title == "" && level == 1 {
+			if matches := titlePattern.FindStringSubmatch(line); matches != nil {
+				p.Title = strings.TrimSpace(matches[1])
+				continue
+			}
 		}
 
 		// check for checkbox (only if inside a task)
@@ -129,12 +192,14 @@ func ParsePlan(content string) (*Plan, error) {
 }
 
 // ParsePlanFile reads and parses a plan file from disk.
-func ParsePlanFile(path string) (*Plan, error) {
+// patterns is an optional variadic list of task-header templates (e.g.
+// "### Task {N}: {title}"). If empty, DefaultTaskHeaderPatterns is used.
+func ParsePlanFile(path string, patterns ...string) (*Plan, error) {
 	content, err := os.ReadFile(path) //nolint:gosec // path is internally resolved, not from user input
 	if err != nil {
 		return nil, fmt.Errorf("read plan file: %w", err)
 	}
-	return ParsePlan(string(content))
+	return ParsePlan(string(content), patterns...)
 }
 
 // FileHasUncompletedCheckbox returns true if the file contains any uncompleted actionable checkbox (- [ ]).
