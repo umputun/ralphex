@@ -60,6 +60,10 @@ ralphex --tasks-only docs/plans/feature.md
 # run in isolated git worktree (full and tasks-only modes only; ignored for --review/--external-only)
 ralphex --worktree docs/plans/feature.md
 
+# override branch name when auto-detection is fragile (generic filenames, spec-driven layouts)
+ralphex --worktree --branch=my-feature docs/plans/tasks.md
+ralphex --branch=my-feature docs/plans/tasks.md
+
 # override default branch for review diffs (useful for comparing against specific ref)
 ralphex --review --base-ref develop
 ralphex --review --base-ref abc1234 --skip-finalize

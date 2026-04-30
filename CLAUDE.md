@@ -202,7 +202,7 @@ Key files:
 
 ### Worktree Isolation Mode
 
-`--worktree` flag or `use_worktree = true` config option runs each plan in an isolated git worktree, enabling parallel execution of multiple plans on the same repo.
+`--worktree` flag or `use_worktree = true` config option runs each plan in an isolated git worktree, enabling parallel execution of multiple plans on the same repo. `--branch` flag overrides the branch name derived from the plan filename (useful when auto-detection is fragile, e.g. generic filenames or spec-driven layouts).
 
 - Worktrees created at `.ralphex/worktrees/<branch-name>` inside main repo
 - Progress logger created before chdir so files land in main repo's `.ralphex/progress/`

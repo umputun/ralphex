@@ -46,6 +46,7 @@ type opts struct {
 	IdleTimeout           time.Duration `long:"idle-timeout" description:"kill claude session after no output for this duration (e.g. 5m, 10m)"`
 	SkipFinalize          bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
 	Worktree              bool          `long:"worktree" description:"run in isolated git worktree"`
+	Branch                string        `long:"branch" description:"override branch name for worktree/branch creation (default: derived from plan filename)"`
 	PlanDescription       string        `long:"plan" description:"create plan interactively (enter plan description)"`
 	Debug                 bool          `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor               bool          `long:"no-color" description:"disable color output"`
@@ -133,9 +134,10 @@ type executePlanRequest struct {
 	DefaultBranch string // actual default branch for branch/worktree creation (config or auto-detect)
 	BaseRef       string // base reference for review diffs and templates (--base-ref override or DefaultBranch)
 	NotifySvc     *notify.Service
-	WtCleanup     *worktreeCleanupFn  // worktree cleanup for interrupt handler; nil when not in worktree mode
-	ProgressLog   *progress.Logger    // pre-created logger (worktree mode); nil in normal mode
-	PhaseHolder   *status.PhaseHolder // pre-created holder (worktree mode); nil in normal mode
+	BranchOverride string             // branch name override (--branch flag); empty = derive from plan filename
+	WtCleanup      *worktreeCleanupFn  // worktree cleanup for interrupt handler; nil when not in worktree mode
+	ProgressLog    *progress.Logger    // pre-created logger (worktree mode); nil in normal mode
+	PhaseHolder    *status.PhaseHolder // pre-created holder (worktree mode); nil in normal mode
 }
 
 // worktreeCleanupFn holds a worktree cleanup function with mutex for safe cross-goroutine access.
@@ -301,14 +303,15 @@ func run(ctx context.Context, o opts) error {
 	}
 
 	return selectAndExecutePlan(ctx, o, executePlanRequest{
-		Mode:          mode,
-		GitSvc:        gitSvc,
-		Config:        cfg,
-		Colors:        colors,
-		DefaultBranch: defaultBranch,
-		BaseRef:       baseRef,
-		NotifySvc:     notifySvc,
-		WtCleanup:     wtCleanup,
+		Mode:           mode,
+		GitSvc:         gitSvc,
+		Config:         cfg,
+		Colors:         colors,
+		DefaultBranch:  defaultBranch,
+		BaseRef:        baseRef,
+		NotifySvc:      notifySvc,
+		WtCleanup:      wtCleanup,
+		BranchOverride: o.Branch,
 	}, selector)
 }
 
@@ -337,7 +340,7 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
 	if planFile != "" && modeRequiresBranch(req.Mode) {
-		if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch); err != nil {
+		if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch, req.BranchOverride); err != nil {
 			return fmt.Errorf("create branch for plan: %w", err)
 		}
 	}
@@ -607,7 +610,7 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 // in the main repo), chdirs into the worktree, and runs executePlan. On return the worktree
 // is cleaned up and CWD is restored. req.WtCleanup is populated for interrupt handler use.
 func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err error) {
-	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile, req.DefaultBranch)
+	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile, req.DefaultBranch, req.BranchOverride)
 	if err != nil {
 		return fmt.Errorf("create worktree: %w", err)
 	}
@@ -644,7 +647,10 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 	// create progress logger BEFORE chdir so progress files land in main repo's .ralphex/progress/.
 	// use branch name derived from plan file since gitSvc still points at the main repo (on master).
 	holder := &status.PhaseHolder{}
-	branch := plan.ExtractBranchName(req.PlanFile)
+	branch := req.BranchOverride
+	if branch == "" {
+		branch = plan.ExtractBranchName(req.PlanFile)
+	}
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: req.PlanFile,
 		Mode:     string(req.Mode),
@@ -1034,20 +1040,21 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	// worktree mode: create worktree and run from there
 	if req.Config.WorktreeEnabled {
 		return runWithWorktree(ctx, o, executePlanRequest{
-			PlanFile:      planFile,
-			Mode:          processor.ModeFull,
-			GitSvc:        req.GitSvc,
-			Config:        req.Config,
-			Colors:        req.Colors,
-			DefaultBranch: req.DefaultBranch,
-			BaseRef:       req.BaseRef,
-			NotifySvc:     req.NotifySvc,
-			WtCleanup:     req.WtCleanup,
+			PlanFile:       planFile,
+			Mode:           processor.ModeFull,
+			GitSvc:         req.GitSvc,
+			Config:         req.Config,
+			Colors:         req.Colors,
+			DefaultBranch:  req.DefaultBranch,
+			BaseRef:        req.BaseRef,
+			NotifySvc:      req.NotifySvc,
+			WtCleanup:      req.WtCleanup,
+			BranchOverride: req.BranchOverride,
 		})
 	}
 
 	// normal mode: create branch and run in place
-	if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch); err != nil {
+	if err := req.GitSvc.CreateBranchForPlan(planFile, req.DefaultBranch, req.BranchOverride); err != nil {
 		return fmt.Errorf("create branch for plan: %w", err)
 	}
 

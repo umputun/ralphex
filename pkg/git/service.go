@@ -166,7 +166,8 @@ func (s *Service) CreateBranch(name string) error {
 // when requireDefault is true, returns error if not on the default branch.
 // when requireDefault is false, returns empty branch name if not on the default branch (caller should skip).
 // defaultBranch is the resolved default branch name (e.g. "main", "develop", "origin/main").
-func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaultBranch string) (string, bool, error) {
+// branchOverride, when non-empty, is used directly instead of deriving from planFile.
+func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaultBranch, branchOverride string) (string, bool, error) {
 	currentBranch, err := s.repo.currentBranch()
 	if err != nil {
 		return "", false, fmt.Errorf("check current branch: %w", err)
@@ -183,7 +184,10 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 		return "", false, nil // already on feature branch, caller should skip
 	}
 
-	branchName := plan.ExtractBranchName(planFile)
+	branchName := branchOverride
+	if branchName == "" {
+		branchName = plan.ExtractBranchName(planFile)
+	}
 
 	// check for uncommitted changes to files other than the plan
 	dirtyFiles, err := s.repo.hasChangesOtherThan(planFile)
@@ -220,9 +224,10 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 // If on the default branch, extracts branch name from plan file and creates/switches to it.
 // If plan file has uncommitted changes and is the only dirty file, auto-commits it.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop").
-func (s *Service) CreateBranchForPlan(planFile, defaultBranch string) error {
+// branchOverride, when non-empty, is used directly instead of deriving the name from planFile.
+func (s *Service) CreateBranchForPlan(planFile, defaultBranch, branchOverride string) error {
 	planFile = s.resolveFilesystemCase(planFile)
-	branchName, planHasChanges, err := s.preparePlanBranch(planFile, false, defaultBranch)
+	branchName, planHasChanges, err := s.preparePlanBranch(planFile, false, defaultBranch, branchOverride)
 	if err != nil {
 		return err
 	}
@@ -264,12 +269,16 @@ func (s *Service) CreateBranchForPlan(planFile, defaultBranch string) error {
 // must commit the plan file in the worktree context (via CommitPlanFile on the worktree's
 // git service) so the commit lands on the feature branch rather than the default branch.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop").
-func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch string) (string, bool, error) {
+// branchOverride, when non-empty, is used directly instead of deriving the name from planFile.
+func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch, branchOverride string) (string, bool, error) {
 	planFile = s.resolveFilesystemCase(planFile)
 
 	// check worktree existence early, before preparePlanBranch runs hasChangesOtherThan
 	// (an existing worktree dir would show up as untracked and fail the dirty check)
-	earlyBranch := plan.ExtractBranchName(planFile)
+	earlyBranch := branchOverride
+	if earlyBranch == "" {
+		earlyBranch = plan.ExtractBranchName(planFile)
+	}
 	wtPath := filepath.Join(s.repo.root(), ".ralphex", "worktrees", earlyBranch)
 
 	// prune stale worktree entries first
@@ -282,7 +291,7 @@ func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch string) (string,
 		return "", false, fmt.Errorf("worktree already exists at %s, another instance may be running", wtPath)
 	}
 
-	branchName, planHasChanges, err := s.preparePlanBranch(planFile, true, defaultBranch)
+	branchName, planHasChanges, err := s.preparePlanBranch(planFile, true, defaultBranch, branchOverride)
 	if err != nil {
 		return "", false, err
 	}
