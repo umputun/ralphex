@@ -1314,12 +1314,17 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	}
 	if value, ok := cliStringOverride(o.ClaudeArgs, o.claudeArgsSet, o.ClaudeArgsAlias, o.claudeArgsAliasSet); ok {
 		cfg.ClaudeArgs = value
+		cfg.ClaudeArgsSet = true
 	}
 	if value, ok := cliStringOverride(
 		o.ExternalReviewTool, o.externalReviewToolSet,
 		o.ExternalReviewAlias, o.externalReviewAliasSet,
 	); ok {
 		cfg.ExternalReviewTool = value
+		if value != "none" {
+			cfg.CodexEnabled = true
+			cfg.CodexEnabledSet = true
+		}
 	}
 	if value, ok := cliStringOverride(
 		o.CustomReviewScript, o.customReviewScriptSet,

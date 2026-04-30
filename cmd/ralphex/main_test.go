@@ -648,6 +648,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		applyCLIOverrides(o, cfg)
 
 		assert.Empty(t, cfg.ClaudeArgs)
+		assert.True(t, cfg.ClaudeArgsSet)
 	})
 
 	t.Run("external_review_tool_overrides_config", func(t *testing.T) {
@@ -666,6 +667,32 @@ func TestProviderOverrideFlags(t *testing.T) {
 		applyCLIOverrides(o, cfg)
 
 		assert.Equal(t, "/tmp/review.sh", cfg.CustomReviewScript)
+	})
+
+	t.Run("external_review_tool_cli_override_enables_legacy_disabled_review", func(t *testing.T) {
+		cfg := &config.Config{
+			CodexEnabled:       false,
+			CodexEnabledSet:    true,
+			ExternalReviewTool: "none",
+		}
+		o := parseTestOpts(t, "--external-review-tool", "custom")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Equal(t, "custom", cfg.ExternalReviewTool)
+		assert.True(t, cfg.CodexEnabled)
+		assert.True(t, cfg.CodexEnabledSet)
+	})
+
+	t.Run("external_review_tool_none_keeps_review_disabled", func(t *testing.T) {
+		cfg := &config.Config{CodexEnabled: false, CodexEnabledSet: true, ExternalReviewTool: "codex"}
+		o := parseTestOpts(t, "--external-review-tool", "none")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+		assert.False(t, cfg.CodexEnabled)
+		assert.True(t, cfg.CodexEnabledSet)
 	})
 }
 

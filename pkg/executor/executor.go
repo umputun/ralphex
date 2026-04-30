@@ -216,6 +216,7 @@ type streamEvent struct {
 type ClaudeExecutor struct {
 	Command       string            // command to execute, defaults to "claude"
 	Args          string            // additional arguments (space-separated), defaults to standard args
+	ArgsSet       bool              // true when Args was explicitly set, including an empty value
 	Model         string            // model override (e.g., "opus", "sonnet", "haiku"); empty = CLI default
 	Effort        string            // reasoning effort override (e.g., "low", "medium", "high", "xhigh", "max"); empty = CLI default
 	OutputHandler func(text string) // called for each text chunk, can be nil
@@ -235,9 +236,12 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 
 	// build args from configured string or use defaults
 	var args []string
-	if e.Args != "" {
+	switch {
+	case e.ArgsSet:
 		args = splitArgs(e.Args)
-	} else {
+	case e.Args != "":
+		args = splitArgs(e.Args)
+	default:
 		args = []string{
 			"--dangerously-skip-permissions",
 			"--output-format", "stream-json",
