@@ -18,8 +18,34 @@ import (
 	"github.com/umputun/ralphex/pkg/progress"
 )
 
-// datePrefixRe matches date-like prefixes in plan filenames (e.g., "2024-01-15-").
+// datePrefixRe matches date-like prefixes in plan filenames (e.g., "2024-01-15-", "20260428-").
 var datePrefixRe = regexp.MustCompile(`^[\d-]+`)
+
+// dirDatePrefixRe matches genuine ISO date prefixes in directory names (YYYY-MM-DD[-] or
+// YYYYMMDD[-]). Trailing dash is optional so pure-date dirs (e.g. "20260428") strip to ""
+// and trigger the filename fallback. More restrictive than datePrefixRe to avoid stripping
+// non-date numeric prefixes like "2fa-" or "404-" from directory names.
+var dirDatePrefixRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-?|^\d{8}-?`)
+
+// genericPlanFilenames lists filenames (and container directory names) where the directory name
+// carries the identity (e.g. OpenSpec layouts like changes/add-dark-mode/tasks.md). When the
+// parent directory is also in this set, the original filename is preserved as fallback.
+// Match is case-insensitive.
+var genericPlanFilenames = map[string]bool{
+	"tasks":  true,
+	"plan":   true,
+	"plans":  true,
+	"index":  true,
+	"readme": true,
+}
+
+func stripDatePrefix(name string) string {
+	return strings.TrimLeft(datePrefixRe.ReplaceAllString(name, ""), "-")
+}
+
+func stripDirDatePrefix(name string) string {
+	return strings.TrimLeft(dirDatePrefixRe.ReplaceAllString(name, ""), "-")
+}
 
 // ErrNoPlansFound is returned when no plan files exist in the plans directory.
 var ErrNoPlansFound = errors.New("no plans found")
@@ -158,9 +184,19 @@ func (s *Selector) FindRecent(startTime time.Time) string {
 // removes the .md extension and strips any leading date prefix (e.g., "2024-01-15-").
 func ExtractBranchName(planFile string) string {
 	name := strings.TrimSuffix(filepath.Base(planFile), ".md")
-	branchName := strings.TrimLeft(datePrefixRe.ReplaceAllString(name, ""), "-")
+	branchName := stripDatePrefix(name)
 	if branchName == "" {
 		return name
+	}
+	if genericPlanFilenames[strings.ToLower(branchName)] {
+		parentDir := filepath.Dir(planFile)
+		if filepath.Dir(parentDir) != parentDir { // not a filesystem root (handles Unix, Windows)
+			dir := filepath.Base(parentDir)
+			stripped := stripDirDatePrefix(dir)
+			if stripped != "" && !genericPlanFilenames[strings.ToLower(stripped)] {
+				return stripped
+			}
+		}
 	}
 	return branchName
 }

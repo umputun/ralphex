@@ -195,10 +195,12 @@ Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, e
 - `Logger` interface for dependency injection, compatible with `*color.Color`
 - Uses `backend` interface internally, implemented by `externalBackend` which shells out to the configured VCS command
 - Optional `vcsCmd` parameter overrides the default `"git"` command (e.g., path to `hg2git.sh` translation script)
+- Branch names are derived from plan paths via `plan.ExtractBranchName`. For generic filenames (`tasks`, `plan`, `plans`, `index`, `readme`, case-insensitive) it falls back to the parent directory's basename (with date prefix stripped) so OpenSpec-style layouts like `openspec/changes/add-dark-mode/tasks.md` yield `add-dark-mode` instead of `tasks`. Bare or nested-generic paths keep the original filename.
 
 Key files:
 - `pkg/git/service.go` - `Service` type, `backend` interface
 - `pkg/git/external.go` - VCS CLI backend (`externalBackend` type)
+- `pkg/plan/plan.go` - `ExtractBranchName`, `stripDatePrefix`, `genericPlanFilenames`
 
 ### Worktree Isolation Mode
 
