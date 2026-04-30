@@ -37,17 +37,17 @@ Add per-run CLI flags that override configured provider settings for Claude-comp
 **Files:**
 - Modify: `cmd/ralphex/main.go`
 
-- [ ] Add visible CLI flags to `opts`: `--claude-command`, `--claude-args`, `--external-review-tool`, and `--custom-review-script`
-- [ ] Add `choice:"codex"`, `choice:"custom"`, and `choice:"none"` validation to `--external-review-tool`
-- [ ] Add hidden underscore aliases for config-style spelling: `--claude_command`, `--claude_args`, `--external_review_tool`, and `--custom_review_script`
-- [ ] Extend `opts` with set-tracking booleans for the new visible flags and hidden aliases so empty string overrides are detectable
-- [ ] Extend `markFlagsSet()` to populate the new set-tracking booleans
-- [ ] Extend `validateFlags()` to reject conflicting visible/alias values when both forms are provided with different values
-- [ ] Extend `applyCLIOverrides()` so explicitly set CLI values override `cfg.ClaudeCommand`, `cfg.ClaudeArgs`, `cfg.ExternalReviewTool`, and `cfg.CustomReviewScript`
-- [ ] Preserve explicit empty `--claude-args=` as a real override so users can clear default Claude flags for wrappers
-- [ ] Move `applyCLIOverrides(o, cfg)` to immediately after `config.Load()` and before `checkClaudeDep(cfg)`
-- [ ] Remove or avoid duplicate later override application after branch detection
-- [ ] Run `go test ./cmd/ralphex` - must pass before task 2
+- [x] Add visible CLI flags to `opts`: `--claude-command`, `--claude-args`, `--external-review-tool`, and `--custom-review-script`
+- [x] Add `choice:"codex"`, `choice:"custom"`, and `choice:"none"` validation to `--external-review-tool`
+- [x] Add hidden underscore aliases for config-style spelling: `--claude_command`, `--claude_args`, `--external_review_tool`, and `--custom_review_script`
+- [x] Extend `opts` with set-tracking booleans for the new visible flags and hidden aliases so empty string overrides are detectable
+- [x] Extend `markFlagsSet()` to populate the new set-tracking booleans
+- [x] Extend `validateFlags()` to reject conflicting visible/alias values when both forms are provided with different values
+- [x] Extend `applyCLIOverrides()` so explicitly set CLI values override `cfg.ClaudeCommand`, `cfg.ClaudeArgs`, `cfg.ExternalReviewTool`, and `cfg.CustomReviewScript`
+- [x] Preserve explicit empty `--claude-args=` as a real override so users can clear default Claude flags for wrappers
+- [x] Move `applyCLIOverrides(o, cfg)` to immediately after `config.Load()` and before `checkClaudeDep(cfg)`
+- [x] Remove or avoid duplicate later override application after branch detection
+- [x] Run `go test ./cmd/ralphex` - must pass before task 2
 
 ### Task 2: Add CLI override tests
 

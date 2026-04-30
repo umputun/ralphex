@@ -36,6 +36,14 @@ type opts struct {
 	ReviewPatience        int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
 	TaskModel             string        `long:"task-model" description:"model for task execution as model[:effort] (e.g., opus, opus:high, :medium)"`
 	ReviewModel           string        `long:"review-model" description:"model for review phases as model[:effort] (falls back to --task-model)"`
+	ClaudeCommand         string        `long:"claude-command" description:"override claude-compatible command for this run"`
+	ClaudeArgs            string        `long:"claude-args" description:"override claude-compatible command args for this run"`
+	ExternalReviewTool    string        `long:"external-review-tool" choice:"codex" choice:"custom" choice:"none" description:"override external review tool for this run"`
+	CustomReviewScript    string        `long:"custom-review-script" description:"override custom external review script for this run"`
+	ClaudeCommandAlias    string        `long:"claude_command" hidden:"true"`
+	ClaudeArgsAlias       string        `long:"claude_args" hidden:"true"`
+	ExternalReviewAlias   string        `long:"external_review_tool" choice:"codex" choice:"custom" choice:"none" hidden:"true"`
+	CustomReviewAlias     string        `long:"custom_review_script" hidden:"true"`
 	Review                bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
 	ExternalOnly          bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
 	CodexOnly             bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
@@ -65,6 +73,15 @@ type opts struct {
 	waitSet           bool
 	sessionTimeoutSet bool
 	idleTimeoutSet    bool
+
+	claudeCommandSet       bool
+	claudeArgsSet          bool
+	externalReviewToolSet  bool
+	customReviewScriptSet  bool
+	claudeCommandAliasSet  bool
+	claudeArgsAliasSet     bool
+	externalReviewAliasSet bool
+	customReviewAliasSet   bool
 }
 
 // markFlagsSet detects which duration flags were explicitly provided on the CLI
@@ -76,6 +93,14 @@ func (o *opts) markFlagsSet(parser *flags.Parser) {
 	o.waitSet = isFlagSet(parser, "wait")
 	o.sessionTimeoutSet = isFlagSet(parser, "session-timeout")
 	o.idleTimeoutSet = isFlagSet(parser, "idle-timeout")
+	o.claudeCommandSet = isFlagSet(parser, "claude-command")
+	o.claudeArgsSet = isFlagSet(parser, "claude-args")
+	o.externalReviewToolSet = isFlagSet(parser, "external-review-tool")
+	o.customReviewScriptSet = isFlagSet(parser, "custom-review-script")
+	o.claudeCommandAliasSet = isFlagSet(parser, "claude_command")
+	o.claudeArgsAliasSet = isFlagSet(parser, "claude_args")
+	o.externalReviewAliasSet = isFlagSet(parser, "external_review_tool")
+	o.customReviewAliasSet = isFlagSet(parser, "custom_review_script")
 }
 
 var revision = "unknown"
@@ -232,6 +257,7 @@ func run(ctx context.Context, o opts) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	applyCLIOverrides(o, cfg)
 
 	// create colors from config (all colors guaranteed populated via fallback)
 	colors := progress.NewColors(cfg.Colors)
@@ -279,7 +305,6 @@ func run(ctx context.Context, o opts) error {
 	defaultBranch := resolveDefaultBranch("", cfg.DefaultBranch, autoDetected)
 	// baseRef is for review diffs and {{DEFAULT_BRANCH}} template variable (--base-ref override)
 	baseRef := resolveDefaultBranch(o.BaseRef, cfg.DefaultBranch, autoDetected)
-	applyCLIOverrides(o, cfg)
 
 	mode := determineMode(o)
 
@@ -834,6 +859,30 @@ func validateFlags(o opts) error {
 	if o.PlanDescription != "" && o.PlanFile != "" {
 		return errors.New("--plan flag conflicts with plan file argument; use one or the other")
 	}
+	if err := validateAliasConflict(
+		"claude-command", o.ClaudeCommand, o.claudeCommandSet,
+		"claude_command", o.ClaudeCommandAlias, o.claudeCommandAliasSet,
+	); err != nil {
+		return err
+	}
+	if err := validateAliasConflict(
+		"claude-args", o.ClaudeArgs, o.claudeArgsSet,
+		"claude_args", o.ClaudeArgsAlias, o.claudeArgsAliasSet,
+	); err != nil {
+		return err
+	}
+	if err := validateAliasConflict(
+		"external-review-tool", o.ExternalReviewTool, o.externalReviewToolSet,
+		"external_review_tool", o.ExternalReviewAlias, o.externalReviewAliasSet,
+	); err != nil {
+		return err
+	}
+	if err := validateAliasConflict(
+		"custom-review-script", o.CustomReviewScript, o.customReviewScriptSet,
+		"custom_review_script", o.CustomReviewAlias, o.customReviewAliasSet,
+	); err != nil {
+		return err
+	}
 	if o.Wait < 0 {
 		return fmt.Errorf("--wait must be non-negative, got %s", o.Wait)
 	}
@@ -842,6 +891,13 @@ func validateFlags(o opts) error {
 	}
 	if o.IdleTimeout < 0 {
 		return fmt.Errorf("--idle-timeout must be non-negative, got %s", o.IdleTimeout)
+	}
+	return nil
+}
+
+func validateAliasConflict(visibleName, visibleValue string, visibleSet bool, aliasName, aliasValue string, aliasSet bool) error {
+	if visibleSet && aliasSet && visibleValue != aliasValue {
+		return fmt.Errorf("--%s conflicts with --%s; use one spelling or provide the same value", visibleName, aliasName)
 	}
 	return nil
 }
@@ -1253,6 +1309,34 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 		cfg.IdleTimeout = o.IdleTimeout
 		cfg.IdleTimeoutSet = true
 	}
+	if value, ok := cliStringOverride(o.ClaudeCommand, o.claudeCommandSet, o.ClaudeCommandAlias, o.claudeCommandAliasSet); ok {
+		cfg.ClaudeCommand = value
+	}
+	if value, ok := cliStringOverride(o.ClaudeArgs, o.claudeArgsSet, o.ClaudeArgsAlias, o.claudeArgsAliasSet); ok {
+		cfg.ClaudeArgs = value
+	}
+	if value, ok := cliStringOverride(
+		o.ExternalReviewTool, o.externalReviewToolSet,
+		o.ExternalReviewAlias, o.externalReviewAliasSet,
+	); ok {
+		cfg.ExternalReviewTool = value
+	}
+	if value, ok := cliStringOverride(
+		o.CustomReviewScript, o.customReviewScriptSet,
+		o.CustomReviewAlias, o.customReviewAliasSet,
+	); ok {
+		cfg.CustomReviewScript = value
+	}
+}
+
+func cliStringOverride(visibleValue string, visibleSet bool, aliasValue string, aliasSet bool) (string, bool) {
+	if visibleSet {
+		return visibleValue, true
+	}
+	if aliasSet {
+		return aliasValue, true
+	}
+	return "", false
 }
 
 // isFlagSet returns true if the named CLI flag was explicitly provided on the command line.
