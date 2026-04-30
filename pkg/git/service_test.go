@@ -423,6 +423,24 @@ func TestService_CreateBranchForPlan(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, hasChanges, "plan file should be committed")
 	})
+
+	t.Run("branch override used instead of plan filename", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, &mockLogger{})
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "2026-04-30-some-long-generated-name.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		err = svc.CreateBranchForPlan(planFile, "master", "my-custom-branch")
+		require.NoError(t, err)
+
+		branch, err := svc.CurrentBranch()
+		require.NoError(t, err)
+		assert.Equal(t, "my-custom-branch", branch)
+	})
 }
 
 func TestService_MovePlanToCompleted(t *testing.T) {
@@ -1195,6 +1213,26 @@ func TestService_CommitPlanFile(t *testing.T) {
 		// cleanup
 		require.NoError(t, svc.RemoveWorktree(wtPath))
 	})
+
+	t.Run("branch override used instead of plan filename", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, &mockLogger{})
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "2026-04-30-some-long-generated-name.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "master", "my-custom-branch")
+		require.NoError(t, err)
+		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // test cleanup, error irrelevant
+
+		// worktree path should use the override, not the plan filename
+		assert.Contains(t, wtPath, "my-custom-branch")
+		assert.True(t, svc.repo.branchExists("my-custom-branch"))
+		assert.False(t, svc.repo.branchExists("some-long-generated-name"))
+	})
 }
 
 func TestService_RemoveWorktree(t *testing.T) {
@@ -1256,44 +1294,6 @@ func TestService_RemoveWorktree(t *testing.T) {
 
 		// branch should still exist
 		assert.True(t, svc.repo.branchExists("preserve-branch"))
-	})
-
-	t.Run("branch override used instead of plan filename", func(t *testing.T) {
-		dir := setupExternalTestRepo(t)
-		svc, err := NewService(dir, &mockLogger{})
-		require.NoError(t, err)
-
-		plansDir := filepath.Join(dir, "docs", "plans")
-		require.NoError(t, os.MkdirAll(plansDir, 0o750))
-		planFile := filepath.Join(plansDir, "2026-04-30-some-long-generated-name.md")
-		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
-
-		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "master", "my-custom-branch")
-		require.NoError(t, err)
-		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // test cleanup, error irrelevant
-
-		// worktree path should use the override, not the plan filename
-		assert.Contains(t, wtPath, "my-custom-branch")
-		assert.True(t, svc.repo.branchExists("my-custom-branch"))
-		assert.False(t, svc.repo.branchExists("some-long-generated-name"))
-	})
-
-	t.Run("branch override used in CreateBranchForPlan", func(t *testing.T) {
-		dir := setupExternalTestRepo(t)
-		svc, err := NewService(dir, &mockLogger{})
-		require.NoError(t, err)
-
-		plansDir := filepath.Join(dir, "docs", "plans")
-		require.NoError(t, os.MkdirAll(plansDir, 0o750))
-		planFile := filepath.Join(plansDir, "2026-04-30-some-long-generated-name.md")
-		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
-
-		err = svc.CreateBranchForPlan(planFile, "master", "my-custom-branch")
-		require.NoError(t, err)
-
-		branch, err := svc.CurrentBranch()
-		require.NoError(t, err)
-		assert.Equal(t, "my-custom-branch", branch)
 	})
 }
 
@@ -1426,16 +1426,17 @@ func TestService_CommitWithTrailer(t *testing.T) {
 		require.NoError(t, err)
 		svc.SetCommitTrailer("Co-authored-by: ralphex <noreply@ralphex.com>")
 
-		// create and commit a plan file via CommitPlanFile
+		// create plan file and switch to feature branch (mirrors real worktree flow)
 		plansDir := filepath.Join(svc.Root(), "docs", "plans")
 		require.NoError(t, os.MkdirAll(plansDir, 0o750))
 		planFile := filepath.Join(plansDir, "trailer-test.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		require.NoError(t, svc.CreateBranch("trailer-test"))
 
 		err = svc.CommitPlanFile(planFile, svc.Root())
 		require.NoError(t, err)
 
-		// verify trailer in commit message
+		// verify trailer in commit message; branch name comes from current branch
 		out := runGit(t, svc.Root(), "log", "-1", "--format=%B")
 		assert.Contains(t, out, "add plan: trailer-test")
 		assert.Contains(t, out, "Co-authored-by: ralphex <noreply@ralphex.com>")
@@ -1451,6 +1452,7 @@ func TestService_CommitWithTrailer(t *testing.T) {
 		require.NoError(t, os.MkdirAll(plansDir, 0o750))
 		planFile := filepath.Join(plansDir, "no-trailer.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		require.NoError(t, svc.CreateBranch("no-trailer"))
 
 		err = svc.CommitPlanFile(planFile, svc.Root())
 		require.NoError(t, err)

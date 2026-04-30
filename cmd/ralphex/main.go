@@ -124,17 +124,17 @@ type startupInfo struct {
 
 // executePlanRequest holds parameters for plan execution.
 type executePlanRequest struct {
-	PlanFile      string
-	MainPlanFile  string // original plan path in main repo (worktree mode); empty in normal mode
-	Mode          processor.Mode
-	GitSvc        *git.Service
-	MainGitSvc    *git.Service // main repo service for cross-boundary ops (worktree mode); nil in normal mode
-	Config        *config.Config
-	Colors        *progress.Colors
-	DefaultBranch string // actual default branch for branch/worktree creation (config or auto-detect)
-	BaseRef       string // base reference for review diffs and templates (--base-ref override or DefaultBranch)
-	NotifySvc     *notify.Service
-	BranchOverride string             // branch name override (--branch flag); empty = derive from plan filename
+	PlanFile       string
+	MainPlanFile   string // original plan path in main repo (worktree mode); empty in normal mode
+	Mode           processor.Mode
+	GitSvc         *git.Service
+	MainGitSvc     *git.Service // main repo service for cross-boundary ops (worktree mode); nil in normal mode
+	Config         *config.Config
+	Colors         *progress.Colors
+	DefaultBranch  string // actual default branch for branch/worktree creation (config or auto-detect)
+	BaseRef        string // base reference for review diffs and templates (--base-ref override or DefaultBranch)
+	NotifySvc      *notify.Service
+	BranchOverride string              // branch name override (--branch flag); empty = derive from plan filename
 	WtCleanup      *worktreeCleanupFn  // worktree cleanup for interrupt handler; nil when not in worktree mode
 	ProgressLog    *progress.Logger    // pre-created logger (worktree mode); nil in normal mode
 	PhaseHolder    *status.PhaseHolder // pre-created holder (worktree mode); nil in normal mode
@@ -291,14 +291,15 @@ func run(ctx context.Context, o opts) error {
 	// plan mode has different flow - doesn't require plan file selection
 	if mode == processor.ModePlan {
 		return runPlanMode(ctx, o, executePlanRequest{
-			Mode:          processor.ModePlan,
-			GitSvc:        gitSvc,
-			Config:        cfg,
-			Colors:        colors,
-			DefaultBranch: defaultBranch,
-			BaseRef:       baseRef,
-			NotifySvc:     notifySvc,
-			WtCleanup:     wtCleanup,
+			Mode:           processor.ModePlan,
+			GitSvc:         gitSvc,
+			Config:         cfg,
+			Colors:         colors,
+			DefaultBranch:  defaultBranch,
+			BaseRef:        baseRef,
+			NotifySvc:      notifySvc,
+			WtCleanup:      wtCleanup,
+			BranchOverride: o.Branch,
 		}, selector)
 	}
 
@@ -647,10 +648,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 	// create progress logger BEFORE chdir so progress files land in main repo's .ralphex/progress/.
 	// use branch name derived from plan file since gitSvc still points at the main repo (on master).
 	holder := &status.PhaseHolder{}
-	branch := req.BranchOverride
-	if branch == "" {
-		branch = plan.ExtractBranchName(req.PlanFile)
-	}
+	branch := req.GitSvc.EffectiveBranchName(req.PlanFile, req.BranchOverride)
 	baseLog, err := progress.NewLogger(progress.Config{
 		PlanFile: req.PlanFile,
 		Mode:     string(req.Mode),

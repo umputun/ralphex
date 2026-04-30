@@ -161,6 +161,14 @@ func (s *Service) CreateBranch(name string) error {
 	return nil
 }
 
+// EffectiveBranchName returns branchOverride when set, otherwise derives the branch name from planFile.
+func (s *Service) EffectiveBranchName(planFile, branchOverride string) string {
+	if branchOverride != "" {
+		return branchOverride
+	}
+	return plan.ExtractBranchName(planFile)
+}
+
 // preparePlanBranch validates state, extracts branch name, and checks plan file status.
 // returns branch name and whether the plan file has uncommitted changes.
 // when requireDefault is true, returns error if not on the default branch.
@@ -184,10 +192,7 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 		return "", false, nil // already on feature branch, caller should skip
 	}
 
-	branchName := branchOverride
-	if branchName == "" {
-		branchName = plan.ExtractBranchName(planFile)
-	}
+	branchName := s.EffectiveBranchName(planFile, branchOverride)
 
 	// check for uncommitted changes to files other than the plan
 	dirtyFiles, err := s.repo.hasChangesOtherThan(planFile)
@@ -275,10 +280,7 @@ func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch, branchOverride 
 
 	// check worktree existence early, before preparePlanBranch runs hasChangesOtherThan
 	// (an existing worktree dir would show up as untracked and fail the dirty check)
-	earlyBranch := branchOverride
-	if earlyBranch == "" {
-		earlyBranch = plan.ExtractBranchName(planFile)
-	}
+	earlyBranch := s.EffectiveBranchName(planFile, branchOverride)
 	wtPath := filepath.Join(s.repo.root(), ".ralphex", "worktrees", earlyBranch)
 
 	// prune stale worktree entries first
@@ -327,7 +329,10 @@ func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch, branchOverride 
 // the plan file path is resolved to actual on-disk case before staging
 // to handle case-insensitive filesystems (macOS APFS).
 func (s *Service) CommitPlanFile(planFile, mainRepoRoot string) error {
-	branchName := plan.ExtractBranchName(planFile)
+	branchName, err := s.repo.currentBranch()
+	if err != nil || branchName == "" {
+		branchName = plan.ExtractBranchName(planFile)
+	}
 	s.log.Printf("committing plan file: %s\n", filepath.Base(planFile))
 
 	// compute the plan file's relative path from the main repo root, then resolve
