@@ -191,22 +191,8 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// (e.g., reviewing code that handles rate limits).
 	// skip pattern checks on context cancellation — cancellation must propagate as-is.
 	if finalErr != nil && ctx.Err() == nil {
-		// check limit patterns first (higher priority)
-		if pattern := matchPattern(stdoutContent, e.LimitPatterns); pattern != "" {
-			return Result{
-				Output: stdoutContent,
-				Signal: signal,
-				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "codex /status"},
-			}
-		}
-
-		// check for error patterns in output
-		if pattern := matchPattern(stdoutContent, e.ErrorPatterns); pattern != "" {
-			return Result{
-				Output: stdoutContent,
-				Signal: signal,
-				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "codex /status"},
-			}
+		if patternErr := e.checkPatterns(stdoutContent, stderrRes); patternErr != nil {
+			return Result{Output: stdoutContent, Signal: signal, Error: patternErr}
 		}
 	}
 
@@ -214,23 +200,77 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	return Result{Output: stdoutContent, Signal: signal, Error: finalErr}
 }
 
-// stderrResult holds processed stderr output and any error from reading.
-type stderrResult struct {
-	lastLines []string // last few lines of stderr for error context
-	err       error
+// checkPatterns scans stdout AND the stderr matches captured live during streaming
+// for limit/error patterns. codex emits OpenAI/ChatGPT plan-quota errors (e.g.,
+// "ERROR: You've hit your usage limit") to stderr while stdout is empty on failure;
+// processStderr matches each line on the fly so detection is not subject to the
+// 5-line / 256-rune tail truncation used for human-readable error context.
+//
+// Priority is limit-first across both sources before any error match: a real
+// stderr quota diagnostic (already filtered through the CLI-error prefix gate
+// in processStderr) must not be downgraded to a non-retryable PatternMatchError
+// just because partial stdout happens to match a configured ErrorPattern. Within
+// each severity class, stdout wins over stderr so an explicit stdout limit/error
+// takes precedence when both sources fire.
+//
+// Order:
+//  1. stdout LimitPatterns
+//  2. stderr.limitMatch (prefix-gated)
+//  3. stdout ErrorPatterns
+//  4. stderr.errorMatch (prefix-gated)
+//
+// returns LimitPatternError or PatternMatchError when a pattern matches; nil otherwise.
+func (e *CodexExecutor) checkPatterns(stdoutContent string, stderr stderrResult) error {
+	// limit-class first — across both sources
+	if pattern := matchPattern(stdoutContent, e.LimitPatterns); pattern != "" {
+		return &LimitPatternError{Pattern: pattern, HelpCmd: "codex /status"}
+	}
+	if stderr.limitMatch != "" {
+		return &LimitPatternError{Pattern: stderr.limitMatch, HelpCmd: "codex /status"}
+	}
+
+	// error-class second
+	if pattern := matchPattern(stdoutContent, e.ErrorPatterns); pattern != "" {
+		return &PatternMatchError{Pattern: pattern, HelpCmd: "codex /status"}
+	}
+	if stderr.errorMatch != "" {
+		return &PatternMatchError{Pattern: stderr.errorMatch, HelpCmd: "codex /status"}
+	}
+
+	return nil
 }
 
-// processStderr reads stderr line-by-line, filters for progress display.
-// shows header block (between first two "--------" separators) and bold summaries.
-// also captures last lines of unfiltered output for error reporting.
+// stderrResult holds processed stderr output and any error from reading.
+// limitMatch and errorMatch capture the FIRST limit/error pattern that fires
+// during streaming, on the untruncated, un-evicted line — so detection is not
+// subject to the lastLines tail truncation (5 lines, 256 runes per line).
+type stderrResult struct {
+	lastLines  []string // last few lines of stderr for error context
+	limitMatch string   // first matched limit pattern seen on stderr (live scan)
+	errorMatch string   // first matched error pattern seen on stderr (live scan)
+	err        error
+}
+
+// processStderr reads stderr line-by-line, filters for progress display, and
+// scans each line for configured limit/error patterns. shows header block
+// (between first two "--------" separators) and bold summaries. captures last
+// lines of unfiltered output for error reporting AND records the first
+// limit/error pattern hit (untruncated, un-evicted) so callers can rely on it
+// regardless of how much chatter follows.
 func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrResult {
 	const maxTailLines = 5    // keep last N lines for error context
 	const maxLineLength = 256 // truncate long lines to avoid oversized error strings
 
 	state := &codexFilterState{}
 	var tail []string
+	var limitMatch, errorMatch string
 
 	err := readLines(ctx, r, func(line string) {
+		// scan untruncated line for patterns first; record only the first hit
+		// per category so detection is eviction- and truncation-resistant.
+		// restricted to CLI-error-prefixed lines (see scanLineForPatterns).
+		e.scanLineForPatterns(line, &limitMatch, &errorMatch)
+
 		// capture non-empty lines for error context, preserving original formatting
 		if strings.TrimSpace(line) != "" {
 			stored := line
@@ -252,9 +292,47 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrRe
 	})
 
 	if err != nil {
-		return stderrResult{lastLines: tail, err: fmt.Errorf("read stderr: %w", err)}
+		return stderrResult{lastLines: tail, limitMatch: limitMatch, errorMatch: errorMatch, err: fmt.Errorf("read stderr: %w", err)}
 	}
-	return stderrResult{lastLines: tail}
+	return stderrResult{lastLines: tail, limitMatch: limitMatch, errorMatch: errorMatch}
+}
+
+// scanLineForPatterns updates limitMatch / errorMatch with the first matching
+// limit/error pattern found in line, gated by isCodexErrorLine so progress
+// chatter cannot trigger false positives. Once each match has been recorded
+// it sticks for the rest of the run.
+func (e *CodexExecutor) scanLineForPatterns(line string, limitMatch, errorMatch *string) {
+	if !isCodexErrorLine(line) {
+		return
+	}
+	if *limitMatch == "" {
+		if pattern := matchPattern(line, e.LimitPatterns); pattern != "" {
+			*limitMatch = pattern
+		}
+	}
+	if *errorMatch == "" {
+		if pattern := matchPattern(line, e.ErrorPatterns); pattern != "" {
+			*errorMatch = pattern
+		}
+	}
+}
+
+// isCodexErrorLine reports whether a stderr line looks like a CLI error message
+// codex reliably prefixes diagnostics. limit/error pattern matching is gated on
+// this prefix so progress text on stderr (header banners, bold summaries, model
+// chatter that may legitimately mention "rate limit" while reviewing code) does
+// not trigger false-positive matches.
+func isCodexErrorLine(line string) bool {
+	s := strings.TrimSpace(line)
+	if s == "" {
+		return false
+	}
+	// case-insensitive prefix match; codex uses "ERROR:" today, others are
+	// defensive against possible future variants.
+	lower := strings.ToLower(s)
+	return strings.HasPrefix(lower, "error:") ||
+		strings.HasPrefix(lower, "fatal:") ||
+		strings.HasPrefix(lower, "panic:")
 }
 
 // readStdout reads the entire stdout content as the final response.

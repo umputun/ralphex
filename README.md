@@ -846,9 +846,9 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `color_timestamp` | Timestamp prefix color (hex) | `#8a8a8a` |
 | `color_info` | Informational messages color (hex) | `#b4b4b4` |
 | `claude_error_patterns` | Patterns to detect in claude output (comma-separated) | `You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in` |
-| `codex_error_patterns` | Patterns to detect in codex output (comma-separated) | `Rate limit,quota exceeded` |
+| `codex_error_patterns` | Patterns to detect in codex output (comma-separated) | `Rate limit,quota exceeded,You've hit your usage limit` |
 | `claude_limit_patterns` | Limit patterns for claude triggering wait+retry (comma-separated) | `You've hit your limit` |
-| `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit,quota exceeded` |
+| `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit,quota exceeded,You've hit your usage limit` |
 | `wait_on_limit` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `session_timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
 | `idle_timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
@@ -858,6 +858,8 @@ Colors use 24-bit RGB (true color), supported natively by all modern terminals (
 Error patterns use case-insensitive substring matching. When a pattern is detected in claude or codex output, ralphex exits gracefully with an informative message suggesting how to check usage/status. Multiple patterns are separated by commas, with whitespace trimmed from each pattern.
 
 **Rate limit retry:** Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) work similarly but support optional wait+retry behavior. When `--wait` is set (or `wait_on_limit` in config), a limit pattern match triggers a wait followed by automatic retry instead of exiting. Without `--wait`, limit patterns fall through to error pattern behavior. Limit patterns are checked before error patterns — if the same string matches both, the limit pattern takes priority when wait is enabled.
+
+**Note for upgrades:** users who customized `codex_limit_patterns` or `codex_error_patterns` to the previous default (`Rate limit,quota exceeded`) will keep that customization on update. To pick up the new OpenAI plan-quota wording, append `,You've hit your usage limit` to the customized list (or comment the line back out to inherit embedded defaults). Codex emits this message on stderr when the ChatGPT plan quota is exhausted; without the pattern, `--wait` cannot retry on it.
 
 ### Custom prompts
 

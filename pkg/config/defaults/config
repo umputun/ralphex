@@ -213,8 +213,8 @@ claude_error_patterns = You've hit your limit,API Error:,cannot be launched insi
 # codex_error_patterns: patterns to detect in codex output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
 # when detected, ralphex exits gracefully with an informative message
-# default: Rate limit,quota exceeded
-codex_error_patterns = Rate limit,quota exceeded
+# default: Rate limit,quota exceeded,You've hit your usage limit
+codex_error_patterns = Rate limit,quota exceeded,You've hit your usage limit
 
 # ------------------------------------------------------------------------------
 # rate limit wait and retry
@@ -230,8 +230,8 @@ claude_limit_patterns = You've hit your limit
 # codex_limit_patterns: patterns to detect rate limits in codex/external output
 # comma-separated list of substrings (case-insensitive matching)
 # same retry behavior as claude_limit_patterns
-# default: Rate limit,quota exceeded
-codex_limit_patterns = Rate limit,quota exceeded
+# default: Rate limit,quota exceeded,You've hit your usage limit
+codex_limit_patterns = Rate limit,quota exceeded,You've hit your usage limit
 
 # wait_on_limit: duration to wait before retrying after a rate limit is detected
 # uses Go duration format (e.g., "1h", "30m", "1h30m", "90s")
