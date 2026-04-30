@@ -247,7 +247,7 @@ test -x "$LAUNCHER" && "$LAUNCHER" --wrap --only=<draft-path>
 
 If the launcher path does not exist (`test -x` fails), skip directly to the in-chat fallback below — the user has revdiff installed via Homebrew or `go install` but does not have the Claude marketplace plugin layout.
 
-Capture stdout into a variable.
+Read the launcher's stdout from the Bash tool result directly. Do not assign it to a shell variable — variables do not persist between Bash tool calls (see Step 5 preamble).
 
 - **Empty stdout** → user reviewed and approved silently. Proceed to Step 6.
 - **Non-empty stdout** → user left annotations. Read each annotation, revise the draft accordingly (rewrite the literal `<draft-path>` in place via Write), then re-run revdiff. Repeat until stdout is empty.
