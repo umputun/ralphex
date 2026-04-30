@@ -54,15 +54,15 @@ Add per-run CLI flags that override configured provider settings for Claude-comp
 **Files:**
 - Modify: `cmd/ralphex/main_test.go`
 
-- [ ] Add tests that `--claude-command` overrides `cfg.ClaudeCommand`
-- [ ] Add tests that `--claude-args` overrides `cfg.ClaudeArgs`
-- [ ] Add tests that `--claude-args=` clears a non-empty configured value
-- [ ] Add tests that `--external-review-tool` overrides `cfg.ExternalReviewTool`
-- [ ] Add tests that `--custom-review-script` overrides `cfg.CustomReviewScript`
-- [ ] Add parser-backed tests for underscore aliases, including `--external_review_tool`
-- [ ] Add conflict validation tests for visible and underscore alias forms with different values
-- [ ] Add a regression test showing `--claude-command` is applied before `checkClaudeDep()` by using a temporary executable command while config points to a missing command
-- [ ] Run `go test ./cmd/ralphex` - must pass before task 3
+- [x] Add tests that `--claude-command` overrides `cfg.ClaudeCommand`
+- [x] Add tests that `--claude-args` overrides `cfg.ClaudeArgs`
+- [x] Add tests that `--claude-args=` clears a non-empty configured value
+- [x] Add tests that `--external-review-tool` overrides `cfg.ExternalReviewTool`
+- [x] Add tests that `--custom-review-script` overrides `cfg.CustomReviewScript`
+- [x] Add parser-backed tests for underscore aliases, including `--external_review_tool`
+- [x] Add conflict validation tests for visible and underscore alias forms with different values
+- [x] Add a regression test showing `--claude-command` is applied before `checkClaudeDep()` by using a temporary executable command while config points to a missing command
+- [x] Run `go test ./cmd/ralphex` - must pass before task 3
 
 ### Task 3: Update user-facing documentation
 

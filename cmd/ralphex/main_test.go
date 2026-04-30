@@ -102,6 +102,20 @@ func skipIfClaudeNotAvailable(t *testing.T) {
 	}
 }
 
+// parseTestOpts parses command-line args and marks explicitly set flags.
+func parseTestOpts(t *testing.T, args ...string) opts {
+	t.Helper()
+	var o opts
+	parser := flags.NewParser(&o, flags.Default)
+	remaining, err := parser.ParseArgs(args)
+	require.NoError(t, err)
+	if len(remaining) > 0 {
+		o.PlanFile = remaining[0]
+	}
+	o.markFlagsSet(parser)
+	return o
+}
+
 func TestPromptPlanDescription(t *testing.T) {
 	colors := testColors()
 
@@ -606,6 +620,194 @@ func TestSkipFinalizeFlag(t *testing.T) {
 		}
 		assert.True(t, cfg.FinalizeEnabled, "config should be preserved when skip-finalize not set")
 	})
+}
+
+func TestProviderOverrideFlags(t *testing.T) {
+	t.Run("claude_command_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{ClaudeCommand: "configured-claude"}
+		o := parseTestOpts(t, "--claude-command", "/tmp/run-claude")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Equal(t, "/tmp/run-claude", cfg.ClaudeCommand)
+	})
+
+	t.Run("claude_args_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{ClaudeArgs: "--configured"}
+		o := parseTestOpts(t, "--claude-args=--wrapper --stream")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Equal(t, "--wrapper --stream", cfg.ClaudeArgs)
+	})
+
+	t.Run("empty_claude_args_clears_config", func(t *testing.T) {
+		cfg := &config.Config{ClaudeArgs: "--configured --args"}
+		o := parseTestOpts(t, "--claude-args=")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Empty(t, cfg.ClaudeArgs)
+	})
+
+	t.Run("external_review_tool_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{ExternalReviewTool: "codex"}
+		o := parseTestOpts(t, "--external-review-tool", "custom")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Equal(t, "custom", cfg.ExternalReviewTool)
+	})
+
+	t.Run("custom_review_script_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{CustomReviewScript: "/configured/review.sh"}
+		o := parseTestOpts(t, "--custom-review-script", "/tmp/review.sh")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Equal(t, "/tmp/review.sh", cfg.CustomReviewScript)
+	})
+}
+
+func TestProviderOverrideAliases(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		assert func(t *testing.T, cfg *config.Config)
+	}{
+		{
+			name: "claude_command_alias",
+			args: []string{"--claude_command", "/tmp/alias-claude"},
+			assert: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				assert.Equal(t, "/tmp/alias-claude", cfg.ClaudeCommand)
+			},
+		},
+		{
+			name: "claude_args_alias",
+			args: []string{"--claude_args=--alias --args"},
+			assert: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				assert.Equal(t, "--alias --args", cfg.ClaudeArgs)
+			},
+		},
+		{
+			name: "claude_args_alias_clears_config",
+			args: []string{"--claude_args="},
+			assert: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				assert.Empty(t, cfg.ClaudeArgs)
+			},
+		},
+		{
+			name: "external_review_tool_alias",
+			args: []string{"--external_review_tool", "none"},
+			assert: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				assert.Equal(t, "none", cfg.ExternalReviewTool)
+			},
+		},
+		{
+			name: "custom_review_script_alias",
+			args: []string{"--custom_review_script", "/tmp/alias-review.sh"},
+			assert: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				assert.Equal(t, "/tmp/alias-review.sh", cfg.CustomReviewScript)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				ClaudeCommand:      "configured-claude",
+				ClaudeArgs:         "--configured",
+				ExternalReviewTool: "codex",
+				CustomReviewScript: "/configured/review.sh",
+			}
+			o := parseTestOpts(t, tc.args...)
+
+			applyCLIOverrides(o, cfg)
+
+			tc.assert(t, cfg)
+		})
+	}
+}
+
+func TestProviderOverrideAliasConflicts(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		errMsg string
+	}{
+		{
+			name:   "claude_command_conflict",
+			args:   []string{"--claude-command", "visible", "--claude_command", "alias"},
+			errMsg: "--claude-command conflicts with --claude_command",
+		},
+		{
+			name:   "claude_args_conflict",
+			args:   []string{"--claude-args", "visible", "--claude_args", "alias"},
+			errMsg: "--claude-args conflicts with --claude_args",
+		},
+		{
+			name:   "external_review_tool_conflict",
+			args:   []string{"--external-review-tool", "codex", "--external_review_tool", "custom"},
+			errMsg: "--external-review-tool conflicts with --external_review_tool",
+		},
+		{
+			name:   "custom_review_script_conflict",
+			args:   []string{"--custom-review-script", "/visible.sh", "--custom_review_script", "/alias.sh"},
+			errMsg: "--custom-review-script conflicts with --custom_review_script",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o := parseTestOpts(t, tc.args...)
+
+			err := validateFlags(o)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errMsg)
+		})
+	}
+
+	t.Run("same_visible_and_alias_values_are_allowed", func(t *testing.T) {
+		o := parseTestOpts(t, "--external-review-tool", "custom", "--external_review_tool", "custom")
+
+		err := validateFlags(o)
+
+		require.NoError(t, err)
+	})
+}
+
+func TestRunAppliesClaudeCommandOverrideBeforeDependencyCheck(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgDir := filepath.Join(tmpDir, "config")
+	require.NoError(t, os.MkdirAll(cfgDir, 0o750))
+
+	missingCommand := "missing-ralphex-claude-command"
+	configData := []byte("claude_command = " + missingCommand + "\n")
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config"), configData, 0o600))
+
+	fakeClaude := filepath.Join(tmpDir, "fake-claude")
+	writeExecutable(t, fakeClaude, "#!/bin/sh\nexit 0\n")
+
+	workDir := filepath.Join(tmpDir, "work")
+	require.NoError(t, os.MkdirAll(workDir, 0o750))
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(workDir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	o := parseTestOpts(t, "--config-dir", cfgDir, "--claude-command", fakeClaude)
+
+	err = run(t.Context(), o)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must run from repository root")
+	assert.NotContains(t, err.Error(), missingCommand)
 }
 
 func TestWaitFlag(t *testing.T) {
