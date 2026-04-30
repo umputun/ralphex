@@ -33,6 +33,7 @@ const (
 // merge behavior where local config can override global config with zero values.
 //
 // *Set fields:
+//   - ClaudeArgsSet: tracks if claude_args was explicitly overridden at runtime
 //   - CodexEnabledSet: tracks if codex_enabled was explicitly set
 //   - CodexTimeoutMsSet: tracks if codex_timeout_ms was explicitly set
 //   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
@@ -45,6 +46,7 @@ const (
 type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`
+	ClaudeArgsSet bool   `json:"-"`            // tracks runtime overrides, including an explicit empty --claude-args=
 	TaskModel     string `json:"task_model"`   // model[:effort] spec for task execution (e.g., "opus", "opus:high", ":medium")
 	ReviewModel   string `json:"review_model"` // model[:effort] spec for review phases (falls back to TaskModel)
 

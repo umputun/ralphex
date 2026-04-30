@@ -63,3 +63,4 @@ __pycache__/
 
 # ralphex progress logs
 .ralphex/worktrees/
+AGENTS.md

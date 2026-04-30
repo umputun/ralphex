@@ -135,6 +135,7 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 	if cfg.AppConfig != nil {
 		claudeExec.Command = cfg.AppConfig.ClaudeCommand
 		claudeExec.Args = cfg.AppConfig.ClaudeArgs
+		claudeExec.ArgsSet = cfg.AppConfig.ClaudeArgsSet
 		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
 		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
 		claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout
@@ -161,6 +162,7 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		if cfg.AppConfig != nil {
 			re.Command = cfg.AppConfig.ClaudeCommand
 			re.Args = cfg.AppConfig.ClaudeArgs
+			re.ArgsSet = cfg.AppConfig.ClaudeArgsSet
 			re.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
 			re.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
 			re.IdleTimeout = cfg.AppConfig.IdleTimeout

@@ -45,6 +45,9 @@ ralphex --wait=1h docs/plans/feature.md
 # use different models for tasks vs reviews (e.g., opus for tasks, sonnet for reviews)
 ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
 
+# override Claude-compatible provider and external review tool for one run
+ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
+
 # set per-session timeout to kill hanging claude sessions
 ralphex --session-timeout=30m docs/plans/feature.md
 
@@ -124,9 +127,9 @@ review_model = sonnet:medium
 
 **Manual break (Ctrl+\):** Press Ctrl+\ (SIGQUIT) to intervene during execution. In the task phase, it pauses execution and prompts "press Enter to continue, Ctrl+C to abort" — on Enter the same task re-runs with a fresh session that re-reads the plan file, so you can edit the plan mid-run. In the external review phase, it terminates the loop immediately. Not available on Windows.
 
-**Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing.
+**Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing. For a one-off run, use `--external-review-tool=custom --custom-review-script=/path/to/script.sh`.
 
-**Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. A codex wrapper is included at `scripts/codex-as-claude/codex-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config. Wrappers should ignore unknown flags gracefully. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
+**Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. A codex wrapper is included at `scripts/codex-as-claude/codex-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config, or use `--claude-command=/path/to/wrapper --claude-args=` for one run. The empty CLI value intentionally clears configured/default args for that invocation. Wrappers should ignore unknown flags gracefully. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
 
 **Configurable VCS backend:** `vcs_command` config option overrides the default `git` binary for all backend operations. Set to a translation script (e.g., `scripts/hg2git/hg2git.sh`) to use ralphex with Mercurial repos. The included `hg2git.sh` maps git subcommands to hg equivalents with phase-based commit logic (amend on draft, commit on public). See `docs/hg-support.md` for setup.
 

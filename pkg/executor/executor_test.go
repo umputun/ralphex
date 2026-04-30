@@ -408,6 +408,25 @@ func TestClaudeExecutor_Run_WithCustomArgs(t *testing.T) {
 	assert.Equal(t, []string{"--custom-arg", "--another-arg", "value", "--print"}, capturedArgs)
 }
 
+func TestClaudeExecutor_Run_WithExplicitEmptyArgs(t *testing.T) {
+	var capturedArgs []string
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, args ...string) (io.Reader, func() error, error) {
+			capturedArgs = args
+			return strings.NewReader(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{
+		cmdRunner: mock,
+		ArgsSet:   true,
+	}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, []string{"--print"}, capturedArgs)
+}
+
 func TestClaudeExecutor_Run_WithCustomCommandAndArgs(t *testing.T) {
 	var capturedCmd string
 	var capturedArgs []string

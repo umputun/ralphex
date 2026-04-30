@@ -557,6 +557,9 @@ ralphex --wait=1h docs/plans/feature.md
 # use different models for tasks vs reviews (e.g., opus for tasks, sonnet for reviews)
 ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
 
+# use provider overrides for one run without editing config
+ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
+
 # set per-session timeout to kill hanging claude sessions
 ralphex --session-timeout=30m docs/plans/feature.md
 
@@ -585,6 +588,10 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
 | `--task-model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort values: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags | empty |
 | `--review-model` | Model for review phases as `model[:effort]` (falls back to `--task-model`). Same syntax and wrapper behavior as `--task-model` | empty |
+| `--claude-command` | Override the Claude-compatible command for this run | config/default |
+| `--claude-args` | Override Claude-compatible command arguments for this run. Use `--claude-args=` to clear configured/default args | config/default |
+| `--external-review-tool` | Override external review tool for this run (`codex`, `custom`, or `none`) | config/default |
+| `--custom-review-script` | Override custom external review script for this run | config/default |
 | `--wait` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `--session-timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
 | `--idle-timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
@@ -804,6 +811,8 @@ project/
 
 Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config location. This is useful for maintaining separate agent/prompt sets for different workflows.
 
+Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-review-tool`, and `--custom-review-script`) follow the same priority and override config only for the current invocation. This is useful for switching wrappers or review tools without maintaining separate config directories.
+
 **Merge behavior:**
 - **Config file**: per-field override (local values override global, missing fields fall back)
 - **Prompts**: per-file fallback (local → global → embedded for each prompt file)
@@ -876,6 +885,8 @@ Use your own AI tool for external code review instead of codex. This allows inte
 external_review_tool = custom
 custom_review_script = ~/.config/ralphex/scripts/my-review.sh
 ```
+
+For a one-off run without editing config, use `--external-review-tool=custom --custom-review-script=/path/to/script.sh`.
 
 **Script interface:**
 
@@ -953,7 +964,7 @@ When running ralphex in Docker, your script must be accessible inside the contai
 
 ### Using Alternative Providers for Claude Phases
 
-The `claude_command` and `claude_args` config options let you replace Claude Code with any CLI that produces compatible `stream-json` output. This means codex, GitHub Copilot CLI, Gemini CLI, local LLMs, or any other tool can drive task execution and review phases — you just need a wrapper script that translates the tool's output format.
+The `claude_command` and `claude_args` config options let you replace Claude Code with any CLI that produces compatible `stream-json` output. This means codex, GitHub Copilot CLI, Gemini CLI, local LLMs, or any other tool can drive task execution and review phases — you just need a wrapper script that translates the tool's output format. Use `--claude-command` and `--claude-args` to choose a wrapper for a single run without changing config.
 
 Working examples are included:
 
@@ -980,7 +991,13 @@ claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
 claude_args =
 ```
 
-Setting `claude_args` to empty is optional. Note that default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`) may still be passed due to config fallback behavior. Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all.
+Or choose it for one invocation:
+
+```bash
+ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh --claude-args= docs/plans/feature.md
+```
+
+Setting `claude_args` to empty in config is optional. Note that default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`) may still be passed due to config fallback behavior. Use the CLI form `--claude-args=` when you need to explicitly clear configured/default args for a single run. Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all.
 
 The included Codex and Copilot wrappers require `jq` on `PATH` for JSON translation.
 
