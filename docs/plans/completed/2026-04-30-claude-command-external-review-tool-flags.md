@@ -96,5 +96,5 @@ Add per-run CLI flags that override configured provider settings for Claude-comp
 **Files:**
 - Move: this plan file to `docs/plans/completed/`
 
-- [ ] Confirm README, `llms.txt`, and `docs/custom-providers.md` cover the user-facing flag behavior
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Confirm README, `llms.txt`, and `docs/custom-providers.md` cover the user-facing flag behavior
+- [x] Move this plan to `docs/plans/completed/`
