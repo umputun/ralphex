@@ -131,11 +131,12 @@ type Logger struct {
 
 // Config holds logger configuration.
 type Config struct {
-	PlanFile        string // plan filename (used to derive progress filename)
-	PlanDescription string // plan description for plan mode (used for filename)
-	Mode            string // execution mode: full, review, codex-only, plan
-	Branch          string // current git branch
-	NoColor         bool   // disable color output (sets color.NoColor globally)
+	PlanFile           string   // plan filename (used to derive progress filename)
+	PlanDescription    string   // plan description for plan mode (used for filename)
+	Mode               string   // execution mode: full, review, codex-only, plan
+	Branch             string   // current git branch
+	TaskHeaderPatterns []string // task header pattern strings (preset names or raw regexes)
+	NoColor            bool     // disable color output (sets color.NoColor globally)
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
@@ -219,8 +220,16 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 	}
 
 	if restart {
-		// write restart separator (matches sectionRegex in web parser)
-		l.writeFile("\n\n--- restarted at %s ---\n\n", time.Now().Format("2006-01-02 15:04:05"))
+		// build the entire restart block as a single string so the marker and
+		// the pattern lines land in one write syscall. a watcher event between
+		// the marker write and pattern writes would clear patterns (on seeing
+		// the restart marker) and never restore them until the next event.
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "\n\n--- restarted at %s ---\n\n", time.Now().Format("2006-01-02 15:04:05"))
+		for _, pat := range cfg.TaskHeaderPatterns {
+			fmt.Fprintf(&sb, "TaskHeaderPattern: %s\n", pat)
+		}
+		l.writeFile("%s", sb.String())
 	} else {
 		l.writeHeader(cfg)
 	}
@@ -239,6 +248,9 @@ func (l *Logger) writeHeader(cfg Config) {
 	l.writeFile("Branch: %s\n", cfg.Branch)
 	l.writeFile("Mode: %s\n", cfg.Mode)
 	l.writeFile("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	for _, pat := range cfg.TaskHeaderPatterns {
+		l.writeFile("TaskHeaderPattern: %s\n", pat)
+	}
 	l.writeFile("%s\n\n", separatorLine)
 }
 

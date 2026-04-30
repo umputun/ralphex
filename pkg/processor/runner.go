@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -907,24 +908,43 @@ func (r *Runner) buildCodexPrompt(isFirst bool, claudeResponse string) string {
 	return r.replaceVariablesWithIteration(r.cfg.AppConfig.CodexReviewPrompt, isFirst, claudeResponse)
 }
 
+// taskHeaderPatterns returns compiled task-header regexes for plan parsing.
+// returns nil when AppConfig is absent (tests), letting plan.ParsePlan fall back to defaults.
+func (r *Runner) taskHeaderPatterns() []*regexp.Regexp {
+	if r.cfg.AppConfig == nil {
+		return nil
+	}
+	patterns, err := plan.ResolveHeaderPatterns(r.cfg.AppConfig.TaskHeaderPatterns)
+	if err != nil {
+		r.log.Print("[WARN] failed to compile task header patterns: %v", err)
+		return nil
+	}
+	return patterns
+}
+
 // validatePlanHasTasks returns an error if the plan file has no executable task sections.
-// guards against spec/reference docs that lack ### Task N: / ### Iteration N: headers,
-// which would otherwise cause the task loop to retry TASK_FAILED until exhaustion.
-// callers must ensure r.cfg.PlanFile is non-empty before invoking.
+// guards against spec/reference docs that lack headers matching the configured
+// task_header_patterns, which would otherwise cause the task loop to retry
+// TASK_FAILED until exhaustion. callers must ensure r.cfg.PlanFile is non-empty
+// before invoking.
 func (r *Runner) validatePlanHasTasks() error {
 	path := r.resolvePlanFilePath()
-	p, err := plan.ParsePlanFile(path)
+	p, err := plan.ParsePlanFile(path, r.taskHeaderPatterns())
 	if err != nil {
 		return fmt.Errorf("parse plan for validation: %w", err)
 	}
 	if len(p.Tasks) == 0 {
-		return fmt.Errorf("plan file %q has no executable task sections (### Task N: or ### Iteration N:); add task sections or pass a different plan file", path)
+		hint := r.getTaskHeaderPatternsHint()
+		if hint == "" {
+			return fmt.Errorf("plan file %q has no executable task sections; add task sections or pass a different plan file", path)
+		}
+		return fmt.Errorf("plan file %q has no executable task sections (expected headers matching %s); add task sections or pass a different plan file", path, hint)
 	}
 	return nil
 }
 
 // hasUncompletedTasks checks if any Task section has uncompleted checkboxes.
-// only Task sections (### Task N: or ### Iteration N:) are considered.
+// only sections matching the configured task_header_patterns are considered.
 // checkboxes in Success criteria, Overview, or Context are ignored for this check,
 // so the agent can output ALL_TASKS_DONE when those are verification-only.
 // for malformed plans (checkboxes without task headers), returns true if any [ ] exists.
@@ -933,7 +953,7 @@ func (r *Runner) hasUncompletedTasks() bool {
 	if path == "" {
 		return false // no plan file, nothing to complete
 	}
-	p, err := plan.ParsePlanFile(path)
+	p, err := plan.ParsePlanFile(path, r.taskHeaderPatterns())
 	if err != nil {
 		r.log.Print("[WARN] failed to parse plan file for completion check: %v", err)
 		return true // assume incomplete if can't read
@@ -959,7 +979,7 @@ func (r *Runner) hasUncompletedTasks() bool {
 // nextPlanTaskPosition returns the 1-indexed position of the first uncompleted task in the plan.
 // returns 0 if the plan file can't be read/parsed or no uncompleted tasks exist (caller falls back to loop counter).
 func (r *Runner) nextPlanTaskPosition() int {
-	p, err := plan.ParsePlanFile(r.resolvePlanFilePath())
+	p, err := plan.ParsePlanFile(r.resolvePlanFilePath(), r.taskHeaderPatterns())
 	if err != nil {
 		r.log.Print("[WARN] failed to parse plan file for task position: %v", err)
 		return 0

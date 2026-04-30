@@ -85,6 +85,130 @@ Branch: main
 		assert.Error(t, err)
 	})
 
+	t.Run("parses TaskHeaderPattern lines into slice", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+TaskHeaderPattern: default
+TaskHeaderPattern: openspec
+------------------------------------------------------------
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Equal(t, []string{"default", "openspec"}, meta.TaskHeaderPatterns)
+		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
+	})
+
+	t.Run("picks up updated patterns from restart section", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-restart.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+TaskHeaderPattern: default
+------------------------------------------------------------
+[26-01-22 10:30:01] some log line
+
+--- restarted at 2026-01-22 11:00:00 ---
+TaskHeaderPattern: openspec
+[26-01-22 11:00:01] second run log line
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Equal(t, []string{"openspec"}, meta.TaskHeaderPatterns, "should use patterns from the latest restart section")
+	})
+
+	t.Run("picks up patterns from multiple restarts, last wins", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-multi-restart.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+TaskHeaderPattern: default
+------------------------------------------------------------
+[26-01-22 10:30:01] first run log
+
+--- restarted at 2026-01-22 11:00:00 ---
+TaskHeaderPattern: openspec
+[26-01-22 11:00:01] second run log
+
+--- restarted at 2026-01-22 12:00:00 ---
+TaskHeaderPattern: default
+TaskHeaderPattern: openspec
+[26-01-22 12:00:01] third run log
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Equal(t, []string{"default", "openspec"}, meta.TaskHeaderPatterns, "should use patterns from the last restart section")
+	})
+
+	t.Run("no patterns in restart section falls back to empty", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-no-restart-patterns.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+TaskHeaderPattern: default
+------------------------------------------------------------
+[26-01-22 10:30:01] some log line
+
+--- restarted at 2026-01-22 11:00:00 ---
+[26-01-22 11:00:01] second run log
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Empty(t, meta.TaskHeaderPatterns, "restart with no patterns should clear the slice (old file written without pattern re-emit)")
+	})
+
+	t.Run("ignores TaskHeaderPatterns line from old progress files", func(t *testing.T) {
+		// backward compat: old progress files may contain TaskHeaderPatterns: lines;
+		// ParseProgressHeader should parse other fields correctly and ignore the line.
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-test.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plans/my-plan.md
+Branch: feature-branch
+Mode: full
+Started: 2026-01-22 10:30:00
+TaskHeaderPatterns: ### Task {N}: {title},## {N}. {title}
+------------------------------------------------------------
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		meta, complete, err := ParseProgressHeader(path)
+		require.NoError(t, err)
+		assert.True(t, complete)
+		assert.Equal(t, "docs/plans/my-plan.md", meta.PlanPath)
+		assert.Equal(t, "feature-branch", meta.Branch)
+	})
+
 	t.Run("reports incomplete when separator not yet written", func(t *testing.T) {
 		// models a mid-write observation: header lines written but terminating
 		// separator still pending. updateSession must not clobber previously

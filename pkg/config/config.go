@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/notify"
@@ -13,6 +14,11 @@ import (
 
 //go:embed defaults/config defaults/prompts/* defaults/agents/*
 var defaultsFS embed.FS
+
+// defaultTaskHeaderPatterns is the built-in fallback used when the user
+// has not configured task_header_patterns (or set it to all-empty entries).
+// "default" resolves to the default preset in pkg/plan.headerPresets.
+var defaultTaskHeaderPatterns = []string{"default"}
 
 // prompt file names
 const (
@@ -86,6 +92,11 @@ type Config struct {
 	// error patterns to detect in executor output (e.g., rate limit messages)
 	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
 	CodexErrorPatterns  []string `json:"codex_error_patterns"`
+
+	// task header patterns used to recognize task sections in plan files.
+	// each entry is a preset name ("default", "openspec") or a raw Go regex.
+	// empty/unset falls back to defaultTaskHeaderPatterns (["default"]).
+	TaskHeaderPatterns []string `json:"task_header_patterns"`
 
 	// limit patterns for wait+retry behavior (overlap with error patterns is intentional)
 	ClaudeLimitPatterns []string      `json:"claude_limit_patterns"`
@@ -276,50 +287,76 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		return nil, fmt.Errorf("load agents: %w", err)
 	}
 
+	// apply runtime default for task_header_patterns: fall back to defaults when
+	// unset or when all user-supplied entries were empty after trim (parseCommaSeparated
+	// drops empties, so len == 0 covers both "explicit empty" and "all whitespace" cases).
+	headerPatterns := values.TaskHeaderPatterns
+	if !values.taskHeaderPatternsSet || len(headerPatterns) == 0 {
+		headerPatterns = defaultTaskHeaderPatterns
+	}
+
+	// validate user-supplied patterns compile early so startup fails fast with a clear
+	// error instead of silently falling back to defaults at plan-parse time.
+	// known preset names are always valid; anything else is treated as a raw Go regex.
+	if values.taskHeaderPatternsSet && len(values.TaskHeaderPatterns) > 0 {
+		for _, p := range values.TaskHeaderPatterns {
+			if !isKnownHeaderPreset(p) {
+				re, err := regexp.Compile(p)
+				if err != nil {
+					return nil, fmt.Errorf("invalid task_header_patterns %q: %w", p, err)
+				}
+				if re.NumSubexp() < 1 {
+					return nil, fmt.Errorf("invalid task_header_patterns %q: pattern must have at least one capture group for task ID", p)
+				}
+			}
+		}
+	}
+
 	// assemble config
 	c := &Config{
-		ClaudeCommand:           values.ClaudeCommand,
-		ClaudeArgs:              values.ClaudeArgs,
-		TaskModel:               values.TaskModel,
-		ReviewModel:             values.ReviewModel,
-		CodexEnabled:            values.CodexEnabled,
-		CodexEnabledSet:         values.CodexEnabledSet,
-		CodexCommand:            values.CodexCommand,
-		CodexModel:              values.CodexModel,
-		CodexReasoningEffort:    values.CodexReasoningEffort,
-		CodexTimeoutMs:          values.CodexTimeoutMs,
-		CodexTimeoutMsSet:       values.CodexTimeoutMsSet,
-		CodexSandbox:            values.CodexSandbox,
-		ExternalReviewTool:      values.ExternalReviewTool,
-		CustomReviewScript:      values.CustomReviewScript,
-		IterationDelayMs:        values.IterationDelayMs,
-		IterationDelayMsSet:     values.IterationDelayMsSet,
-		TaskRetryCount:          values.TaskRetryCount,
-		TaskRetryCountSet:       values.TaskRetryCountSet,
-		MaxIterations:           values.MaxIterations,
-		MaxIterationsSet:        values.MaxIterationsSet,
-		MaxExternalIterations:   values.MaxExternalIterations,
-		ReviewPatience:          values.ReviewPatience,
-		FinalizeEnabled:         values.FinalizeEnabled,
-		FinalizeEnabledSet:      values.FinalizeEnabledSet,
-		MovePlanOnCompletion:    values.MovePlanOnCompletion,
-		WorktreeEnabled:         values.WorktreeEnabled,
-		WorktreeEnabledSet:      values.WorktreeEnabledSet,
-		PlansDir:                values.PlansDir,
-		DefaultBranch:           values.DefaultBranch,
-		VcsCommand:              values.VcsCommand,
-		CommitTrailer:           values.CommitTrailer,
-		WatchDirs:               values.WatchDirs,
-		ClaudeErrorPatterns:     values.ClaudeErrorPatterns,
-		CodexErrorPatterns:      values.CodexErrorPatterns,
-		ClaudeLimitPatterns:     values.ClaudeLimitPatterns,
-		CodexLimitPatterns:      values.CodexLimitPatterns,
-		WaitOnLimit:             values.WaitOnLimit,
-		WaitOnLimitSet:          values.WaitOnLimitSet,
-		SessionTimeout:          values.SessionTimeout,
-		SessionTimeoutSet:       values.SessionTimeoutSet,
-		IdleTimeout:             values.IdleTimeout,
-		IdleTimeoutSet:          values.IdleTimeoutSet,
+		ClaudeCommand:         values.ClaudeCommand,
+		ClaudeArgs:            values.ClaudeArgs,
+		TaskModel:             values.TaskModel,
+		ReviewModel:           values.ReviewModel,
+		CodexEnabled:          values.CodexEnabled,
+		CodexEnabledSet:       values.CodexEnabledSet,
+		CodexCommand:          values.CodexCommand,
+		CodexModel:            values.CodexModel,
+		CodexReasoningEffort:  values.CodexReasoningEffort,
+		CodexTimeoutMs:        values.CodexTimeoutMs,
+		CodexTimeoutMsSet:     values.CodexTimeoutMsSet,
+		CodexSandbox:          values.CodexSandbox,
+		ExternalReviewTool:    values.ExternalReviewTool,
+		CustomReviewScript:    values.CustomReviewScript,
+		IterationDelayMs:      values.IterationDelayMs,
+		IterationDelayMsSet:   values.IterationDelayMsSet,
+		TaskRetryCount:        values.TaskRetryCount,
+		TaskRetryCountSet:     values.TaskRetryCountSet,
+		MaxIterations:         values.MaxIterations,
+		MaxIterationsSet:      values.MaxIterationsSet,
+		MaxExternalIterations: values.MaxExternalIterations,
+		ReviewPatience:        values.ReviewPatience,
+		FinalizeEnabled:       values.FinalizeEnabled,
+		FinalizeEnabledSet:    values.FinalizeEnabledSet,
+		MovePlanOnCompletion:  values.MovePlanOnCompletion,
+		WorktreeEnabled:       values.WorktreeEnabled,
+		WorktreeEnabledSet:    values.WorktreeEnabledSet,
+		PlansDir:              values.PlansDir,
+		DefaultBranch:         values.DefaultBranch,
+		VcsCommand:            values.VcsCommand,
+		CommitTrailer:         values.CommitTrailer,
+		WatchDirs:             values.WatchDirs,
+		ClaudeErrorPatterns:   values.ClaudeErrorPatterns,
+		CodexErrorPatterns:    values.CodexErrorPatterns,
+		TaskHeaderPatterns:  headerPatterns,
+		ClaudeLimitPatterns: values.ClaudeLimitPatterns,
+		CodexLimitPatterns:    values.CodexLimitPatterns,
+		WaitOnLimit:           values.WaitOnLimit,
+		WaitOnLimitSet:        values.WaitOnLimitSet,
+		SessionTimeout:        values.SessionTimeout,
+		SessionTimeoutSet:     values.SessionTimeoutSet,
+		IdleTimeout:           values.IdleTimeout,
+		IdleTimeoutSet:        values.IdleTimeoutSet,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,
@@ -381,4 +418,15 @@ func DefaultConfigDir() string {
 // returns empty string if no local config was used.
 func (c *Config) LocalDir() string {
 	return c.localDir
+}
+
+// isKnownHeaderPreset reports whether s is a built-in preset name that
+// pkg/plan/presets.go resolves without regexp.Compile. Kept in sync with
+// headerPresets in presets.go; these names are stable API surface.
+func isKnownHeaderPreset(s string) bool {
+	switch s {
+	case "default", "openspec":
+		return true
+	}
+	return false
 }

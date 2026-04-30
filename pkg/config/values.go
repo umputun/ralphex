@@ -20,6 +20,8 @@ type Values struct {
 	TaskModel               string   // model for task execution (e.g., "opus", "sonnet", "haiku")
 	ReviewModel             string   // model for review phases (falls back to TaskModel if empty)
 	ClaudeErrorPatterns     []string // patterns to detect in claude output (e.g., rate limit messages)
+	TaskHeaderPatterns      []string // preset names or raw regexes used to recognize task section headers
+	taskHeaderPatternsSet   bool     // tracks if task_header_patterns was explicitly set (allows empty to disable)
 	CodexEnabled            bool
 	CodexEnabledSet         bool // tracks if codex_enabled was explicitly set
 	CodexCommand            string
@@ -342,6 +344,15 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	values.ClaudeErrorPatterns = vl.parseCommaSeparated(section, "claude_error_patterns")
 	values.CodexErrorPatterns = vl.parseCommaSeparated(section, "codex_error_patterns")
 
+	// task header patterns: track explicit presence so callers can distinguish
+	// "unset, use defaults" from "explicitly set to empty". uses a regex-aware
+	// splitter so raw patterns containing commas (e.g. {1,3} quantifiers) are
+	// not incorrectly split at those commas.
+	if section.HasKey("task_header_patterns") {
+		values.taskHeaderPatternsSet = true
+		values.TaskHeaderPatterns = vl.parseTaskHeaderPatternsList(section, "task_header_patterns")
+	}
+
 	// limit patterns (comma-separated, same format as error patterns)
 	values.ClaudeLimitPatterns = vl.parseCommaSeparated(section, "claude_limit_patterns")
 	values.CodexLimitPatterns = vl.parseCommaSeparated(section, "codex_limit_patterns")
@@ -527,6 +538,13 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	}
 	if len(src.ClaudeErrorPatterns) > 0 {
 		dst.ClaudeErrorPatterns = src.ClaudeErrorPatterns
+	}
+	// deliberately guard on taskHeaderPatternsSet (not len > 0) so an explicit
+	// empty value can clear a parent config; runtime default fallback is applied
+	// later in the Config builder, not here.
+	if src.taskHeaderPatternsSet {
+		dst.TaskHeaderPatterns = src.TaskHeaderPatterns
+		dst.taskHeaderPatternsSet = true
 	}
 	if len(src.CodexErrorPatterns) > 0 {
 		dst.CodexErrorPatterns = src.CodexErrorPatterns
@@ -741,6 +759,81 @@ func (vl *valuesLoader) parseCommaSeparated(section *ini.Section, key string) []
 		if t := strings.TrimSpace(p); t != "" {
 			result = append(result, t)
 		}
+	}
+	return result
+}
+
+// parseTaskHeaderPatternsList reads the task_header_patterns key and splits it
+// using a regex-aware splitter that does not break on commas inside quantifiers
+// ({n,m}) or character classes ([a,b]).
+func (vl *valuesLoader) parseTaskHeaderPatternsList(section *ini.Section, key string) []string {
+	k, err := section.GetKey(key)
+	if err != nil {
+		return nil
+	}
+	val := strings.TrimSpace(k.String())
+	if val == "" {
+		return nil
+	}
+	return splitTaskHeaderPatterns(val)
+}
+
+// splitTaskHeaderPatterns splits a comma-separated list of task header pattern
+// strings while treating commas inside regex quantifier braces ({n,m}) and
+// character classes ([...]) as part of the pattern rather than separators.
+// This allows raw Go regexes like `^#{1,3} Task (\d+)` to be used without
+// escaping.
+func splitTaskHeaderPatterns(val string) []string {
+	var result []string
+	var cur strings.Builder
+	braceDepth := 0
+	charClass := false
+	escaped := false
+
+	for i := 0; i < len(val); i++ {
+		ch := val[i]
+		if escaped {
+			cur.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		switch ch {
+		case '\\':
+			escaped = true
+			cur.WriteByte(ch)
+		case '[':
+			if !charClass {
+				charClass = true
+			}
+			cur.WriteByte(ch)
+		case ']':
+			charClass = false
+			cur.WriteByte(ch)
+		case '{':
+			if !charClass {
+				braceDepth++
+			}
+			cur.WriteByte(ch)
+		case '}':
+			if !charClass && braceDepth > 0 {
+				braceDepth--
+			}
+			cur.WriteByte(ch)
+		case ',':
+			if braceDepth == 0 && !charClass {
+				if t := strings.TrimSpace(cur.String()); t != "" {
+					result = append(result, t)
+				}
+				cur.Reset()
+			} else {
+				cur.WriteByte(ch)
+			}
+		default:
+			cur.WriteByte(ch)
+		}
+	}
+	if t := strings.TrimSpace(cur.String()); t != "" {
+		result = append(result, t)
 	}
 	return result
 }

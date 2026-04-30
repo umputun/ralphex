@@ -6,8 +6,9 @@
 #   {{PROGRESS_FILE}} - path to the progress log file
 #   {{GOAL}} - human-readable goal description
 #   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
+#   {{TASK_HEADER_PATTERNS}} - configured task header patterns (preset descriptions or regex, quoted, "or"-joined)
 
-Read the plan file at {{PLAN_FILE}}. Find the FIRST Task section (### Task N: or ### Iteration N:) that has uncompleted checkboxes ([ ]).
+Read the plan file at {{PLAN_FILE}}. Find the FIRST Task section (matching {{TASK_HEADER_PATTERNS}}) that has uncompleted checkboxes ([ ]).
 
 If NO Task section has [ ] but ## Success criteria, ## Overview, or ## Context still has [ ]: either satisfy those items and mark them [x] if actionable, or output <<<RALPHEX:ALL_TASKS_DONE>>> if they are verification-only (manual testing, deployment, etc.) — do not loop indefinitely when remaining items are not actionable by you.
 
@@ -16,7 +17,7 @@ If a Task section has [ ] checkboxes you cannot complete (manual testing, deploy
 NOTE: Progress is logged to {{PROGRESS_FILE}} - this file contains detailed execution steps and can be reviewed for debugging.
 
 CRITICAL CONSTRAINT: Complete ONE Task section per iteration.
-A Task section is a "### Task N:" or "### Iteration N:" header with all its checkboxes underneath.
+A Task section is a header matching {{TASK_HEADER_PATTERNS}} with all its checkboxes underneath.
 Complete ALL checkboxes in that section, then STOP.
 Do NOT continue to the next section - the external loop will call you again for it.
 
@@ -39,12 +40,12 @@ STEP 2 - VALIDATE:
 STEP 3 - COMPLETE (after validation passes):
 - Update progress: edit {{PLAN_FILE}} and change [ ] to [x] for each checkbox you implemented in the current Task section. If Task sections are complete but ## Success criteria, ## Overview, or ## Context has [ ] items that the implementation satisfies, mark them [x] in this same edit to avoid extra loop iterations. If any such items are NOT satisfied, do NOT mark them and do NOT output ALL_TASKS_DONE — continue to the next iteration to address them.
 - Commit all changes (code + updated plan) with message: feat: <brief task description>
-- Check if any [ ] checkboxes remain in Task sections (### Task N: or ### Iteration N:)
+- Check if any [ ] checkboxes remain in Task sections (headers matching {{TASK_HEADER_PATTERNS}})
 - If NO more [ ] checkboxes in the entire plan, output exactly: <<<RALPHEX:ALL_TASKS_DONE>>>
 - If more Task sections have [ ] checkboxes, STOP HERE - do not continue
 
 If any phase fails after reasonable fix attempts, output exactly: <<<RALPHEX:TASK_FAILED>>>
 
-REMINDER: ONE section (Task/Iteration) per loop cycle. After commit, STOP and let the loop handle the next section.
+REMINDER: ONE section per loop cycle. After commit, STOP and let the loop handle the next section.
 
 OUTPUT FORMAT: No markdown formatting (no **bold**, `code`, # headers). Plain text and - lists are fine. Do not echo phase names or step numbers - just do the work.

@@ -24,11 +24,12 @@ var embeddedFS embed.FS
 
 // ServerConfig holds configuration for the web server.
 type ServerConfig struct {
-	Port     int    // port to listen on
-	Host     string // host/IP to bind to (default "127.0.0.1")
-	PlanName string // plan name to display in dashboard
-	Branch   string // git branch name
-	PlanFile string // path to plan file for /api/plan endpoint
+	Port               int      // port to listen on
+	Host               string   // host/IP to bind to (default "127.0.0.1")
+	PlanName           string   // plan name to display in dashboard
+	Branch             string   // git branch name
+	PlanFile           string   // path to plan file for /api/plan endpoint
+	TaskHeaderPatterns []string // task-header templates used to parse plans (empty = plan defaults)
 }
 
 // host returns the bind address, defaulting to "127.0.0.1" if not set.
@@ -227,7 +228,19 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 		planPath = filepath.Join(sessionDir, meta.PlanPath)
 	}
 
-	p, err := loadPlanWithFallback(planPath)
+	// prefer per-session patterns recorded in the progress header; fall back to
+	// the dashboard server's own config for sessions from the same repo or for
+	// old progress files that pre-date per-session header storage.
+	patterns := meta.TaskHeaderPatterns
+	if len(patterns) == 0 {
+		patterns = s.cfg.TaskHeaderPatterns
+	}
+	compiledPatterns, err := plan.ResolveHeaderPatterns(patterns)
+	if err != nil {
+		log.Printf("[WARN] failed to compile task header patterns: %v", err)
+		compiledPatterns = plan.DefaultHeaderPatterns()
+	}
+	p, err := loadPlanWithFallback(planPath, compiledPatterns)
 	if err != nil {
 		log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
 		http.Error(w, "unable to load plan", http.StatusInternalServerError)
@@ -247,7 +260,11 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 
 // loadPlan loads a plan from disk (with completed/ fallback).
 func (s *Server) loadPlan() (*plan.Plan, error) {
-	return loadPlanWithFallback(s.cfg.PlanFile)
+	patterns, err := plan.ResolveHeaderPatterns(s.cfg.TaskHeaderPatterns)
+	if err != nil {
+		return nil, fmt.Errorf("compile task header patterns: %w", err)
+	}
+	return loadPlanWithFallback(s.cfg.PlanFile, patterns)
 }
 
 // handleEvents serves the SSE stream.

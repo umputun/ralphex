@@ -75,6 +75,7 @@ func TestNewLogger(t *testing.T) {
 	}
 }
 
+
 func TestNewLogger_AppendOnRestart(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -127,6 +128,41 @@ func TestNewLogger_AppendOnRestart(t *testing.T) {
 
 	// header written only once
 	assert.Equal(t, 1, strings.Count(contentStr, "# Ralphex Progress Log"))
+}
+
+func TestNewLogger_RestartWritesTaskHeaderPatterns(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	colors := testColors()
+	holder := &status.PhaseHolder{}
+
+	cfg1 := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main", TaskHeaderPatterns: []string{"default"}}
+	l1, err := NewLogger(cfg1, colors, holder)
+	require.NoError(t, err)
+	l1.Print("first session")
+	require.NoError(t, unlockFile(l1.file))
+	unregisterActiveLock(l1.file.Name())
+	require.NoError(t, l1.file.Close())
+	l1.file = nil
+
+	// restart with different patterns
+	cfg2 := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main", TaskHeaderPatterns: []string{"openspec"}}
+	l2, err := NewLogger(cfg2, colors, holder)
+	require.NoError(t, err)
+	l2.Print("second session")
+	require.NoError(t, l2.Close())
+
+	content, err := os.ReadFile(l2.Path())
+	require.NoError(t, err)
+	s := string(content)
+
+	assert.Contains(t, s, "--- restarted at")
+	// new pattern written after restart marker
+	idx := strings.Index(s, "--- restarted at")
+	assert.Contains(t, s[idx:], "TaskHeaderPattern: openspec")
 }
 
 func TestNewLogger_EmptyFileWritesHeader(t *testing.T) {

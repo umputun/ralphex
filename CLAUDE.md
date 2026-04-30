@@ -291,6 +291,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - `session_timeout` config option: per-session timeout for claude (e.g., "30m", "1h"). Kills hanging sessions and continues to next iteration. CLI flag `--session-timeout` takes precedence. Disabled by default
 - `idle_timeout` config option: kills claude sessions when no output for specified duration (e.g., "5m"). Resets on each output line, only fires when session goes silent. CLI flag `--idle-timeout` takes precedence. Disabled by default
 - `move_plan_on_completion` config option: controls whether completed plans move to `docs/plans/completed/` on success. Default `true`. Disable for workflows that manage plan lifecycle externally (spec-driven tooling with separate archive steps)
+- `task_header_patterns` config option: comma-separated list of preset names (`default`, `openspec`) or raw Go regexes controlling which headers the plan parser recognizes as task sections. Capture group 1 = task id (required), capture group 2 = title (optional). Default: `default` (matches `### Task N: title` and `### Iteration N: title`). Use `openspec` or a raw regex for spec-driven workflows that use different header shapes. Resolved via `plan.ResolveHeaderPatterns` in `pkg/plan/presets.go`. Key files: `pkg/plan/presets.go` (preset registry, `ResolveHeaderPattern`, `ResolveHeaderPatterns`, `DefaultHeaderPatterns`, `PresetDescription`); `pkg/plan/parse.go` (`ParsePlan(content string, patterns []*regexp.Regexp)`, `ParsePlanFile(path string, patterns []*regexp.Regexp)` — callers resolve `[]string` config values via `plan.ResolveHeaderPatterns` before passing; `nil`/empty slice falls back to `DefaultHeaderPatterns()`)
 
 ### Local Project Config (.ralphex/)
 
@@ -372,6 +373,7 @@ Implementation:
 - `{{DEFAULT_BRANCH}}` - detected default branch (main, master, origin/main, etc.), overridable via `--base-ref` CLI flag or `default_branch` config option
 - `{{DIFF_INSTRUCTION}}` - git diff command for current iteration (first: `git diff main...HEAD`, subsequent: `git diff`)
 - `{{PREVIOUS_REVIEW_CONTEXT}}` - previous review context block for external review iterations (empty on first iteration, formatted context on subsequent)
+- `{{TASK_HEADER_PATTERNS}}` - human-readable descriptions of configured `task_header_patterns` (preset descriptions or raw regex patterns, quoted, `or`-joined; used in `task.txt`)
 - `{{agent:name}}` - expands to Task tool instructions for the named agent
 
 Variables are also expanded inside agent content, so custom agents can use `{{DEFAULT_BRANCH}}` etc.

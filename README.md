@@ -172,6 +172,21 @@ Set `move_plan_on_completion = false` in `~/.config/ralphex/config` or `.ralphex
 
 **When to disable:** workflows that manage plan file lifecycle externally (e.g. spec-driven tooling where the plan lives inside a bundle that a separate archive step consumes) should opt out so ralphex doesn't fight the external tool's file layout.
 
+### Plan Header Patterns (optional)
+
+By default, ralphex recognizes `### Task N: ...` and `### Iteration N: ...` as task section headers. Set `task_header_patterns` to a comma-separated list of preset names or raw Go regexes to support alternative plan formats (e.g. OpenSpec-style `## 1. Phase Name`). Each entry is either a known preset (`default`, `openspec`) or a raw Go regexp where capture group 1 is the task id and capture group 2 is the optional title.
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+# use built-in openspec preset
+task_header_patterns = openspec
+
+# or a raw regex
+task_header_patterns = ^## (\d+)\.\s*(.*)$
+```
+
+**When to use:** spec-driven workflows (OpenSpec etc.) whose `tasks.md` uses different header conventions than the ralphex defaults. Leaving the option unset preserves today's behavior.
+
 ### Review-Only Mode
 
 Review-only mode (`--review`) runs the full review pipeline (Phase 2 → Phase 3 → Phase 4) on changes already present on the current branch. This is useful when changes were made outside ralphex — via Claude Code's built-in plan mode, manual edits, other AI agents, or any other workflow.
@@ -681,6 +696,7 @@ Custom prompt files support variable expansion. All variables use the `{{VARIABL
 | `{{PROGRESS_FILE}}` | Path to the progress log file | `.ralphex/progress/progress-feature.txt` |
 | `{{GOAL}}` | Human-readable goal description | `implementation of plan at docs/plans/feature.md` |
 | `{{DEFAULT_BRANCH}}` | Default branch name (overridable via `--base-ref` or `default_branch` config) | `main`, `master`, `origin/main` |
+| `{{TASK_HEADER_PATTERNS}}` | Human-readable descriptions of configured task header patterns (preset descriptions or raw regexes, quoted, `or`-joined; used in `task.txt`) | `'### Task N: title  or  ### Iteration N: title'` |
 | `{{agent:name}}` | Expands to Task tool instructions for the named agent | (see below) |
 
 **Agent references:**
@@ -831,6 +847,7 @@ Use `--config-dir` or `RALPHEX_CONFIG_DIR` to override the global config locatio
 | `task_retry_count` | Task retry attempts | `1` |
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
 | `move_plan_on_completion` | Move completed plan file into `docs/plans/completed/` on success (disable for external plan-lifecycle workflows) | `true` |
+| `task_header_patterns` | Comma-separated preset names (`default`, `openspec`) or raw Go regexes the plan parser uses to recognize task sections. Capture group 1 = task id, group 2 = title (optional) | `default` |
 | `use_worktree` | Run each plan in an isolated git worktree (full and tasks-only modes only) | `false` |
 | `plans_dir` | Plans directory | `docs/plans` |
 | `default_branch` | Override auto-detected default branch for review diffs | auto-detect |

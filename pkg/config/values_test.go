@@ -888,6 +888,140 @@ func TestValuesLoader_Load_ErrorPatternsOverride(t *testing.T) {
 	assert.Equal(t, []string{"local pattern"}, values.ClaudeErrorPatterns)
 }
 
+func TestValuesLoader_parseValuesFromBytes_TaskHeaderPatterns(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	tests := []struct {
+		name        string
+		input       string
+		expected    []string
+		expectedSet bool
+	}{
+		{
+			name:        "key absent",
+			input:       "",
+			expected:    nil,
+			expectedSet: false,
+		},
+		{
+			name:        "explicit preset names list",
+			input:       "task_header_patterns = default, openspec",
+			expected:    []string{"default", "openspec"},
+			expectedSet: true,
+		},
+		{
+			name:        "explicit empty string",
+			input:       "task_header_patterns = ",
+			expected:    nil,
+			expectedSet: true,
+		},
+		{
+			name:        "single preset name",
+			input:       "task_header_patterns = openspec",
+			expected:    []string{"openspec"},
+			expectedSet: true,
+		},
+		{
+			name:        "whitespace trimmed around commas",
+			input:       `task_header_patterns =  default ,  ^## (\d+)\.\s*(.*)$  `,
+			expected:    []string{"default", `^## (\d+)\.\s*(.*)$`},
+			expectedSet: true,
+		},
+		{
+			name:        "whitespace-only entries dropped",
+			input:       "task_header_patterns = ,   ,",
+			expected:    nil,
+			expectedSet: true,
+		},
+		{
+			name:        "duplicate entries preserved in order",
+			input:       "task_header_patterns = default, default",
+			expected:    []string{"default", "default"},
+			expectedSet: true,
+		},
+		{
+			name:        "raw regex with special chars stored as-is",
+			input:       `task_header_patterns = ^# Phase (\d+):\s*(.*)$`,
+			expected:    []string{`^# Phase (\d+):\s*(.*)$`},
+			expectedSet: true,
+		},
+		{
+			name:        "raw regex with comma inside quantifier kept intact",
+			input:       `task_header_patterns = ^#{1,3} Task (\d+):\s*(.*)$`,
+			expected:    []string{`^#{1,3} Task (\d+):\s*(.*)$`},
+			expectedSet: true,
+		},
+		{
+			name:        "two patterns where first has quantifier comma",
+			input:       `task_header_patterns = ^#{1,3} Task (\d+):\s*(.*)$, openspec`,
+			expected:    []string{`^#{1,3} Task (\d+):\s*(.*)$`, "openspec"},
+			expectedSet: true,
+		},
+		{
+			name:        "raw regex with comma inside character class kept intact",
+			input:       `task_header_patterns = ^[A-Z,a-z]+ (\d+):\s*(.*)$`,
+			expected:    []string{`^[A-Z,a-z]+ (\d+):\s*(.*)$`},
+			expectedSet: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			values, err := vl.parseValuesFromBytes([]byte(tc.input))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, values.TaskHeaderPatterns)
+			assert.Equal(t, tc.expectedSet, values.taskHeaderPatternsSet)
+		})
+	}
+}
+
+func TestValues_mergeFrom_TaskHeaderPatterns(t *testing.T) {
+	t.Run("src set overrides dst", func(t *testing.T) {
+		dst := Values{
+			TaskHeaderPatterns:    []string{"dst pattern"},
+			taskHeaderPatternsSet: true,
+		}
+		src := Values{
+			TaskHeaderPatterns:    []string{"src pattern 1", "src pattern 2"},
+			taskHeaderPatternsSet: true,
+		}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.TaskHeaderPatterns)
+		assert.True(t, dst.taskHeaderPatternsSet)
+	})
+
+	t.Run("src set to empty clears dst", func(t *testing.T) {
+		dst := Values{
+			TaskHeaderPatterns:    []string{"dst pattern"},
+			taskHeaderPatternsSet: true,
+		}
+		src := Values{
+			TaskHeaderPatterns:    nil,
+			taskHeaderPatternsSet: true,
+		}
+		dst.mergeFrom(&src)
+
+		assert.Nil(t, dst.TaskHeaderPatterns)
+		assert.True(t, dst.taskHeaderPatternsSet)
+	})
+
+	t.Run("src unset preserves dst", func(t *testing.T) {
+		dst := Values{
+			TaskHeaderPatterns:    []string{"dst pattern"},
+			taskHeaderPatternsSet: true,
+		}
+		src := Values{
+			TaskHeaderPatterns:    nil,
+			taskHeaderPatternsSet: false,
+		}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"dst pattern"}, dst.TaskHeaderPatterns)
+		assert.True(t, dst.taskHeaderPatternsSet)
+	})
+}
+
 func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalConfig := filepath.Join(tmpDir, "config")

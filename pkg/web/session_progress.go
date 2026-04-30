@@ -53,28 +53,62 @@ func ParseProgressHeader(path string) (meta SessionMetadata, complete bool, err 
 
 		// parse key-value pairs (process line before checking error,
 		// as ReadString may return partial data alongside an error)
-		if val, found := strings.CutPrefix(line, "Plan: "); found {
-			meta.PlanPath = val
-		} else if val, found := strings.CutPrefix(line, "Branch: "); found {
-			meta.Branch = val
-		} else if val, found := strings.CutPrefix(line, "Mode: "); found {
-			meta.Mode = val
-		} else if val, found := strings.CutPrefix(line, "Started: "); found {
-			// header timestamps are written in local time without a zone offset
-			if t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local); parseErr == nil {
-				meta.StartTime = t
-			}
-		}
+		applyHeaderField(line, &meta)
 
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
 				return SessionMetadata{}, false, fmt.Errorf("read file: %w", readErr)
 			}
-			break // EOF after processing final line
+			return meta, complete, nil // EOF before separator
+		}
+	}
+
+	// scan the rest of the file for restart sections that may carry updated patterns.
+	// each restart marker resets the pattern slice; the last written set wins.
+	for {
+		line, readErr := reader.ReadString('\n')
+		line = trimLineEnding(line)
+
+		if strings.HasPrefix(line, "--- restarted at ") {
+			meta.TaskHeaderPatterns = nil
+		} else if val, found := strings.CutPrefix(line, "TaskHeaderPattern: "); found {
+			meta.TaskHeaderPatterns = append(meta.TaskHeaderPatterns, val)
+		}
+
+		if readErr != nil {
+			break
 		}
 	}
 
 	return meta, complete, nil
+}
+
+// applyHeaderField parses a single header line (e.g. "Plan: ...") and updates
+// the metadata in place. unknown or unmatched lines are ignored.
+func applyHeaderField(line string, meta *SessionMetadata) {
+	if val, found := strings.CutPrefix(line, "Plan: "); found {
+		meta.PlanPath = val
+		return
+	}
+	if val, found := strings.CutPrefix(line, "Branch: "); found {
+		meta.Branch = val
+		return
+	}
+	if val, found := strings.CutPrefix(line, "Mode: "); found {
+		meta.Mode = val
+		return
+	}
+	if val, found := strings.CutPrefix(line, "Started: "); found {
+		// header timestamps are written in local time without a zone offset
+		if t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local); parseErr == nil {
+			meta.StartTime = t
+		}
+		return
+	}
+	if val, found := strings.CutPrefix(line, "TaskHeaderPattern: "); found {
+		meta.TaskHeaderPatterns = append(meta.TaskHeaderPatterns, val)
+		return
+	}
 }
 
 // loadProgressFileIntoSession reads a progress file and publishes events to the session's SSE server.

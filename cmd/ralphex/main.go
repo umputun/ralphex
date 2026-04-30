@@ -399,11 +399,16 @@ func setupProgressLogger(o opts, req executePlanRequest, branch string) (progres
 		baseLog = req.ProgressLog
 	} else {
 		var err error
+		var taskHeaderPatterns []string
+		if req.Config != nil {
+			taskHeaderPatterns = req.Config.TaskHeaderPatterns
+		}
 		baseLog, err = progress.NewLogger(progress.Config{
-			PlanFile: req.PlanFile,
-			Mode:     string(req.Mode),
-			Branch:   branch,
-			NoColor:  o.NoColor,
+			PlanFile:           req.PlanFile,
+			Mode:               string(req.Mode),
+			Branch:             branch,
+			TaskHeaderPatterns: taskHeaderPatterns,
+			NoColor:            o.NoColor,
 		}, req.Colors, holder)
 		if err != nil {
 			return progressLogResult{}, fmt.Errorf("create progress logger: %w", err)
@@ -514,14 +519,15 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	var runnerLog processor.Logger = plr.baseLog
 	if o.Serve {
 		dashboard := web.NewDashboard(web.DashboardConfig{
-			BaseLog:         plr.baseLog,
-			Port:            o.Port,
-			Host:            o.Host,
-			PlanFile:        req.PlanFile,
-			Branch:          branch,
-			WatchDirs:       o.Watch,
-			ConfigWatchDirs: req.Config.WatchDirs,
-			Colors:          req.Colors,
+			BaseLog:            plr.baseLog,
+			Port:               o.Port,
+			Host:               o.Host,
+			PlanFile:           req.PlanFile,
+			Branch:             branch,
+			WatchDirs:          o.Watch,
+			ConfigWatchDirs:    req.Config.WatchDirs,
+			Colors:             req.Colors,
+			TaskHeaderPatterns: req.Config.TaskHeaderPatterns,
 		}, plr.holder)
 		var dashErr error
 		runnerLog, dashErr = dashboard.Start(ctx)
@@ -646,10 +652,11 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 	holder := &status.PhaseHolder{}
 	branch := plan.ExtractBranchName(req.PlanFile)
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanFile: req.PlanFile,
-		Mode:     string(req.Mode),
-		Branch:   branch,
-		NoColor:  o.NoColor,
+		PlanFile:           req.PlanFile,
+		Mode:               string(req.Mode),
+		Branch:             branch,
+		TaskHeaderPatterns: req.Config.TaskHeaderPatterns,
+		NoColor:            o.NoColor,
 	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
@@ -767,9 +774,10 @@ func isWatchOnlyMode(o opts, configWatchDirs []string) bool {
 func runWatchOnly(ctx context.Context, o opts, cfg *config.Config, colors *progress.Colors) error {
 	dirs := web.ResolveWatchDirs(o.Watch, cfg.WatchDirs)
 	dashboard := web.NewDashboard(web.DashboardConfig{
-		Port:   o.Port,
-		Host:   o.Host,
-		Colors: colors,
+		Port:               o.Port,
+		Host:               o.Host,
+		Colors:             colors,
+		TaskHeaderPatterns: cfg.TaskHeaderPatterns,
 	}, nil)
 	if watchErr := dashboard.RunWatchOnly(ctx, dirs); watchErr != nil {
 		return fmt.Errorf("run watch-only mode: %w", watchErr)
@@ -934,10 +942,11 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	// create progress logger for plan mode
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanDescription: o.PlanDescription,
-		Mode:            string(processor.ModePlan),
-		Branch:          branch,
-		NoColor:         o.NoColor,
+		PlanDescription:    o.PlanDescription,
+		Mode:               string(processor.ModePlan),
+		Branch:             branch,
+		TaskHeaderPatterns: req.Config.TaskHeaderPatterns,
+		NoColor:            o.NoColor,
 	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)

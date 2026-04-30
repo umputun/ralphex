@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/umputun/ralphex/pkg/config"
+	"github.com/umputun/ralphex/pkg/plan"
 )
 
 // agentRefPattern matches {{agent:name}} template syntax
@@ -65,7 +66,7 @@ func (r *Runner) getProgressFileRef() string {
 }
 
 // replaceBaseVariables replaces common template variables in prompts.
-// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}}
+// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}}, {{TASK_HEADER_PATTERNS}}
 // this is the core replacement function used by all prompt builders.
 // replaces common template variables shared across all prompt types.
 // does not append trailer instruction — callers are responsible for calling appendCommitTrailerInstruction
@@ -77,7 +78,25 @@ func (r *Runner) replaceBaseVariables(prompt string) string {
 	result = strings.ReplaceAll(result, "{{GOAL}}", r.getGoal())
 	result = strings.ReplaceAll(result, "{{DEFAULT_BRANCH}}", r.getDefaultBranch())
 	result = strings.ReplaceAll(result, "{{PLANS_DIR}}", r.getPlansDir())
+	result = strings.ReplaceAll(result, "{{TASK_HEADER_PATTERNS}}", r.getTaskHeaderPatternsHint())
 	return result
+}
+
+// getTaskHeaderPatternsHint returns the configured task header patterns as a
+// human-readable, single-quoted, " or "-joined string for use in prompts and
+// error messages. preset names are expanded to their format description (e.g.
+// "default" → "'### Task N: title'  or  '### Iteration N: title'"). raw regex
+// strings are shown as-is. returns empty string when no patterns are configured.
+func (r *Runner) getTaskHeaderPatternsHint() string {
+	if r.cfg.AppConfig == nil || len(r.cfg.AppConfig.TaskHeaderPatterns) == 0 {
+		return ""
+	}
+	patterns := r.cfg.AppConfig.TaskHeaderPatterns
+	quoted := make([]string, len(patterns))
+	for i, p := range patterns {
+		quoted[i] = "'" + plan.PresetDescription(p) + "'"
+	}
+	return strings.Join(quoted, " or ")
 }
 
 // appendCommitTrailerInstruction appends trailer instruction to prompt when commit_trailer is configured.
@@ -119,7 +138,7 @@ If Claude's arguments are invalid, explain why the issues still exist.`, claudeR
 
 // replaceVariablesWithIteration replaces all template variables including iteration-aware ones.
 // supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}},
-// {{DIFF_INSTRUCTION}}, {{PREVIOUS_REVIEW_CONTEXT}}, {{agent:name}}
+// {{TASK_HEADER_PATTERNS}}, {{DIFF_INSTRUCTION}}, {{PREVIOUS_REVIEW_CONTEXT}}, {{agent:name}}
 // this variant is used when iteration context is needed (e.g., external review prompts).
 func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration bool, claudeResponse string) string {
 	result := r.replaceBaseVariables(prompt)
@@ -185,7 +204,8 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 }
 
 // replacePromptVariables replaces all template variables including agent references.
-// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}}, {{agent:name}}
+// supported: {{PLAN_FILE}}, {{PROGRESS_FILE}}, {{GOAL}}, {{DEFAULT_BRANCH}}, {{PLANS_DIR}},
+// {{TASK_HEADER_PATTERNS}}, {{agent:name}}
 // note: {{CODEX_OUTPUT}} and {{PLAN_DESCRIPTION}} are handled by specific build functions.
 func (r *Runner) replacePromptVariables(prompt string) string {
 	result := r.replaceBaseVariables(prompt)

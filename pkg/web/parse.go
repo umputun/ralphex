@@ -45,6 +45,15 @@ func parseProgressLine(line string, inHeader bool) (ParsedLine, bool) {
 		return ParsedLine{Type: ParsedLineSkip}, true
 	}
 
+	// suppress metadata lines that carry task header pattern config.
+	// "TaskHeaderPatterns: " is the old plural form from prior versions;
+	// "TaskHeaderPattern: " is the current singular form written in the
+	// initial header and after restart markers. neither should appear as
+	// plain output in the SSE event stream.
+	if strings.HasPrefix(line, "TaskHeaderPattern: ") || strings.HasPrefix(line, "TaskHeaderPatterns: ") {
+		return ParsedLine{Type: ParsedLineSkip}, false
+	}
+
 	// check for section header (--- section name ---)
 	if matches := sectionRegex.FindStringSubmatch(line); matches != nil {
 		sectionName := matches[1]

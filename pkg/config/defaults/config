@@ -110,6 +110,20 @@ external_review_tool = codex
 move_plan_on_completion = true
 
 # ------------------------------------------------------------------------------
+# plan parsing
+# ------------------------------------------------------------------------------
+
+# task_header_patterns: comma-separated list of preset names or raw Go regexes
+# used to recognize task sections in plan files. each entry is either a known
+# preset name ("default", "openspec") or a raw Go regexp. capture group 1 must
+# be the task id and capture group 2 (optional) the title.
+# presets: "default" matches "### Task N: title" and "### Iteration N: title";
+#          "openspec" matches "## N. title".
+# example raw regex: ^### (?:Task|Iteration) ([^:]+?):\s*(.*)$
+# default: default
+# task_header_patterns = default
+
+# ------------------------------------------------------------------------------
 # worktree isolation
 # ------------------------------------------------------------------------------
 

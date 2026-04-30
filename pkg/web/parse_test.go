@@ -63,6 +63,15 @@ func TestParseProgressLine(t *testing.T) {
 		assert.False(t, isHeaderSeparator("--- restarted at 2026-02-18 15:30:00 ---"))
 	})
 
+	t.Run("TaskHeaderPatterns line at restart marker is skipped", func(t *testing.T) {
+		// the writer re-emits TaskHeaderPatterns next to a restart marker so
+		// dashboards pick up the latest patterns; the event stream should
+		// suppress the line rather than surface it as plain output.
+		parsed, inHeader := parseProgressLine("TaskHeaderPatterns: ## {N}. {title}", false)
+		assert.False(t, inHeader)
+		assert.Equal(t, ParsedLineSkip, parsed.Type)
+	})
+
 	t.Run("error line", func(t *testing.T) {
 		parsed, inHeader := parseProgressLine("[26-01-22 10:30:45] ERROR: something failed", false)
 		assert.False(t, inHeader)

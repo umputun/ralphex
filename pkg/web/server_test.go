@@ -326,6 +326,49 @@ func TestServer_HandlePlan(t *testing.T) {
 		assert.Contains(t, string(body), "Completed Plan")
 	})
 
+	t.Run("uses configured task_header_patterns to parse plan", func(t *testing.T) {
+		// plan with custom openspec-style headers: without threading the
+		// configured patterns into the server the /api/plan endpoint would
+		// return an empty task list.
+		session := NewSession("test", "/tmp/test.txt")
+		defer session.Close()
+
+		tmpDir := t.TempDir()
+		planFile := filepath.Join(tmpDir, "plan.md")
+		planContent := `# Custom Plan
+
+## 1. First Phase
+
+- [ ] phase one item
+
+## 2. Second Phase
+
+- [x] phase two item
+`
+		require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0o600))
+
+		srv, err := NewServer(ServerConfig{
+			Port:               8080,
+			PlanFile:           planFile,
+			TaskHeaderPatterns: []string{"openspec"},
+		}, session)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "First Phase")
+		assert.Contains(t, string(body), "Second Phase")
+	})
+
 	t.Run("rejects non-GET methods", func(t *testing.T) {
 		session := NewSession("test", "/tmp/test.txt")
 		defer session.Close()
@@ -680,6 +723,117 @@ Started: 2026-01-22 10:30:00
 		require.NoError(t, err)
 		assert.Contains(t, string(body), "Completed Session Plan")
 	})
+
+	t.Run("uses dashboard config patterns to parse session plan", func(t *testing.T) {
+		// the dashboard uses its own configured task_header_patterns for all sessions;
+		// per-session pattern transport was removed in favor of simpler config-only approach.
+		tmpDir := t.TempDir()
+
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		require.NoError(t, os.Chdir(tmpDir))
+
+		plansDir := filepath.Join(tmpDir, "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+
+		// plan uses openspec-style header
+		planContent := `# Session Plan
+
+## 1. Session Phase
+
+- [ ] Item 1
+`
+		planPath := filepath.Join(plansDir, "session-plan.md")
+		require.NoError(t, os.WriteFile(planPath, []byte(planContent), 0o600))
+
+		progressPath := filepath.Join(tmpDir, "progress-session.txt")
+		progressContent := "# Ralphex Progress Log\n" +
+			"Plan: plans/session-plan.md\n" +
+			"Branch: main\n" +
+			"Mode: full\n" +
+			"Started: 2026-01-22 10:30:00\n" +
+			"------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		defer sm.Close()
+		_, err = sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		// dashboard config uses openspec preset to match ## N. header
+		srv, err := NewServerWithSessions(ServerConfig{
+			Port:               8080,
+			TaskHeaderPatterns: []string{"openspec"},
+		}, sm)
+		require.NoError(t, err)
+
+		sessionID := sessionIDFromPath(progressPath)
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionID, http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "Session Phase", "dashboard config patterns parse the plan correctly")
+	})
+
+	t.Run("uses default preset to parse watched sessions with Task headers", func(t *testing.T) {
+		// dashboard configured with "default" preset correctly parses plans using
+		// the built-in ### Task / ### Iteration header format.
+		tmpDir := t.TempDir()
+
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		require.NoError(t, os.Chdir(tmpDir))
+
+		plansDir := filepath.Join(tmpDir, "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+
+		planContent := `# Default-Format Plan
+
+### Task 1: Watched Task
+
+- [ ] Item 1
+`
+		planPath := filepath.Join(plansDir, "watched.md")
+		require.NoError(t, os.WriteFile(planPath, []byte(planContent), 0o600))
+
+		progressPath := filepath.Join(tmpDir, "progress-watched.txt")
+		progressContent := "# Ralphex Progress Log\nPlan: plans/watched.md\nBranch: main\nMode: full\nStarted: 2026-01-22 10:30:00\n------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		defer sm.Close()
+		_, err = sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{
+			Port:               8080,
+			TaskHeaderPatterns: []string{"default"},
+		}, sm)
+		require.NoError(t, err)
+
+		sessionID := sessionIDFromPath(progressPath)
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionID, http.NoBody)
+		w := httptest.NewRecorder()
+
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "Watched Task")
+	})
 }
 
 func TestLoadPlanWithFallback(t *testing.T) {
@@ -694,7 +848,7 @@ func TestLoadPlanWithFallback(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(planPath, []byte(planContent), 0o600))
 
-		plan, err := loadPlanWithFallback(planPath)
+		plan, err := loadPlanWithFallback(planPath, nil)
 		require.NoError(t, err)
 		require.NotNil(t, plan)
 		assert.Equal(t, "Test Plan", plan.Title)
@@ -717,7 +871,7 @@ func TestLoadPlanWithFallback(t *testing.T) {
 
 		// request the non-existent original path
 		originalPath := filepath.Join(tmpDir, "test-plan.md")
-		plan, err := loadPlanWithFallback(originalPath)
+		plan, err := loadPlanWithFallback(originalPath, nil)
 		require.NoError(t, err)
 		require.NotNil(t, plan)
 		assert.Equal(t, "Completed Plan", plan.Title)
@@ -727,7 +881,7 @@ func TestLoadPlanWithFallback(t *testing.T) {
 		tmpDir := t.TempDir()
 		nonexistentPath := filepath.Join(tmpDir, "nonexistent.md")
 
-		_, err := loadPlanWithFallback(nonexistentPath)
+		_, err := loadPlanWithFallback(nonexistentPath, nil)
 		require.Error(t, err)
 	})
 }
