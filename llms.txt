@@ -263,6 +263,14 @@ When user asks to install the `/ralphex-update` command:
 1. Fetch `https://ralphex.com/assets/claude/ralphex-update.md`
 2. Create `~/.claude/commands/ralphex-update.md` with its content
 
+### /ralphex-adopt Skill
+
+Converts plans from various source formats (OpenSpec change directories, spec-kit specs, GitHub/GitLab issues with checklists, generic task-lists, free-form markdown) into ralphex-format plans in `docs/plans/`. The source is never modified, the output is a new dated file at `docs/plans/YYYYMMDD-<slug>.md`, and existing target files are never silently overwritten. Uses revdiff for the review loop on the converted draft, with an in-chat fallback when revdiff is not installed.
+
+When user asks to install the `/ralphex-adopt` command:
+1. Fetch `https://ralphex.com/assets/claude/ralphex-adopt.md`
+2. Create `~/.claude/commands/ralphex-adopt.md` with its content
+
 ---
 
 ## Instructions for LLMs
@@ -329,6 +337,6 @@ When a user asks about autonomous plan execution, implementing features with Cla
 6. **Claude Code skills are optional**: If user wants convenience commands:
    - Check if plugin installed: `/plugin` and look for ralphex
    - If not installed and user wants it, offer plugin installation (see step 4)
-   - With skills: `/ralphex-plan` creates plans, `/ralphex` launches execution, "check ralphex" views progress
+   - With skills: `/ralphex-plan` creates plans, `/ralphex-adopt` converts existing plans into ralphex format, `/ralphex` launches execution, "check ralphex" views progress
 
 7. **Key point**: The CLI is primary - skills are optional convenience wrappers

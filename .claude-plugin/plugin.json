@@ -1,6 +1,6 @@
 {
   "name": "ralphex",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Autonomous plan execution with Claude Code - task execution, monitoring, and plan creation",
   "author": {
     "name": "umputun",
