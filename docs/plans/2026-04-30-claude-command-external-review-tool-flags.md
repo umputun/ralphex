@@ -83,13 +83,13 @@ Add per-run CLI flags that override configured provider settings for Claude-comp
 **Files:**
 - No code changes expected
 
-- [ ] Run `make fmt`
-- [ ] Run `make test`
-- [ ] Run `make lint`
-- [ ] Run `make build`
-- [ ] Run `./scripts/internal/prep-toy-test.sh`
-- [ ] Run `cd /tmp/ralphex-test && .bin/ralphex docs/plans/fix-issues.md`
-- [ ] Verify the toy project run reaches completion and moves the plan to `docs/plans/completed/`
+- [x] Run `make fmt`
+- [x] Run `make test`
+- [x] Run `make lint`
+- [x] Run `make build`
+- [x] Run `./scripts/internal/prep-toy-test.sh`
+- [x] Run `cd /tmp/ralphex-test && .bin/ralphex docs/plans/fix-issues.md`
+- [x] Verify the toy project run reaches completion and moves the plan to `docs/plans/completed/`
 
 ### Task 5: Update plan lifecycle
 

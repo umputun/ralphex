@@ -357,6 +357,9 @@ func TestLogger_PhaseColors(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir(origDir) }()
 
+	// fatih/color latches NO_COLOR into each Color when it is created.
+	t.Setenv("NO_COLOR", "")
+
 	// enable colors for this test
 	origNoColor := color.NoColor
 	color.NoColor = false
