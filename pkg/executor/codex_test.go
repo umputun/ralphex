@@ -967,3 +967,358 @@ func TestCodexExecutor_Run_LimitPattern_ContextCanceled(t *testing.T) {
 	var patternErr *PatternMatchError
 	assert.NotErrorAs(t, result.Error, &patternErr, "should not return PatternMatchError on cancellation")
 }
+
+func TestCodexExecutor_Run_LimitPattern_StderrMatch(t *testing.T) {
+	// codex emits OpenAI/ChatGPT plan-quota errors to stderr while stdout is empty.
+	// pattern check must scan stderr too, otherwise --wait can never fire.
+	exitErr := errors.New("exit status 1")
+	stderr := "--------\nworkdir: /tmp/test\n--------\nworking...\n" +
+		"ERROR: You've hit your usage limit. Upgrade to Pro to purchase more credits.\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, ""), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"You've hit your usage limit"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr, "limit message in stderr must be detected")
+	assert.Equal(t, "You've hit your usage limit", limitErr.Pattern)
+	assert.Equal(t, "codex /status", limitErr.HelpCmd)
+	assert.Empty(t, result.Output, "stderr-only match must not leak stderr content into Result.Output")
+}
+
+func TestCodexExecutor_Run_ErrorPattern_StderrMatch(t *testing.T) {
+	// error pattern that appears only in stderr (e.g., auth failures) must be detected
+	exitErr := errors.New("exit status 1")
+	stderr := "--------\nworkdir: /tmp/test\n--------\n" +
+		"Error: authentication failed, please log in again"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, ""), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		ErrorPatterns: []string{"authentication failed"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var patternErr *PatternMatchError
+	require.ErrorAs(t, result.Error, &patternErr, "error pattern in stderr must be detected")
+	assert.Equal(t, "authentication failed", patternErr.Pattern)
+	assert.Empty(t, result.Output, "stderr-only match must not leak stderr content into Result.Output")
+}
+
+func TestCodexExecutor_Run_LimitPattern_StderrIgnoredOnCleanExit(t *testing.T) {
+	// stderr containing the pattern must be ignored when codex exits cleanly,
+	// to avoid false positives from analysis text that mentions limit phrases.
+	// the stderr line below would be matched on a non-zero exit (verified by
+	// TestCodexExecutor_Run_LimitPattern_StderrMatch), so a clean-exit pass here
+	// proves the guard at codex.go gates pattern detection on finalErr != nil.
+	stderr := "--------\nworkdir: /tmp/test\n--------\n" +
+		"ERROR: You've hit your usage limit (in code under review)\n"
+
+	tests := []struct {
+		name          string
+		limitPat      []string
+		errorPat      []string
+		stdoutContent string
+	}{
+		{name: "limit pattern only", limitPat: []string{"You've hit your usage limit"}, stdoutContent: "Analysis complete"},
+		{name: "error pattern only", errorPat: []string{"You've hit your usage limit"}, stdoutContent: "Analysis complete"},
+		{name: "both patterns", limitPat: []string{"You've hit your usage limit"}, errorPat: []string{"You've hit your usage limit"}, stdoutContent: "Analysis complete"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := &mockCodexRunner{
+				runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+					return mockStreams(stderr, tc.stdoutContent), mockWait(), nil
+				},
+			}
+			e := &CodexExecutor{
+				runner:        mock,
+				LimitPatterns: tc.limitPat,
+				ErrorPatterns: tc.errorPat,
+			}
+
+			result := e.Run(context.Background(), "analyze code")
+			require.NoError(t, result.Error, "patterns in stderr must not trigger on clean exit")
+		})
+	}
+}
+
+func TestCodexExecutor_Run_LimitPattern_EvictionResistant(t *testing.T) {
+	// the limit message followed by many trailing stderr lines must still be
+	// detected: pattern scanning is live (per-line) so the 5-line tail buffer
+	// used for human-readable error context cannot evict the match.
+	exitErr := errors.New("exit status 1")
+	var sb strings.Builder
+	sb.WriteString("--------\nworkdir: /tmp/test\n--------\n")
+	sb.WriteString("ERROR: You've hit your usage limit. Upgrade to Pro.\n")
+	for i := range 20 {
+		fmt.Fprintf(&sb, "trailing chatter line %d\n", i)
+	}
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(sb.String(), ""), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"You've hit your usage limit"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr,
+		"limit message must survive eviction by trailing stderr chatter (live per-line scan)")
+	assert.Equal(t, "You've hit your usage limit", limitErr.Pattern)
+}
+
+func TestCodexExecutor_Run_LimitPattern_TruncationResistant(t *testing.T) {
+	// a single stderr error line longer than the 256-rune cap used for
+	// error-context truncation must still be matched: pattern scanning runs
+	// on the raw, untruncated line before tail capture/truncation.
+	exitErr := errors.New("exit status 1")
+	padding := strings.Repeat("x", 300)
+	stderr := "--------\nworkdir: /tmp/test\n--------\n" +
+		"ERROR: " + padding + " You've hit your usage limit\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, ""), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"You've hit your usage limit"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr,
+		"limit message past the 256-rune line cap must still be detected (scan before truncation)")
+	assert.Equal(t, "You've hit your usage limit", limitErr.Pattern)
+}
+
+func TestCodexExecutor_Run_StderrChatterIgnoredWithoutErrorPrefix(t *testing.T) {
+	// progress chatter on stderr (header banners, bold summaries, model thinking)
+	// must NOT trigger pattern matches even when it contains the configured pattern
+	// strings — only CLI-error-prefixed lines are scanned. with empty stdout this
+	// test exercises the gate in isolation: removing isCodexErrorLine would make
+	// stderr.limitMatch / stderr.errorMatch fire and the assertion would fail.
+	exitErr := errors.New("exit status 1")
+	stderr := "--------\nworkdir: /tmp/test\n--------\n" +
+		"**Reviewing rate limit handling code...**\n" +
+		"the code mentions quota exceeded behavior in passing\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, ""), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"rate limit"},
+		ErrorPatterns: []string{"quota exceeded"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error, "non-zero exit must surface")
+	// neither stderr line has an error/fatal/panic prefix, so the gate must
+	// suppress both pattern matches; the surviving error is the wrapped wait error.
+	var limitErr *LimitPatternError
+	require.NotErrorAs(t, result.Error, &limitErr,
+		"stderr chatter without error prefix must not produce LimitPatternError")
+	var patternErr *PatternMatchError
+	require.NotErrorAs(t, result.Error, &patternErr,
+		"stderr chatter without error prefix must not produce PatternMatchError")
+	assert.Contains(t, result.Error.Error(), "codex exited with error")
+}
+
+func TestCodexExecutor_Run_StdoutLimitBeatsStderrChatter(t *testing.T) {
+	// when stdout has an authoritative LimitPattern match AND stderr has chatter
+	// that mentions the same pattern (no error prefix), stdout wins — and the
+	// stderr chatter contributes nothing because the gate suppresses it.
+	exitErr := errors.New("exit status 1")
+	stderr := "--------\nworkdir: /tmp/test\n--------\n" +
+		"**Reviewing rate limit handling code...**\n"
+	stdout := "Rate limit detected in handler.go:42\n<<<RALPHEX:CODEX_REVIEW_DONE>>>"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, stdout), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"rate limit"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr,
+		"stdout LimitPattern must match — stderr chatter is suppressed by the gate")
+	assert.Equal(t, "rate limit", limitErr.Pattern)
+}
+
+func TestCodexExecutor_Run_StderrLimitBeatsStdoutError(t *testing.T) {
+	// when stderr has a CLI-error-prefixed limit match (real quota diagnostic) AND
+	// stdout matches a configured ErrorPattern, stderr limit must win — otherwise a
+	// real OpenAI quota hit gets downgraded to a non-retryable PatternMatchError and
+	// --wait can never retry. the prefix gate in processStderr already prevents
+	// benign stderr text from firing, so a stderr.limitMatch is trustworthy.
+	exitErr := errors.New("exit status 1")
+	stderr := "ERROR: You've hit your usage limit\n" // real CLI quota diagnostic
+	stdout := "Authentication failed for user\n"     // partial response with ErrorPattern hit
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, stdout), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"You've hit your usage limit"},
+		ErrorPatterns: []string{"Authentication failed"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr,
+		"stderr limit (CLI quota diagnostic) must trump stdout error pattern so --wait can retry")
+	assert.Equal(t, "You've hit your usage limit", limitErr.Pattern)
+	var patternErr *PatternMatchError
+	assert.NotErrorAs(t, result.Error, &patternErr,
+		"must not downgrade to PatternMatchError when a real stderr quota diagnostic fires")
+}
+
+func TestCodexExecutor_Run_StdoutLimitBeatsStderrError(t *testing.T) {
+	// stdout limit match (intentional, in actual response) trumps stderr error match.
+	// limit-class wins across both sources before any error-class match, but within
+	// the same class stdout wins over stderr.
+	exitErr := errors.New("exit status 1")
+	stderr := "ERROR: server error during request\n"
+	stdout := "ratelimit detected in handler\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, stdout), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"ratelimit"},
+		ErrorPatterns: []string{"server error"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr,
+		"stdout limit pattern must beat stderr error pattern (limit class wins, stdout source wins within class)")
+	assert.Equal(t, "ratelimit", limitErr.Pattern)
+}
+
+func TestCodexExecutor_Run_LimitPattern_StderrPriority(t *testing.T) {
+	// when both limit and error patterns match on stderr, limit must win
+	exitErr := errors.New("exit status 1")
+	stderr := "--------\nworkdir: /tmp/test\n--------\n" +
+		"ERROR: rate limit + quota exceeded\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, ""), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"rate limit"},
+		ErrorPatterns: []string{"quota exceeded"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr, "limit pattern must take priority over error pattern on stderr path")
+	assert.Equal(t, "rate limit", limitErr.Pattern)
+}
+
+func TestCodexExecutor_Run_LimitPattern_StderrCancellation(t *testing.T) {
+	// context cancellation must not be masked by a stderr-only pattern match
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	stderr := "ERROR: You've hit your usage limit\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, ""), mockWaitError(context.Canceled), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"You've hit your usage limit"},
+		ErrorPatterns: []string{"You've hit your usage limit"},
+	}
+
+	result := e.Run(ctx, "analyze code")
+
+	require.ErrorIs(t, result.Error, context.Canceled, "cancellation must not be masked by stderr pattern match")
+	var limitErr *LimitPatternError
+	assert.NotErrorAs(t, result.Error, &limitErr)
+	var patternErr *PatternMatchError
+	assert.NotErrorAs(t, result.Error, &patternErr)
+}
+
+func TestIsCodexErrorLine(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{"ERROR prefix", "ERROR: You've hit your usage limit", true},
+		{"Error prefix mixed case", "Error: authentication failed", true},
+		{"error prefix lower", "error: something went wrong", true},
+		{"FATAL prefix", "FATAL: cannot continue", true},
+		{"panic prefix", "panic: nil pointer", true},
+		{"leading whitespace then ERROR", "  ERROR: indented", true},
+		{"empty", "", false},
+		{"whitespace only", "   ", false},
+		{"bold summary", "**Reviewing rate limit handling**", false},
+		{"separator", "--------", false},
+		{"prose mentioning error", "the code logs an error: foo", false},
+		{"prose mentioning rate limit", "rate limit handling looks fine", false},
+		{"header", "workdir: /tmp/test", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isCodexErrorLine(tc.line))
+		})
+	}
+}

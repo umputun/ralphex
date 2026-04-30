@@ -67,9 +67,9 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, "git", values.VcsCommand)
 	assert.Empty(t, values.CommitTrailer)
 	assert.Equal(t, []string{"You've hit your limit", "API Error:", "cannot be launched inside another Claude Code session", "Not logged in"}, values.ClaudeErrorPatterns)
-	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexErrorPatterns)
+	assert.Equal(t, []string{"Rate limit", "quota exceeded", "You've hit your usage limit"}, values.CodexErrorPatterns)
 	assert.Equal(t, []string{"You've hit your limit"}, values.ClaudeLimitPatterns)
-	assert.Equal(t, []string{"Rate limit", "quota exceeded"}, values.CodexLimitPatterns)
+	assert.Equal(t, []string{"Rate limit", "quota exceeded", "You've hit your usage limit"}, values.CodexLimitPatterns)
 	assert.Zero(t, values.WaitOnLimit)
 	assert.False(t, values.WaitOnLimitSet)
 }
