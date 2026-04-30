@@ -702,21 +702,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 
 	// resolve plan file path inside the worktree so Claude operates on the local copy,
 	// not the original in the main repo. the plan was copied by CreateWorktreeForPlan.
-	wtPlanFile := req.PlanFile
-	if filepath.IsAbs(req.PlanFile) {
-		// resolve symlinks on plan path to match GitSvc.Root() which is also resolved
-		// (macOS: /tmp -> /private/tmp); without this, filepath.Rel produces wrong results
-		resolvedPlan := req.PlanFile
-		if resolved, evalErr := filepath.EvalSymlinks(resolvedPlan); evalErr == nil {
-			resolvedPlan = resolved
-		}
-		if rel, relErr := filepath.Rel(req.GitSvc.Root(), resolvedPlan); relErr == nil {
-			abs, absErr := filepath.Abs(rel) // resolve relative to CWD (now the worktree)
-			if absErr == nil {
-				wtPlanFile = abs
-			}
-		}
-	}
+	wtPlanFile := resolveWorktreePlanFile(req.PlanFile, req.GitSvc.Root())
 
 	// commit plan file on the feature branch (inside worktree), not on the default branch
 	if planNeedsCommit {
@@ -739,6 +725,29 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 		ProgressLog:   baseLog,
 		PhaseHolder:   holder,
 	})
+}
+
+// resolveWorktreePlanFile maps an absolute plan path from the main repo into the worktree CWD.
+// It resolves symlinks on the plan path to match the repo root (macOS: /tmp -> /private/tmp),
+// then makes the path relative to the root and absolute within the worktree.
+// Falls back to the original path if any step fails or the path is not absolute.
+func resolveWorktreePlanFile(planFile, repoRoot string) string {
+	if !filepath.IsAbs(planFile) {
+		return planFile
+	}
+	resolved := planFile
+	if r, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = r
+	}
+	rel, err := filepath.Rel(repoRoot, resolved)
+	if err != nil {
+		return planFile
+	}
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		return planFile
+	}
+	return abs
 }
 
 // openGitService creates a git.Service for the current directory.

@@ -1270,7 +1270,7 @@ func TestService_RemoveWorktree(t *testing.T) {
 
 		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "master", "my-custom-branch")
 		require.NoError(t, err)
-		defer svc.RemoveWorktree(wtPath) //nolint:errcheck
+		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // test cleanup, error irrelevant
 
 		// worktree path should use the override, not the plan filename
 		assert.Contains(t, wtPath, "my-custom-branch")
