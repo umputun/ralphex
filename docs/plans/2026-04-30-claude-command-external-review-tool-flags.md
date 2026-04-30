@@ -71,12 +71,12 @@ Add per-run CLI flags that override configured provider settings for Claude-comp
 - Modify: `llms.txt`
 - Modify: `docs/custom-providers.md`
 
-- [ ] Add the new flags to the README options table
-- [ ] Add a README example for one-off provider selection using `--claude-command`, `--claude-args=`, `--external-review-tool`, and `--custom-review-script`
-- [ ] Update README configuration/provider sections to explain CLI flags override config for a single run
-- [ ] Update `llms.txt` quick usage and provider notes with the new flags
-- [ ] Update `docs/custom-providers.md` to mention CLI alternatives to config-file setup and the empty `--claude-args=` behavior
-- [ ] Run `go test ./cmd/ralphex` - must pass before task 4
+- [x] Add the new flags to the README options table
+- [x] Add a README example for one-off provider selection using `--claude-command`, `--claude-args=`, `--external-review-tool`, and `--custom-review-script`
+- [x] Update README configuration/provider sections to explain CLI flags override config for a single run
+- [x] Update `llms.txt` quick usage and provider notes with the new flags
+- [x] Update `docs/custom-providers.md` to mention CLI alternatives to config-file setup and the empty `--claude-args=` behavior
+- [x] Run `go test ./cmd/ralphex` - must pass before task 4
 
 ### Task 4: Verify acceptance criteria
 

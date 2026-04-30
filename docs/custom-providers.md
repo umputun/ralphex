@@ -1,6 +1,6 @@
 # Custom Providers for Claude Phases
 
-ralphex uses Claude Code as the primary agent for task execution and code reviews. The `claude_command` and `claude_args` configuration options allow replacing Claude Code with any CLI tool that produces compatible output — codex, Gemini CLI, local LLMs, or custom scripts.
+ralphex uses Claude Code as the primary agent for task execution and code reviews. The `claude_command` and `claude_args` configuration options allow replacing Claude Code with any CLI tool that produces compatible output — codex, Gemini CLI, local LLMs, or custom scripts. The same provider can also be selected per run with `--claude-command` and `--claude-args`.
 
 ## How it works
 
@@ -31,9 +31,19 @@ ralphex prompts instruct the agent to emit signals like `<<<RALPHEX:COMPLETED>>>
 
 The prompt is passed via stdin (not as a CLI argument). This avoids the cmd.exe 8191-character command-line limit on Windows, where large prompts (e.g., after variable expansion) can exceed the limit.
 
-When `claude_args` has a value (default: `--dangerously-skip-permissions --output-format stream-json --verbose`), those flags are split and passed as arguments. Note that setting `claude_args =` (empty) in the config file may not clear the default due to config fallback behavior — the embedded default value is preserved when the user-specified value is empty.
+When `claude_args` has a value (default: `--dangerously-skip-permissions --output-format stream-json --verbose`), those flags are split and passed as arguments. Note that setting `claude_args =` (empty) in the config file may not clear the default due to config fallback behavior — the embedded default value is preserved when the user-specified value is empty. Use `--claude-args=` on the command line when you need to explicitly clear configured/default arguments for a single run.
 
 **Wrapper scripts should accept the prompt via stdin** and also accept `-p <prompt>` for backward compatibility. Use `[[ ! -t 0 ]]` to detect non-interactive stdin before reading. **Wrapper scripts should also ignore unknown flags gracefully** — use a catch-all `*) shift ;;` in the argument parser.
+
+### Per-run provider overrides
+
+Use CLI flags when you want to test or switch providers without editing `~/.config/ralphex/config` or `.ralphex/config`. These flags override config for the current invocation only:
+
+```bash
+ralphex --claude-command=/path/to/wrapper.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
+```
+
+`--external-review-tool` accepts `codex`, `custom`, or `none`. When `custom` is selected, `--custom-review-script` points at the script that receives the external review prompt file path.
 
 ## Codex wrapper (included example)
 
@@ -45,6 +55,12 @@ The repository includes a working wrapper at `scripts/codex-as-claude/codex-as-c
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
 claude_args =
+```
+
+For a one-off run without editing config:
+
+```bash
+ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh --claude-args= docs/plans/feature.md
 ```
 
 ### Environment variables
@@ -94,6 +110,12 @@ Unlike the Gemini wrapper, Copilot already has a native non-interactive JSONL mo
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
 claude_args =
+```
+
+For a one-off run without editing config:
+
+```bash
+ralphex --claude-command=/path/to/scripts/copilot-as-claude/copilot-as-claude.sh --claude-args= docs/plans/feature.md
 ```
 
 ### Authentication
