@@ -55,6 +55,7 @@ type Config struct {
 	TaskModel             string         // model[:effort] spec for task execution; parsed via ParseModelEffort (empty = CLI defaults)
 	ReviewModel           string         // model[:effort] spec for review phases; empty falls back to TaskModel
 	CodexEnabled          bool           // whether codex review is enabled
+	ExternalReviewToolSet bool           // when true, AppConfig.ExternalReviewTool is an explicit choice that overrides legacy codex_enabled=false back-compat
 	FinalizeEnabled       bool           // whether finalize step is enabled
 	DefaultBranch         string         // default branch name (detected from repo)
 	AppConfig             *config.Config // full application config (for executors and prompts)
@@ -676,21 +677,23 @@ func (r *Runner) updateStalemate(headBefore, diffBefore string, unchangedRounds 
 }
 
 // externalReviewTool returns the effective external review tool to use.
-// handles backward compatibility: codex_enabled = false → "none"
-// the CodexEnabled flag takes precedence for backward compatibility.
+// an explicit ExternalReviewTool choice (e.g. via --external-review-tool) wins
+// over legacy codex_enabled=false back-compat; otherwise codex_enabled=false
+// is treated as "none" so users with only that legacy setting still skip
+// external review.
 func (r *Runner) externalReviewTool() string {
-	// backward compatibility: codex_enabled = false means no external review
-	// this takes precedence over external_review_tool setting
+	if r.cfg.ExternalReviewToolSet && r.cfg.AppConfig != nil && r.cfg.AppConfig.ExternalReviewTool != "" {
+		return r.cfg.AppConfig.ExternalReviewTool
+	}
+
 	if !r.cfg.CodexEnabled {
 		return "none"
 	}
 
-	// check explicit external_review_tool setting
 	if r.cfg.AppConfig != nil && r.cfg.AppConfig.ExternalReviewTool != "" {
 		return r.cfg.AppConfig.ExternalReviewTool
 	}
 
-	// default to codex
 	return "codex"
 }
 

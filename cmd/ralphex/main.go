@@ -902,6 +902,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		IterationDelayMs:      req.Config.IterationDelayMs,
 		TaskRetryCount:        req.Config.TaskRetryCount,
 		CodexEnabled:          codexEnabled,
+		ExternalReviewToolSet: o.externalReviewToolSet,
 		FinalizeEnabled:       req.Config.FinalizeEnabled,
 		DefaultBranch:         req.BaseRef,
 		TaskModel:             taskModel,
@@ -1275,10 +1276,6 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	}
 	if o.externalReviewToolSet {
 		cfg.ExternalReviewTool = o.ExternalReviewTool
-		if o.ExternalReviewTool != "none" {
-			cfg.CodexEnabled = true
-			cfg.CodexEnabledSet = true
-		}
 	}
 	if o.customReviewScriptSet {
 		cfg.CustomReviewScript = o.CustomReviewScript

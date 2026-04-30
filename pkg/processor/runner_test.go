@@ -1931,6 +1931,34 @@ func TestRunner_ExternalReviewTool_BackwardCompat_CodexDisabled(t *testing.T) {
 	assert.Empty(t, codex.RunCalls(), "codex should not be called when CodexEnabled=false (backward compat)")
 }
 
+func TestRunner_ExternalReviewTool_ExplicitSet_OverridesLegacyCodexDisabled(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "done", Signal: processor.SignalCodexDone}, // codex evaluation (no findings → post-codex review skipped)
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "found issue"},
+	})
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewTool = "codex"
+
+	// legacy codex_enabled=false combined with an explicit ExternalReviewToolSet
+	// (e.g. via --external-review-tool=codex) should run the chosen tool, not "none"
+	cfg := processor.Config{
+		Mode:                  processor.ModeCodexOnly,
+		MaxIterations:         50,
+		CodexEnabled:          false,
+		ExternalReviewToolSet: true,
+		AppConfig:             appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 1, "explicit ExternalReviewTool should win over legacy CodexEnabled=false")
+}
+
 func TestRunner_ExternalReviewTool_Custom_Success(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{

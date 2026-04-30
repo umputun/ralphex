@@ -669,7 +669,9 @@ func TestProviderOverrideFlags(t *testing.T) {
 		assert.Equal(t, "/tmp/review.sh", cfg.CustomReviewScript)
 	})
 
-	t.Run("external_review_tool_cli_override_enables_legacy_disabled_review", func(t *testing.T) {
+	t.Run("external_review_tool_cli_override_does_not_mutate_codex_enabled", func(t *testing.T) {
+		// CLI explicitness is plumbed to the runner via ExternalReviewToolSet,
+		// so applyCLIOverrides no longer needs to flip CodexEnabled.
 		cfg := &config.Config{
 			CodexEnabled:       false,
 			CodexEnabledSet:    true,
@@ -680,7 +682,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		applyCLIOverrides(o, cfg)
 
 		assert.Equal(t, "custom", cfg.ExternalReviewTool)
-		assert.True(t, cfg.CodexEnabled)
+		assert.False(t, cfg.CodexEnabled)
 		assert.True(t, cfg.CodexEnabledSet)
 	})
 
