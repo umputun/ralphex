@@ -279,14 +279,7 @@ func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch, branchOverride 
 	if earlyBranch == "" {
 		earlyBranch = plan.ExtractBranchName(planFile)
 	}
-	wtBase := filepath.Join(s.repo.root(), ".ralphex", "worktrees")
-	wtPath := filepath.Join(wtBase, earlyBranch)
-	if filepath.IsAbs(earlyBranch) {
-		return "", false, fmt.Errorf("invalid branch name %q: must not be an absolute path", earlyBranch)
-	}
-	if rel, err := filepath.Rel(wtBase, wtPath); err != nil || strings.HasPrefix(rel, "..") {
-		return "", false, fmt.Errorf("invalid branch name %q: must not escape worktrees directory", earlyBranch)
-	}
+	wtPath := filepath.Join(s.repo.root(), ".ralphex", "worktrees", earlyBranch)
 
 	// prune stale worktree entries first
 	if pruneErr := s.repo.pruneWorktrees(); pruneErr != nil {
