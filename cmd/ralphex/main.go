@@ -417,10 +417,11 @@ func setupProgressLogger(o opts, req executePlanRequest, branch string) (progres
 	} else {
 		var err error
 		baseLog, err = progress.NewLogger(progress.Config{
-			PlanFile: req.PlanFile,
-			Mode:     string(req.Mode),
-			Branch:   branch,
-			NoColor:  o.NoColor,
+			PlanFile:       req.PlanFile,
+			Mode:           string(req.Mode),
+			Branch:         branch,
+			BranchOverride: req.BranchOverride,
+			NoColor:        o.NoColor,
 		}, req.Colors, holder)
 		if err != nil {
 			return progressLogResult{}, fmt.Errorf("create progress logger: %w", err)
@@ -663,10 +664,11 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 	holder := &status.PhaseHolder{}
 	branch := req.GitSvc.EffectiveBranchName(req.PlanFile, req.BranchOverride)
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanFile: req.PlanFile,
-		Mode:     string(req.Mode),
-		Branch:   branch,
-		NoColor:  o.NoColor,
+		PlanFile:       req.PlanFile,
+		Mode:           string(req.Mode),
+		Branch:         branch,
+		BranchOverride: req.BranchOverride,
+		NoColor:        o.NoColor,
 	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)

@@ -135,6 +135,7 @@ type Config struct {
 	PlanDescription string // plan description for plan mode (used for filename)
 	Mode            string // execution mode: full, review, codex-only, plan
 	Branch          string // current git branch
+	BranchOverride  string // explicit branch name override (--branch flag); when set, used as filename stem instead of plan file
 	NoColor         bool   // disable color output (sets color.NoColor globally)
 }
 
@@ -151,7 +152,7 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		color.NoColor = true
 	}
 
-	progressPath := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode)
+	progressPath := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode, cfg.BranchOverride)
 
 	// resolve to absolute path so Logger.Path() works from any CWD (e.g. after worktree chdir)
 	if absPath, absErr := filepath.Abs(progressPath); absErr == nil {
@@ -652,24 +653,33 @@ func isProgressCompleted(f *os.File, size int64) bool {
 // progressDir is the directory for progress files within the project.
 const progressDir = ".ralphex/progress"
 
+// filenameWithStem returns the progress file path for a known stem and mode.
+func filenameWithStem(stem, mode string) string {
+	switch mode {
+	case "codex-only":
+		return filepath.Join(progressDir, fmt.Sprintf("progress-%s-codex.txt", stem))
+	case "review":
+		return filepath.Join(progressDir, fmt.Sprintf("progress-%s-review.txt", stem))
+	default:
+		return filepath.Join(progressDir, fmt.Sprintf("progress-%s.txt", stem))
+	}
+}
+
 // progressFilename returns progress file path based on plan and mode.
-func progressFilename(planFile, planDescription, mode string) string {
+func progressFilename(planFile, planDescription, mode, branchOverride string) string {
 	// plan mode uses sanitized plan description
 	if mode == "plan" && planDescription != "" {
 		sanitized := sanitizePlanName(planDescription)
 		return filepath.Join(progressDir, fmt.Sprintf("progress-plan-%s.txt", sanitized))
 	}
 
+	// explicit branch override takes precedence over plan filename as stem
+	if branchOverride != "" {
+		return filenameWithStem(sanitizePlanName(branchOverride), mode)
+	}
+
 	if planFile != "" {
-		stem := strings.TrimSuffix(filepath.Base(planFile), ".md")
-		switch mode {
-		case "codex-only":
-			return filepath.Join(progressDir, fmt.Sprintf("progress-%s-codex.txt", stem))
-		case "review":
-			return filepath.Join(progressDir, fmt.Sprintf("progress-%s-review.txt", stem))
-		default:
-			return filepath.Join(progressDir, fmt.Sprintf("progress-%s.txt", stem))
-		}
+		return filenameWithStem(strings.TrimSuffix(filepath.Base(planFile), ".md"), mode)
 	}
 
 	switch mode {

@@ -788,24 +788,29 @@ func TestGetProgressFilename(t *testing.T) {
 		planFile        string
 		planDescription string
 		mode            string
+		branchOverride  string
 		want            string
 	}{
-		{"full mode with plan", "docs/plans/feature.md", "", "full", filepath.Join(progressDir, "progress-feature.txt")},
-		{"review mode with plan", "docs/plans/feature.md", "", "review", filepath.Join(progressDir, "progress-feature-review.txt")},
-		{"codex-only mode with plan", "docs/plans/feature.md", "", "codex-only", filepath.Join(progressDir, "progress-feature-codex.txt")},
-		{"full mode no plan", "", "", "full", filepath.Join(progressDir, "progress.txt")},
-		{"review mode no plan", "", "", "review", filepath.Join(progressDir, "progress-review.txt")},
-		{"codex-only mode no plan", "", "", "codex-only", filepath.Join(progressDir, "progress-codex.txt")},
-		{"full with date prefix", "plans/2024-01-15-refactor.md", "", "full", filepath.Join(progressDir, "progress-2024-01-15-refactor.txt")},
-		{"plan mode with description", "", "implement caching", "plan", filepath.Join(progressDir, "progress-plan-implement-caching.txt")},
-		{"plan mode with complex description", "", "Add User Authentication!", "plan", filepath.Join(progressDir, "progress-plan-add-user-authentication.txt")},
-		{"plan mode no description", "", "", "plan", filepath.Join(progressDir, "progress-plan.txt")},
-		{"plan mode with special chars", "", "fix: bug #123", "plan", filepath.Join(progressDir, "progress-plan-fix-bug-123.txt")},
+		{"full mode with plan", "docs/plans/feature.md", "", "full", "", filepath.Join(progressDir, "progress-feature.txt")},
+		{"review mode with plan", "docs/plans/feature.md", "", "review", "", filepath.Join(progressDir, "progress-feature-review.txt")},
+		{"codex-only mode with plan", "docs/plans/feature.md", "", "codex-only", "", filepath.Join(progressDir, "progress-feature-codex.txt")},
+		{"full mode no plan", "", "", "full", "", filepath.Join(progressDir, "progress.txt")},
+		{"review mode no plan", "", "", "review", "", filepath.Join(progressDir, "progress-review.txt")},
+		{"codex-only mode no plan", "", "", "codex-only", "", filepath.Join(progressDir, "progress-codex.txt")},
+		{"full with date prefix", "plans/2024-01-15-refactor.md", "", "full", "", filepath.Join(progressDir, "progress-2024-01-15-refactor.txt")},
+		{"plan mode with description", "", "implement caching", "plan", "", filepath.Join(progressDir, "progress-plan-implement-caching.txt")},
+		{"plan mode with complex description", "", "Add User Authentication!", "plan", "", filepath.Join(progressDir, "progress-plan-add-user-authentication.txt")},
+		{"plan mode no description", "", "", "plan", "", filepath.Join(progressDir, "progress-plan.txt")},
+		{"plan mode with special chars", "", "fix: bug #123", "plan", "", filepath.Join(progressDir, "progress-plan-fix-bug-123.txt")},
+		{"branch override full mode", "docs/plans/tasks.md", "", "full", "my-feature", filepath.Join(progressDir, "progress-my-feature.txt")},
+		{"branch override review mode", "docs/plans/tasks.md", "", "review", "my-feature", filepath.Join(progressDir, "progress-my-feature-review.txt")},
+		{"branch override codex-only mode", "docs/plans/tasks.md", "", "codex-only", "my-feature", filepath.Join(progressDir, "progress-my-feature-codex.txt")},
+		{"branch override no plan", "", "", "full", "my-feature", filepath.Join(progressDir, "progress-my-feature.txt")},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := progressFilename(tc.planFile, tc.planDescription, tc.mode)
+			got := progressFilename(tc.planFile, tc.planDescription, tc.mode, tc.branchOverride)
 			assert.Equal(t, tc.want, got)
 		})
 	}
