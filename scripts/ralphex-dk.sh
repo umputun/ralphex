@@ -398,10 +398,17 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
         add_symlink_targets(codex_dir)
 
     # 7. ~/.config/ralphex -> /home/app/.config/ralphex + symlink targets
+    # always mount, creating the host dir if missing — this ensures docker
+    # creates /home/app/.config in the container (as root), avoiding mkdir
+    # permission errors when SKIP_HOME_CHOWN=1 leaves /home/app unwritable
+    # to the remapped APP_UID
     ralphex_config = home / ".config" / "ralphex"
-    if ralphex_config.is_dir():
-        add(resolve_path(ralphex_config), "/home/app/.config/ralphex")
-        add_symlink_targets(ralphex_config)
+    try:
+        ralphex_config.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SystemExit(f"error: failed to create config directory {ralphex_config}: {exc}")
+    add(resolve_path(ralphex_config), "/home/app/.config/ralphex")
+    add_symlink_targets(ralphex_config)
 
     # 8. .ralphex/ symlink targets only (workspace mount already includes it)
     local_ralphex = cwd / ".ralphex"
