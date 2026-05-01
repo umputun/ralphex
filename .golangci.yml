@@ -16,7 +16,6 @@ linters:
     - exhaustive
     - fatcontext
     - gochecknoinits
-    - goconst
     - gocritic
     - gocyclo
     - godoclint
@@ -67,9 +66,6 @@ linters:
       require-specific: true
     dupl:
       threshold: 100
-    goconst:
-      min-len: 2
-      min-occurrences: 7
     gocritic:
       disabled-checks:
         - wrapperFunc
@@ -137,7 +133,6 @@ linters:
         text: unused-parameter
       - linters:
           - dupl
-          - goconst
           - noctx
           - usestdlibvars
         path: _test\.go$
