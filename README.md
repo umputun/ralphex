@@ -1236,7 +1236,7 @@ The ralphex CLI is the primary interface. Claude Code skills (`/ralphex`, `/ralp
 /plugin marketplace add umputun/ralphex
 
 # Install the plugin
-/plugin install ralphex@umputun-ralphex
+/plugin install ralphex@ralphex
 ```
 
 Benefits: Auto-updates when marketplace refreshes (at Claude Code startup).

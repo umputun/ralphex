@@ -13,7 +13,7 @@ Users can install via the plugin marketplace:
 
 ```bash
 /plugin marketplace add umputun/ralphex
-/plugin install ralphex@umputun-ralphex
+/plugin install ralphex@ralphex
 ```
 
 ## Versioning
