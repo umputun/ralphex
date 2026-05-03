@@ -330,7 +330,7 @@ When a user asks about autonomous plan execution, implementing features with Cla
    - **Recommended**: Add marketplace and install plugin:
      ```bash
      /plugin marketplace add umputun/ralphex
-     /plugin install ralphex@umputun-ralphex
+     /plugin install ralphex@ralphex
      ```
    - **Alternative**: Manual installation by fetching from URLs (see README)
 
