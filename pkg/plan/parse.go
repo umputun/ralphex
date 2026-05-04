@@ -49,6 +49,13 @@ var (
 	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
 	// formatInText matches [ ] or [x] in checkbox text — description/example, not actionable for completion check.
 	formatInText = regexp.MustCompile(`\[\s*[ xX]?\s*\]`)
+	// fenceOpenPattern matches a CommonMark code-fence opener: optional indentation up to 3 spaces,
+	// then 3+ backticks or 3+ tildes, optional info string. captures the fence character run.
+	fenceOpenPattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
+	// fenceClosePattern matches a CommonMark code-fence closer: same as opener but with no info
+	// string permitted — only optional trailing whitespace. used to avoid treating an inner
+	// opener-with-info-string (e.g. ```go) as closing an outer fence.
+	fenceClosePattern = regexp.MustCompile(`^ {0,3}(` + "`" + `{3,}|~{3,})[ \t]*$`)
 )
 
 // ParsePlan parses plan markdown content into a structured Plan.
@@ -59,9 +66,15 @@ func ParsePlan(content string) (*Plan, error) {
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	var currentTask *Task
+	var ft fenceTracker
 
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		// skip lines inside fenced code blocks so example checkboxes are not parsed as tasks
+		if ft.skip(line) {
+			continue
+		}
 
 		// check for plan title (first h1)
 		if p.Title == "" {
@@ -145,8 +158,13 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read plan file: %w", err)
 	}
-	// scan lines for uncompleted checkboxes; only count actionable ones (text without [ ] or [x])
+	// scan lines for uncompleted checkboxes; only count actionable ones (text without [ ] or [x]).
+	// skip lines inside fenced code blocks so example checkboxes in templates are ignored.
+	var ft fenceTracker
 	for line := range strings.SplitSeq(string(content), "\n") {
+		if ft.skip(line) {
+			continue
+		}
 		matches := checkboxPattern.FindStringSubmatch(line)
 		if len(matches) < 3 || matches[1] == "x" || matches[1] == "X" {
 			continue
@@ -158,6 +176,52 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// fenceTracker tracks markdown fenced code block state across a line-by-line scan.
+// the zero value is ready to use.
+type fenceTracker struct {
+	open string // current fence marker (e.g. "```" or "~~~~"); empty when not in fenced block
+}
+
+// skip reports whether line is inside (or opens/closes) a fenced code block and should be skipped
+// by the caller. when the call returns true, the caller should advance to the next line. fence
+// matching follows CommonMark: 0-3 leading spaces, then 3+ backticks or 3+ tildes. an opener may
+// carry an info string (e.g. ```go); a closer may not — only trailing whitespace is allowed —
+// and must use the same character as the opener with length at least equal to the opener.
+func (f *fenceTracker) skip(line string) bool {
+	if f.open == "" {
+		marker := f.openerMarker(line)
+		if marker == "" {
+			return false
+		}
+		f.open = marker
+		return true
+	}
+	if marker := f.closerMarker(line); marker != "" && len(marker) >= len(f.open) && marker[0] == f.open[0] {
+		f.open = ""
+	}
+	return true
+}
+
+// openerMarker returns the fence sequence (backticks or tildes) that opens a fenced code block,
+// or empty string if line is not an opener. trailing info strings are allowed.
+func (f *fenceTracker) openerMarker(line string) string {
+	m := fenceOpenPattern.FindStringSubmatch(line)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+// closerMarker returns the fence sequence that closes a fenced code block, or empty string if
+// line is not a valid closer. closers must have no info string — only optional trailing whitespace.
+func (f *fenceTracker) closerMarker(line string) string {
+	m := fenceClosePattern.FindStringSubmatch(line)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
 }
 
 // JSON returns the plan as JSON bytes.

@@ -345,6 +345,154 @@ Just some text, no checkboxes.
 		require.Len(t, p.Tasks, 1)
 		assert.True(t, p.Tasks[0].HasUncompletedActionableWork())
 	})
+
+	t.Run("ignores checkboxes inside backtick fenced code blocks", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Generate PR body\n\n" +
+			"3. Generate PR summary file:\n\n" +
+			"   ```markdown\n" +
+			"   ## Test plan\n" +
+			"   - [ ] /team/X shows coaches if present\n" +
+			"   - [ ] /control/od leading-zero same width\n" +
+			"   ```\n\n" +
+			"- [x] Validation green\n" +
+			"- [x] PR body file generated\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 2, "checkboxes inside fenced code block must be ignored")
+		assert.Equal(t, "Validation green", p.Tasks[0].Checkboxes[0].Text)
+		assert.Equal(t, "PR body file generated", p.Tasks[0].Checkboxes[1].Text)
+		assert.Equal(t, plan.TaskStatusDone, p.Tasks[0].Status)
+		assert.False(t, p.Tasks[0].HasUncompletedActionableWork())
+	})
+
+	t.Run("ignores checkboxes inside tilde fenced code blocks", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Example\n\n" +
+			"~~~markdown\n" +
+			"- [ ] example item inside tilde fence\n" +
+			"~~~\n\n" +
+			"- [x] real done item\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+		assert.Equal(t, "real done item", p.Tasks[0].Checkboxes[0].Text)
+	})
+
+	t.Run("handles multiple fenced blocks within a task", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Multi-fence\n\n" +
+			"```\n" +
+			"- [ ] first fenced item\n" +
+			"```\n\n" +
+			"- [x] real item one\n\n" +
+			"```bash\n" +
+			"- [ ] second fenced item\n" +
+			"```\n\n" +
+			"- [ ] real unchecked item\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 2)
+		assert.Equal(t, "real item one", p.Tasks[0].Checkboxes[0].Text)
+		assert.Equal(t, "real unchecked item", p.Tasks[0].Checkboxes[1].Text)
+		assert.True(t, p.Tasks[0].HasUncompletedActionableWork())
+	})
+
+	t.Run("treats unclosed fence as code until end of file", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Unclosed\n\n" +
+			"- [x] real done\n\n" +
+			"```\n" +
+			"- [ ] should be ignored\n" +
+			"- [ ] also ignored, no closing fence\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+		assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
+	})
+
+	t.Run("does not toggle fence on inline backticks", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Inline code\n\n" +
+			"- [ ] use `foo` to call bar\n" +
+			"- [x] handle ``escaped`` cases\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 2)
+	})
+
+	t.Run("handles indented fence markers", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Indented fence\n\n" +
+			"3. Example output:\n\n" +
+			"   ```\n" +
+			"   - [ ] inside indented fence\n" +
+			"   ```\n\n" +
+			"- [x] real done\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+		assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
+	})
+
+	t.Run("handles fence info string with backticks count > 3", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Quad fence\n\n" +
+			"````markdown\n" +
+			"```\n" +
+			"- [ ] nested fence example\n" +
+			"```\n" +
+			"- [ ] still inside outer fence\n" +
+			"````\n\n" +
+			"- [x] real done\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+		assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
+	})
+
+	t.Run("does not close fence on opener-with-info-string of equal length", func(t *testing.T) {
+		// CommonMark: closing fence may not have an info string. A line like ```bash is an opener,
+		// not a valid closer for an outer ``` fence. If treated as a close, the inner example
+		// checkbox leaks back as actionable — the same failure mode as issue #328.
+		content := "# Plan\n\n" +
+			"### Task 1: Show PR body example\n\n" +
+			"```markdown\n" +
+			"example output:\n" +
+			"```bash\n" +
+			"- [ ] example checkbox inside outer markdown fence with nested bash block\n" +
+			"```\n\n" +
+			"- [x] real done\n"
+
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 1, "outer fence must not be closed by an inner opener-with-info-string")
+		assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
+		assert.False(t, p.Tasks[0].HasUncompletedActionableWork())
+	})
 }
 
 func TestParsePlanFile(t *testing.T) {
@@ -407,6 +555,37 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		has, err := plan.FileHasUncompletedCheckbox(path)
 		require.NoError(t, err)
 		assert.False(t, has)
+	})
+
+	t.Run("returns false when only fenced-block checkboxes unchecked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\n\n" +
+			"```markdown\n" +
+			"- [ ] inside fence\n" +
+			"- [ ] also inside fence\n" +
+			"```\n\n" +
+			"- [x] real done\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.False(t, has, "fenced-block checkboxes must be ignored")
+	})
+
+	t.Run("returns true for unchecked outside fence even when fence has unchecked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\n\n" +
+			"```\n" +
+			"- [ ] inside fence\n" +
+			"```\n\n" +
+			"- [ ] real unchecked\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.True(t, has)
 	})
 }
 
