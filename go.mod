@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/fatih/color v1.19.0
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.0
 	github.com/go-pkgz/notify v1.3.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/playwright-community/playwright-go v0.5700.1
