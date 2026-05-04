@@ -587,6 +587,24 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, has)
 	})
+
+	t.Run("handles CRLF line endings around fence markers", func(t *testing.T) {
+		// FileHasUncompletedCheckbox splits on \n, leaving trailing \r on each line. The closer
+		// regex must tolerate the trailing \r or it will never see a closing fence on a CRLF file,
+		// the fence stays open, and a real unchecked checkbox after the fence gets skipped.
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\r\n\r\n" +
+			"```\r\n" +
+			"- [ ] inside fence\r\n" +
+			"```\r\n\r\n" +
+			"- [ ] real unchecked\r\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.True(t, has, "real unchecked checkbox after a CRLF-terminated fence must be detected")
+	})
 }
 
 func TestPlan_JSON(t *testing.T) {

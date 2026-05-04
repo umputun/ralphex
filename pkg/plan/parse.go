@@ -53,9 +53,10 @@ var (
 	// then 3+ backticks or 3+ tildes, optional info string. captures the fence character run.
 	fenceOpenPattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
 	// fenceClosePattern matches a CommonMark code-fence closer: same as opener but with no info
-	// string permitted — only optional trailing whitespace. used to avoid treating an inner
+	// string permitted — only optional trailing whitespace (including a trailing CR for CRLF
+	// inputs that reach scanners which do not strip it). used to avoid treating an inner
 	// opener-with-info-string (e.g. ```go) as closing an outer fence.
-	fenceClosePattern = regexp.MustCompile(`^ {0,3}(` + "`" + `{3,}|~{3,})[ \t]*$`)
+	fenceClosePattern = regexp.MustCompile(`^ {0,3}(` + "`" + `{3,}|~{3,})[ \t]*\r?$`)
 )
 
 // ParsePlan parses plan markdown content into a structured Plan.
