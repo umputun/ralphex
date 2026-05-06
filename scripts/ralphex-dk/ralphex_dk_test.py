@@ -188,6 +188,18 @@ class TestShouldBindPort(unittest.TestCase):
         self.assertFalse(should_bind_port([]))
 
 class TestBuildVolumes(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.fake_home = self.tmp / "home"
+        self.fake_home.mkdir()
+        (self.fake_home / ".claude").mkdir()
+        self._home_patcher = unittest.mock.patch("ralphex_dk.Path.home", return_value=self.fake_home)
+        self._home_patcher.start()
+
+    def tearDown(self) -> None:
+        self._home_patcher.stop()
+        shutil.rmtree(self.tmp)
+
     def test_volume_pairs(self) -> None:
         with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
             vols = build_volumes(None)
@@ -224,40 +236,20 @@ class TestBuildVolumes(unittest.TestCase):
 
     def test_creates_ralphex_config_dir_when_missing(self) -> None:
         """build_volumes creates ~/.config/ralphex with mode 0o700 when it does not exist."""
-        tmp = Path(tempfile.mkdtemp()).resolve()
-        try:
-            fake_home = tmp / "home"
-            fake_home.mkdir()
-            (fake_home / ".claude").mkdir()
-            ralphex_config = fake_home / ".config" / "ralphex"
-            self.assertFalse(ralphex_config.exists())
-            with (
-                unittest.mock.patch("ralphex_dk.Path.home", return_value=fake_home),
-                unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False),
-            ):
-                build_volumes(None)
-            self.assertTrue(ralphex_config.is_dir(), "~/.config/ralphex should be created")
-            mode = ralphex_config.stat().st_mode & 0o777
-            self.assertEqual(mode, 0o700, f"expected mode 0700, got {oct(mode)}")
-        finally:
-            shutil.rmtree(tmp)
+        ralphex_config = self.fake_home / ".config" / "ralphex"
+        self.assertFalse(ralphex_config.exists())
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            build_volumes(None)
+        self.assertTrue(ralphex_config.is_dir(), "~/.config/ralphex should be created")
+        mode = ralphex_config.stat().st_mode & 0o777
+        self.assertEqual(mode, 0o700, f"expected mode 0700, got {oct(mode)}")
 
     def test_always_mounts_ralphex_config(self) -> None:
         """build_volumes always includes the ~/.config/ralphex mount even when dir was missing."""
-        tmp = Path(tempfile.mkdtemp()).resolve()
-        try:
-            fake_home = tmp / "home"
-            fake_home.mkdir()
-            (fake_home / ".claude").mkdir()
-            with (
-                unittest.mock.patch("ralphex_dk.Path.home", return_value=fake_home),
-                unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False),
-            ):
-                vols = build_volumes(None)
-            found = any("/home/app/.config/ralphex" in v for v in vols)
-            self.assertTrue(found, "~/.config/ralphex should always be mounted to /home/app/.config/ralphex")
-        finally:
-            shutil.rmtree(tmp)
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        found = any("/home/app/.config/ralphex" in v for v in vols)
+        self.assertTrue(found, "~/.config/ralphex should always be mounted to /home/app/.config/ralphex")
 
 class TestBuildVolumesGitignore(unittest.TestCase):
     def test_global_gitignore_remapped_to_home_app(self) -> None:

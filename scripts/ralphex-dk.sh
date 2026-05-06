@@ -406,7 +406,7 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
     try:
         ralphex_config.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError as exc:
-        raise SystemExit(f"error: failed to create config directory {ralphex_config}: {exc}")
+        raise OSError(f"failed to create config directory {ralphex_config}") from exc
     add(resolve_path(ralphex_config), "/home/app/.config/ralphex")
     add_symlink_targets(ralphex_config)
 
@@ -1061,6 +1061,9 @@ def main() -> int:
             cmd.extend(["-w", "/workspace"])
             cmd.extend([image, "/srv/ralphex", "--help"])
             return subprocess.run(cmd, check=False).returncode
+        except OSError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
         finally:
             if creds_temp:
                 try:
@@ -1222,6 +1225,9 @@ def main() -> int:
         schedule_cleanup(creds_temp)
 
         return run_docker(image, port, volumes, extra_env, bind_port, ralphex_args, docker_gid=docker_gid, network=network)
+    except OSError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     finally:
         # only skip cleanup if dry-run completed successfully (user got the file path warning)
         if not dry_run_completed:
