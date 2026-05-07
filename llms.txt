@@ -94,9 +94,6 @@ RALPHEX_CLAUDE_PROVIDER=bedrock ralphex docs/plans/feature.md
 
 # preserve ANTHROPIC_API_KEY in the claude child env (for API-key auth users)
 ralphex --preserve-anthropic-api-key docs/plans/feature.md
-
-# force-strip ANTHROPIC_API_KEY for one run even if config enables preservation
-ralphex --no-preserve-anthropic-api-key docs/plans/feature.md
 ```
 
 ## Requirements
@@ -153,7 +150,7 @@ review_model = sonnet:medium
 
 **Plan move behavior:** `move_plan_on_completion` config option controls whether completed plans move to `docs/plans/completed/` on success. Default `true` (existing behavior). Set to `false` for workflows that manage plan file lifecycle externally, such as spec-driven tooling with separate archive steps.
 
-**Preserving ANTHROPIC_API_KEY:** by default, ralphex strips `ANTHROPIC_API_KEY` from the child claude process so a host-set key cannot silently override OAuth/keychain credentials. If you authenticate Claude Code via API key (not OAuth), set `preserve_anthropic_api_key = true` in config or pass `--preserve-anthropic-api-key` on the CLI to keep the key in the child env. To force the strip back on for a single run when the config has it enabled, use `--no-preserve-anthropic-api-key` (no-form wins on conflict for safety). When passthrough is active, ralphex prints `auth: ANTHROPIC_API_KEY passthrough enabled` in the startup banner so wrong-context runs are visible. `CLAUDECODE` is always stripped regardless (prevents nested-session errors).
+**Preserving ANTHROPIC_API_KEY:** by default, ralphex strips `ANTHROPIC_API_KEY` from the child claude process so a host-set key cannot silently override OAuth/keychain credentials. If you authenticate Claude Code via API key (not OAuth), set `preserve_anthropic_api_key = true` in config or pass `--preserve-anthropic-api-key` on the CLI to keep the key in the child env. When passthrough is active, ralphex prints `auth: ANTHROPIC_API_KEY passthrough enabled` in the startup banner (in both task-execution and plan-creation modes) so wrong-context runs are visible before claude bills the wrong account. `CLAUDECODE` is always stripped regardless (prevents nested-session errors).
 
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 

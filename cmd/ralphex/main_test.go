@@ -632,30 +632,6 @@ func TestPreserveAnthropicAPIKeyFlag(t *testing.T) {
 		assert.True(t, cfg.PreserveAnthropicAPIKey, "CLI flag should enable preserve in config")
 	})
 
-	t.Run("no-flag overrides config-set true", func(t *testing.T) {
-		// the safety case: user has preserve_anthropic_api_key = true in global config
-		// but is running ralphex inside an OAuth-authenticated project. without explicit-strip
-		// override, claude would silently bill the wrong account.
-		cfg := &config.Config{PreserveAnthropicAPIKey: true}
-		o := parseTestOpts(t, "--no-preserve-anthropic-api-key")
-
-		applyCLIOverrides(o, cfg)
-
-		assert.False(t, cfg.PreserveAnthropicAPIKey, "--no-preserve-anthropic-api-key must override config-set true")
-	})
-
-	t.Run("no-flag wins on safety conflict", func(t *testing.T) {
-		// if both flags are passed in the same invocation, the "off" direction wins
-		// because the cost of accidentally billing the wrong account is higher than
-		// the cost of running unauthenticated.
-		cfg := &config.Config{PreserveAnthropicAPIKey: false}
-		o := parseTestOpts(t, "--preserve-anthropic-api-key", "--no-preserve-anthropic-api-key")
-
-		applyCLIOverrides(o, cfg)
-
-		assert.False(t, cfg.PreserveAnthropicAPIKey, "no-flag must take precedence on conflict for safety")
-	})
-
 	t.Run("absent flag preserves config true", func(t *testing.T) {
 		cfg := &config.Config{PreserveAnthropicAPIKey: true}
 		o := parseTestOpts(t)
@@ -1010,6 +986,25 @@ func TestPrintStartupInfo(t *testing.T) {
 			printStartupInfo(info, colors)
 		})
 		assert.NotContains(t, out, "passthrough", "no auth line when default-strip behavior")
+	})
+
+	t.Run("shows auth passthrough line in plan mode when preserve enabled", func(t *testing.T) {
+		// plan mode has its own early-return branch in printStartupInfo; the auth
+		// line must surface there too because passthrough is the only safety
+		// signal once the run is on the wrong account.
+		info := startupInfo{
+			PlanDescription:         "add health endpoint",
+			Branch:                  "plan-branch",
+			Mode:                    processor.ModePlan,
+			MaxIterations:           50,
+			ProgressPath:            "progress.txt",
+			PreserveAnthropicAPIKey: true,
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.Contains(t, out, "ANTHROPIC_API_KEY passthrough enabled",
+			"plan mode banner must surface API key passthrough")
 	})
 }
 

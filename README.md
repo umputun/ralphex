@@ -569,10 +569,6 @@ ralphex --idle-timeout=5m docs/plans/feature.md
 # preserve ANTHROPIC_API_KEY in the claude child env (for API-key auth users)
 ralphex --preserve-anthropic-api-key docs/plans/feature.md
 
-# force-strip ANTHROPIC_API_KEY for one run, even with preserve_anthropic_api_key=true in config
-# (use when running ralphex inside an OAuth-authenticated project to avoid billing the wrong account)
-ralphex --no-preserve-anthropic-api-key docs/plans/feature.md
-
 # with web dashboard
 ralphex --serve docs/plans/feature.md
 
@@ -604,7 +600,6 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `--idle-timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
 | `--worktree` | Run in isolated git worktree (full and tasks-only modes only) | false |
 | `--preserve-anthropic-api-key` | Pass `ANTHROPIC_API_KEY` through to claude (for users authenticating Claude Code via API key rather than OAuth/keychain) | false |
-| `--no-preserve-anthropic-api-key` | Force `ANTHROPIC_API_KEY` strip even if `preserve_anthropic_api_key=true` in config (per-run safety override for OAuth contexts) | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
 | `-p, --port` | Web dashboard port (used with `--serve`) | 8080 |
