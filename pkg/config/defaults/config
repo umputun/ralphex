@@ -99,6 +99,18 @@ external_review_tool = codex
 # finalize_enabled = false
 
 # ------------------------------------------------------------------------------
+# claude authentication
+# ------------------------------------------------------------------------------
+
+# preserve_anthropic_api_key: when true, ANTHROPIC_API_KEY is passed through to
+# the child claude process. enable this if you authenticate Claude Code via API
+# key (ANTHROPIC_API_KEY) rather than OAuth/keychain login. by default the key
+# is stripped so a host-set key cannot silently override OAuth credentials and
+# bill a different account.
+# default: false
+# preserve_anthropic_api_key = false
+
+# ------------------------------------------------------------------------------
 # plan move behavior
 # ------------------------------------------------------------------------------
 

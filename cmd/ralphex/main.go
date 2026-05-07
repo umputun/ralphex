@@ -31,38 +31,39 @@ import (
 
 // opts holds all command-line options.
 type opts struct {
-	MaxIterations         int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
-	MaxExternalIterations int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
-	ReviewPatience        int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
-	TaskModel             string        `long:"task-model" description:"model for task execution as model[:effort] (e.g., opus, opus:high, :medium)"`
-	ReviewModel           string        `long:"review-model" description:"model for review phases as model[:effort] (falls back to --task-model)"`
-	ClaudeCommand         string        `long:"claude-command" description:"override claude-compatible command for this run"`
-	ClaudeArgs            string        `long:"claude-args" description:"override claude-compatible command args for this run"`
-	ExternalReviewTool    string        `long:"external-review-tool" choice:"codex" choice:"custom" choice:"none" description:"override external review tool for this run"`
-	CustomReviewScript    string        `long:"custom-review-script" description:"override custom external review script for this run"`
-	Review                bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
-	ExternalOnly          bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
-	CodexOnly             bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
-	TasksOnly             bool          `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
-	BaseRef               string        `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
-	Wait                  time.Duration `long:"wait" description:"wait duration on rate limit before retry (e.g. 1h, 30m)"`
-	SessionTimeout        time.Duration `long:"session-timeout" description:"per-session timeout for claude (e.g. 30m, 1h)"`
-	IdleTimeout           time.Duration `long:"idle-timeout" description:"kill claude session after no output for this duration (e.g. 5m, 10m)"`
-	SkipFinalize          bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
-	Worktree              bool          `long:"worktree" description:"run in isolated git worktree"`
-	Branch                string        `long:"branch" description:"override branch name for worktree/branch creation (default: derived from plan filename)"`
-	PlanDescription       string        `long:"plan" description:"create plan interactively (enter plan description)"`
-	Debug                 bool          `short:"d" long:"debug" description:"enable debug logging"`
-	NoColor               bool          `long:"no-color" description:"disable color output"`
-	Version               bool          `short:"v" long:"version" description:"print version and exit"`
-	Serve                 bool          `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
-	Port                  int           `short:"p" long:"port" default:"8080" description:"web dashboard port"`
-	Host                  string        `long:"host" default:"127.0.0.1" env:"RALPHEX_WEB_HOST" description:"web dashboard listen address"`
-	Watch                 []string      `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
-	Init                  bool          `long:"init" description:"initialize local .ralphex/ config directory in current project"`
-	Reset                 bool          `long:"reset" description:"interactively reset global config to embedded defaults"`
-	DumpDefaults          string        `long:"dump-defaults" description:"extract raw embedded defaults to specified directory"`
-	ConfigDir             string        `long:"config-dir" env:"RALPHEX_CONFIG_DIR" description:"custom config directory"`
+	MaxIterations           int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
+	MaxExternalIterations   int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
+	ReviewPatience          int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
+	TaskModel               string        `long:"task-model" description:"model for task execution as model[:effort] (e.g., opus, opus:high, :medium)"`
+	ReviewModel             string        `long:"review-model" description:"model for review phases as model[:effort] (falls back to --task-model)"`
+	ClaudeCommand           string        `long:"claude-command" description:"override claude-compatible command for this run"`
+	ClaudeArgs              string        `long:"claude-args" description:"override claude-compatible command args for this run"`
+	ExternalReviewTool      string        `long:"external-review-tool" choice:"codex" choice:"custom" choice:"none" description:"override external review tool for this run"`
+	CustomReviewScript      string        `long:"custom-review-script" description:"override custom external review script for this run"`
+	Review                  bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
+	ExternalOnly            bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
+	CodexOnly               bool          `short:"c" long:"codex-only" description:"alias for --external-only (deprecated)"`
+	TasksOnly               bool          `short:"t" long:"tasks-only" description:"run only task phase, skip all reviews"`
+	BaseRef                 string        `short:"b" long:"base-ref" description:"override default branch for review diffs (branch name or commit hash)"`
+	Wait                    time.Duration `long:"wait" description:"wait duration on rate limit before retry (e.g. 1h, 30m)"`
+	SessionTimeout          time.Duration `long:"session-timeout" description:"per-session timeout for claude (e.g. 30m, 1h)"`
+	IdleTimeout             time.Duration `long:"idle-timeout" description:"kill claude session after no output for this duration (e.g. 5m, 10m)"`
+	SkipFinalize            bool          `long:"skip-finalize" description:"skip finalize step even if enabled in config"`
+	PreserveAnthropicAPIKey bool          `long:"preserve-anthropic-api-key" description:"pass ANTHROPIC_API_KEY through to claude (for users authenticating Claude Code via API key rather than OAuth/keychain)"`
+	Worktree                bool          `long:"worktree" description:"run in isolated git worktree"`
+	Branch                  string        `long:"branch" description:"override branch name for worktree/branch creation (default: derived from plan filename)"`
+	PlanDescription         string        `long:"plan" description:"create plan interactively (enter plan description)"`
+	Debug                   bool          `short:"d" long:"debug" description:"enable debug logging"`
+	NoColor                 bool          `long:"no-color" description:"disable color output"`
+	Version                 bool          `short:"v" long:"version" description:"print version and exit"`
+	Serve                   bool          `short:"s" long:"serve" description:"start web dashboard for real-time streaming"`
+	Port                    int           `short:"p" long:"port" default:"8080" description:"web dashboard port"`
+	Host                    string        `long:"host" default:"127.0.0.1" env:"RALPHEX_WEB_HOST" description:"web dashboard listen address"`
+	Watch                   []string      `short:"w" long:"watch" description:"directories to watch for progress files (repeatable)"`
+	Init                    bool          `long:"init" description:"initialize local .ralphex/ config directory in current project"`
+	Reset                   bool          `long:"reset" description:"interactively reset global config to embedded defaults"`
+	DumpDefaults            string        `long:"dump-defaults" description:"extract raw embedded defaults to specified directory"`
+	ConfigDir               string        `long:"config-dir" env:"RALPHEX_CONFIG_DIR" description:"custom config directory"`
 
 	PlanFile string `positional-arg-name:"plan-file" description:"path to plan file (optional, uses fzf if omitted)"`
 
@@ -127,12 +128,13 @@ func (stderrLog) Print(format string, args ...any) {
 
 // startupInfo holds parameters for printing startup information.
 type startupInfo struct {
-	PlanFile        string
-	PlanDescription string // used for plan mode instead of PlanFile
-	Branch          string
-	Mode            processor.Mode
-	MaxIterations   int
-	ProgressPath    string
+	PlanFile                string
+	PlanDescription         string // used for plan mode instead of PlanFile
+	Branch                  string
+	Mode                    processor.Mode
+	MaxIterations           int
+	ProgressPath            string
+	PreserveAnthropicAPIKey bool // when true, surfaced in the banner so users can spot wrong-context runs before claude bills the wrong account
 }
 
 // executePlanRequest holds parameters for plan execution.
@@ -552,11 +554,12 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	// print startup info
 	printStartupInfo(startupInfo{
-		PlanFile:      req.PlanFile,
-		Branch:        branch,
-		Mode:          req.Mode,
-		MaxIterations: resolveMaxIterations(o.MaxIterations, req.Config),
-		ProgressPath:  plr.baseLog.Path(),
+		PlanFile:                req.PlanFile,
+		Branch:                  branch,
+		Mode:                    req.Mode,
+		MaxIterations:           resolveMaxIterations(o.MaxIterations, req.Config),
+		ProgressPath:            plr.baseLog.Path(),
+		PreserveAnthropicAPIKey: req.Config.PreserveAnthropicAPIKey,
 	}, req.Colors)
 
 	// create and run the runner
@@ -935,7 +938,11 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 		colors.Info().Printf("starting interactive plan creation\n")
 		colors.Info().Printf("request: %s\n", info.PlanDescription)
 		colors.Info().Printf("branch: %s (max %d iterations)\n", info.Branch, info.MaxIterations)
-		colors.Info().Printf("progress log: %s\n\n", toRelPath(info.ProgressPath))
+		colors.Info().Printf("progress log: %s\n", toRelPath(info.ProgressPath))
+		if info.PreserveAnthropicAPIKey {
+			colors.Warn().Printf("auth: ANTHROPIC_API_KEY passthrough enabled\n")
+		}
+		colors.Info().Printf("\n")
 		return
 	}
 
@@ -945,6 +952,9 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 	}
 	colors.Info().Printf("starting ralphex loop (max %d iterations)%s\n", info.MaxIterations, modeStr)
 	displayMeta(colors, 0, info.PlanFile, info.Branch, info.ProgressPath)
+	if info.PreserveAnthropicAPIKey {
+		colors.Warn().Printf("auth: ANTHROPIC_API_KEY passthrough enabled\n")
+	}
 	colors.Info().Printf("\n")
 }
 
@@ -989,11 +999,12 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	// print startup info for plan mode
 	printStartupInfo(startupInfo{
-		PlanDescription: o.PlanDescription,
-		Branch:          branch,
-		Mode:            processor.ModePlan,
-		MaxIterations:   maxIter,
-		ProgressPath:    baseLog.Path(),
+		PlanDescription:         o.PlanDescription,
+		Branch:                  branch,
+		Mode:                    processor.ModePlan,
+		MaxIterations:           maxIter,
+		ProgressPath:            baseLog.Path(),
+		PreserveAnthropicAPIKey: req.Config.PreserveAnthropicAPIKey,
 	}, req.Colors)
 
 	// create input collector
@@ -1267,6 +1278,9 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 func applyCLIOverrides(o opts, cfg *config.Config) {
 	if o.SkipFinalize {
 		cfg.FinalizeEnabled = false
+	}
+	if o.PreserveAnthropicAPIKey {
+		cfg.PreserveAnthropicAPIKey = true
 	}
 	if o.Worktree {
 		cfg.WorktreeEnabled = true

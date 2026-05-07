@@ -556,6 +556,53 @@ func TestFilterEnv(t *testing.T) {
 	}
 }
 
+func TestClaudeChildEnv(t *testing.T) {
+	tests := []struct {
+		name           string
+		env            []string
+		preserveAPIKey bool
+		want           []string
+	}{
+		{
+			name:           "default strips both ANTHROPIC_API_KEY and CLAUDECODE",
+			env:            []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+			preserveAPIKey: false,
+			want:           []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name:           "preserve keeps ANTHROPIC_API_KEY but still strips CLAUDECODE",
+			env:            []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+			preserveAPIKey: true,
+			want:           []string{"PATH=/usr/bin", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+		},
+		{
+			name:           "preserve with no api key in env keeps everything except CLAUDECODE",
+			env:            []string{"PATH=/usr/bin", "CLAUDECODE=1", "HOME=/home/user"},
+			preserveAPIKey: true,
+			want:           []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name:           "default with no api key in env still strips CLAUDECODE",
+			env:            []string{"PATH=/usr/bin", "CLAUDECODE=1", "HOME=/home/user"},
+			preserveAPIKey: false,
+			want:           []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name:           "preserve does not affect partial-match keys like ANTHROPIC_API_KEY_OLD",
+			env:            []string{"ANTHROPIC_API_KEY_OLD=old", "ANTHROPIC_API_KEY=new", "CLAUDECODE=1"},
+			preserveAPIKey: true,
+			want:           []string{"ANTHROPIC_API_KEY_OLD=old", "ANTHROPIC_API_KEY=new"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := claudeChildEnv(tc.env, tc.preserveAPIKey)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestClaudeExecutor_parseStream_largeLines(t *testing.T) {
 	// test that lines of arbitrary length are handled without limit
 

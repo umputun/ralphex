@@ -58,8 +58,11 @@ type CommandRunner interface {
 // execClaudeRunner is the default command runner using os/exec.
 // when stdin is non-nil, it is connected to the child process's stdin (used to pass
 // the prompt via pipe instead of a -p CLI argument to avoid Windows 8191-char cmd limit).
+// preserveAPIKey, when true, leaves ANTHROPIC_API_KEY intact in the child env (for users
+// who authenticate Claude Code via API key rather than OAuth/keychain).
 type execClaudeRunner struct {
-	stdin io.Reader
+	stdin          io.Reader
+	preserveAPIKey bool
 }
 
 func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string) (io.Reader, func() error, error) {
@@ -72,8 +75,11 @@ func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string)
 	// to ensure the entire process group is killed, not just the direct child
 	cmd := exec.Command(name, args...) //nolint:noctx // intentional: we handle context cancellation via process group kill
 
-	// filter out ANTHROPIC_API_KEY (claude uses different auth) and CLAUDECODE (prevents nested session errors)
-	cmd.Env = filterEnv(os.Environ(), "ANTHROPIC_API_KEY", "CLAUDECODE")
+	// build child env: always strip CLAUDECODE (prevents nested session errors); strip
+	// ANTHROPIC_API_KEY by default so a host-set key cannot silently override OAuth/keychain
+	// auth and bill a different account. preserveAPIKey opts into keeping the key for users
+	// who authenticate Claude Code via API key.
+	cmd.Env = claudeChildEnv(os.Environ(), r.preserveAPIKey)
 
 	// pass prompt via stdin when set (avoids Windows 8191-char command-line limit)
 	if r.stdin != nil {
@@ -174,6 +180,17 @@ func stripFlag(args []string, flag string) []string {
 	return result
 }
 
+// claudeChildEnv builds the environment for a child claude process. CLAUDECODE is always
+// stripped to prevent nested-session errors. ANTHROPIC_API_KEY is stripped unless
+// preserveAPIKey is true; preserving it is required for users who authenticate Claude Code
+// via API key rather than OAuth/keychain.
+func claudeChildEnv(env []string, preserveAPIKey bool) []string {
+	if preserveAPIKey {
+		return filterEnv(env, "CLAUDECODE")
+	}
+	return filterEnv(env, "ANTHROPIC_API_KEY", "CLAUDECODE")
+}
+
 // filterEnv returns a copy of env with specified keys removed.
 func filterEnv(env []string, keysToRemove ...string) []string {
 	result := make([]string, 0, len(env))
@@ -214,17 +231,18 @@ type streamEvent struct {
 
 // ClaudeExecutor runs claude CLI commands with streaming JSON parsing.
 type ClaudeExecutor struct {
-	Command       string            // command to execute, defaults to "claude"
-	Args          string            // additional arguments (space-separated), defaults to standard args
-	ArgsSet       bool              // true when Args was explicitly set, including an empty value
-	Model         string            // model override (e.g., "opus", "sonnet", "haiku"); empty = CLI default
-	Effort        string            // reasoning effort override (e.g., "low", "medium", "high", "xhigh", "max"); empty = CLI default
-	OutputHandler func(text string) // called for each text chunk, can be nil
-	Debug         bool              // enable debug output
-	ErrorPatterns []string          // patterns to detect in output (e.g., rate limit messages)
-	LimitPatterns []string          // patterns to detect rate limits (checked before error patterns)
-	IdleTimeout   time.Duration     // kill session after this duration of no output, zero = disabled
-	cmdRunner     CommandRunner     // for testing, nil uses default
+	Command        string            // command to execute, defaults to "claude"
+	Args           string            // additional arguments (space-separated), defaults to standard args
+	ArgsSet        bool              // true when Args was explicitly set, including an empty value
+	Model          string            // model override (e.g., "opus", "sonnet", "haiku"); empty = CLI default
+	Effort         string            // reasoning effort override (e.g., "low", "medium", "high", "xhigh", "max"); empty = CLI default
+	OutputHandler  func(text string) // called for each text chunk, can be nil
+	Debug          bool              // enable debug output
+	ErrorPatterns  []string          // patterns to detect in output (e.g., rate limit messages)
+	LimitPatterns  []string          // patterns to detect rate limits (checked before error patterns)
+	IdleTimeout    time.Duration     // kill session after this duration of no output, zero = disabled
+	PreserveAPIKey bool              // when true, ANTHROPIC_API_KEY is passed through to the child; default false strips it
+	cmdRunner      CommandRunner     // for testing, nil uses default
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -270,7 +288,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	if e.cmdRunner != nil {
 		runner = e.cmdRunner
 	} else {
-		runner = &execClaudeRunner{stdin: stdinReader}
+		runner = &execClaudeRunner{stdin: stdinReader, preserveAPIKey: e.PreserveAPIKey}
 	}
 
 	// set up idle timeout: derive a cancellable context that fires when no output

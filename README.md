@@ -566,6 +566,9 @@ ralphex --session-timeout=30m docs/plans/feature.md
 # kill claude session when no output for 5 minutes (idle detection)
 ralphex --idle-timeout=5m docs/plans/feature.md
 
+# preserve ANTHROPIC_API_KEY in the claude child env (for API-key auth users)
+ralphex --preserve-anthropic-api-key docs/plans/feature.md
+
 # with web dashboard
 ralphex --serve docs/plans/feature.md
 
@@ -596,6 +599,7 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `--session-timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
 | `--idle-timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
 | `--worktree` | Run in isolated git worktree (full and tasks-only modes only) | false |
+| `--preserve-anthropic-api-key` | Pass `ANTHROPIC_API_KEY` through to claude (for users authenticating Claude Code via API key rather than OAuth/keychain) | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
 | `-p, --port` | Web dashboard port (used with `--serve`) | 8080 |
@@ -841,6 +845,7 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 | `finalize_enabled` | Enable finalize step after reviews | `false` |
 | `move_plan_on_completion` | Move completed plan file into `docs/plans/completed/` on success (disable for external plan-lifecycle workflows) | `true` |
 | `use_worktree` | Run each plan in an isolated git worktree (full and tasks-only modes only) | `false` |
+| `preserve_anthropic_api_key` | Pass `ANTHROPIC_API_KEY` through to the claude child process (for users authenticating Claude Code via API key rather than OAuth/keychain). Default `false` strips the key so a host-set value cannot silently override OAuth credentials | `false` |
 | `plans_dir` | Plans directory | `docs/plans` |
 | `default_branch` | Override auto-detected default branch for review diffs | auto-detect |
 | `vcs_command` | VCS command for the git backend (set to a translation script for hg repos) | `git` |

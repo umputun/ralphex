@@ -91,6 +91,9 @@ RALPHEX_CONFIG_DIR=~/my-config ralphex docs/plans/feature.md
 # use AWS Bedrock for Claude (Docker wrapper only)
 ralphex --claude-provider=bedrock docs/plans/feature.md
 RALPHEX_CLAUDE_PROVIDER=bedrock ralphex docs/plans/feature.md
+
+# preserve ANTHROPIC_API_KEY in the claude child env (for API-key auth users)
+ralphex --preserve-anthropic-api-key docs/plans/feature.md
 ```
 
 ## Requirements
@@ -146,6 +149,8 @@ review_model = sonnet:medium
 **Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit` (claude), `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` (codex). The codex defaults are tightened so that review findings that *talk about* rate limiting in a codebase do not trip a false positive. Users who customized `codex_limit_patterns` or `codex_error_patterns` to an earlier default (e.g. `Rate limit,quota exceeded` or `Rate limit,quota exceeded,You've hit your usage limit`) keep their customization on update — comment the line out to inherit the new embedded default. Pattern matching scans both stdout and stderr (live, untruncated) so detection survives the 5-line / 256-rune error-context tail.
 
 **Plan move behavior:** `move_plan_on_completion` config option controls whether completed plans move to `docs/plans/completed/` on success. Default `true` (existing behavior). Set to `false` for workflows that manage plan file lifecycle externally, such as spec-driven tooling with separate archive steps.
+
+**Preserving ANTHROPIC_API_KEY:** by default, ralphex strips `ANTHROPIC_API_KEY` from the child claude process so a host-set key cannot silently override OAuth/keychain credentials. If you authenticate Claude Code via API key (not OAuth), set `preserve_anthropic_api_key = true` in config or pass `--preserve-anthropic-api-key` on the CLI to keep the key in the child env. When passthrough is active, ralphex prints `auth: ANTHROPIC_API_KEY passthrough enabled` in the startup banner (in both task-execution and plan-creation modes) so wrong-context runs are visible before claude bills the wrong account. `CLAUDECODE` is always stripped regardless (prevents nested-session errors).
 
 **Notifications** (`notify_*` fields in config): Optional alerts on completion/failure via `telegram`, `email`, `slack`, `webhook`, or `custom` script. Disabled by default. See `docs/notifications.md` for setup.
 

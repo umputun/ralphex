@@ -622,6 +622,35 @@ func TestSkipFinalizeFlag(t *testing.T) {
 	})
 }
 
+func TestPreserveAnthropicAPIKeyFlag(t *testing.T) {
+	t.Run("flag enables when config disabled", func(t *testing.T) {
+		cfg := &config.Config{PreserveAnthropicAPIKey: false}
+		o := parseTestOpts(t, "--preserve-anthropic-api-key")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.True(t, cfg.PreserveAnthropicAPIKey, "CLI flag should enable preserve in config")
+	})
+
+	t.Run("absent flag preserves config true", func(t *testing.T) {
+		cfg := &config.Config{PreserveAnthropicAPIKey: true}
+		o := parseTestOpts(t)
+
+		applyCLIOverrides(o, cfg)
+
+		assert.True(t, cfg.PreserveAnthropicAPIKey, "config-set true should be preserved when flag absent")
+	})
+
+	t.Run("absent flag preserves config false", func(t *testing.T) {
+		cfg := &config.Config{PreserveAnthropicAPIKey: false}
+		o := parseTestOpts(t)
+
+		applyCLIOverrides(o, cfg)
+
+		assert.False(t, cfg.PreserveAnthropicAPIKey)
+	})
+}
+
 func TestProviderOverrideFlags(t *testing.T) {
 	t.Run("claude_command_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{ClaudeCommand: "configured-claude"}
@@ -926,6 +955,56 @@ func TestPrintStartupInfo(t *testing.T) {
 		}
 		// verify it doesn't panic with empty plan
 		printStartupInfo(info, colors)
+	})
+
+	t.Run("shows auth passthrough line when preserve enabled", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:                "/path/to/plan.md",
+			Branch:                  "feature-branch",
+			Mode:                    processor.ModeFull,
+			MaxIterations:           50,
+			ProgressPath:            "progress.txt",
+			PreserveAnthropicAPIKey: true,
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.Contains(t, out, "ANTHROPIC_API_KEY passthrough enabled",
+			"banner must surface API key passthrough so users notice wrong-context runs")
+	})
+
+	t.Run("hides auth line when preserve disabled", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:                "/path/to/plan.md",
+			Branch:                  "feature-branch",
+			Mode:                    processor.ModeFull,
+			MaxIterations:           50,
+			ProgressPath:            "progress.txt",
+			PreserveAnthropicAPIKey: false,
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.NotContains(t, out, "passthrough", "no auth line when default-strip behavior")
+	})
+
+	t.Run("shows auth passthrough line in plan mode when preserve enabled", func(t *testing.T) {
+		// plan mode has its own early-return branch in printStartupInfo; the auth
+		// line must surface there too because passthrough is the only safety
+		// signal once the run is on the wrong account.
+		info := startupInfo{
+			PlanDescription:         "add health endpoint",
+			Branch:                  "plan-branch",
+			Mode:                    processor.ModePlan,
+			MaxIterations:           50,
+			ProgressPath:            "progress.txt",
+			PreserveAnthropicAPIKey: true,
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.Contains(t, out, "ANTHROPIC_API_KEY passthrough enabled",
+			"plan mode banner must surface API key passthrough")
 	})
 }
 
