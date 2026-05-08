@@ -325,7 +325,7 @@ project/
 ### Error Pattern Detection
 
 Configurable patterns detect rate limit and quota errors in claude/codex output:
-- `claude_error_patterns`: comma-separated patterns for claude (default: "You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin")
+- `claude_error_patterns`: comma-separated patterns for claude (default: "You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit")
 - `codex_error_patterns`: comma-separated patterns for codex (default: "Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit"). Phrases are tightened so codex review findings that *talk about* rate limiting in a codebase do not trip a false positive when codex exits non-zero for an unrelated reason
 - Matching is case-insensitive substring search
 - Whitespace is trimmed from each pattern
@@ -335,7 +335,7 @@ Configurable patterns detect rate limit and quota errors in claude/codex output:
 - On match, ralphex exits gracefully with pattern info and help command suggestion
 
 Limit patterns for wait+retry behavior:
-- `claude_limit_patterns`: comma-separated (default: "You've hit your limit,Your usage allocation has been disabled by your admin")
+- `claude_limit_patterns`: comma-separated (default: "You've hit your limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit")
 - `codex_limit_patterns`: comma-separated (default: "Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit")
 - `wait_on_limit`: duration string (e.g., "1h", "30m"), disabled by default
 - `--wait` CLI flag overrides `wait_on_limit` config

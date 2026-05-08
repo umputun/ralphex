@@ -219,8 +219,8 @@ vcs_command = git
 # claude_error_patterns: patterns to detect in claude output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
 # when detected, ralphex exits gracefully with an informative message
-# default: You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin
-claude_error_patterns = You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin
+# default: You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit
+claude_error_patterns = You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit
 
 # codex_error_patterns: patterns to detect in codex output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
@@ -236,8 +236,8 @@ codex_error_patterns = Rate limit exceeded,rate limit reached,429 Too Many Reque
 # comma-separated list of substrings (case-insensitive matching)
 # when detected AND wait_on_limit is set, ralphex waits and retries
 # when detected WITHOUT wait_on_limit, falls through to error pattern behavior
-# default: You've hit your limit,Your usage allocation has been disabled by your admin
-claude_limit_patterns = You've hit your limit,Your usage allocation has been disabled by your admin
+# default: You've hit your limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit
+claude_limit_patterns = You've hit your limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit
 
 # codex_limit_patterns: patterns to detect rate limits in codex/external output
 # comma-separated list of substrings (case-insensitive matching)
