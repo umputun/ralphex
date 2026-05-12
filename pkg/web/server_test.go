@@ -778,24 +778,6 @@ func TestLoadPlanWithFallback(t *testing.T) {
 	})
 }
 
-func Test_altDateFormatBasename(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"dashed to compact", "2026-05-12-foo.md", "20260512-foo.md"},
-		{"compact to dashed", "20260512-foo.md", "2026-05-12-foo.md"},
-		{"no date prefix returns empty", "feature-x.md", ""},
-		{"non-md extension returns empty", "2026-05-12-foo.txt", ""},
-		{"empty input returns empty", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, altDateFormatBasename(tt.in))
-		})
-	}
-}
 
 func TestExtractProjectDir(t *testing.T) {
 	tests := []struct {

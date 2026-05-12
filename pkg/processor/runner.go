@@ -937,8 +937,9 @@ func (r *Runner) validatePlanHasTasks() error {
 // so the agent can output ALL_TASKS_DONE when those are verification-only.
 // for malformed plans (checkboxes without task headers), returns true if any [ ] exists.
 // returns false if the plan file is missing after resolvePlanFilePath exhausts all probes
-// (original, completed/<basename>, completed/<alt-date-basename>), to avoid spinning the loop
-// when an LLM-driven git mv renamed the file out from under the runtime.
+// (original, <dir>/<alt-date-basename>, completed/<basename>, completed/<alt-date-basename>),
+// to avoid spinning the loop when an LLM-driven git mv renamed the file out from under
+// the runtime.
 func (r *Runner) hasUncompletedTasks() bool {
 	path := r.resolvePlanFilePath()
 	if path == "" {
@@ -947,8 +948,9 @@ func (r *Runner) hasUncompletedTasks() bool {
 	p, err := plan.ParsePlanFile(path)
 	if err != nil {
 		// last line of defense: resolvePlanFilePath has already tried the original path,
-		// completed/<basename>, and the alternate-date-format probe. if the file is still
-		// missing, treat the run as complete so a vanished plan does not spin the loop.
+		// the in-place alternate-date rename, completed/<basename>, and completed/<alt-date>.
+		// if the file is still missing, treat the run as complete so a vanished plan does
+		// not spin the loop.
 		if errors.Is(err, fs.ErrNotExist) {
 			return false
 		}

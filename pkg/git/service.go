@@ -6,21 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/umputun/ralphex/pkg/plan"
 )
-
-// dashedDatePattern matches YYYY-MM-DD-<rest>.md basenames (dashed convention).
-// intentionally duplicated from pkg/processor/prompts.go: pkg/git is a low-level
-// leaf used by pkg/processor, so it should not import the higher-level package
-// just to share a ~10-line helper.
-var dashedDatePattern = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})-(.+\.md)$`)
-
-// compactDatePattern matches YYYYMMDD-<rest>.md basenames (compact convention).
-// see dashedDatePattern for the duplication rationale.
-var compactDatePattern = regexp.MustCompile(`^(\d{8})-(.+\.md)$`)
 
 //go:generate moq -out mocks/logger.go -pkg mocks -skip-ensure -fmt goimports . Logger
 
@@ -91,20 +80,6 @@ func NewService(path string, log Logger, vcsCmd ...string) (*Service, error) {
 // when set, a blank line and the trailer are appended after the commit message.
 func (s *Service) SetCommitTrailer(trailer string) {
 	s.trailer = trailer
-}
-
-// altDateFormatBasename returns the basename with the date prefix swapped between
-// dashed (YYYY-MM-DD) and compact (YYYYMMDD) conventions, or "" if name matches
-// neither pattern. Pure string transformation, no I/O.
-func (s *Service) altDateFormatBasename(name string) string {
-	if m := dashedDatePattern.FindStringSubmatch(name); m != nil {
-		return m[1] + m[2] + m[3] + "-" + m[4]
-	}
-	if m := compactDatePattern.FindStringSubmatch(name); m != nil {
-		d := m[1]
-		return d[0:4] + "-" + d[4:6] + "-" + d[6:8] + "-" + m[2]
-	}
-	return ""
 }
 
 // appendTrailer appends the configured trailer to a commit message.
@@ -517,8 +492,10 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 
 // resolvePlanMoveTargets determines the source and destination for MovePlanToCompleted,
 // accounting for files already moved to completed/ or renamed between the dashed
-// (YYYY-MM-DD) and compact (YYYYMMDD) date-prefix conventions. Returns done=true when
-// the file is already in completed/ (with either basename) and no move is needed.
+// (YYYY-MM-DD) and compact (YYYYMMDD) date-prefix conventions. Returns done=true in
+// two cases: the file is already in completed/ (with either basename), or there is a
+// collision between an active in-place rename and a stale completed/<altBase> copy
+// that the move should not clobber.
 // Probe order mirrors resolvePlanFilePath in pkg/processor/prompts.go: the in-place
 // alternate source is checked before any completed/ probe so a current renamed file
 // wins over a stale completed/ copy left from a prior run.
@@ -530,7 +507,7 @@ func (s *Service) resolvePlanMoveTargets(planFile, completedDir string) (sourceF
 		return sourceFile, destPath, false
 	}
 
-	altBase := s.altDateFormatBasename(filepath.Base(planFile))
+	altBase := plan.AltDateBasename(filepath.Base(planFile))
 
 	// file may have been renamed in place (same dir, alt basename) — use it as source.
 	// checked before completed/ probes so a current renamed file wins over a stale

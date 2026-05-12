@@ -411,30 +411,6 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 	})
 }
 
-func TestRunner_tryAlternateDateFormat(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "empty input", in: "", want: ""},
-		{name: "dashed to compact", in: "docs/plans/2026-05-12-foo.md", want: "docs/plans/20260512-foo.md"},
-		{name: "compact to dashed", in: "docs/plans/20260512-foo.md", want: "docs/plans/2026-05-12-foo.md"},
-		{name: "dashed in completed subdir", in: "docs/plans/completed/2026-05-12-foo.md", want: "docs/plans/completed/20260512-foo.md"},
-		{name: "compact in completed subdir", in: "docs/plans/completed/20260512-foo.md", want: "docs/plans/completed/2026-05-12-foo.md"},
-		{name: "non-date basename returns empty", in: "docs/plans/feature-x.md", want: ""},
-		{name: "no .md extension returns empty", in: "docs/plans/2026-05-12-foo.txt", want: ""},
-		{name: "8-digit non-date is treated as date", in: "docs/plans/12345678-foo.md", want: "docs/plans/1234-56-78-foo.md"},
-		{name: "multi-segment slug preserved", in: "docs/plans/2026-05-12-add-user-auth.md", want: "docs/plans/20260512-add-user-auth.md"},
-	}
-	r := &Runner{}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, r.tryAlternateDateFormat(tc.in))
-		})
-	}
-}
-
 func TestRunner_getProgressFileRef(t *testing.T) {
 	t.Run("with progress path", func(t *testing.T) {
 		r := &Runner{cfg: Config{ProgressPath: "progress-test.txt"}}
