@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os/exec"
 	"strings"
 	"time"
@@ -935,6 +936,9 @@ func (r *Runner) validatePlanHasTasks() error {
 // checkboxes in Success criteria, Overview, or Context are ignored for this check,
 // so the agent can output ALL_TASKS_DONE when those are verification-only.
 // for malformed plans (checkboxes without task headers), returns true if any [ ] exists.
+// returns false if the plan file is missing after resolvePlanFilePath exhausts all probes
+// (original, completed/<basename>, completed/<alt-date-basename>), to avoid spinning the loop
+// when an LLM-driven git mv renamed the file out from under the runtime.
 func (r *Runner) hasUncompletedTasks() bool {
 	path := r.resolvePlanFilePath()
 	if path == "" {
@@ -942,6 +946,12 @@ func (r *Runner) hasUncompletedTasks() bool {
 	}
 	p, err := plan.ParsePlanFile(path)
 	if err != nil {
+		// last line of defense: resolvePlanFilePath has already tried the original path,
+		// completed/<basename>, and the alternate-date-format probe. if the file is still
+		// missing, treat the run as complete so a vanished plan does not spin the loop.
+		if errors.Is(err, fs.ErrNotExist) {
+			return false
+		}
 		r.log.Print("[WARN] failed to parse plan file for completion check: %v", err)
 		return true // assume incomplete if can't read
 	}

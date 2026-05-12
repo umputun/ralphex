@@ -683,6 +683,31 @@ func TestRunner_HasUncompletedTasks_CompletedDir(t *testing.T) {
 	assert.True(t, r.TestHasUncompletedTasks())
 }
 
+func TestRunner_HasUncompletedTasks_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	plansDir := filepath.Join(tmpDir, "docs", "plans")
+	require.NoError(t, os.MkdirAll(plansDir, 0o700))
+
+	// file is referenced but does not exist anywhere — neither at original path,
+	// nor in completed/, nor under the alternate date format probe.
+	// this simulates the loop-spin failure mode where an LLM-renamed plan
+	// becomes unresolvable; the runtime must treat it as complete, not stuck.
+	missingPath := filepath.Join(plansDir, "2026-05-12-vanished.md")
+
+	log := newMockLogger("")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	cfg := processor.Config{PlanFile: missingPath}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+
+	assert.False(t, r.TestHasUncompletedTasks(), "missing plan file must return false so SignalCompleted is honored")
+
+	for _, call := range log.PrintCalls() {
+		assert.NotContains(t, call.Format, "[WARN]", "missing-file branch must not emit [WARN] (file is gone, signal already implies completion)")
+	}
+}
+
 func TestRunner_BuildCodexPrompt_CompletedDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	plansDir := filepath.Join(tmpDir, "docs", "plans")

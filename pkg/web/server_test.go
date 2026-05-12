@@ -730,6 +730,71 @@ func TestLoadPlanWithFallback(t *testing.T) {
 		_, err := loadPlanWithFallback(nonexistentPath)
 		require.Error(t, err)
 	})
+
+	t.Run("falls back to alt-date basename in completed/ (dashed to compact)", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		completedDir := filepath.Join(tmpDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+
+		// plan only exists under compact-date basename in completed/
+		completedPlan := filepath.Join(completedDir, "20260512-foo.md")
+		planContent := `# Renamed Plan
+
+### Task 1: Done
+
+- [x] Item
+`
+		require.NoError(t, os.WriteFile(completedPlan, []byte(planContent), 0o600))
+
+		// request the dashed-date original path
+		originalPath := filepath.Join(tmpDir, "2026-05-12-foo.md")
+		plan, err := loadPlanWithFallback(originalPath)
+		require.NoError(t, err)
+		require.NotNil(t, plan)
+		assert.Equal(t, "Renamed Plan", plan.Title)
+	})
+
+	t.Run("falls back to alt-date basename in completed/ (compact to dashed)", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		completedDir := filepath.Join(tmpDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+
+		// plan only exists under dashed-date basename in completed/
+		completedPlan := filepath.Join(completedDir, "2026-05-12-foo.md")
+		planContent := `# Renamed Plan
+
+### Task 1: Done
+
+- [x] Item
+`
+		require.NoError(t, os.WriteFile(completedPlan, []byte(planContent), 0o600))
+
+		// request the compact-date original path
+		originalPath := filepath.Join(tmpDir, "20260512-foo.md")
+		plan, err := loadPlanWithFallback(originalPath)
+		require.NoError(t, err)
+		require.NotNil(t, plan)
+		assert.Equal(t, "Renamed Plan", plan.Title)
+	})
+}
+
+func Test_altDateFormatBasename(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"dashed to compact", "2026-05-12-foo.md", "20260512-foo.md"},
+		{"compact to dashed", "20260512-foo.md", "2026-05-12-foo.md"},
+		{"no date prefix returns empty", "feature-x.md", ""},
+		{"non-md extension returns empty", "2026-05-12-foo.txt", ""},
+		{"empty input returns empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, altDateFormatBasename(tt.in))
+		})
+	}
 }
 
 func TestExtractProjectDir(t *testing.T) {

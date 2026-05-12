@@ -13,6 +13,36 @@ import (
 // agentRefPattern matches {{agent:name}} template syntax
 var agentRefPattern = regexp.MustCompile(`\{\{agent:([a-zA-Z0-9_-]+)\}\}`)
 
+// dashedDatePattern matches YYYY-MM-DD-<rest>.md basenames (dashed convention).
+var dashedDatePattern = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})-(.+\.md)$`)
+
+// compactDatePattern matches YYYYMMDD-<rest>.md basenames (compact convention).
+var compactDatePattern = regexp.MustCompile(`^(\d{8})-(.+\.md)$`)
+
+// tryAlternateDateFormat returns the same path with the date prefix swapped between
+// dashed (YYYY-MM-DD) and compact (YYYYMMDD) conventions, or "" if the basename
+// matches neither pattern. Pure string transformation, no I/O.
+func (r *Runner) tryAlternateDateFormat(path string) string {
+	if path == "" {
+		return ""
+	}
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	if m := dashedDatePattern.FindStringSubmatch(base); m != nil {
+		// YYYY-MM-DD-rest.md → YYYYMMDD-rest.md
+		alt := m[1] + m[2] + m[3] + "-" + m[4]
+		return filepath.Join(dir, alt)
+	}
+	if m := compactDatePattern.FindStringSubmatch(base); m != nil {
+		// YYYYMMDD-rest.md → YYYY-MM-DD-rest.md
+		d := m[1]
+		alt := d[0:4] + "-" + d[4:6] + "-" + d[6:8] + "-" + m[2]
+		return filepath.Join(dir, alt)
+	}
+	return ""
+}
+
 // getGoal returns the goal string based on whether a plan file is configured.
 func (r *Runner) getGoal() string {
 	if r.cfg.PlanFile == "" {
@@ -29,8 +59,11 @@ func (r *Runner) getPlanFileRef() string {
 	return r.resolvePlanFilePath()
 }
 
-// resolvePlanFilePath returns the actual path to the plan file, checking if it was moved to completed/.
-// returns original path if file exists there, completed/ path if moved, or original path as fallback.
+// resolvePlanFilePath returns the actual path to the plan file, checking if it was moved or renamed.
+// probes in order: original path, <dir>/<alt-date-basename> (in-place rename),
+// completed/<basename> (moved), completed/<alt-date-basename> (moved + renamed).
+// the YYYY-MM-DD ↔ YYYYMMDD swap handles LLM-driven date-format renames.
+// returns the first path that exists, or the original path as fallback.
 func (r *Runner) resolvePlanFilePath() string {
 	if r.cfg.PlanFile == "" {
 		return ""
@@ -46,10 +79,29 @@ func (r *Runner) resolvePlanFilePath() string {
 		return r.cfg.PlanFile
 	}
 
+	alt := r.tryAlternateDateFormat(r.cfg.PlanFile)
+
+	// check if file was renamed in place to the alternate date format (same directory)
+	// done before completed/ probes so a current renamed file wins over a stale completed/ copy
+	if alt != "" {
+		if _, err := os.Stat(alt); err == nil {
+			return alt
+		}
+	}
+
 	// check if file was moved to completed/ subdirectory
-	completedPath := filepath.Join(filepath.Dir(r.cfg.PlanFile), "completed", filepath.Base(r.cfg.PlanFile))
+	dir := filepath.Dir(r.cfg.PlanFile)
+	completedPath := filepath.Join(dir, "completed", filepath.Base(r.cfg.PlanFile))
 	if _, err := os.Stat(completedPath); err == nil {
 		return completedPath
+	}
+
+	// check if file was moved and renamed to the alternate date format in completed/
+	if alt != "" {
+		altCompletedPath := filepath.Join(dir, "completed", filepath.Base(alt))
+		if _, err := os.Stat(altCompletedPath); err == nil {
+			return altCompletedPath
+		}
 	}
 
 	// fall back to original path

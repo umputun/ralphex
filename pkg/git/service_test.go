@@ -554,6 +554,223 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 		require.Len(t, log.logs, 1)
 		assert.Contains(t, log.logs[0], "already in completed")
 	})
+
+	t.Run("returns nil if renamed to compact date in completed", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// simulate prior move that also renamed dashed → compact date prefix
+		plansDir := filepath.Join(dir, "docs", "plans")
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+		completedPath := filepath.Join(completedDir, "20260512-foo.md")
+		require.NoError(t, os.WriteFile(completedPath, []byte("# Plan"), 0o600))
+
+		// caller still references the original dashed-format path
+		planFile := filepath.Join(plansDir, "2026-05-12-foo.md")
+		_, err = os.Stat(planFile)
+		require.True(t, os.IsNotExist(err))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		require.Len(t, log.logs, 1)
+		assert.Contains(t, log.logs[0], "already in completed")
+		assert.Contains(t, log.logs[0], "renamed")
+		assert.Contains(t, log.logs[0], "20260512-foo.md")
+	})
+
+	t.Run("returns nil if renamed to dashed date in completed", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		// simulate prior move that also renamed compact → dashed date prefix
+		plansDir := filepath.Join(dir, "docs", "plans")
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+		completedPath := filepath.Join(completedDir, "2026-05-12-foo.md")
+		require.NoError(t, os.WriteFile(completedPath, []byte("# Plan"), 0o600))
+
+		// caller still references the original compact-format path
+		planFile := filepath.Join(plansDir, "20260512-foo.md")
+		_, err = os.Stat(planFile)
+		require.True(t, os.IsNotExist(err))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		require.Len(t, log.logs, 1)
+		assert.Contains(t, log.logs[0], "already in completed")
+		assert.Contains(t, log.logs[0], "renamed")
+		assert.Contains(t, log.logs[0], "2026-05-12-foo.md")
+	})
+
+	t.Run("moves file renamed in place to compact date", func(t *testing.T) {
+		// caller references original dashed path, file was renamed in place to compact
+		// e.g. git mv docs/plans/2026-05-12-foo.md docs/plans/20260512-foo.md
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		renamedPath := filepath.Join(plansDir, "20260512-foo.md")
+		require.NoError(t, os.WriteFile(renamedPath, []byte("# Plan"), 0o600))
+		require.NoError(t, svc.repo.add(renamedPath))
+		require.NoError(t, svc.repo.commit("add plan with renamed basename"))
+
+		// caller still passes the original dashed path
+		planFile := filepath.Join(plansDir, "2026-05-12-foo.md")
+		_, err = os.Stat(planFile)
+		require.True(t, os.IsNotExist(err))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		// renamed source should be gone
+		_, err = os.Stat(renamedPath)
+		assert.True(t, os.IsNotExist(err))
+
+		// destination uses the renamed basename
+		completedPath := filepath.Join(plansDir, "completed", "20260512-foo.md")
+		_, err = os.Stat(completedPath)
+		require.NoError(t, err)
+	})
+
+	t.Run("moves file renamed in place to dashed date", func(t *testing.T) {
+		// mirror: caller references compact, file renamed in place to dashed
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		renamedPath := filepath.Join(plansDir, "2026-05-12-foo.md")
+		require.NoError(t, os.WriteFile(renamedPath, []byte("# Plan"), 0o600))
+		require.NoError(t, svc.repo.add(renamedPath))
+		require.NoError(t, svc.repo.commit("add plan with renamed basename"))
+
+		planFile := filepath.Join(plansDir, "20260512-foo.md")
+		_, err = os.Stat(planFile)
+		require.True(t, os.IsNotExist(err))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		_, err = os.Stat(renamedPath)
+		assert.True(t, os.IsNotExist(err))
+
+		completedPath := filepath.Join(plansDir, "completed", "2026-05-12-foo.md")
+		_, err = os.Stat(completedPath)
+		require.NoError(t, err)
+	})
+
+	t.Run("in-place rename wins over stale completed copy", func(t *testing.T) {
+		// caller passes original dashed path. file was renamed in place to compact AND a stale
+		// completed/<original-basename> exists from a prior run. the in-place rename is the
+		// active plan and must be moved; the stale completed/ copy must not short-circuit.
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+
+		// active plan at compact basename (renamed in place)
+		renamedPath := filepath.Join(plansDir, "20260512-foo.md")
+		require.NoError(t, os.WriteFile(renamedPath, []byte("# Plan (current)"), 0o600))
+		require.NoError(t, svc.repo.add(renamedPath))
+		require.NoError(t, svc.repo.commit("add plan with renamed basename"))
+
+		// stale completed copy at original (dashed) basename from a prior run
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+		stalePath := filepath.Join(completedDir, "2026-05-12-foo.md")
+		require.NoError(t, os.WriteFile(stalePath, []byte("# Plan (stale)"), 0o600))
+
+		// caller still references the original dashed path
+		planFile := filepath.Join(plansDir, "2026-05-12-foo.md")
+		_, err = os.Stat(planFile)
+		require.True(t, os.IsNotExist(err))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		// renamed source should be gone (was moved, not abandoned)
+		_, err = os.Stat(renamedPath)
+		assert.True(t, os.IsNotExist(err), "active in-place renamed file should have been moved")
+
+		// destination uses the renamed basename
+		movedPath := filepath.Join(completedDir, "20260512-foo.md")
+		movedContent, err := os.ReadFile(movedPath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Equal(t, "# Plan (current)", string(movedContent), "moved file should contain current content")
+
+		// stale completed copy is left in place (not our responsibility to clean up)
+		staleContent, err := os.ReadFile(stalePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Equal(t, "# Plan (stale)", string(staleContent))
+	})
+
+	t.Run("collision between in-place rename and stale completed/<altBase> is left untouched", func(t *testing.T) {
+		// caller passes original dashed path. file was renamed in place to compact AND a stale
+		// completed/<altBase> copy already exists with the same basename (e.g. same slug ran
+		// twice on the same day). git mv would refuse, os.Rename fallback would clobber the
+		// stale copy and leave the source's deletion unstaged. verify we surface this as
+		// already-completed and preserve both files for manual resolution.
+		dir := setupExternalTestRepo(t)
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+
+		// active plan at compact basename (renamed in place, tracked)
+		renamedPath := filepath.Join(plansDir, "20260512-foo.md")
+		require.NoError(t, os.WriteFile(renamedPath, []byte("# Plan (current)"), 0o600))
+		require.NoError(t, svc.repo.add(renamedPath))
+		require.NoError(t, svc.repo.commit("add plan with renamed basename"))
+
+		// stale completed copy at compact basename from a prior run with same slug+date
+		completedDir := filepath.Join(plansDir, "completed")
+		require.NoError(t, os.MkdirAll(completedDir, 0o750))
+		stalePath := filepath.Join(completedDir, "20260512-foo.md")
+		require.NoError(t, os.WriteFile(stalePath, []byte("# Plan (stale)"), 0o600))
+
+		// caller references the original dashed path
+		planFile := filepath.Join(plansDir, "2026-05-12-foo.md")
+		_, err = os.Stat(planFile)
+		require.True(t, os.IsNotExist(err))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		// active source must be preserved (NOT clobbered, NOT moved)
+		activeContent, err := os.ReadFile(renamedPath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Equal(t, "# Plan (current)", string(activeContent), "active in-place renamed file must be preserved")
+
+		// stale completed copy must also be preserved (not overwritten)
+		staleContent, err := os.ReadFile(stalePath) //nolint:gosec // test file
+		require.NoError(t, err)
+		assert.Equal(t, "# Plan (stale)", string(staleContent), "stale completed copy must be preserved")
+
+		// repo must be clean — no dangling deletion of the active source
+		dirty, err := svc.repo.isDirty()
+		require.NoError(t, err)
+		assert.False(t, dirty, "repo must be clean after collision-skip")
+
+		// should have logged that the move was skipped due to the collision
+		require.Len(t, log.logs, 1)
+		assert.Contains(t, log.logs[0], "already in completed")
+		assert.Contains(t, log.logs[0], "20260512-foo.md")
+		assert.Contains(t, log.logs[0], "manual cleanup")
+	})
 }
 
 func TestService_EnsureHasCommits(t *testing.T) {
@@ -1537,6 +1754,31 @@ func TestService_resolveFilesystemCase(t *testing.T) {
 			input := tt.setup(t, tmpDir)
 			got := svc.resolveFilesystemCase(input)
 			assert.Equal(t, tt.wantBase, filepath.Base(got))
+		})
+	}
+}
+
+func TestService_altDateFormatBasename(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"dashed to compact", "2026-05-12-foo.md", "20260512-foo.md"},
+		{"compact to dashed", "20260512-foo.md", "2026-05-12-foo.md"},
+		{"dashed multi-part slug", "2026-05-12-extract-env-variable.md", "20260512-extract-env-variable.md"},
+		{"compact multi-part slug", "20260512-extract-env-variable.md", "2026-05-12-extract-env-variable.md"},
+		{"non-date basename returns empty", "feature-x.md", ""},
+		{"missing .md extension returns empty", "2026-05-12-foo", ""},
+		{"empty string returns empty", "", ""},
+		{"non-md extension returns empty", "2026-05-12-foo.txt", ""},
+		{"loose 8-digit prefix still swapped (no date validation)", "12345678-foo.md", "1234-56-78-foo.md"},
+	}
+
+	svc := &Service{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, svc.altDateFormatBasename(tt.in))
 		})
 	}
 }
