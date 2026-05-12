@@ -784,3 +784,22 @@ func TestPromptLoader_Load_CustomEvalPrompt_LocalOverridesGlobal(t *testing.T) {
 
 	assert.Equal(t, "local custom eval", prompts.CustomEval)
 }
+
+// tripwire regression test: the embedded make_plan.txt must not instruct claude to relocate
+// the plan file at end of run. the framework's MovePlanToCompleted (pkg/git/service.go) already
+// handles that move idempotently using the resolved plan-file basename, so any LLM-driven git mv
+// can rename the file out from under the runtime and trigger the infinite warning loop described
+// in umputun/ralphex#341. if a template change legitimately re-introduces an LLM-driven plan-file
+// relocation, this test must be updated deliberately, not silently.
+func TestMakePlanPrompt_NoLLMDrivenPlanMove(t *testing.T) {
+	loader := newPromptLoader(defaultsFS)
+	content, err := loader.loadPromptFromEmbedFS("defaults/prompts/make_plan.txt")
+	require.NoError(t, err)
+	require.NotEmpty(t, content)
+
+	forbidden := []string{"move this plan", "completed/", "mv ", "relocate"}
+	for _, sub := range forbidden {
+		assert.NotContains(t, content, sub,
+			"embedded make_plan.txt must not contain %q (would re-introduce LLM-driven plan-file relocation)", sub)
+	}
+}

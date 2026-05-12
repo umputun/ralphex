@@ -153,7 +153,6 @@ Write the accepted plan to disk:
 
 - [ ] update README.md if user-facing changes
 - [ ] update CLAUDE.md if internal patterns changed
-- [ ] move this plan to `docs/plans/completed/`
 ---
 
 ## Step 4.5: Validate Plan Before Draft
