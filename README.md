@@ -416,12 +416,13 @@ ralphex --update-script  # update the wrapper script itself
 <details markdown>
 <summary>Available images</summary>
 
-Two images are published:
+Three images are published:
 
 | Image | Description |
 |-------|-------------|
 | `ghcr.io/umputun/ralphex:latest` | Base image with Claude Code, Codex, and core tools |
 | `ghcr.io/umputun/ralphex-go:latest` | Go development (extends base with Go toolchain) |
+| `ghcr.io/umputun/ralphex-python:latest` | Python development (extends base with uv, ruff, mypy, pytest) |
 
 **Base image includes:**
 
@@ -451,6 +452,11 @@ Two images are published:
 **For Go projects**, use the `-go` image:
 ```bash
 RALPHEX_IMAGE=ghcr.io/umputun/ralphex-go:latest ralphex docs/plans/feature.md
+```
+
+**For Python projects**, use the `-python` image:
+```bash
+RALPHEX_IMAGE=ghcr.io/umputun/ralphex-python:latest ralphex docs/plans/feature.md
 ```
 
 **For other languages**, create a custom image by extending the base with your language toolchain. The Go image (`Dockerfile-go`) shows the pattern:

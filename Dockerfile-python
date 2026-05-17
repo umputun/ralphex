@@ -1,0 +1,14 @@
+# Python development image extending base ralphex
+ARG BASE_TAG=latest
+FROM ghcr.io/umputun/ralphex:${BASE_TAG}
+
+LABEL org.opencontainers.image.description="Autonomous plan execution with Claude Code - Python development"
+
+# install uv - modern Python package and project manager
+RUN wget -qO- https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+
+# install Python development tools
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+RUN uv tool install ruff && \
+    uv tool install mypy && \
+    uv tool install pytest
