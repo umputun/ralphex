@@ -209,6 +209,39 @@ ralphex --external-only
 ralphex --external-only docs/plans/feature.md
 ```
 
+### Codex Executor Mode
+
+The `--codex` flag routes task execution, both review phases, and the optional finalize step through the codex CLI instead of Claude Code. The external review phase is automatically skipped because codex-reviewing-codex is a same-model self-review with weak signal; the cross-model independence between Claude and codex was the original reason that phase existed.
+
+**Why this exists:** in June 2026 Anthropic split the Claude Max subscription from the Claude Agent SDK, putting unattended ralphex runs on a separate $200 credit pool rather than the Max plan. Users with an OpenAI/codex plan can switch the entire ralphex pipeline to codex with one flag and stay on their existing OpenAI subscription instead.
+
+```bash
+# run the full pipeline (task, first review, second review, finalize) through codex
+ralphex --codex docs/plans/feature.md
+
+# additionally let codex read project CLAUDE.md as AGENTS.md
+ralphex --codex --pass-claude-md docs/plans/feature.md
+```
+
+**How it differs from `codex-as-claude.sh`:** the `--codex` flag is the native codex path. It calls the codex CLI directly and configures multi-agent reviews through additive `-c` flag overrides on the codex command line. Review prompts are shared with claude — the `{{agent:<name>}}` expansion produces `spawn_agent` calls for codex and Task-tool calls for claude at runtime. The `scripts/codex-as-claude/codex-as-claude.sh` wrapper still exists for backwards compatibility — it translates codex JSONL output into Claude stream-json events, which adds overhead and keeps Claude-flavored prompt vocabulary in front of a codex model.
+
+**Project CLAUDE.md passthrough (`--pass-claude-md`):** adds `-c project_doc_fallback_filenames=["CLAUDE.md"]` to the codex invocation so codex's native AGENTS.md walk picks up the project-level `./CLAUDE.md` file. This works for project-level CLAUDE.md only. For user-level `~/.claude/CLAUDE.md`, ralphex never modifies the user's `~/.codex/` directory. If `~/.claude/CLAUDE.md` exists and `~/.codex/AGENTS.md` does not, ralphex prints a one-time hint suggesting `ln -s ~/.claude/CLAUDE.md ~/.codex/AGENTS.md` and continues; the user opts in by running the command themselves.
+
+**Configuration alternative:** instead of passing `--codex` every run, set it in `~/.config/ralphex/config` or `.ralphex/config`:
+
+```ini
+executor       = codex
+pass_claude_md = true
+```
+
+When `executor = codex` is set in config and the user has also set `external_review_tool = codex` (or `custom`), ralphex silently overrides `external_review_tool` to `none` and prints a warning to stderr that the config-file value was overridden. Only CLI-flag conflicts are hard errors; config-only conflicts resolve with a warning.
+
+**Mutual exclusion:** the codex executor (whether enabled via `--codex` or `executor = codex` in config) cannot be combined with `--external-only` (alias `-e`), `--codex-only` (alias `-c`), or `--external-review-tool=<X>` where `<X>` is not `none`. `--pass-claude-md` requires the codex executor (CLI `--codex` or config `executor = codex`). Each combination fails with a clear error message at startup.
+
+**Requirements:** `--codex` requires the codex CLI version 0.130.0 or newer. The mode relies on `[features] multi_agent`, `[agents.<name>]` agent registration, and (with `--pass-claude-md`) `project_doc_fallback_filenames`, all supported in 0.130.0. Older codex versions silently ignore unknown `-c` overrides, so a misconfigured run will not error visibly — it will simply behave as if the overrides were absent. There is no runtime version check; verify your codex version with `codex --version` if behavior is unexpected.
+
+**Model selection under `--codex`:** `--task-model` and `--review-model` (and their config equivalents `task_model` / `review_model`) only feed the claude executor — they are appended as `--model`/`--effort` to `claude_command`. Under `--codex` they are ignored. Codex model selection follows this order: `codex_model` / `codex_reasoning_effort` in ralphex config (if set) override everything; otherwise codex reads its own `~/.codex/config.toml`; otherwise the codex CLI's built-in defaults apply. Leave `codex_model` / `codex_reasoning_effort` unset in ralphex config to preserve your `~/.codex/config.toml` choice.
+
 ### Worktree Isolation
 
 The `--worktree` flag runs plan execution in an isolated git worktree at `.ralphex/worktrees/<branch>`, enabling parallel execution of multiple plans on the same repo without branch conflicts.
@@ -540,6 +573,12 @@ ralphex --review docs/plans/feature.md
 # external-only mode (skip tasks and first review, run only external review loop)
 ralphex --external-only
 
+# codex executor mode (run task, review, and finalize phases through codex; skip external review)
+ralphex --codex docs/plans/feature.md
+
+# codex executor mode with project CLAUDE.md passthrough (codex reads CLAUDE.md as AGENTS.md)
+ralphex --codex --pass-claude-md docs/plans/feature.md
+
 # tasks-only mode (run only task phase, skip all reviews)
 ralphex --tasks-only docs/plans/feature.md
 
@@ -574,10 +613,10 @@ ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
 # use provider overrides for one run without editing config
 ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
 
-# set per-session timeout to kill hanging claude sessions
+# set per-session timeout to kill hanging sessions (external review in Claude mode excluded)
 ralphex --session-timeout=30m docs/plans/feature.md
 
-# kill claude session when no output for 5 minutes (idle detection)
+# kill claude/codex executor session when no output for 5 minutes
 ralphex --idle-timeout=5m docs/plans/feature.md
 
 # preserve ANTHROPIC_API_KEY in the claude child env (for API-key auth users)
@@ -600,6 +639,8 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `-r, --review` | Skip task execution, run full review pipeline | false |
 | `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
 | `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
+| `--codex` | Use codex CLI as the executor for task, review, and finalize phases. Skips the external review phase (codex-reviewing-codex is a same-model self-review with weak signal). Requires codex CLI ≥ 0.130.0 | false |
+| `--pass-claude-md` | Pass project `CLAUDE.md` to codex via `-c project_doc_fallback_filenames=["CLAUDE.md"]`. User-level `~/.claude/CLAUDE.md` is NOT auto-passed (a one-time setup hint is shown). Requires the codex executor (`--codex` or `executor = codex`) | false |
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
@@ -610,8 +651,8 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `--external-review-tool` | Override external review tool for this run (`codex`, `custom`, or `none`) | config/default |
 | `--custom-review-script` | Override custom external review script for this run | config/default |
 | `--wait` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
-| `--session-timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
-| `--idle-timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
+| `--session-timeout` | Per-session timeout for task/review executor (e.g., `30m`, `1h`). Applies to Claude calls in default executor mode and every executor call under `--codex`; external codex/custom review in Claude mode is not affected | disabled |
+| `--idle-timeout` | Kill executor session when no output for specified duration (e.g., `5m`). Resets on each output line. Applies to Claude and Codex executors, including external codex review; custom review is not affected | disabled |
 | `--worktree` | Run in isolated git worktree (full and tasks-only modes only) | false |
 | `--preserve-anthropic-api-key` | Pass `ANTHROPIC_API_KEY` through to claude (for users authenticating Claude Code via API key rather than OAuth/keychain) | false |
 | `--plan` | Create plan interactively (provide description) | - |
@@ -842,14 +883,16 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 |--------|-------------|---------|
 | `claude_command` | Claude CLI command | `claude` |
 | `claude_args` | Claude CLI arguments | `--dangerously-skip-permissions --output-format stream-json --verbose` |
+| `executor` | Executor for task, review, and finalize phases. `""` (default) uses Claude Code; `codex` routes the full pipeline through the codex CLI and skips the external review phase. CLI flag `--codex` takes precedence | empty |
+| `pass_claude_md` | When `executor = codex`, pass project `CLAUDE.md` to codex as `AGENTS.md` via `-c project_doc_fallback_filenames=["CLAUDE.md"]`. CLI flag `--pass-claude-md` takes precedence | `false` |
 | `task_model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags | empty |
 | `review_model` | Model for review phases as `model[:effort]`. Falls back to `task_model` if empty. Same syntax and wrapper behavior as `task_model` | empty |
 | `codex_enabled` | Enable codex review phase | `true` |
 | `codex_command` | Codex CLI command | `codex` |
-| `codex_model` | Codex model ID | `gpt-5.4` |
-| `codex_reasoning_effort` | Reasoning effort level | `xhigh` |
+| `codex_model` | Codex model ID. Leave unset to inherit from `~/.codex/config.toml` | unset |
+| `codex_reasoning_effort` | Reasoning effort level. Leave unset to inherit from `~/.codex/config.toml` | unset |
 | `codex_timeout_ms` | Codex timeout in ms | `3600000` |
-| `codex_sandbox` | Sandbox mode | `read-only` |
+| `codex_sandbox` | Sandbox mode. External codex review defaults to `read-only`; first-class `executor = codex` uses `danger-full-access` (task/review/finalize need to write git metadata and commit) unless explicitly overridden | `read-only` (claude mode) / `danger-full-access` (codex mode) |
 | `external_review_tool` | External review tool (`codex`, `custom`, `none`) | `codex` |
 | `custom_review_script` | Path to custom review script (when `external_review_tool = custom`) | - |
 | `max_external_iterations` | Override external review iteration limit (0 = auto, derived from `max_iterations`) | `0` |
@@ -878,8 +921,8 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 | `claude_limit_patterns` | Limit patterns for claude triggering wait+retry (comma-separated) | `You've hit your limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit` |
 | `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` |
 | `wait_on_limit` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
-| `session_timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
-| `idle_timeout` | Kill claude session when no output for specified duration (e.g., `5m`). Resets on each output line | disabled |
+| `session_timeout` | Per-session timeout for task/review executor (e.g., `30m`, `1h`). Applies to Claude calls in default executor mode and every executor call under `executor = codex`; external codex/custom review in Claude mode is not affected | disabled |
+| `idle_timeout` | Kill executor session when no output for specified duration (e.g., `5m`). Resets on each output line. Applies to Claude and Codex executors, including external codex review; custom review is not affected | disabled |
 
 Colors use 24-bit RGB (true color), supported natively by all modern terminals (iTerm2, Kitty, Terminal.app, Windows Terminal, GNOME Terminal, Alacritty, Zed, VS Code, etc). Older terminals will degrade gracefully. Use `--no-color` to disable colors entirely.
 

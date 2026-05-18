@@ -9,7 +9,8 @@ import "fmt"
 //   - SectionGeneric, SectionClaudeEval: no boundary events, just section headers
 //
 // invariants:
-//   - Iteration > 0 for SectionTaskIteration, SectionClaudeReview, SectionCodexIteration
+//   - Iteration > 0 for SectionTaskIteration, SectionCodexIteration
+//   - Iteration >= 0 for SectionClaudeReview (first review pass uses 0)
 //   - Iteration == 0 for SectionGeneric, SectionClaudeEval
 //
 // prefer using the constructor functions (NewTaskIterationSection, etc.) to ensure
@@ -21,7 +22,7 @@ const (
 	SectionGeneric SectionType = iota
 	// SectionTaskIteration represents a task execution iteration.
 	SectionTaskIteration
-	// SectionClaudeReview represents a Claude review iteration.
+	// SectionClaudeReview represents an internal review iteration.
 	SectionClaudeReview
 	// SectionCodexIteration represents a Codex review iteration.
 	SectionCodexIteration
@@ -61,6 +62,19 @@ func NewClaudeReviewSection(iteration int, suffix string) Section {
 		Type:      SectionClaudeReview,
 		Iteration: iteration,
 		Label:     fmt.Sprintf("claude review %d%s", iteration, suffix),
+	}
+}
+
+// NewInternalReviewSection creates a section for executor-neutral internal review iteration.
+// the label uses a fixed "review" prefix (no executor name) because the web
+// dashboard's name-based phase routing (phaseFromSection) matches "codex"
+// before "review" — embedding executor names in the label would misroute
+// the codex-executor internal review into PhaseCodex on file-replay.
+func NewInternalReviewSection(iteration int, suffix string) Section {
+	return Section{
+		Type:      SectionClaudeReview,
+		Iteration: iteration,
+		Label:     fmt.Sprintf("review %d%s", iteration, suffix),
 	}
 }
 

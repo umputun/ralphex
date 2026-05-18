@@ -54,11 +54,13 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.True(t, values.CodexEnabled)
 	assert.True(t, values.CodexEnabledSet)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.4", values.CodexModel)
-	assert.Equal(t, "xhigh", values.CodexReasoningEffort)
+	assert.Empty(t, values.CodexModel, "codex_model must be unset in embedded defaults so ~/.codex/config.toml is preserved")
+	assert.Empty(t, values.CodexReasoningEffort, "codex_reasoning_effort must be unset in embedded defaults")
 	assert.Equal(t, 3600000, values.CodexTimeoutMs)
 	assert.Equal(t, "read-only", values.CodexSandbox)
+	assert.False(t, values.CodexSandboxSet)
 	assert.Equal(t, "codex", values.ExternalReviewTool)
+	assert.False(t, values.ExternalReviewToolSet, "ExternalReviewToolSet must be false for embedded defaults")
 	assert.Empty(t, values.CustomReviewScript)
 	assert.Equal(t, 2000, values.IterationDelayMs)
 	assert.Equal(t, 1, values.TaskRetryCount)
@@ -97,7 +99,7 @@ iteration_delay_ms = 5000
 	// values from embedded (not set in global)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.4", values.CodexModel)
+	assert.Empty(t, values.CodexModel, "codex_model must remain unset when not in user config")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
@@ -521,6 +523,125 @@ func TestValues_mergeFrom_PreserveAnthropicAPIKey(t *testing.T) {
 	})
 }
 
+func TestValues_mergeFrom_Executor(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{Executor: "", ExecutorSet: false}
+		src := Values{Executor: "codex", ExecutorSet: true}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "codex", dst.Executor)
+		assert.True(t, dst.ExecutorSet)
+	})
+
+	t.Run("unset flag preserves dst", func(t *testing.T) {
+		dst := Values{Executor: "codex", ExecutorSet: true}
+		src := Values{Executor: "", ExecutorSet: false}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "codex", dst.Executor)
+		assert.True(t, dst.ExecutorSet)
+	})
+
+	t.Run("local explicit empty overrides global codex", func(t *testing.T) {
+		dst := Values{Executor: "codex", ExecutorSet: true}
+		src := Values{Executor: "", ExecutorSet: true}
+		dst.mergeFrom(&src)
+		assert.Empty(t, dst.Executor)
+		assert.True(t, dst.ExecutorSet)
+	})
+
+	t.Run("local file overrides global through Load", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`executor = codex`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`executor =`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Empty(t, values.Executor)
+		assert.True(t, values.ExecutorSet)
+	})
+
+	t.Run("local omitted preserves global codex", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`executor = codex`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`# unrelated`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, "codex", values.Executor)
+		assert.True(t, values.ExecutorSet)
+	})
+
+	t.Run("neither set leaves default empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`# nothing`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`# nothing`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Empty(t, values.Executor)
+		assert.False(t, values.ExecutorSet)
+	})
+}
+
+func TestValues_mergeFrom_PassClaudeMd(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{PassClaudeMd: false, PassClaudeMdSet: false}
+		src := Values{PassClaudeMd: true, PassClaudeMdSet: true}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.PassClaudeMd)
+		assert.True(t, dst.PassClaudeMdSet)
+	})
+
+	t.Run("unset flag preserves dst", func(t *testing.T) {
+		dst := Values{PassClaudeMd: true, PassClaudeMdSet: true}
+		src := Values{PassClaudeMd: false, PassClaudeMdSet: false}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.PassClaudeMd)
+		assert.True(t, dst.PassClaudeMdSet)
+	})
+
+	t.Run("local explicit false overrides global true", func(t *testing.T) {
+		dst := Values{PassClaudeMd: true, PassClaudeMdSet: true}
+		src := Values{PassClaudeMd: false, PassClaudeMdSet: true}
+		dst.mergeFrom(&src)
+		assert.False(t, dst.PassClaudeMd)
+		assert.True(t, dst.PassClaudeMdSet)
+	})
+
+	t.Run("local file overrides global through Load", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`pass_claude_md = true`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`pass_claude_md = false`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.False(t, values.PassClaudeMd)
+		assert.True(t, values.PassClaudeMdSet)
+	})
+
+	t.Run("invalid value returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`pass_claude_md = notabool`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		_, err := loader.Load("", globalCfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "pass_claude_md")
+	})
+}
+
 func TestValues_mergeFrom_MovePlanOnCompletion(t *testing.T) {
 	t.Run("set flag merges", func(t *testing.T) {
 		dst := Values{MovePlanOnCompletion: false, MovePlanOnCompletionSet: false}
@@ -646,6 +767,7 @@ plans_dir = my/plans
 	assert.Equal(t, "low", values.CodexReasoningEffort)
 	assert.Equal(t, 1000, values.CodexTimeoutMs)
 	assert.Equal(t, "none", values.CodexSandbox)
+	assert.True(t, values.CodexSandboxSet)
 	assert.Equal(t, 500, values.IterationDelayMs)
 	assert.Equal(t, 5, values.TaskRetryCount)
 	assert.True(t, values.TaskRetryCountSet)
@@ -972,7 +1094,7 @@ func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.4", values.CodexModel)
+	assert.Empty(t, values.CodexModel, "codex_model must remain unset (commented in embedded default)")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 

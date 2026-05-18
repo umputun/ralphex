@@ -1244,3 +1244,283 @@ func TestRunner_replaceBaseVariables_CommitTrailer(t *testing.T) {
 		assert.Contains(t, result, "Co-authored-by: test <test@test.com>")
 	})
 }
+
+func TestRunner_formatAgentExpansion_ClaudeShape(t *testing.T) {
+	appCfg := &config.Config{
+		CustomAgents: []config.CustomAgent{{Name: "scanner", Prompt: "scan code"}},
+	}
+	// no agentSyntax set: defaults to claude shape (ExecutorClaude is "")
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+
+	result := r.expandAgentReferences("Run {{agent:scanner}} now.")
+
+	assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent with this prompt:")
+	assert.Contains(t, result, `"scan code"`)
+	assert.Contains(t, result, "Report findings only - no positive observations.")
+	assert.NotContains(t, result, "spawn_agent")
+	assert.NotContains(t, result, "{{agent:scanner}}")
+}
+
+func TestRunner_formatAgentExpansion_CodexShape(t *testing.T) {
+	appCfg := &config.Config{
+		Executor:     config.ExecutorCodex,
+		CustomAgents: []config.CustomAgent{{Name: "scanner", Prompt: "scan code"}},
+	}
+	r := &Runner{
+		cfg: Config{AppConfig: appCfg},
+		log: newMockLogger(""),
+	}
+
+	result := r.expandAgentReferences("Run {{agent:scanner}} now.")
+
+	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='scan code')")
+	assert.Contains(t, result, "Report findings only - no positive observations.")
+	assert.NotContains(t, result, "Use the Task tool")
+	assert.NotContains(t, result, "{{agent:scanner}}")
+}
+
+func TestRunner_formatAgentExpansion_AllFiveDefaultAgents(t *testing.T) {
+	// load the 5 embedded default agents (quality, implementation, testing, simplification, documentation)
+	appCfg := testAppConfig(t)
+	require.NotEmpty(t, appCfg.CustomAgents, "embedded defaults must include the 5 agents")
+
+	names := []string{"quality", "implementation", "testing", "simplification", "documentation"}
+
+	// build name -> body map for assertion convenience
+	byName := make(map[string]string, len(appCfg.CustomAgents))
+	for _, a := range appCfg.CustomAgents {
+		byName[a.Name] = a.Prompt
+	}
+	for _, name := range names {
+		require.Contains(t, byName, name, "default agent %q missing from embedded defaults", name)
+	}
+
+	for _, name := range names {
+		t.Run("claude_"+name, func(t *testing.T) {
+			r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+			result := r.expandAgentReferences("{{agent:" + name + "}}")
+
+			assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent with this prompt:")
+			assert.NotContains(t, result, "spawn_agent")
+			assert.NotContains(t, result, "{{agent:"+name+"}}")
+			// inlined agent body present verbatim
+			assert.Contains(t, result, byName[name])
+		})
+
+		t.Run("codex_"+name, func(t *testing.T) {
+			codexCfg := *appCfg
+			codexCfg.Executor = config.ExecutorCodex
+			r := &Runner{
+				cfg: Config{AppConfig: &codexCfg},
+				log: newMockLogger(""),
+			}
+			result := r.expandAgentReferences("{{agent:" + name + "}}")
+
+			assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
+			assert.NotContains(t, result, "Use the Task tool")
+			assert.NotContains(t, result, "{{agent:"+name+"}}")
+			// inlined agent body present with codex single-quoted escaping applied
+			// (escapeCodexSingleQuoted: backslash first, then single-quote, then CR, then LF)
+			escaped := strings.ReplaceAll(byName[name], `\`, `\\`)
+			escaped = strings.ReplaceAll(escaped, `'`, `\'`)
+			escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+			escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+			assert.Contains(t, result, escaped)
+		})
+	}
+}
+
+func TestRunner_formatAgentExpansion_CodexIgnoresFrontmatterOverrides(t *testing.T) {
+	// codex registers a single reviewer agent globally; frontmatter Model/AgentType
+	// overrides on the agent file do not apply because the per-call behavior is
+	// carried in the inlined task argument, not in the agent registration.
+	appCfg := &config.Config{
+		Executor: config.ExecutorCodex,
+		CustomAgents: []config.CustomAgent{{
+			Name:    "reviewer",
+			Prompt:  "do a review",
+			Options: config.Options{Model: "opus", AgentType: "qa-expert"},
+		}},
+	}
+	r := &Runner{
+		cfg: Config{AppConfig: appCfg},
+		log: newMockLogger(""),
+	}
+
+	mockLog := newMockLogger("")
+	r.log = mockLog
+
+	result := r.expandAgentReferences("{{agent:reviewer}}")
+
+	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='do a review')")
+	assert.NotContains(t, result, "qa-expert")
+	assert.NotContains(t, result, "with model=opus")
+
+	// verify the warning fires when frontmatter is discarded
+	var foundWarn bool
+	for _, call := range mockLog.PrintCalls() {
+		if strings.Contains(call.Format, "codex mode ignores frontmatter") {
+			foundWarn = true
+			break
+		}
+	}
+	assert.True(t, foundWarn, "expected codex frontmatter-discard warning")
+
+	// second expansion of the same agent must NOT fire a second warning (dedup by agent name)
+	callsBefore := len(mockLog.PrintCalls())
+	r.expandAgentReferences("{{agent:reviewer}}")
+	newCalls := mockLog.PrintCalls()[callsBefore:]
+	for _, call := range newCalls {
+		assert.NotContains(t, call.Format, "codex mode ignores frontmatter",
+			"warning must fire only once per agent name")
+	}
+}
+
+func TestRunner_expandAgentReferences_NoCodexWarnWhenFrontmatterEmpty(t *testing.T) {
+	// no Model/AgentType set → no warning should fire under codex mode
+	appCfg := &config.Config{
+		Executor: config.ExecutorCodex,
+		CustomAgents: []config.CustomAgent{{
+			Name:   "reviewer",
+			Prompt: "do a review",
+		}},
+	}
+	mockLog := newMockLogger("")
+	r := &Runner{
+		cfg: Config{AppConfig: appCfg},
+		log: mockLog,
+	}
+
+	r.expandAgentReferences("{{agent:reviewer}}")
+
+	for _, call := range mockLog.PrintCalls() {
+		assert.NotContains(t, call.Format, "codex mode ignores frontmatter",
+			"no warning expected when frontmatter is empty")
+	}
+}
+
+func TestRunner_formatAgentExpansion_PicksShapeFromExecutor(t *testing.T) {
+	// formatAgentExpansion reads cfg.AppConfig.Executor directly (no cached agentSyntax
+	// field). verifies the per-executor expansion shape choice.
+	t.Run("default executor produces claude shape", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		appCfg.Executor = config.ExecutorClaude
+		appCfg.CustomAgents = []config.CustomAgent{{Name: "scanner", Prompt: "scan"}}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		result := r.expandAgentReferences("{{agent:scanner}}")
+		assert.Contains(t, result, "Use the Task tool")
+		assert.NotContains(t, result, "spawn_agent")
+	})
+
+	t.Run("codex executor produces codex shape", func(t *testing.T) {
+		appCfg := testAppConfig(t)
+		appCfg.Executor = config.ExecutorCodex
+		appCfg.CustomAgents = []config.CustomAgent{{Name: "scanner", Prompt: "scan"}}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		result := r.expandAgentReferences("{{agent:scanner}}")
+		assert.Contains(t, result, "spawn_agent")
+		assert.NotContains(t, result, "Use the Task tool")
+	})
+
+	t.Run("nil AppConfig defaults to claude shape (no expansion since no agents)", func(t *testing.T) {
+		r := &Runner{cfg: Config{}, log: newMockLogger("")}
+		// without AppConfig, expandAgentReferences returns the prompt unchanged
+		result := r.expandAgentReferences("{{agent:scanner}}")
+		assert.Equal(t, "{{agent:scanner}}", result)
+	})
+}
+
+func TestRunner_formatAgentExpansionCodex_EscapesSingleQuotedLiteral(t *testing.T) {
+	// regression: agent bodies contain apostrophes (don't, what's, isn't) and
+	// occasionally backslashes (path examples). when expanded into
+	// spawn_agent(task='<body>'), the body MUST be escaped or it terminates the
+	// surrounding single-quoted Python-style literal that codex parses.
+	tests := []struct {
+		name     string
+		input    string
+		expected string // the escaped portion that must appear in the output
+	}{
+		{name: "apostrophe", input: "don't fix this", expected: `don\'t fix this`},
+		{name: "multiple apostrophes", input: "what's wrong with don't?", expected: `what\'s wrong with don\'t?`},
+		{name: "backslash", input: `path: c:\foo`, expected: `path: c:\\foo`},
+		{name: "backslash before apostrophe", input: `\' tricky`, expected: `\\\' tricky`},
+		{name: "no escaping needed", input: "plain ascii text", expected: "plain ascii text"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Runner{
+				cfg: Config{AppConfig: &config.Config{
+					Executor:     config.ExecutorCodex,
+					CustomAgents: []config.CustomAgent{{Name: "x", Prompt: tc.input}},
+				}},
+				log: newMockLogger(""),
+			}
+			result := r.expandAgentReferences("{{agent:x}}")
+
+			// the escaped form must appear inside the spawn_agent(...) wrapper
+			assert.Contains(t, result, tc.expected, "escaped body must appear in spawn_agent output")
+			// the single-quoted literal wrapper must be balanced: the start marker
+			// is preceded by zero or no escape, and the final ') must be there.
+			assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
+			assert.Contains(t, result, "')\n\nReport findings only")
+		})
+	}
+}
+
+func TestEscapeCodexSingleQuoted(t *testing.T) {
+	// directly test the helper to lock in the escape-order invariant:
+	// backslash MUST be escaped first so the apostrophe and newline escapes do not
+	// get re-escaped (apostrophe -> \\\' or newline -> \\n).
+	r := &Runner{}
+	tests := []struct {
+		in, want string
+	}{
+		{in: "", want: ""},
+		{in: "plain", want: "plain"},
+		{in: "don't", want: `don\'t`},
+		{in: `a\b`, want: `a\\b`},
+		{in: `mixed: \ and ' end`, want: `mixed: \\ and \' end`},
+		{in: `already\'escaped`, want: `already\\\'escaped`}, // backslash-then-quote round-trips
+		{in: "line1\nline2", want: `line1\nline2`},
+		{in: "line1\r\nline2", want: `line1\r\nline2`},
+		{in: "with\ttab", want: `with\ttab`},
+		{in: "multi\nline\ndon't", want: `multi\nline\ndon\'t`},
+		{in: `path\to\file` + "\n" + "next", want: `path\\to\\file\nnext`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, r.escapeCodexSingleQuoted(tc.in))
+		})
+	}
+}
+
+func TestRunner_formatAgentExpansionCodex_MultiLineAgentBodyStaysSingleLine(t *testing.T) {
+	// regression: default agent bodies in pkg/config/defaults/agents/*.txt contain
+	// embedded newlines. when expanded into spawn_agent(task='<body>'), the body
+	// MUST have newlines escaped or codex's Python-style single-quoted string parser
+	// will treat the newline as a terminator of the task=' literal. verify the entire
+	// spawn_agent(...) call stays on a single line and the original newlines appear
+	// as the literal escape \n (two chars: backslash + n).
+	multiLineBody := "first line\nsecond line\nthird line"
+	r := &Runner{
+		cfg: Config{AppConfig: &config.Config{
+			Executor:     config.ExecutorCodex,
+			CustomAgents: []config.CustomAgent{{Name: "ml", Prompt: multiLineBody}},
+		}},
+		log: newMockLogger(""),
+	}
+	result := r.expandAgentReferences("{{agent:ml}}")
+
+	// extract just the spawn_agent(...) call by isolating the line that starts the wrapper
+	// the result includes a trailing "Report findings only..." block on subsequent lines.
+	lines := strings.Split(result, "\n")
+	require.NotEmpty(t, lines)
+	spawnLine := lines[0]
+	assert.True(t, strings.HasPrefix(spawnLine, "spawn_agent(agent='reviewer', task='"), "spawn_agent call must start at first line")
+	assert.True(t, strings.HasSuffix(spawnLine, "')"), "spawn_agent call must end with ')' on the same line; got %q", spawnLine)
+	// embedded newlines from the agent body must NOT appear as raw newlines in the task='...' literal
+	assert.NotContains(t, spawnLine, "first line\nsecond line", "raw newline leaked into single-quoted literal")
+	// they must appear as the literal escape sequence \n inside the spawn_agent call
+	assert.Contains(t, spawnLine, `first line\nsecond line\nthird line`)
+}

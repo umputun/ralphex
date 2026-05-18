@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,43 @@ func mockWait() func() error {
 // mockWaitError returns a wait function that returns the given error.
 func mockWaitError(err error) func() error {
 	return func() error { return err }
+}
+
+func TestExecCodexRunner_childEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{
+			name: "strips ANTHROPIC_API_KEY and CLAUDECODE",
+			env:  []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+			want: []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name: "no key in env still strips CLAUDECODE",
+			env:  []string{"PATH=/usr/bin", "CLAUDECODE=1", "HOME=/home/user"},
+			want: []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name: "does not match partial keys like ANTHROPIC_API_KEY_OLD",
+			env:  []string{"ANTHROPIC_API_KEY_OLD=old", "ANTHROPIC_API_KEY=new", "CLAUDECODE=1"},
+			want: []string{"ANTHROPIC_API_KEY_OLD=old"},
+		},
+		{
+			name: "passes through other keys unchanged",
+			env:  []string{"OPENAI_API_KEY=ok", "FOO=bar"},
+			want: []string{"OPENAI_API_KEY=ok", "FOO=bar"},
+		},
+	}
+
+	r := &execCodexRunner{}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := r.childEnv(tc.env)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestCodexExecutor_Run_Success(t *testing.T) {
@@ -216,15 +254,38 @@ func TestCodexExecutor_Run_DefaultSettings(t *testing.T) {
 
 	require.NoError(t, result.Error)
 
-	// verify default settings
+	// verify default settings: model and reasoning effort must NOT be set on the codex CLI
+	// when ralphex config does not specify them — codex inherits from ~/.codex/config.toml
 	argsStr := strings.Join(capturedArgs, " ")
-	assert.Contains(t, argsStr, `model="gpt-5.4"`)
-	assert.Contains(t, argsStr, "model_reasoning_effort=xhigh")
+	assert.NotContains(t, argsStr, "-c model=", "model must not be passed when not explicitly configured")
+	assert.NotContains(t, argsStr, "model_reasoning_effort=", "reasoning effort must not be passed when not explicitly configured")
 	assert.Contains(t, argsStr, "stream_idle_timeout_ms=3600000")
 	assert.Contains(t, argsStr, "--sandbox read-only")
+	assert.NotContains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox",
+		"sandbox bypass must not be emitted for read-only mode")
 
 	// prompt must not appear in CLI args (passed via stdin to avoid Windows 8191-char limit)
 	assert.NotContains(t, capturedArgs, "test prompt", "prompt should be passed via stdin, not as CLI arg")
+}
+
+func TestCodexExecutor_Run_DangerFullAccessBypassesSandbox(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	var capturedArgs []string
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+			capturedArgs = args
+			return mockStreams("", "result"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock, Sandbox: "danger-full-access"}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	argsStr := strings.Join(capturedArgs, " ")
+	assert.Contains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox")
+	assert.Contains(t, argsStr, "--sandbox danger-full-access")
 }
 
 func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
@@ -264,6 +325,8 @@ func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
 	assert.Contains(t, argsStr, "stream_idle_timeout_ms=1000")
 	assert.Contains(t, argsStr, "--sandbox off")
 	assert.Contains(t, argsStr, `project_doc="/path/to/doc.md"`)
+	assert.NotContains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox",
+		"sandbox bypass must only fire for danger-full-access mode")
 
 	// prompt must not appear in CLI args (passed via stdin to avoid Windows 8191-char limit)
 	assert.NotContains(t, capturedArgs, "test", "prompt should be passed via stdin, not as CLI arg")
@@ -453,7 +516,7 @@ func TestCodexExecutor_processStderr_contextCancellation(t *testing.T) {
 	}()
 
 	e := &CodexExecutor{}
-	res := e.processStderr(ctx, pr)
+	res := e.processStderr(ctx, pr, nil)
 
 	// should return context.Canceled or nil (depending on timing)
 	if res.err != nil {
@@ -542,7 +605,7 @@ func TestCodexExecutor_processStderr_readError(t *testing.T) {
 	e := &CodexExecutor{}
 	errReader := &failingReader{err: errors.New("read failed")}
 
-	res := e.processStderr(context.Background(), errReader)
+	res := e.processStderr(context.Background(), errReader, nil)
 
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "read stderr")
@@ -569,7 +632,7 @@ func TestCodexExecutor_processStderr_lastLines(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &CodexExecutor{}
-			res := e.processStderr(context.Background(), strings.NewReader(tc.stderr))
+			res := e.processStderr(context.Background(), strings.NewReader(tc.stderr), nil)
 			require.NoError(t, res.err)
 			assert.Equal(t, tc.wantLines, res.lastLines)
 		})
@@ -715,7 +778,7 @@ func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 				},
 			}
 
-			res := e.processStderr(context.Background(), strings.NewReader(stderr))
+			res := e.processStderr(context.Background(), strings.NewReader(stderr), nil)
 
 			require.NoError(t, res.err, "should handle %d byte line without error", tc.size)
 			assert.Contains(t, shown, largeContent, "large content should be captured")
@@ -1321,4 +1384,335 @@ func TestIsCodexErrorLine(t *testing.T) {
 			assert.Equal(t, tc.want, isCodexErrorLine(tc.line))
 		})
 	}
+}
+
+func TestCodexExecutor_configOverrides(t *testing.T) {
+	reviewerDesc := fmt.Sprintf("agents.%s.description=%q", CodexReviewerAgentName, codexReviewerDescription)
+	const fallbackArg = `project_doc_fallback_filenames=["CLAUDE.md"]`
+
+	tests := []struct {
+		name string
+		exec CodexExecutor
+		want []string
+	}{
+		{
+			name: "no flags produce no overrides",
+			exec: CodexExecutor{},
+			want: nil,
+		},
+		{
+			name: "MultiAgent only adds feature flag and reviewer registration",
+			exec: CodexExecutor{MultiAgent: true},
+			want: []string{"-c", "features.multi_agent=true", "-c", reviewerDesc},
+		},
+		{
+			name: "PassClaudeMd only adds project_doc_fallback_filenames",
+			exec: CodexExecutor{PassClaudeMd: true},
+			want: []string{"-c", fallbackArg},
+		},
+		{
+			name: "both flags emit all overrides with multi-agent first",
+			exec: CodexExecutor{MultiAgent: true, PassClaudeMd: true},
+			want: []string{"-c", "features.multi_agent=true", "-c", reviewerDesc, "-c", fallbackArg},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.exec.configOverrides())
+		})
+	}
+}
+
+func TestCodexExecutor_configOverrides_reviewerPairsWithMultiAgent(t *testing.T) {
+	// agent registration is meaningless without features.multi_agent=true,
+	// so PassClaudeMd alone must NOT emit any agents.reviewer override.
+	e := CodexExecutor{PassClaudeMd: true}
+	args := e.configOverrides()
+	joined := strings.Join(args, " ")
+	assert.NotContains(t, joined, "agents.reviewer", "reviewer agent must only be registered alongside multi_agent")
+	assert.NotContains(t, joined, "features.multi_agent", "multi_agent flag must not appear when only fallback is set")
+}
+
+func TestCodexExecutor_Run_SplicesMultiAgentArgs(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	var capturedArgs []string
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+			capturedArgs = args
+			return mockStreams("", "result"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock, MultiAgent: true}
+
+	result := e.Run(context.Background(), "test prompt")
+	require.NoError(t, result.Error)
+
+	require.NotEmpty(t, capturedArgs)
+	assert.Equal(t, "exec", capturedArgs[0], "exec must be first arg")
+	// multi-agent overrides splice right after exec, before --sandbox
+	require.GreaterOrEqual(t, len(capturedArgs), 5)
+	assert.Equal(t, "-c", capturedArgs[1])
+	assert.Equal(t, "features.multi_agent=true", capturedArgs[2])
+	assert.Equal(t, "-c", capturedArgs[3])
+	expectedReviewerDesc := fmt.Sprintf("agents.%s.description=%q", CodexReviewerAgentName, codexReviewerDescription)
+	assert.Equal(t, expectedReviewerDesc, capturedArgs[4], "exact reviewer description literal")
+	assert.Contains(t, strings.Join(capturedArgs, " "), "--sandbox read-only", "default sandbox still emitted")
+}
+
+func TestCodexExecutor_Run_SplicesFallbackArgs(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	var capturedArgs []string
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+			capturedArgs = args
+			return mockStreams("", "result"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock, PassClaudeMd: true}
+
+	result := e.Run(context.Background(), "test prompt")
+	require.NoError(t, result.Error)
+
+	argsStr := strings.Join(capturedArgs, " ")
+	assert.Contains(t, argsStr, `project_doc_fallback_filenames=["CLAUDE.md"]`)
+	assert.NotContains(t, argsStr, "features.multi_agent", "no multi_agent flag when only fallback is set")
+}
+
+func TestCodexExecutor_Run_NoOverridesByDefault(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	var capturedArgs []string
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+			capturedArgs = args
+			return mockStreams("", "result"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock}
+
+	result := e.Run(context.Background(), "test prompt")
+	require.NoError(t, result.Error)
+
+	argsStr := strings.Join(capturedArgs, " ")
+	assert.NotContains(t, argsStr, "features.multi_agent")
+	assert.NotContains(t, argsStr, "agents.reviewer")
+	assert.NotContains(t, argsStr, "project_doc_fallback_filenames")
+}
+
+func TestCodexExecutor_Run_IdleTimeoutFires(t *testing.T) {
+	// idle timeout fires when stderr emits one line then goes silent and stdout produces no further output
+	stderrPipeR, stderrPipeW := io.Pipe()
+	stdoutPipeR, stdoutPipeW := io.Pipe()
+
+	mock := &mockCodexRunner{
+		runFunc: func(ctx context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer stderrPipeW.Close()
+				defer stdoutPipeW.Close()
+				_, _ = stderrPipeW.Write([]byte("--------\nworking...\n"))
+				<-ctx.Done() // wait for idle timeout to cancel context
+			}()
+			return CodexStreams{Stderr: stderrPipeR, Stdout: stdoutPipeR}, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	e := &CodexExecutor{runner: mock, IdleTimeout: 100 * time.Millisecond}
+	result := e.Run(context.Background(), "analyze code")
+
+	require.NoError(t, result.Error, "idle timeout should not produce an error")
+	assert.True(t, result.IdleTimedOut, "IdleTimedOut should be set when idle timeout fires")
+}
+
+func TestCodexExecutor_Run_IdleTimeoutResetsOnStderrLines(t *testing.T) {
+	stderrPipeR, stderrPipeW := io.Pipe()
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer stderrPipeW.Close()
+				for range 5 {
+					_, _ = stderrPipeW.Write([]byte("--------\n"))
+					time.Sleep(50 * time.Millisecond)
+				}
+			}()
+			return CodexStreams{Stderr: stderrPipeR, Stdout: strings.NewReader("final answer")},
+				func() error { return nil }, nil
+		},
+	}
+
+	// 10x margin between writer sleep (50ms) and IdleTimeout (500ms): tight 2x margins
+	// cause spurious "idle timed out" failures on loaded CI runners.
+	e := &CodexExecutor{runner: mock, IdleTimeout: 500 * time.Millisecond}
+	result := e.Run(context.Background(), "analyze code")
+
+	require.NoError(t, result.Error)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false when stderr keeps emitting")
+	assert.Equal(t, "final answer", result.Output)
+}
+
+func TestCodexExecutor_Run_IdleTimeoutResetsOnStdoutChunks(t *testing.T) {
+	stdoutPipeR, stdoutPipeW := io.Pipe()
+	done := make(chan struct{})
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer close(done)
+				defer stdoutPipeW.Close()
+				for _, chunk := range []string{"one", " two", " three", " four"} {
+					_, _ = stdoutPipeW.Write([]byte(chunk))
+					time.Sleep(50 * time.Millisecond)
+				}
+			}()
+			return CodexStreams{Stderr: strings.NewReader(""), Stdout: stdoutPipeR}, func() error {
+				<-done
+				return nil
+			}, nil
+		},
+	}
+
+	// 10x margin between writer sleep (50ms) and IdleTimeout (500ms): tight 2x margins
+	// cause spurious "idle timed out" failures on loaded CI runners.
+	e := &CodexExecutor{runner: mock, IdleTimeout: 500 * time.Millisecond}
+	result := e.Run(context.Background(), "analyze code")
+
+	require.NoError(t, result.Error)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false when stdout keeps emitting")
+	assert.Equal(t, "one two three four", result.Output)
+}
+
+func TestCodexExecutor_Run_IdleTimeoutDisabledWhenZero(t *testing.T) {
+	// default behavior: IdleTimeout=0 means no idle timeout, runs normally
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams("", "done"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock} // IdleTimeout is zero (default)
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "done", result.Output)
+	assert.Zero(t, e.IdleTimeout)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false when idle timeout is disabled")
+}
+
+func TestCodexExecutor_Run_IdleTimeoutDetectsLimitPattern(t *testing.T) {
+	// when idle timeout fires after a stderr quota diagnostic, the limit pattern
+	// must be detected so runWithLimitRetry can wait-and-retry.
+	stderrPipeR, stderrPipeW := io.Pipe()
+
+	mock := &mockCodexRunner{
+		runFunc: func(ctx context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer stderrPipeW.Close()
+				_, _ = stderrPipeW.Write([]byte("ERROR: You've hit your usage limit\n"))
+				<-ctx.Done()
+			}()
+			return CodexStreams{Stderr: stderrPipeR, Stdout: strings.NewReader("")}, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	e := &CodexExecutor{
+		runner:        mock,
+		IdleTimeout:   100 * time.Millisecond,
+		LimitPatterns: []string{"You've hit your usage limit"},
+	}
+	result := e.Run(context.Background(), "analyze code")
+
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr, "should return LimitPatternError")
+	assert.Equal(t, "You've hit your usage limit", limitErr.Pattern)
+	assert.Equal(t, "codex /status", limitErr.HelpCmd)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should not be set when pattern matched")
+}
+
+func TestCodexExecutor_Run_NoFalsePositiveOnLongStreamingOutput(t *testing.T) {
+	// regression: long streaming codex output that mentions rate-limit phrases in
+	// reasoning text (without the error:/fatal:/panic: prefix) must NOT trigger
+	// a pattern match. the isCodexErrorLine gate in scanLineForPatterns enforces
+	// this, but verify it still holds across many lines of streaming output.
+	stderrLines := make([]string, 0, 3+200*2)
+	stderrLines = append(stderrLines, "--------", "workdir: /tmp/test", "--------")
+	// 200 lines of progress chatter that legitimately mention "rate limit" in code-review reasoning
+	for i := range 200 {
+		stderrLines = append(stderrLines,
+			fmt.Sprintf("**Reviewing rate limit handler at line %d**", i),
+			fmt.Sprintf("checking whether quota exceeded path is reachable from handler %d", i),
+		)
+	}
+	stderr := strings.Join(stderrLines, "\n") + "\n"
+	stdout := "Analysis complete: no real rate-limit hits.\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, stdout), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"rate limit", "quota exceeded"},
+		ErrorPatterns: []string{"rate limit", "quota exceeded"},
+	}
+
+	result := e.Run(context.Background(), "review code")
+
+	require.NoError(t, result.Error,
+		"non-prefixed stderr chatter mentioning rate-limit phrases must not trigger pattern match")
+	var limitErr *LimitPatternError
+	assert.NotErrorAs(t, result.Error, &limitErr)
+	var patternErr *PatternMatchError
+	assert.NotErrorAs(t, result.Error, &patternErr)
+	assert.Contains(t, result.Output, "Analysis complete")
+}
+
+func TestTouchReader_Read(t *testing.T) {
+	t.Run("non-empty read calls touch", func(t *testing.T) {
+		var touched int
+		r := &touchReader{r: strings.NewReader("hello"), touch: func() { touched++ }}
+		buf := make([]byte, 5)
+		n, err := r.Read(buf)
+		require.NoError(t, err)
+		assert.Equal(t, 5, n)
+		assert.Equal(t, 1, touched, "touch must be called once for a non-empty read")
+	})
+
+	t.Run("zero-byte read does not call touch", func(t *testing.T) {
+		// EOF on an empty reader returns (0, io.EOF); touch must not fire
+		var touched int
+		r := &touchReader{r: strings.NewReader(""), touch: func() { touched++ }}
+		buf := make([]byte, 8)
+		n, err := r.Read(buf)
+		require.ErrorIs(t, err, io.EOF)
+		assert.Zero(t, n)
+		assert.Zero(t, touched, "touch must NOT be called when n == 0")
+	})
+
+	t.Run("error after partial read still calls touch", func(t *testing.T) {
+		// io.MultiReader returns partial then EOF; touch must fire for the partial read
+		var touched int
+		r := &touchReader{r: strings.NewReader("ab"), touch: func() { touched++ }}
+		buf := make([]byte, 4)
+		n, _ := r.Read(buf)
+		assert.Equal(t, 2, n)
+		assert.Equal(t, 1, touched, "non-zero n must trigger touch even when accompanied by error")
+	})
+
+	t.Run("nil touch is safe", func(t *testing.T) {
+		r := &touchReader{r: strings.NewReader("data"), touch: nil}
+		buf := make([]byte, 4)
+		n, err := r.Read(buf)
+		require.NoError(t, err)
+		assert.Equal(t, 4, n)
+	})
 }

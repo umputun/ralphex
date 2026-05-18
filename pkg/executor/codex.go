@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // CodexStreams holds both stderr and stdout from codex command.
@@ -30,6 +32,14 @@ type execCodexRunner struct {
 	stdin io.Reader
 }
 
+// childEnv strips ANTHROPIC_API_KEY and CLAUDECODE from the codex child process env.
+// codex doesn't need either, and a user switching to --codex for billing isolation
+// should not have an inherited Anthropic key silently bill Anthropic if their codex
+// config selects an Anthropic-compatible provider.
+func (r *execCodexRunner) childEnv(env []string) []string {
+	return filterEnv(env, "ANTHROPIC_API_KEY", "CLAUDECODE")
+}
+
 func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) (CodexStreams, func() error, error) {
 	// check context before starting to avoid spawning a process that will be immediately killed
 	if err := ctx.Err(); err != nil {
@@ -39,6 +49,8 @@ func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) 
 	// use exec.Command (not CommandContext) because we handle cancellation ourselves
 	// to ensure the entire process group is killed, not just the direct child
 	cmd := exec.Command(name, args...) //nolint:noctx // intentional: we handle context cancellation via process group kill
+
+	cmd.Env = r.childEnv(os.Environ())
 
 	// pass prompt via stdin when set (avoids Windows 8191-char command-line limit)
 	if r.stdin != nil {
@@ -71,8 +83,8 @@ func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) 
 // CodexExecutor runs codex CLI commands and filters output.
 type CodexExecutor struct {
 	Command         string            // command to execute, defaults to "codex"
-	Model           string            // model to use, defaults to gpt-5.4
-	ReasoningEffort string            // reasoning effort level, defaults to "xhigh"
+	Model           string            // model override; empty means inherit from ~/.codex/config.toml (no -c model= flag emitted)
+	ReasoningEffort string            // reasoning effort override; empty means inherit from ~/.codex/config.toml
 	TimeoutMs       int               // stream idle timeout in ms, defaults to 3600000
 	Sandbox         string            // sandbox mode, defaults to "read-only"
 	ProjectDoc      string            // path to project documentation file
@@ -80,7 +92,44 @@ type CodexExecutor struct {
 	Debug           bool              // enable debug output
 	ErrorPatterns   []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns   []string          // patterns to detect rate limits (checked before error patterns)
+	MultiAgent      bool              // enable codex multi_agent feature + reviewer agent registration; set to true on the review-phase codex instance built by processor.New() for first-class --codex mode
+	PassClaudeMd    bool              // pass project-level CLAUDE.md to codex via project_doc_fallback_filenames (set by processor.New() only when cfg.AppConfig.Executor == ExecutorCodex)
+	IdleTimeout     time.Duration     // kill session after this duration of no output, zero = disabled
 	runner          CodexRunner       // for testing, nil uses default
+}
+
+// CodexReviewerAgentName is the agent name registered with codex when
+// features.multi_agent is enabled. shared with pkg/processor so the
+// spawn_agent(agent=...) call in review prompts stays in sync with the
+// registration here — if either side drifts, codex silently fails to
+// resolve the agent and the review phase breaks.
+const CodexReviewerAgentName = "reviewer"
+
+// codexReviewerDescription is the description registered for the reviewer
+// agent when features.multi_agent is enabled. behavior is driven by the task
+// argument, so the description stays generic and stable.
+//
+// MUST stay ASCII without backslashes, control characters, or non-printable bytes:
+// codexConfigOpts.cliArgs serializes this via fmt.Sprintf("...=%q", ...) which
+// emits Go string-literal escapes; only the printable ASCII subset round-trips
+// safely through TOML basic-string syntax.
+const codexReviewerDescription = "general code review specialist; behavior driven by the task argument"
+
+// configOverrides returns the -c key=value arg slice to splice into the codex CLI
+// invocation based on the executor's MultiAgent and PassClaudeMd flags. All overrides
+// are additive on top of the user's ~/.codex/config.toml.
+func (e *CodexExecutor) configOverrides() []string {
+	var args []string
+	if e.MultiAgent {
+		args = append(args,
+			"-c", "features.multi_agent=true",
+			"-c", fmt.Sprintf("agents.%s.description=%q", CodexReviewerAgentName, codexReviewerDescription),
+		)
+	}
+	if e.PassClaudeMd {
+		args = append(args, "-c", `project_doc_fallback_filenames=["CLAUDE.md"]`)
+	}
+	return args
 }
 
 // codexFilterState tracks header separator count for filtering.
@@ -98,16 +147,6 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 		cmd = "codex"
 	}
 
-	model := e.Model
-	if model == "" {
-		model = "gpt-5.4"
-	}
-
-	reasoningEffort := e.ReasoningEffort
-	if reasoningEffort == "" {
-		reasoningEffort = "xhigh"
-	}
-
 	timeoutMs := e.TimeoutMs
 	if timeoutMs <= 0 {
 		timeoutMs = 3600000
@@ -122,13 +161,22 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 		sandbox = "danger-full-access"
 	}
 
-	args := []string{
-		"exec",
-		"--sandbox", sandbox,
-		"-c", fmt.Sprintf("model=%q", model),
-		"-c", "model_reasoning_effort=" + reasoningEffort,
-		"-c", fmt.Sprintf("stream_idle_timeout_ms=%d", timeoutMs),
+	args := []string{"exec"}
+	args = append(args, e.configOverrides()...)
+	if sandbox == "danger-full-access" {
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
+	args = append(args, "--sandbox", sandbox)
+	// model and reasoning effort are emitted only when explicitly set in ralphex config,
+	// so the user's ~/.codex/config.toml choice is preserved otherwise (matches the
+	// "additive -c overrides" promise documented in CLAUDE.md / llms.txt).
+	if e.Model != "" {
+		args = append(args, "-c", fmt.Sprintf("model=%q", e.Model))
+	}
+	if e.ReasoningEffort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+e.ReasoningEffort)
+	}
+	args = append(args, "-c", fmt.Sprintf("stream_idle_timeout_ms=%d", timeoutMs))
 
 	if e.ProjectDoc != "" {
 		args = append(args, "-c", fmt.Sprintf("project_doc=%q", e.ProjectDoc))
@@ -142,7 +190,21 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 		runner = &execCodexRunner{stdin: stdinReader}
 	}
 
-	streams, wait, err := runner.Run(ctx, cmd, args...)
+	// set up idle timeout: derive a cancellable context that fires when no output
+	// is received for IdleTimeout duration. the touch closure resets the timer on
+	// each stderr line and on each stdout read; mirrors the ClaudeExecutor pattern.
+	execCtx := ctx
+	idleTouch := func() {} // no-op by default
+	if e.IdleTimeout > 0 {
+		var idleCancel context.CancelFunc
+		execCtx, idleCancel = context.WithCancel(ctx)
+		defer idleCancel()
+		timer := time.AfterFunc(e.IdleTimeout, idleCancel)
+		defer timer.Stop()
+		idleTouch = func() { timer.Reset(e.IdleTimeout) }
+	}
+
+	streams, wait, err := runner.Run(execCtx, cmd, args...)
 	if err != nil {
 		return Result{Error: fmt.Errorf("start codex: %w", err)}
 	}
@@ -150,11 +212,16 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// process stderr for progress display (header block + bold summaries)
 	stderrDone := make(chan stderrResult, 1)
 	go func() {
-		stderrDone <- e.processStderr(ctx, streams.Stderr)
+		stderrDone <- e.processStderr(execCtx, streams.Stderr, idleTouch)
 	}()
 
-	// read stdout entirely as final response
-	stdoutContent, stdoutErr := e.readStdout(streams.Stdout)
+	// read stdout entirely as final response; wrap with touch-on-read so reads
+	// keep the idle timer alive even while stderr is quiet.
+	stdoutReader := streams.Stdout
+	if e.IdleTimeout > 0 {
+		stdoutReader = &touchReader{r: streams.Stdout, touch: idleTouch}
+	}
+	stdoutContent, stdoutErr := e.readStdout(stdoutReader)
 
 	// wait for stderr processing to complete
 	stderrRes := <-stderrDone
@@ -162,29 +229,17 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// wait for command completion
 	waitErr := wait()
 
-	// determine final error (prefer stderr/stdout errors over wait error)
-	var finalErr error
-	switch {
-	case stderrRes.err != nil && !errors.Is(stderrRes.err, context.Canceled):
-		finalErr = stderrRes.err
-	case stdoutErr != nil:
-		finalErr = stdoutErr
-	case waitErr != nil:
-		if ctx.Err() != nil {
-			finalErr = fmt.Errorf("context error: %w", ctx.Err())
-		} else {
-			// include stderr tail for error context when codex exits with non-zero status
-			if len(stderrRes.lastLines) > 0 {
-				finalErr = fmt.Errorf("codex exited with error: %w\nstderr: %s",
-					waitErr, strings.Join(stderrRes.lastLines, "\n"))
-			} else {
-				finalErr = fmt.Errorf("codex exited with error: %w", waitErr)
-			}
-		}
-	}
-
 	// detect signal in stdout (the actual response)
 	signal := detectSignal(stdoutContent)
+
+	// idle timeout: derived context canceled but parent is alive — not an error.
+	// mirrors the ClaudeExecutor idle-timeout completion path so callers see uniform behavior.
+	if e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil {
+		e.logDroppedIdleErrors(stdoutErr, waitErr)
+		return e.idleTimeoutResult(stdoutContent, signal, stderrRes)
+	}
+
+	finalErr := e.finalError(ctx, stderrRes, stdoutErr, waitErr)
 
 	// only check error/limit patterns when the process failed (non-zero exit or stream error).
 	// when codex exits cleanly, pattern matches in output are false positives from findings
@@ -198,6 +253,69 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 
 	// return stdout content as the result (the actual answer from codex)
 	return Result{Output: stdoutContent, Signal: signal, Error: finalErr}
+}
+
+// finalError reconciles stderr/stdout/wait errors into the single error returned
+// from Run. stderr and stdout errors win over wait errors so callers see the
+// root cause rather than the cascade exit code; ctx.Err() short-circuits to
+// preserve cancellation semantics; non-zero exit with stderr tail produces a
+// readable diagnostic that includes the last few stderr lines.
+func (e *CodexExecutor) finalError(ctx context.Context, stderrRes stderrResult, stdoutErr, waitErr error) error {
+	switch {
+	case stderrRes.err != nil && !errors.Is(stderrRes.err, context.Canceled):
+		return stderrRes.err
+	case stdoutErr != nil:
+		return stdoutErr
+	case waitErr != nil:
+		if ctx.Err() != nil {
+			return fmt.Errorf("context error: %w", ctx.Err())
+		}
+		if len(stderrRes.lastLines) > 0 {
+			return fmt.Errorf("codex exited with error: %w\nstderr: %s",
+				waitErr, strings.Join(stderrRes.lastLines, "\n"))
+		}
+		return fmt.Errorf("codex exited with error: %w", waitErr)
+	}
+	return nil
+}
+
+// touchReader wraps an io.Reader to invoke touch on each successful Read.
+// used to keep the idle-timeout timer alive while stdout is being drained.
+type touchReader struct {
+	r     io.Reader
+	touch func()
+}
+
+func (t *touchReader) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if n > 0 && t.touch != nil {
+		t.touch()
+	}
+	return n, err //nolint:wrapcheck // pass-through reader; preserve EOF and original error semantics
+}
+
+// idleTimeoutResult builds the Result returned when the idle-timeout timer
+// canceled the derived execution context (parent ctx still alive). limit and
+// logDroppedIdleErrors surfaces concurrent stream/wait errors that would otherwise
+// be discarded by the idle-timeout completion path. operators need this to
+// distinguish "agent went silent" from "stream broke" before retrying.
+func (e *CodexExecutor) logDroppedIdleErrors(stdoutErr, waitErr error) {
+	if stdoutErr != nil {
+		log.Printf("codex idle timeout fired with concurrent stdout error: %v", stdoutErr)
+	}
+	if waitErr != nil {
+		log.Printf("codex idle timeout fired with concurrent wait error: %v", waitErr)
+	}
+}
+
+// error patterns are still checked across stdout and stderr so a wait-and-retry
+// triggered by a real quota diagnostic survives idle-timeout cancellation;
+// otherwise IdleTimedOut is set and the caller treats this as a soft kill.
+func (e *CodexExecutor) idleTimeoutResult(stdoutContent, signal string, stderr stderrResult) Result {
+	if patternErr := e.checkPatterns(stdoutContent, stderr); patternErr != nil {
+		return Result{Output: stdoutContent, Signal: signal, Error: patternErr}
+	}
+	return Result{Output: stdoutContent, Signal: signal, IdleTimedOut: true}
 }
 
 // checkPatterns scans stdout AND the stderr matches captured live during streaming
@@ -256,8 +374,10 @@ type stderrResult struct {
 // (between first two "--------" separators) and bold summaries. captures last
 // lines of unfiltered output for error reporting AND records the first
 // limit/error pattern hit (untruncated, un-evicted) so callers can rely on it
-// regardless of how much chatter follows.
-func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrResult {
+// regardless of how much chatter follows. idleTouch is invoked for every
+// stderr line so the idle-timeout timer is reset while codex is producing
+// progress output; pass a no-op when idle timeout is disabled.
+func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader, idleTouch func()) stderrResult {
 	const maxTailLines = 5    // keep last N lines for error context
 	const maxLineLength = 256 // truncate long lines to avoid oversized error strings
 
@@ -266,6 +386,9 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader) stderrRe
 	var limitMatch, errorMatch string
 
 	err := readLines(ctx, r, func(line string) {
+		if idleTouch != nil {
+			idleTouch() // reset idle timer on every stderr line
+		}
 		// scan untruncated line for patterns first; record only the first hit
 		// per category so detection is eviction- and truncation-resistant.
 		// restricted to CLI-error-prefixed lines (see scanLineForPatterns).

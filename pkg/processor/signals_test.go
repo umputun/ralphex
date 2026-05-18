@@ -413,3 +413,173 @@ func Test_parsePlanDraftPayload_NoSignal(t *testing.T) {
 		})
 	}
 }
+
+// codex-style outputs are free-form plaintext without JSON envelopes or markdown fences.
+// these regression tests assert the existing signal detection helpers and payload parsers
+// remain codex-compatible. if they all pass with signals.go unchanged, the investigation
+// is concluded with no code change required.
+
+func Test_parseQuestionPayload_CodexStyleFreeForm(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected *questionPayload
+	}{
+		{
+			name: "question preceded by codex reasoning summary",
+			output: `I explored the codebase. The auth layer currently has no token store.
+Two reasonable approaches exist: keep tokens in-memory or persist them.
+
+<<<RALPHEX:QUESTION>>>
+{"question": "Where should tokens live?", "options": ["in-memory", "sqlite", "redis"]}
+<<<RALPHEX:END>>>`,
+			expected: &questionPayload{
+				Question: "Where should tokens live?",
+				Options:  []string{"in-memory", "sqlite", "redis"},
+			},
+		},
+		{
+			name: "question followed by additional codex chatter",
+			output: `<<<RALPHEX:QUESTION>>>
+{"question": "Pick a serializer", "options": ["json", "gob", "protobuf"], "context": "current path uses json"}
+<<<RALPHEX:END>>>
+
+Once you choose I will continue refining the plan and produce the draft.`,
+			expected: &questionPayload{
+				Question: "Pick a serializer",
+				Options:  []string{"json", "gob", "protobuf"},
+				Context:  "current path uses json",
+			},
+		},
+		{
+			name: "question wrapped by multi-paragraph reasoning text",
+			output: `Background: the existing fetcher batches by 100. Lowering it may help latency
+but raises per-request overhead. A value above the current default risks exceeding
+the upstream rate cap of ~250 requests/minute. Asking the user.
+
+<<<RALPHEX:QUESTION>>>
+{"question": "What batch size?", "options": ["50", "100", "200"]}
+<<<RALPHEX:END>>>
+
+Will proceed once selection is provided.`,
+			expected: &questionPayload{
+				Question: "What batch size?",
+				Options:  []string{"50", "100", "200"},
+			},
+		},
+		{
+			name: "question with JSON payload on separate lines",
+			output: `<<<RALPHEX:QUESTION>>>
+{
+  "question": "Choose retry policy",
+  "options": ["exponential", "linear", "none"]
+}
+<<<RALPHEX:END>>>`,
+			expected: &questionPayload{
+				Question: "Choose retry policy",
+				Options:  []string{"exponential", "linear", "none"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseQuestionPayload(tc.output)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func Test_parsePlanDraftPayload_CodexStyleFreeForm(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected string
+	}{
+		{
+			name: "plan_draft preceded by codex reasoning summary",
+			output: `I reviewed README.md, the cmd/ entry point, and key pkg/ subtrees.
+Identified eight tasks across config, runner, and docs. Drafting the plan now.
+
+<<<RALPHEX:PLAN_DRAFT>>>
+# Plan
+## Overview
+Add feature X with task breakdown.
+<<<RALPHEX:END>>>`,
+			expected: `# Plan
+## Overview
+Add feature X with task breakdown.`,
+		},
+		{
+			name: "plan_draft followed by codex chatter after END",
+			output: `<<<RALPHEX:PLAN_DRAFT>>>
+# Feature Plan
+
+## Overview
+Wire up the new endpoint.
+
+## Tasks
+- [ ] task 1
+- [ ] task 2
+<<<RALPHEX:END>>>
+
+That covers the minimal viable scope. Let me know if revisions are needed.`,
+			expected: `# Feature Plan
+
+## Overview
+Wire up the new endpoint.
+
+## Tasks
+- [ ] task 1
+- [ ] task 2`,
+		},
+		{
+			name: "plan_draft spanning many lines with structured task sections",
+			output: `Exploration complete. Here is the draft.
+
+<<<RALPHEX:PLAN_DRAFT>>>
+# Implementation Plan
+
+## Context
+The project uses Go modules and a layered package layout.
+
+## Implementation Steps
+
+### Task 1: Add config
+- [ ] new field on struct
+- [ ] tests
+
+### Task 2: Wire CLI
+- [ ] flag
+- [ ] validation
+- [ ] tests
+<<<RALPHEX:END>>>
+
+Awaiting accept/revise/reject decision.`,
+			expected: `# Implementation Plan
+
+## Context
+The project uses Go modules and a layered package layout.
+
+## Implementation Steps
+
+### Task 1: Add config
+- [ ] new field on struct
+- [ ] tests
+
+### Task 2: Wire CLI
+- [ ] flag
+- [ ] validation
+- [ ] tests`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parsePlanDraftPayload(tc.output)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}

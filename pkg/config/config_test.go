@@ -198,9 +198,10 @@ func TestLoad_PartialConfig(t *testing.T) {
 	assert.Equal(t, "claude", cfg.ClaudeCommand)
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
 	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Equal(t, "gpt-5.4", cfg.CodexModel)
-	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
+	assert.Empty(t, cfg.CodexModel, "codex_model unset in embedded default preserves ~/.codex/config.toml")
+	assert.Empty(t, cfg.CodexReasoningEffort)
 	assert.Equal(t, "read-only", cfg.CodexSandbox)
+	assert.False(t, cfg.CodexSandboxSet)
 	assert.Equal(t, 2000, cfg.IterationDelayMs)
 	assert.Equal(t, 3600000, cfg.CodexTimeoutMs)
 	assert.True(t, cfg.CodexEnabled)
@@ -224,9 +225,10 @@ func TestLoad_EmptyConfig(t *testing.T) {
 	assert.Equal(t, "claude", cfg.ClaudeCommand)
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
 	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Equal(t, "gpt-5.4", cfg.CodexModel)
-	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
+	assert.Empty(t, cfg.CodexModel, "codex_model unset in embedded default preserves ~/.codex/config.toml")
+	assert.Empty(t, cfg.CodexReasoningEffort)
 	assert.Equal(t, "read-only", cfg.CodexSandbox)
+	assert.False(t, cfg.CodexSandboxSet)
 	assert.Equal(t, "docs/plans", cfg.PlansDir)
 	assert.Equal(t, 2000, cfg.IterationDelayMs)
 	assert.Equal(t, 3600000, cfg.CodexTimeoutMs)
@@ -439,6 +441,106 @@ func TestLoad_PreserveAnthropicAPIKey_InvalidValue(t *testing.T) {
 	assert.Contains(t, err.Error(), "preserve_anthropic_api_key")
 }
 
+func TestLoad_Executor(t *testing.T) {
+	testCases := []struct {
+		name       string
+		configBody string
+		want       string
+	}{
+		{name: "default not set yields empty", configBody: "", want: ""},
+		{name: "explicit codex yields codex", configBody: "executor = codex", want: "codex"},
+		{name: "explicit empty yields empty", configBody: "executor =", want: ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configDir := filepath.Join(tmpDir, "ralphex")
+			require.NoError(t, os.MkdirAll(configDir, 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+			require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(tc.configBody), 0o600))
+
+			cfg, err := Load(configDir)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, cfg.Executor)
+		})
+	}
+}
+
+func TestLoad_Executor_RejectsInvalidValue(t *testing.T) {
+	// regression: config-file `executor = clyde` (typo) used to flow through silently
+	// and be treated as claude. validation now rejects unknown values explicitly so
+	// users get a clear error instead of mysterious "claude was selected" behavior.
+	tests := []struct {
+		name       string
+		configBody string
+	}{
+		{name: "typo", configBody: "executor = clyde"},
+		{name: "claude_spelled_out", configBody: "executor = claude"},
+		{name: "uppercase_codex", configBody: "executor = CODEX"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configDir := filepath.Join(tmpDir, "ralphex")
+			require.NoError(t, os.MkdirAll(configDir, 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(tc.configBody), 0o600))
+
+			_, err := Load(configDir)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid executor")
+		})
+	}
+}
+
+func TestLoad_PassClaudeMd(t *testing.T) {
+	testCases := []struct {
+		name       string
+		configBody string
+		want       bool
+	}{
+		{name: "default not set yields false", configBody: "", want: false},
+		{name: "explicit true yields true", configBody: "pass_claude_md = true", want: true},
+		{name: "explicit false yields false", configBody: "pass_claude_md = false", want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configDir := filepath.Join(tmpDir, "ralphex")
+			require.NoError(t, os.MkdirAll(configDir, 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+			require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(tc.configBody), 0o600))
+
+			cfg, err := Load(configDir)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, cfg.PassClaudeMd)
+		})
+	}
+}
+
+func TestLoad_PassClaudeMd_InvalidValue(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte("pass_claude_md = notabool"), 0o600))
+
+	_, err := Load(configDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pass_claude_md")
+}
+
 func TestLoad_AllUserValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")
@@ -474,6 +576,7 @@ plans_dir = my/plans
 	assert.Equal(t, "low", cfg.CodexReasoningEffort)
 	assert.Equal(t, 1000, cfg.CodexTimeoutMs)
 	assert.Equal(t, "none", cfg.CodexSandbox)
+	assert.True(t, cfg.CodexSandboxSet)
 	assert.Equal(t, 500, cfg.IterationDelayMs)
 	assert.Equal(t, 5, cfg.TaskRetryCount)
 	assert.Equal(t, "my/plans", cfg.PlansDir)
@@ -793,7 +896,7 @@ color_task = #0000ff
 	// embedded defaults (not in global or local)
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
 	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Equal(t, "gpt-5.4", cfg.CodexModel)
+	assert.Empty(t, cfg.CodexModel, "codex_model unset in embedded default")
 
 	// --- verify colors merge chain ---
 	// local override
@@ -1325,4 +1428,24 @@ func TestLocalConfig_LocalOverridesIdleTimeout(t *testing.T) {
 
 	assert.Equal(t, 5*time.Minute, cfg.IdleTimeout)
 	assert.True(t, cfg.IdleTimeoutSet)
+}
+
+func TestConfig_CodexExecutorSandbox(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{"nil config returns danger-full-access", nil, "danger-full-access"},
+		{"unset sandbox returns danger-full-access", &Config{CodexSandboxSet: false}, "danger-full-access"},
+		{"set but empty returns danger-full-access", &Config{CodexSandbox: "", CodexSandboxSet: true}, "danger-full-access"},
+		{"explicit workspace-write wins", &Config{CodexSandbox: "workspace-write", CodexSandboxSet: true}, "workspace-write"},
+		{"explicit read-only wins", &Config{CodexSandbox: "read-only", CodexSandboxSet: true}, "read-only"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.cfg.CodexExecutorSandbox())
+		})
+	}
 }

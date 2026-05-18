@@ -27,6 +27,12 @@ const (
 	codexReviewPromptFile  = "codex_review.txt"
 )
 
+// Executor mode constants for the Config.Executor field.
+const (
+	ExecutorClaude = ""
+	ExecutorCodex  = "codex"
+)
+
 // Config holds all configuration settings for ralphex.
 // Fields ending in *Set track whether that field was explicitly set in config.
 // This allows distinguishing explicit false/0 from "not set", enabling proper
@@ -36,6 +42,7 @@ const (
 //   - ClaudeArgsSet: tracks if claude_args was explicitly overridden at runtime
 //   - CodexEnabledSet: tracks if codex_enabled was explicitly set
 //   - CodexTimeoutMsSet: tracks if codex_timeout_ms was explicitly set
+//   - CodexSandboxSet: tracks if codex_sandbox was explicitly set outside embedded defaults
 //   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
 //   - TaskRetryCountSet: tracks if task_retry_count was explicitly set
 //   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
@@ -58,9 +65,11 @@ type Config struct {
 	CodexTimeoutMs       int    `json:"codex_timeout_ms"`
 	CodexTimeoutMsSet    bool   `json:"-"` // tracks if codex_timeout_ms was explicitly set in config
 	CodexSandbox         string `json:"codex_sandbox"`
+	CodexSandboxSet      bool   `json:"-"` // tracks if codex_sandbox was explicitly set outside embedded defaults
 
-	ExternalReviewTool string `json:"external_review_tool"` // "codex", "custom", or "none"
-	CustomReviewScript string `json:"custom_review_script"` // path to custom review script
+	ExternalReviewTool    string `json:"external_review_tool"` // "codex", "custom", or "none"
+	ExternalReviewToolSet bool   `json:"-"`                    // tracks if external_review_tool was explicitly set in user config (not embedded default)
+	CustomReviewScript    string `json:"custom_review_script"` // path to custom review script
 
 	IterationDelayMs      int  `json:"iteration_delay_ms"`
 	IterationDelayMsSet   bool `json:"-"` // tracks if iteration_delay_ms was explicitly set in config
@@ -75,6 +84,9 @@ type Config struct {
 	FinalizeEnabledSet bool `json:"-"` // tracks if finalize_enabled was explicitly set in config
 
 	PreserveAnthropicAPIKey bool `json:"preserve_anthropic_api_key"` // when true, ANTHROPIC_API_KEY is passed through to the claude child process
+
+	Executor     string `json:"executor"`       // "" (= claude, default) or ExecutorCodex
+	PassClaudeMd bool   `json:"pass_claude_md"` // when true, codex reads project CLAUDE.md via project_doc_fallback_filenames; user-level ~/.claude/CLAUDE.md is not auto-passed (a one-time setup hint is printed)
 
 	MovePlanOnCompletion bool `json:"move_plan_on_completion"`
 
@@ -97,11 +109,11 @@ type Config struct {
 	WaitOnLimit         time.Duration `json:"wait_on_limit"`
 	WaitOnLimitSet      bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
 
-	// session timeout for claude sessions (kills hanging sessions)
+	// session timeout for configured executor sessions (external review in Claude mode is excluded)
 	SessionTimeout    time.Duration `json:"session_timeout"`
 	SessionTimeoutSet bool          `json:"-"` // tracks if session_timeout was explicitly set in config
 
-	// idle timeout for claude sessions (kills session after no output for this duration)
+	// idle timeout for claude and codex executor sessions
 	IdleTimeout    time.Duration `json:"idle_timeout"`
 	IdleTimeoutSet bool          `json:"-"` // tracks if idle_timeout was explicitly set in config
 
@@ -294,7 +306,9 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CodexTimeoutMs:          values.CodexTimeoutMs,
 		CodexTimeoutMsSet:       values.CodexTimeoutMsSet,
 		CodexSandbox:            values.CodexSandbox,
+		CodexSandboxSet:         values.CodexSandboxSet,
 		ExternalReviewTool:      values.ExternalReviewTool,
+		ExternalReviewToolSet:   values.ExternalReviewToolSet,
 		CustomReviewScript:      values.CustomReviewScript,
 		IterationDelayMs:        values.IterationDelayMs,
 		IterationDelayMsSet:     values.IterationDelayMsSet,
@@ -307,6 +321,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		FinalizeEnabled:         values.FinalizeEnabled,
 		FinalizeEnabledSet:      values.FinalizeEnabledSet,
 		PreserveAnthropicAPIKey: values.PreserveAnthropicAPIKey,
+		Executor:                values.Executor,
+		PassClaudeMd:            values.PassClaudeMd,
 		MovePlanOnCompletion:    values.MovePlanOnCompletion,
 		WorktreeEnabled:         values.WorktreeEnabled,
 		WorktreeEnabledSet:      values.WorktreeEnabledSet,
@@ -354,9 +370,9 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CustomReviewPrompt: prompts.CustomReview,
 		CustomEvalPrompt:   prompts.CustomEval,
 		CodexReviewPrompt:  prompts.CodexReview,
-		CustomAgents:       agents,
-		configDir:          globalDir,
-		localDir:           localDir,
+		CustomAgents:            agents,
+		configDir:               globalDir,
+		localDir:                localDir,
 	}
 
 	// notify_on_error and notify_on_complete default to true when not explicitly set
@@ -386,4 +402,16 @@ func DefaultConfigDir() string {
 // returns empty string if no local config was used.
 func (c *Config) LocalDir() string {
 	return c.localDir
+}
+
+// CodexExecutorSandbox returns the sandbox mode to use when codex is the active
+// executor (--codex mode). Defaults to "danger-full-access" because the codex
+// executor needs to write git metadata and commit; an explicit codex_sandbox in
+// user config wins. Distinct from the raw CodexSandbox field, which is what the
+// external-review codex (claude mode) reads directly.
+func (c *Config) CodexExecutorSandbox() string {
+	if c == nil || !c.CodexSandboxSet || c.CodexSandbox == "" {
+		return "danger-full-access"
+	}
+	return c.CodexSandbox
 }

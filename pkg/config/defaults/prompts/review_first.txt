@@ -1,13 +1,14 @@
 # first review prompt
 # this prompt is used for the first (comprehensive) review pass in phase 2
-# launches 5 parallel agents for thorough code review
+# launches 5 parallel reviewer agents for thorough code review
 #
 # available variables:
 #   {{PLAN_FILE}} - path to the plan file being executed
 #   {{PROGRESS_FILE}} - path to the progress log (task execution + previous reviews)
 #   {{GOAL}} - human-readable goal description
 #   {{DEFAULT_BRANCH}} - default branch name (main, master, trunk, etc.)
-#   {{agent:<name>}} - expands to Task tool instructions for the named agent
+#   {{agent:<name>}} - expands to the executor-appropriate agent invocation
+#                      (Task tool for claude, spawn_agent for codex)
 #
 # agents are defined in ~/.config/ralphex/agents/ (user) or pkg/config/defaults/agents/ (builtin)
 
@@ -23,22 +24,15 @@ Run both commands to understand what was done:
 
 ## Step 2: Launch ALL 5 Review Agents IN PARALLEL
 
-All Task tool calls MUST be in the same message for parallel foreground execution.
-Do NOT use run_in_background. Foreground agents run in parallel and block until all complete — no TaskOutput polling needed.
+Issue all of the following agent invocations in parallel — do not serialize them.
 
 CRITICAL: Do NOT proceed to Step 3 until ALL 5 agents have returned results.
 
-Agents to launch:
 {{agent:quality}}
 {{agent:implementation}}
 {{agent:testing}}
 {{agent:simplification}}
 {{agent:documentation}}
-
-Each agent prompt should be short — do NOT paste the diff into it. Instead, instruct each agent to:
-1. Run `git diff {{DEFAULT_BRANCH}}...HEAD` and `git diff --stat {{DEFAULT_BRANCH}}...HEAD` to get the changes
-2. Read the actual source files to review code in full context
-3. Report problems only - no positive observations
 
 ## Step 3: Collect, Verify, and Fix Findings
 

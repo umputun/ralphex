@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/umputun/ralphex/pkg/config"
+	"github.com/umputun/ralphex/pkg/executor"
 	"github.com/umputun/ralphex/pkg/plan"
 )
 
@@ -153,8 +154,17 @@ func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration b
 	return r.appendCommitTrailerInstruction(result)
 }
 
-// formatAgentExpansion creates the Task tool instruction for an agent, respecting frontmatter overrides.
+// formatAgentExpansion creates the agent invocation block for an agent, respecting frontmatter overrides.
+// claude executor produces a Task tool instruction; codex executor produces a spawn_agent block.
 func (r *Runner) formatAgentExpansion(prompt string, opts config.Options) string {
+	if r.cfg.isCodexExecutor() {
+		return r.formatAgentExpansionCodex(prompt)
+	}
+	return r.formatAgentExpansionClaude(prompt, opts)
+}
+
+// formatAgentExpansionClaude builds the Task-tool prose used by claude executor.
+func (r *Runner) formatAgentExpansionClaude(prompt string, opts config.Options) string {
 	subagent := "general-purpose"
 	if opts.AgentType != "" {
 		subagent = opts.AgentType
@@ -169,6 +179,35 @@ func (r *Runner) formatAgentExpansion(prompt string, opts config.Options) string
 "%s"
 
 Report findings only - no positive observations.`, modelClause, subagent, prompt)
+}
+
+// formatAgentExpansionCodex builds the spawn_agent block used by codex executor.
+// frontmatter Model/AgentType overrides do not apply: codex registers a single
+// reviewer agent globally; per-call behavior is driven by the inlined task body.
+// the agent body is escaped so apostrophes (don't, what's) and backslashes inside
+// it do not terminate the surrounding single-quoted task='...' literal. the agent
+// name is shared with pkg/executor.CodexReviewerAgentName so the spawn_agent call
+// here stays in sync with the codex -c agents.<name>.description registration.
+func (r *Runner) formatAgentExpansionCodex(prompt string) string {
+	return fmt.Sprintf(`spawn_agent(agent='%s', task='%s')
+
+Report findings only - no positive observations.`, executor.CodexReviewerAgentName, r.escapeCodexSingleQuoted(prompt))
+}
+
+// escapeCodexSingleQuoted escapes the characters that would otherwise break a
+// Python-style single-quoted string literal — which is what spawn_agent(task='...')
+// expects. supported escapes: backslash (must be escaped first so subsequent
+// escapes are not double-processed), single quote, tab, carriage return, newline.
+// other control characters (\b, \f, \v, unicode escapes) are not escaped because
+// the project's default agent bodies do not contain them; if a custom agent embeds
+// such characters, extend this set to cover them.
+func (r *Runner) escapeCodexSingleQuoted(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	s = strings.ReplaceAll(s, "\t", `\t`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
 }
 
 // expandAgentReferences replaces {{agent:name}} patterns with Task tool instructions.
@@ -201,11 +240,31 @@ func (r *Runner) expandAgentReferences(prompt string) string {
 
 		r.log.Print("agent %q: %s", name, agent.Options)
 
+		// under codex syntax, formatAgentExpansionCodex collapses every {{agent:name}} into
+		// the same spawn_agent(agent='reviewer', task=...) call — frontmatter Model/AgentType
+		// are intentionally discarded. warn so users do not silently lose per-agent overrides.
+		if r.cfg.isCodexExecutor() && (agent.Model != "" || agent.AgentType != "") {
+			r.warnCodexFrontmatterDiscarded(name, agent.Options)
+		}
+
 		// expand variables in agent content (no agent expansion to avoid recursion)
 		agentPrompt := r.replaceBaseVariables(agent.Prompt)
 
 		return r.formatAgentExpansion(agentPrompt, agent.Options)
 	})
+}
+
+// warnCodexFrontmatterDiscarded logs a one-time-per-agent warning when codex
+// mode drops a per-agent Model/AgentType override.
+func (r *Runner) warnCodexFrontmatterDiscarded(name string, opts config.Options) {
+	if r.codexFrontmatterWarned == nil {
+		r.codexFrontmatterWarned = make(map[string]bool)
+	}
+	if r.codexFrontmatterWarned[name] {
+		return
+	}
+	r.codexFrontmatterWarned[name] = true
+	r.log.Print("[WARN] codex mode ignores frontmatter overrides for agent %q (model=%q agent=%q); a single shared codex agent is used", name, opts.Model, opts.AgentType)
 }
 
 // replacePromptVariables replaces all template variables including agent references.

@@ -778,7 +778,6 @@ func TestLoadPlanWithFallback(t *testing.T) {
 	})
 }
 
-
 func TestExtractProjectDir(t *testing.T) {
 	tests := []struct {
 		name     string

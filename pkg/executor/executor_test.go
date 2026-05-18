@@ -354,6 +354,26 @@ func TestDetectSignal(t *testing.T) {
 		{"review complete " + status.ReviewDone, status.ReviewDone},
 		{status.CodexDone + " analysis done", status.CodexDone},
 		{"plan complete " + status.PlanReady, status.PlanReady},
+		{`I have inspected the codebase and confirmed all tasks are done.
+The plan file shows every checkbox marked, tests pass locally, and the linter is clean.
+
+<<<RALPHEX:ALL_TASKS_DONE>>>`, status.Completed},
+		{`Round 1 review summary follows.
+
+The implementation looks complete. Tests cover the new behavior.
+
+<<<RALPHEX:REVIEW_DONE>>>
+
+Additional thoughts: future work could explore caching.`, status.ReviewDone},
+		{`External review iteration finished.
+<<<RALPHEX:CODEX_REVIEW_DONE>>>
+Note: a minor formatting preference was noted but not flagged.`, status.CodexDone},
+		{`Attempted to run go test ./... but encountered a compilation error.
+
+<<<RALPHEX:TASK_FAILED>>>`, status.Failed},
+		{`Plan file written to docs/plans/20260514-feature.md.
+
+<<<RALPHEX:PLAN_READY>>>`, status.PlanReady},
 		{"no signal here", ""},
 	}
 
