@@ -188,15 +188,61 @@ Report findings only - no positive observations.`, modelClause, subagent, prompt
 // it do not terminate the surrounding single-quoted task='...' literal. the agent
 // name is shared with pkg/executor.CodexReviewerAgentName so the spawn_agent call
 // here stays in sync with the codex -c agents.<name>.description registration.
-// the explicit "do not set fork_context" hint pre-empts a codex auto-optimization
-// that pairs fork_context=true with an explicit agent_type, which codex rejects
-// ("Full-history forked agents inherit the parent agent type, model, and reasoning
-// effort..."); without the hint each review iteration burns ~5 wasted spawn_agent
-// calls before codex retries without fork_context.
+// fork_context / wait_agent guidance lives once in codexReviewGuidance (prepended
+// to review prompts by prependCodexReviewGuidance) rather than being repeated per
+// agent block — keeps the spawn_agent example compact and avoids the same
+// directives being duplicated 5× per review iteration.
 func (r *Runner) formatAgentExpansionCodex(prompt string) string {
 	return fmt.Sprintf(`spawn_agent(agent='%s', task='%s')
 
-Report findings only - no positive observations. Pass only agent and task; do not set fork_context.`, executor.CodexReviewerAgentName, r.escapeCodexSingleQuoted(prompt))
+Report findings only - no positive observations.`, executor.CodexReviewerAgentName, r.escapeCodexSingleQuoted(prompt))
+}
+
+// codexReviewGuidance is the section-level directive block prepended to review
+// prompts by prependCodexReviewGuidance when the codex executor is active. it
+// covers two codex multi_agent quirks that affect EVERY review iteration:
+//
+//   - spawn_agent: codex auto-tries fork_context=true with an explicit
+//     agent_type, which codex's own API rejects ("Full-history forked agents
+//     inherit the parent agent type..."). without the directive each iteration
+//     wastes ~5 spawn round-trips before codex retries cleanly.
+//   - wait_agent: when a spawned sub-agent dies mid-tool-call (observed during
+//     parallel exec batches), codex never registers its termination and the
+//     parent loops on wait_agent for the full 1-hour outer timeout. with the
+//     directive the parent re-spawns once after the first 10-min wait window
+//     instead of waiting 40+ min before deciding the agent is gone.
+//
+// the block lives at ralphex level so users with customized review prompts
+// (that hard-code agent lists inline instead of using {{agent:NAME}} expansion)
+// still get the directives — the per-agent expander doesn't fire for them.
+const codexReviewGuidance = `=== Codex orchestration directives ===
+
+spawn_agent: pass ONLY the agent and task arguments. Do NOT set fork_context.
+Codex rejects fork_context=true paired with an explicit agent_type and the
+wasted retry round-trips delay every launch.
+
+wait_agent: if the call returns with timed_out=true and one or more requested
+agents are missing from the status map, those agents are dead — do not keep
+waiting. Re-spawn the missing agents ONCE in a single replacement batch. If
+the replacement batch also returns missing agents, proceed with available
+results and note the missing agent in your findings. Total budget: at most
+one re-spawn per dead agent.
+
+=======================================
+
+`
+
+// prependCodexReviewGuidance returns prompt with codexReviewGuidance prepended
+// when the codex executor is active; otherwise returns prompt unchanged. used
+// to inject codex multi_agent orchestration directives into review prompts at
+// build time so the directives are present regardless of whether the user
+// kept the embedded review_first/review_second templates or replaced them with
+// hard-coded inline agent lists.
+func (r *Runner) prependCodexReviewGuidance(prompt string) string {
+	if !r.cfg.isCodexExecutor() {
+		return prompt
+	}
+	return codexReviewGuidance + prompt
 }
 
 // escapeCodexSingleQuoted escapes the characters that would otherwise break a

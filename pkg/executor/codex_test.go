@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1807,8 +1808,24 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = f.Close() })
 
-	var captured []string
-	e := &CodexExecutor{OutputHandler: func(text string) { captured = append(captured, text) }}
+	// OutputHandler is called from the tailer goroutine, so guard the test-side
+	// slice with a mutex; otherwise -race flags concurrent slice appends.
+	var (
+		capturedMu sync.Mutex
+		captured   []string
+	)
+	snapshot := func() []string {
+		capturedMu.Lock()
+		defer capturedMu.Unlock()
+		out := make([]string, len(captured))
+		copy(out, captured)
+		return out
+	}
+	e := &CodexExecutor{OutputHandler: func(text string) {
+		capturedMu.Lock()
+		captured = append(captured, text)
+		capturedMu.Unlock()
+	}}
 
 	// pre-write some events, then start tailer, then append more — verifies
 	// both initial-drain and follow-on append behavior.
@@ -1830,7 +1847,7 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 
 	// wait briefly for initial drain
 	deadline := time.Now().Add(2 * time.Second)
-	for len(captured) < 1 && time.Now().Before(deadline) {
+	for len(snapshot()) < 1 && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -1840,16 +1857,17 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 
 	// give the tailer a poll cycle to pick it up
 	deadline = time.Now().Add(2 * time.Second)
-	for len(captured) < 2 && time.Now().Before(deadline) {
+	for len(snapshot()) < 2 && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
 	cancel()
 	<-tailDone
 
-	require.GreaterOrEqual(t, len(captured), 2, "expected at least 2 emissions, got %v", captured)
-	assert.Contains(t, captured[0], "first reply")
-	assert.Contains(t, captured[1], "late reply after first read")
+	final := snapshot()
+	require.GreaterOrEqual(t, len(final), 2, "expected at least 2 emissions, got %v", final)
+	assert.Contains(t, final[0], "first reply")
+	assert.Contains(t, final[1], "late reply after first read")
 }
 
 func TestCodexExecutor_findRolloutFile(t *testing.T) {

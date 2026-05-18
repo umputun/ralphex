@@ -1275,9 +1275,40 @@ func TestRunner_formatAgentExpansion_CodexShape(t *testing.T) {
 
 	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='scan code')")
 	assert.Contains(t, result, "Report findings only - no positive observations.")
-	assert.Contains(t, result, "do not set fork_context")
+	// fork_context guidance lives in the section-level codexReviewGuidance block
+	// (injected by prependCodexReviewGuidance), not in the per-agent expansion.
+	assert.NotContains(t, result, "do not set fork_context")
 	assert.NotContains(t, result, "Use the Task tool")
 	assert.NotContains(t, result, "{{agent:scanner}}")
+}
+
+func TestRunner_prependCodexReviewGuidance(t *testing.T) {
+	body := "Review the changes."
+
+	t.Run("codex executor prepends guidance", func(t *testing.T) {
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: config.ExecutorCodex}}, log: newMockLogger("")}
+		result := r.prependCodexReviewGuidance(body)
+
+		assert.True(t, strings.HasPrefix(result, "=== Codex orchestration directives ==="), "guidance block must be at the top")
+		assert.Contains(t, result, "Do NOT set fork_context", "spawn_agent guidance present")
+		assert.Contains(t, result, "wait_agent", "wait_agent retry guidance present")
+		assert.Contains(t, result, "Re-spawn the missing agents ONCE", "explicit one-retry cap")
+		assert.True(t, strings.HasSuffix(result, body), "original prompt preserved at the end")
+	})
+
+	t.Run("claude executor returns prompt unchanged", func(t *testing.T) {
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: "claude"}}, log: newMockLogger("")}
+		result := r.prependCodexReviewGuidance(body)
+
+		assert.Equal(t, body, result, "non-codex executor must not see codex-specific directives")
+	})
+
+	t.Run("empty executor (default claude) returns prompt unchanged", func(t *testing.T) {
+		r := &Runner{cfg: Config{AppConfig: &config.Config{}}, log: newMockLogger("")}
+		result := r.prependCodexReviewGuidance(body)
+
+		assert.Equal(t, body, result, "unset executor must not see codex-specific directives")
+	})
 }
 
 func TestRunner_formatAgentExpansion_AllFiveDefaultAgents(t *testing.T) {

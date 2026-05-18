@@ -424,7 +424,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 	r.phaseHolder.Set(status.PhaseReview)
 	r.log.PrintSection(r.reviewSection(0, ": all findings"))
 
-	if err := r.runReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
+	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt))); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -448,7 +448,7 @@ func (r *Runner) runReviewOnly(ctx context.Context) error {
 	r.phaseHolder.Set(status.PhaseReview)
 	r.log.PrintSection(r.reviewSection(0, ": all findings"))
 
-	if err := r.runReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
+	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt))); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -694,7 +694,7 @@ func (r *Runner) runReviewLoop(ctx context.Context, promptPrefix ...string) erro
 		headBefore := r.headHash()
 
 		result := r.runWithLimitRetry(ctx, r.review.Run,
-			prefix+r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt), execName)
+			prefix+r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt)), execName)
 		if result.Error != nil {
 			if err := r.handlePatternMatchError(result.Error, execName); err != nil {
 				return err
