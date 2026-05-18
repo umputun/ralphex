@@ -198,8 +198,8 @@ func TestLoad_PartialConfig(t *testing.T) {
 	assert.Equal(t, "claude", cfg.ClaudeCommand)
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
 	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Empty(t, cfg.CodexModel, "codex_model unset in embedded default preserves ~/.codex/config.toml")
-	assert.Empty(t, cfg.CodexReasoningEffort)
+	assert.Equal(t, "gpt-5.5", cfg.CodexModel, "codex_model defaults to embedded gpt-5.5")
+	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
 	assert.Equal(t, "read-only", cfg.CodexSandbox)
 	assert.False(t, cfg.CodexSandboxSet)
 	assert.Equal(t, 2000, cfg.IterationDelayMs)
@@ -225,8 +225,8 @@ func TestLoad_EmptyConfig(t *testing.T) {
 	assert.Equal(t, "claude", cfg.ClaudeCommand)
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
 	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Empty(t, cfg.CodexModel, "codex_model unset in embedded default preserves ~/.codex/config.toml")
-	assert.Empty(t, cfg.CodexReasoningEffort)
+	assert.Equal(t, "gpt-5.5", cfg.CodexModel, "codex_model defaults to embedded gpt-5.5")
+	assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
 	assert.Equal(t, "read-only", cfg.CodexSandbox)
 	assert.False(t, cfg.CodexSandboxSet)
 	assert.Equal(t, "docs/plans", cfg.PlansDir)
@@ -896,7 +896,7 @@ color_task = #0000ff
 	// embedded defaults (not in global or local)
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", cfg.ClaudeArgs)
 	assert.Equal(t, "codex", cfg.CodexCommand)
-	assert.Empty(t, cfg.CodexModel, "codex_model unset in embedded default")
+	assert.Equal(t, "gpt-5.5", cfg.CodexModel, "codex_model defaults to embedded gpt-5.5")
 
 	// --- verify colors merge chain ---
 	// local override

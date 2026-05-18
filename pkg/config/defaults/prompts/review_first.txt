@@ -24,9 +24,14 @@ Run both commands to understand what was done:
 
 ## Step 2: Launch ALL 5 Review Agents IN PARALLEL
 
-Issue all of the following agent invocations in parallel — do not serialize them.
+CRITICAL: All 5 agent invocations MUST be issued in a single message for true parallel execution.
+These agents are fully independent — no shared state, no dependencies between them, no ordering requirements.
+Under claude executor: do NOT use run_in_background. Foreground Task tool calls in the same message run in parallel and block until all complete — no TaskOutput polling needed.
+Under codex executor: do NOT serialize spawn_agent calls; emit them all in one response and then call wait_agent on the full set.
 
 CRITICAL: Do NOT proceed to Step 3 until ALL 5 agents have returned results.
+
+CRITICAL: Do NOT embed code or diffs in agent prompts. Keep prompts short — the agent expansions below tell each agent to run git commands themselves. Embedding large diffs into agent prompts causes slow parallel launch and burns tokens.
 
 {{agent:quality}}
 {{agent:implementation}}

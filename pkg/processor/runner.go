@@ -233,20 +233,28 @@ func (cfg Config) buildExternalCodexExecutor(log Logger) *executor.CodexExecutor
 
 // buildCodexExecutor builds the codex executor used for first-class --codex mode.
 // MultiAgent is always enabled so any phase (task, review, finalize) can spawn sub-agents,
-// and PassClaudeMd is sourced from config.
+// and PassClaudeMd is sourced from config. IdleTimeout is wired here (and only here)
+// because the user explicitly opted into --codex; the external-review codex used in
+// claude mode keeps master semantics with no idle timeout.
 func (cfg Config) buildCodexExecutor(log Logger) *executor.CodexExecutor {
 	e := cfg.newBaseCodexExecutor(log)
 	e.MultiAgent = true
 	if cfg.AppConfig != nil {
 		e.Sandbox = cfg.AppConfig.CodexExecutorSandbox()
 		e.PassClaudeMd = cfg.AppConfig.PassClaudeMd
+		e.IdleTimeout = cfg.AppConfig.IdleTimeout
 	}
 	return e
 }
 
 // newBaseCodexExecutor returns a CodexExecutor populated with the fields shared
 // between the external-review and first-class --codex builders. Callers layer on
-// Sandbox, MultiAgent, and PassClaudeMd as appropriate for their role.
+// Sandbox, MultiAgent, PassClaudeMd, and IdleTimeout as appropriate for their
+// role — see buildCodexExecutor (first-class) and buildExternalCodexExecutor
+// (claude mode). IdleTimeout is intentionally NOT set here: applying it to the
+// external codex review path silently shortened previously-idle-tolerant
+// review sessions for default-claude users, so it is wired only by
+// buildCodexExecutor where the user opted into --codex.
 func (cfg Config) newBaseCodexExecutor(log Logger) *executor.CodexExecutor {
 	e := &executor.CodexExecutor{
 		OutputHandler: func(text string) { log.PrintAligned(text) },
@@ -261,7 +269,6 @@ func (cfg Config) newBaseCodexExecutor(log Logger) *executor.CodexExecutor {
 	e.TimeoutMs = cfg.AppConfig.CodexTimeoutMs
 	e.ErrorPatterns = cfg.AppConfig.CodexErrorPatterns
 	e.LimitPatterns = cfg.AppConfig.CodexLimitPatterns
-	e.IdleTimeout = cfg.AppConfig.IdleTimeout
 	return e
 }
 
@@ -424,7 +431,7 @@ func (r *Runner) runFull(ctx context.Context) error {
 	r.phaseHolder.Set(status.PhaseReview)
 	r.log.PrintSection(r.reviewSection(0, ": all findings"))
 
-	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt))); err != nil {
+	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)), "first review pass"); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -448,7 +455,7 @@ func (r *Runner) runReviewOnly(ctx context.Context) error {
 	r.phaseHolder.Set(status.PhaseReview)
 	r.log.PrintSection(r.reviewSection(0, ": all findings"))
 
-	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt))); err != nil {
+	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)), "first review pass"); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
@@ -640,7 +647,10 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 }
 
 // runReview runs the configured review executor with the given prompt until REVIEW_DONE.
-func (r *Runner) runReview(ctx context.Context, prompt string) error {
+// phaseLabel identifies the phase in error messages and the soft-warning log line
+// (today only "first review pass" but parameterized so a future caller doesn't ship
+// a misleading message).
+func (r *Runner) runReview(ctx context.Context, prompt, phaseLabel string) error {
 	execName := r.executorName()
 	result := r.runWithLimitRetry(ctx, r.review.Run, prompt, execName)
 	if result.Error != nil {
@@ -654,16 +664,21 @@ func (r *Runner) runReview(ctx context.Context, prompt string) error {
 		return errors.New("review failed (FAILED signal received)")
 	}
 
-	// session/idle timeout cleared result.Error and result.Signal inside runWithSessionTimeout;
-	// without this check the missing REVIEW_DONE would fall through to a soft warning and the
-	// phase would silently advance, dropping findings. surface the timeout as an error so the
-	// caller decides how to proceed.
+	// session/idle timeout cleared result.Error and result.Signal inside runWithSessionTimeout.
+	// under first-class --codex the comprehensive first review is the only place we can
+	// catch findings — silently advancing on timeout drops them — so surface the timeout as
+	// an error. claude-default mode keeps master's soft-warning + continue behavior so
+	// existing users with --session-timeout / --idle-timeout don't see new run failures.
 	if r.lastSessionTimedOut {
-		return errors.New("first review pass timed out")
+		if r.cfg.isCodexExecutor() {
+			return fmt.Errorf("%s timed out", phaseLabel)
+		}
+		r.log.Print("warning: %s did not complete cleanly (session timed out), continuing...", phaseLabel)
+		return nil
 	}
 
 	if !isReviewDone(result.Signal) {
-		r.log.Print("warning: first review pass did not complete cleanly, continuing...")
+		r.log.Print("warning: %s did not complete cleanly, continuing...", phaseLabel)
 	}
 
 	return nil

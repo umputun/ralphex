@@ -3657,20 +3657,27 @@ func TestRunner_SessionTimeout_ExternalReviewBypassPreservesIdleTimeoutDiagnosti
 }
 
 func TestRunner_SessionTimeout_FirstReviewWarningStillLogged(t *testing.T) {
-	// when the one-shot first review pass times out, runWithSessionTimeout must still log
-	// the session timeout warning before runReview surfaces the error to the caller.
-	// the diagnostic is what tells the user *why* the run aborted.
+	// when the one-shot first review pass times out under default-claude mode,
+	// runReview must log the session timeout warning AND continue (no error).
+	// preserves master behavior — claude users with --session-timeout don't see
+	// new run failures. Under --codex the timeout is fatal (covered separately).
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
 	log := newMockLogger("progress.txt")
 
-	// first call blocks (review timeout)
+	// first call blocks (review timeout), subsequent calls return ReviewDone so the
+	// run finishes normally after the warning is emitted.
+	callNum := 0
 	claude := &mocks.ExecutorMock{
 		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			<-ctx.Done() // block until session timeout fires
-			return executor.Result{Error: ctx.Err()}
+			callNum++
+			if callNum == 1 {
+				<-ctx.Done()
+				return executor.Result{Error: ctx.Err()}
+			}
+			return executor.Result{Output: "review done", Signal: status.ReviewDone}
 		},
 	}
 	codex := newMockExecutor(nil)
@@ -3683,9 +3690,7 @@ func TestRunner_SessionTimeout_FirstReviewWarningStillLogged(t *testing.T) {
 	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
-	// first review session timeout surfaces as an error (covered by TestRunner_SessionTimeout_FirstReviewSurfacesAsError);
-	// here we only verify the warning fired before the abort.
-	require.Error(t, err)
+	require.NoError(t, err, "claude-default mode treats first-review timeout as a soft warning")
 
 	// verify session timeout warning was logged
 	var foundLog bool
@@ -3747,31 +3752,36 @@ func TestRunner_SessionTimeout_ReviewLoopContinuesAfterTimeout(t *testing.T) {
 }
 
 func TestRunner_SessionTimeout_FirstReviewSurfacesAsError(t *testing.T) {
-	// the one-shot first review pass (runReview) must NOT silently advance when
-	// the session times out. without the lastSessionTimedOut check, runWithSessionTimeout
-	// clears Error and Signal, and the missing REVIEW_DONE falls through to a soft warning,
-	// dropping comprehensive findings on the floor — especially under --codex where the
-	// later external review phase is auto-skipped.
+	// under --codex the comprehensive first review pass (runReview) must NOT silently
+	// advance when the session times out. Without the codex-gated lastSessionTimedOut
+	// check the missing REVIEW_DONE falls through to a soft warning and the run
+	// continues into the critical/major loop with no findings to act on — especially
+	// load-bearing under --codex where the later external review phase is auto-skipped.
+	// claude-default mode keeps the soft-warning behavior (see
+	// TestRunner_SessionTimeout_FirstReviewWarningStillLogged) so master users with
+	// --session-timeout don't see new run failures.
 	log := newMockLogger("progress.txt")
 
 	// first call (first review pass): block until session timeout fires
-	claude := &mocks.ExecutorMock{
+	executorMock := &mocks.ExecutorMock{
 		RunFunc: func(ctx context.Context, _ string) executor.Result {
 			<-ctx.Done()
 			return executor.Result{Output: "partial output", Error: ctx.Err()}
 		},
 	}
-	codex := newMockExecutor(nil)
 
 	appCfg := testAppConfig(t)
 	appCfg.SessionTimeout = 50 * time.Millisecond
 	appCfg.SessionTimeoutSet = true
+	// --codex mode wires the same codex executor into Task and Review and treats
+	// session timeout in the first review as a fatal error.
+	appCfg.Executor = config.ExecutorCodex
 
 	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: executorMock, Review: executorMock}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
-	require.Error(t, err, "first review session timeout must surface as an error, not silently advance")
+	require.Error(t, err, "first review session timeout under --codex must surface as an error, not silently advance")
 	assert.Contains(t, err.Error(), "first review pass timed out")
 }
 

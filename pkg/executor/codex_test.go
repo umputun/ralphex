@@ -46,35 +46,46 @@ func mockWaitError(err error) func() error {
 
 func TestExecCodexRunner_childEnv(t *testing.T) {
 	tests := []struct {
-		name string
-		env  []string
-		want []string
+		name              string
+		stripAnthropicKey bool
+		env               []string
+		want              []string
 	}{
 		{
-			name: "strips ANTHROPIC_API_KEY and CLAUDECODE",
-			env:  []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
-			want: []string{"PATH=/usr/bin", "HOME=/home/user"},
+			name:              "first-class --codex strips ANTHROPIC_API_KEY and CLAUDECODE",
+			stripAnthropicKey: true,
+			env:               []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+			want:              []string{"PATH=/usr/bin", "HOME=/home/user"},
 		},
 		{
-			name: "no key in env still strips CLAUDECODE",
-			env:  []string{"PATH=/usr/bin", "CLAUDECODE=1", "HOME=/home/user"},
-			want: []string{"PATH=/usr/bin", "HOME=/home/user"},
+			name:              "external codex review (claude mode) preserves ANTHROPIC_API_KEY",
+			stripAnthropicKey: false,
+			env:               []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+			want:              []string{"PATH=/usr/bin", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
 		},
 		{
-			name: "does not match partial keys like ANTHROPIC_API_KEY_OLD",
-			env:  []string{"ANTHROPIC_API_KEY_OLD=old", "ANTHROPIC_API_KEY=new", "CLAUDECODE=1"},
-			want: []string{"ANTHROPIC_API_KEY_OLD=old"},
+			name:              "CLAUDECODE always stripped regardless of mode",
+			stripAnthropicKey: false,
+			env:               []string{"PATH=/usr/bin", "CLAUDECODE=1", "HOME=/home/user"},
+			want:              []string{"PATH=/usr/bin", "HOME=/home/user"},
 		},
 		{
-			name: "passes through other keys unchanged",
-			env:  []string{"OPENAI_API_KEY=ok", "FOO=bar"},
-			want: []string{"OPENAI_API_KEY=ok", "FOO=bar"},
+			name:              "does not match partial keys like ANTHROPIC_API_KEY_OLD when stripping",
+			stripAnthropicKey: true,
+			env:               []string{"ANTHROPIC_API_KEY_OLD=old", "ANTHROPIC_API_KEY=new", "CLAUDECODE=1"},
+			want:              []string{"ANTHROPIC_API_KEY_OLD=old"},
+		},
+		{
+			name:              "passes through other keys unchanged",
+			stripAnthropicKey: true,
+			env:               []string{"OPENAI_API_KEY=ok", "FOO=bar"},
+			want:              []string{"OPENAI_API_KEY=ok", "FOO=bar"},
 		},
 	}
 
-	r := &execCodexRunner{}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			r := &execCodexRunner{stripAnthropicKey: tc.stripAnthropicKey}
 			got := r.childEnv(tc.env)
 			assert.Equal(t, tc.want, got)
 		})
@@ -281,21 +292,48 @@ func TestCodexExecutor_Run_DefaultSettings(t *testing.T) {
 func TestCodexExecutor_Run_DangerFullAccessBypassesSandbox(t *testing.T) {
 	t.Setenv("RALPHEX_DOCKER", "")
 
-	var capturedArgs []string
-	mock := &mockCodexRunner{
-		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
-			capturedArgs = args
-			return mockStreams("", "result"), mockWait(), nil
-		},
-	}
-	e := &CodexExecutor{runner: mock, Sandbox: "danger-full-access"}
+	t.Run("first-class --codex emits bypass flag", func(t *testing.T) {
+		// MultiAgent=true is the first-class --codex signal (set by buildCodexExecutor).
+		// danger-full-access requires the bypass flag for unattended runs.
+		var capturedArgs []string
+		mock := &mockCodexRunner{
+			runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+				capturedArgs = args
+				return mockStreams("", "result"), mockWait(), nil
+			},
+		}
+		e := &CodexExecutor{runner: mock, Sandbox: "danger-full-access", MultiAgent: true}
 
-	result := e.Run(context.Background(), "test prompt")
+		result := e.Run(context.Background(), "test prompt")
 
-	require.NoError(t, result.Error)
-	argsStr := strings.Join(capturedArgs, " ")
-	assert.Contains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox")
-	assert.Contains(t, argsStr, "--sandbox danger-full-access")
+		require.NoError(t, result.Error)
+		argsStr := strings.Join(capturedArgs, " ")
+		assert.Contains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox")
+		assert.Contains(t, argsStr, "--sandbox danger-full-access")
+	})
+
+	t.Run("external codex review (claude mode) omits bypass flag in danger-full-access", func(t *testing.T) {
+		// MultiAgent=false signals external codex review (built by buildExternalCodexExecutor).
+		// Master never emitted --dangerously-bypass-approvals-and-sandbox; gating it on MultiAgent
+		// preserves master semantics for default-claude users (esp. Docker mode where the sandbox
+		// is forced to danger-full-access).
+		var capturedArgs []string
+		mock := &mockCodexRunner{
+			runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+				capturedArgs = args
+				return mockStreams("", "result"), mockWait(), nil
+			},
+		}
+		e := &CodexExecutor{runner: mock, Sandbox: "danger-full-access"}
+
+		result := e.Run(context.Background(), "test prompt")
+
+		require.NoError(t, result.Error)
+		argsStr := strings.Join(capturedArgs, " ")
+		assert.NotContains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox",
+			"external codex review must keep master semantics — no bypass flag")
+		assert.Contains(t, argsStr, "--sandbox danger-full-access")
+	})
 }
 
 func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
@@ -1728,24 +1766,6 @@ func TestCodexExecutor_extractSessionID(t *testing.T) {
 	}
 }
 
-func TestCodexExecutor_firstLine(t *testing.T) {
-	e := &CodexExecutor{}
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "single line", in: "git status", want: "git status"},
-		{name: "multi line", in: "first\nsecond\nthird", want: "first"},
-		{name: "leading newline", in: "\nrest", want: ""},
-		{name: "empty", in: "", want: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, e.firstLine(tc.in))
-		})
-	}
-}
 
 func TestCodexExecutor_formatRolloutEvent(t *testing.T) {
 	e := &CodexExecutor{}

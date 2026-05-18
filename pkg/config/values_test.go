@@ -54,8 +54,8 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.True(t, values.CodexEnabled)
 	assert.True(t, values.CodexEnabledSet)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Empty(t, values.CodexModel, "codex_model must be unset in embedded defaults so ~/.codex/config.toml is preserved")
-	assert.Empty(t, values.CodexReasoningEffort, "codex_reasoning_effort must be unset in embedded defaults")
+	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded gpt-5.5")
+	assert.Equal(t, "xhigh", values.CodexReasoningEffort, "codex_reasoning_effort defaults to embedded xhigh")
 	assert.Equal(t, 3600000, values.CodexTimeoutMs)
 	assert.Equal(t, "read-only", values.CodexSandbox)
 	assert.False(t, values.CodexSandboxSet)
@@ -99,7 +99,7 @@ iteration_delay_ms = 5000
 	// values from embedded (not set in global)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Empty(t, values.CodexModel, "codex_model must remain unset when not in user config")
+	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded value when not in user config")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
@@ -1094,7 +1094,7 @@ func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Empty(t, values.CodexModel, "codex_model must remain unset (commented in embedded default)")
+	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded gpt-5.5 (uncommented in embedded default)")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 

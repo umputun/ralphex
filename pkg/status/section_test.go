@@ -18,14 +18,14 @@ func TestReviewSections_TypeAndLabelContract(t *testing.T) {
 		{
 			name:          "claude first pass review",
 			section:       NewClaudeReviewSection(0, ": all findings"),
-			wantType:      SectionClaudeReview,
+			wantType:      SectionInternalReview,
 			wantIteration: 0,
 			wantLabel:     "claude review 0: all findings",
 		},
 		{
 			name:          "internal codex review",
 			section:       NewInternalReviewSection(3, ": critical/major"),
-			wantType:      SectionClaudeReview,
+			wantType:      SectionInternalReview,
 			wantIteration: 3,
 			wantLabel:     "review 3: critical/major",
 			noCodex:       true,

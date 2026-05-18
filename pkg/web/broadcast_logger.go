@@ -84,7 +84,7 @@ func (b *BroadcastLogger) PrintSection(section status.Section) {
 		b.currentTask = section.Iteration
 		b.broadcast(NewTaskStartEvent(b.holder.Get(), section.Iteration, section.Label))
 
-	case status.SectionClaudeReview:
+	case status.SectionInternalReview:
 		b.broadcast(NewIterationStartEvent(b.holder.Get(), section.Iteration, section.Label))
 
 	case status.SectionCodexIteration:

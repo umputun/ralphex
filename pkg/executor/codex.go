@@ -33,16 +33,25 @@ type CodexRunner interface {
 // codex outputs streaming progress to stderr, final response to stdout.
 // when stdin is non-nil, it is connected to the child process's stdin (used to pass
 // the prompt via pipe instead of a CLI argument to avoid Windows 8191-char cmd limit).
+// stripAnthropicKey scopes ANTHROPIC_API_KEY filtering to first-class --codex runs;
+// external codex review in default claude mode keeps the host env intact so custom
+// codex wrappers proxying through Anthropic (e.g., scripts/codex-as-claude.sh) keep
+// authenticating. CLAUDECODE is always stripped regardless of mode to prevent
+// nested-session errors when codex is launched from inside a Claude Code session.
 type execCodexRunner struct {
-	stdin io.Reader
+	stdin             io.Reader
+	stripAnthropicKey bool
 }
 
-// childEnv strips ANTHROPIC_API_KEY and CLAUDECODE from the codex child process env.
-// codex doesn't need either, and a user switching to --codex for billing isolation
-// should not have an inherited Anthropic key silently bill Anthropic if their codex
-// config selects an Anthropic-compatible provider.
+// childEnv builds the codex child-process env. CLAUDECODE is always stripped to
+// prevent nested-session errors. ANTHROPIC_API_KEY is stripped only when the
+// caller requested it (first-class --codex mode); default-claude external codex
+// review passes the key through so custom Anthropic-proxying wrappers keep working.
 func (r *execCodexRunner) childEnv(env []string) []string {
-	return filterEnv(env, "ANTHROPIC_API_KEY", "CLAUDECODE")
+	if r.stripAnthropicKey {
+		return filterEnv(env, "ANTHROPIC_API_KEY", "CLAUDECODE")
+	}
+	return filterEnv(env, "CLAUDECODE")
 }
 
 func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) (CodexStreams, func() error, error) {
@@ -170,7 +179,13 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 
 	args := []string{"exec"}
 	args = append(args, e.configOverrides()...)
-	if sandbox == "danger-full-access" {
+	// --dangerously-bypass-approvals-and-sandbox is required for unattended first-class
+	// --codex runs (which use danger-full-access by default). External codex review in
+	// claude mode worked on master without this flag and adding it would silently change
+	// approval semantics for default-claude users (esp. Docker mode where the sandbox is
+	// forced to danger-full-access); gate the flag on MultiAgent which is true only in
+	// first-class --codex (set by processor.buildCodexExecutor).
+	if sandbox == "danger-full-access" && e.MultiAgent {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
 	args = append(args, "--sandbox", sandbox)
@@ -190,11 +205,15 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	}
 
 	// pass prompt via stdin to avoid Windows 8191-char command-line limit;
-	// codex reads from stdin when no positional prompt argument is given
+	// codex reads from stdin when no positional prompt argument is given.
+	// MultiAgent signals first-class --codex (set by processor.buildCodexExecutor only;
+	// external codex review built by buildExternalCodexExecutor leaves it false), so it
+	// also gates ANTHROPIC_API_KEY stripping — default-claude external codex review
+	// preserves the host env so wrappers proxying through Anthropic keep working.
 	stdinReader := strings.NewReader(prompt)
 	runner := e.runner
 	if runner == nil {
-		runner = &execCodexRunner{stdin: stdinReader}
+		runner = &execCodexRunner{stdin: stdinReader, stripAnthropicKey: e.MultiAgent}
 	}
 
 	// set up idle timeout: derive a cancellable context that fires when no output
@@ -314,8 +333,6 @@ func (t *touchReader) Read(p []byte) (int, error) {
 	return n, err //nolint:wrapcheck // pass-through reader; preserve EOF and original error semantics
 }
 
-// idleTimeoutResult builds the Result returned when the idle-timeout timer
-// canceled the derived execution context (parent ctx still alive). limit and
 // logDroppedIdleErrors surfaces concurrent stream/wait errors that would otherwise
 // be discarded by the idle-timeout completion path. operators need this to
 // distinguish "agent went silent" from "stream broke" before retrying.
@@ -328,6 +345,8 @@ func (e *CodexExecutor) logDroppedIdleErrors(stdoutErr, waitErr error) {
 	}
 }
 
+// idleTimeoutResult builds the Result returned when the idle-timeout timer
+// canceled the derived execution context (parent ctx still alive). limit and
 // error patterns are still checked across stdout and stderr so a wait-and-retry
 // triggered by a real quota diagnostic survives idle-timeout cancellation;
 // otherwise IdleTimedOut is set and the caller treats this as a soft kill.
@@ -727,15 +746,15 @@ type rolloutEvent struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// rolloutPayload covers the union of response_item payload shapes we render:
-// assistant messages (payload.type=message, role=assistant), exec_command and
-// spawn_agent function calls. fields outside this subset are ignored.
+// rolloutPayload covers the response_item payload shape we render: assistant
+// messages (payload.type=message, role=assistant). function_call records and
+// reasoning records are dropped by formatRolloutEvent before any of those
+// fields would be read, so the struct only carries the subset we actually
+// consume.
 type rolloutPayload struct {
-	Type      string `json:"type"`
-	Role      string `json:"role"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-	Content   []struct {
+	Type    string `json:"type"`
+	Role    string `json:"role"`
+	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
@@ -781,11 +800,4 @@ func (e *CodexExecutor) formatRolloutEvent(line []byte) string {
 		sb.WriteString(c.Text)
 	}
 	return sb.String()
-}
-
-// firstLine returns the first newline-delimited segment of s, or s when it
-// contains no newline. used to keep rollout event display lines compact.
-func (e *CodexExecutor) firstLine(s string) string {
-	head, _, _ := strings.Cut(s, "\n")
-	return head
 }

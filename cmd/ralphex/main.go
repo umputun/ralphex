@@ -568,15 +568,14 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		}
 	}
 
-	// resolve effective codex config (model+effort from task_model spec; sandbox
-	// from CodexExecutorSandbox accessor) so the banner reflects what codex
-	// actually receives, not the raw config fields. CLI --task-model wins over
-	// config task_model just like createRunner resolves it later.
-	taskModelSpec := req.Config.TaskModel
-	if o.TaskModel != "" {
-		taskModelSpec = o.TaskModel
-	}
-	codexModel, codexEffort := processor.ParseModelEffort(taskModelSpec)
+	// resolve effective codex config (model+effort + sandbox) so the banner
+	// reflects what codex actually receives. Under --codex the executor reads
+	// cfg.AppConfig.CodexModel / CodexReasoningEffort directly — NOT TaskModel
+	// (which feeds the claude executor) — so the banner must read the same
+	// fields. Sandbox comes from CodexExecutorSandbox() which already accounts
+	// for the first-class-vs-external default-mode difference.
+	codexModel := req.Config.CodexModel
+	codexEffort := req.Config.CodexReasoningEffort
 
 	// print startup info
 	printStartupInfo(startupInfo{
@@ -1070,12 +1069,10 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	maxIter := resolveMaxIterations(o.MaxIterations, req.Config)
 
 	// resolve effective codex config so the plan-mode banner reflects what
-	// codex actually receives (same logic as executePlan above).
-	taskModelSpec := req.Config.TaskModel
-	if o.TaskModel != "" {
-		taskModelSpec = o.TaskModel
-	}
-	codexModel, codexEffort := processor.ParseModelEffort(taskModelSpec)
+	// codex actually receives (same logic as executePlan above): the executor
+	// reads cfg.AppConfig.CodexModel / CodexReasoningEffort, not TaskModel.
+	codexModel := req.Config.CodexModel
+	codexEffort := req.Config.CodexReasoningEffort
 
 	// print startup info for plan mode
 	printStartupInfo(startupInfo{
