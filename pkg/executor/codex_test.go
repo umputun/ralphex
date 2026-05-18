@@ -1766,7 +1766,6 @@ func TestCodexExecutor_extractSessionID(t *testing.T) {
 	}
 }
 
-
 func TestCodexExecutor_formatRolloutEvent(t *testing.T) {
 	e := &CodexExecutor{}
 	tests := []struct {
