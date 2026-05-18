@@ -92,4 +92,3 @@ func (r *Runner) TestReviewExecutor() Executor {
 func (r *Runner) TestExternalExecutor() Executor {
 	return r.external
 }
-

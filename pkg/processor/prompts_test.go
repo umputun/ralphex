@@ -1275,6 +1275,7 @@ func TestRunner_formatAgentExpansion_CodexShape(t *testing.T) {
 
 	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='scan code')")
 	assert.Contains(t, result, "Report findings only - no positive observations.")
+	assert.Contains(t, result, "do not set fork_context")
 	assert.NotContains(t, result, "Use the Task tool")
 	assert.NotContains(t, result, "{{agent:scanner}}")
 }

@@ -1,14 +1,19 @@
 package executor
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -93,6 +98,7 @@ type CodexExecutor struct {
 	ErrorPatterns   []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns   []string          // patterns to detect rate limits (checked before error patterns)
 	MultiAgent      bool              // enable codex multi_agent feature + reviewer agent registration; set to true on the review-phase codex instance built by processor.New() for first-class --codex mode
+	headerEmitted   atomic.Bool       // tracks first invocation across Run() calls; false until first task/review then suppressed permanently — used to emit codex's resolved model/sandbox/effort once at the top of the run
 	PassClaudeMd    bool              // pass project-level CLAUDE.md to codex via project_doc_fallback_filenames (set by processor.New() only when cfg.AppConfig.Executor == ExecutorCodex)
 	IdleTimeout     time.Duration     // kill session after this duration of no output, zero = disabled
 	runner          CodexRunner       // for testing, nil uses default
@@ -136,6 +142,7 @@ func (e *CodexExecutor) configOverrides() []string {
 type codexFilterState struct {
 	headerCount int             // tracks "--------" separators seen (show content between first two)
 	seen        map[string]bool // track all shown lines for deduplication
+	firstRun    bool            // when true, whitelist model/sandbox/effort lines from the header block so the user sees codex's resolved config once at the top of the run
 }
 
 // Run executes codex CLI with the given prompt and returns filtered output.
@@ -209,11 +216,20 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 		return Result{Error: fmt.Errorf("start codex: %w", err)}
 	}
 
-	// process stderr for progress display (header block + bold summaries)
+	// process stderr for progress display (header block + bold summaries).
+	// sessionIDCh receives the session id once stderr's header block surfaces
+	// it; the tail goroutine below uses it to follow the rollout file.
+	// firstRun is true exactly once across all Run() calls on this executor —
+	// gives shouldDisplay license to leak codex's resolved model/sandbox/effort
+	// once at the top of the run instead of repeating the full banner per phase.
+	firstRun := e.headerEmitted.CompareAndSwap(false, true)
+	sessionIDCh := make(chan string, 1)
 	stderrDone := make(chan stderrResult, 1)
 	go func() {
-		stderrDone <- e.processStderr(execCtx, streams.Stderr, idleTouch)
+		stderrDone <- e.processStderr(execCtx, streams.Stderr, idleTouch, sessionIDCh, firstRun)
 	}()
+
+	tailCancel, tailDone := e.startRolloutTail(execCtx, sessionIDCh, idleTouch)
 
 	// read stdout entirely as final response; wrap with touch-on-read so reads
 	// keep the idle timer alive even while stderr is quiet.
@@ -225,6 +241,10 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 
 	// wait for stderr processing to complete
 	stderrRes := <-stderrDone
+
+	// codex has exited; signal tailer to drain remaining file content and stop
+	tailCancel()
+	<-tailDone
 
 	// wait for command completion
 	waitErr := wait()
@@ -377,13 +397,20 @@ type stderrResult struct {
 // regardless of how much chatter follows. idleTouch is invoked for every
 // stderr line so the idle-timeout timer is reset while codex is producing
 // progress output; pass a no-op when idle timeout is disabled.
-func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader, idleTouch func()) stderrResult {
+// when sessionIDCh is non-nil, the first detected "session id: <uuid>" line
+// in the header block is written to it (non-blocking, buffered channel
+// expected) so the caller can start tailing the rollout file in parallel.
+// firstRun gates the one-time emission of codex's resolved model/sandbox/
+// effort header lines so the user can see what codex actually picked from
+// ~/.codex/config.toml; on subsequent invocations the header stays hidden.
+func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader, idleTouch func(), sessionIDCh chan<- string, firstRun bool) stderrResult {
 	const maxTailLines = 5    // keep last N lines for error context
 	const maxLineLength = 256 // truncate long lines to avoid oversized error strings
 
-	state := &codexFilterState{}
+	state := &codexFilterState{firstRun: firstRun}
 	var tail []string
 	var limitMatch, errorMatch string
+	sessionIDSent := false
 
 	err := readLines(ctx, r, func(line string) {
 		if idleTouch != nil {
@@ -393,6 +420,18 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader, idleTouc
 		// per category so detection is eviction- and truncation-resistant.
 		// restricted to CLI-error-prefixed lines (see scanLineForPatterns).
 		e.scanLineForPatterns(line, &limitMatch, &errorMatch)
+
+		// surface session id from header block to caller (once) so the rollout
+		// file can be tailed in parallel for assistant-message streaming.
+		if !sessionIDSent && sessionIDCh != nil {
+			if id := e.extractSessionID(line); id != "" {
+				select {
+				case sessionIDCh <- id:
+				default:
+				}
+				sessionIDSent = true
+			}
+		}
 
 		// capture non-empty lines for error context, preserving original formatting
 		if strings.TrimSpace(line) != "" {
@@ -468,7 +507,14 @@ func (e *CodexExecutor) readStdout(r io.Reader) (string, error) {
 }
 
 // shouldDisplay implements a simple filter for codex stderr output.
-// shows: header block (between first two "--------" separators) and bold summaries.
+// shows: bold reasoning summaries codex emits as live progress; on the very
+// first codex invocation across this executor's lifetime (state.firstRun)
+// also shows codex's resolved model/sandbox/effort lines from the header
+// block so the user sees what codex actually picked from ~/.codex/config.toml.
+// per-iteration header repetition (workdir/provider/approval/session id) is
+// always suppressed to match ClaudeExecutor's empty-banner UX. session id
+// detection in processStderr is independent of display so the rollout tailer
+// still works whether the line is forwarded or not.
 // also deduplicates lines to avoid non-consecutive repeats.
 func (e *CodexExecutor) shouldDisplay(line string, state *codexFilterState) (bool, string) {
 	s := strings.TrimSpace(line)
@@ -478,27 +524,29 @@ func (e *CodexExecutor) shouldDisplay(line string, state *codexFilterState) (boo
 
 	var show bool
 	var filtered string
-	var skipDedup bool // separators are not deduplicated
 
 	switch {
 	case strings.HasPrefix(s, "--------"):
-		// track "--------" separators for header block
+		// track separators only so subsequent header lines stay suppressed;
+		// never displayed.
 		state.headerCount++
-		show = state.headerCount <= 2 // show first two separators
-		filtered = line
-		skipDedup = true // don't deduplicate separators
 	case state.headerCount == 1:
-		// show everything between first two separators (header block)
-		show = true
-		filtered = line
+		// inside the header block. on the first run let codex's resolved
+		// config (model / sandbox / reasoning effort) leak through so the
+		// banner reflects what codex actually picked when ralphex did not
+		// explicitly override these fields.
+		if state.firstRun && e.isHeaderConfigLine(s) {
+			show = true
+			filtered = s
+		}
 	case strings.HasPrefix(s, "**"):
 		// show bold summaries after header (progress indication)
 		show = true
 		filtered = e.stripBold(s)
 	}
 
-	// check for duplicates before returning (except separators)
-	if show && !skipDedup {
+	// deduplicate displayed lines
+	if show {
 		if state.seen == nil {
 			state.seen = make(map[string]bool)
 		}
@@ -509,6 +557,17 @@ func (e *CodexExecutor) shouldDisplay(line string, state *codexFilterState) (boo
 	}
 
 	return show, filtered
+}
+
+// isHeaderConfigLine returns true when line is one of codex's header-block
+// lines describing the resolved per-session config that ralphex doesn't know
+// up front (model picked from ~/.codex/config.toml, sandbox, reasoning effort).
+// other header lines (workdir, provider, approval, reasoning summaries,
+// session id) are either obvious from context or not useful to the user.
+func (e *CodexExecutor) isHeaderConfigLine(s string) bool {
+	return strings.HasPrefix(s, "model:") ||
+		strings.HasPrefix(s, "sandbox:") ||
+		strings.HasPrefix(s, "reasoning effort:")
 }
 
 // stripBold removes markdown bold markers (**text**) from text.
@@ -528,4 +587,205 @@ func (e *CodexExecutor) stripBold(s string) string {
 		result = result[:start] + result[start+2:start+2+end] + result[start+2+end+2:]
 	}
 	return result
+}
+
+// sessionIDPattern matches the "session id: <uuid>" line codex emits in its
+// startup banner. capture group 1 is the session id (lowercase hex + dashes).
+var sessionIDPattern = regexp.MustCompile(`(?i)\bsession id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b`)
+
+// extractSessionID returns the codex session id from a stderr line that
+// includes "session id: <uuid>", or "" when the line does not match. used
+// by processStderr to surface the id to the rollout-tail goroutine.
+func (e *CodexExecutor) extractSessionID(line string) string {
+	m := sessionIDPattern.FindStringSubmatch(line)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+// startRolloutTail spawns the rollout-tail goroutine and returns a cancel
+// function plus a done channel. tail goroutine waits for the session id on
+// sessionIDCh, then follows codex's session rollout file until the returned
+// cancel is called. caller must invoke tailCancel and wait on tailDone before
+// returning so the tailer drains remaining file content and exits cleanly.
+// the goroutine is a no-op when OutputHandler is nil — extracted from Run()
+// to keep its cyclomatic complexity in check.
+func (e *CodexExecutor) startRolloutTail(parent context.Context, sessionIDCh <-chan string, idleTouch func()) (context.CancelFunc, <-chan struct{}) {
+	tailCtx, tailCancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-tailCtx.Done():
+			return
+		case id := <-sessionIDCh:
+			e.tailRolloutFile(tailCtx, id, idleTouch)
+		}
+	}()
+	return tailCancel, done
+}
+
+// findRolloutFile resolves the path to codex's session-rollout JSONL file
+// for the given session id. codex stores the file under
+// ~/.codex/sessions/<year>/<month>/<day>/rollout-<timestamp>-<session-id>.jsonl
+// and may take a brief moment to create it after printing the session-id
+// banner, so we poll up to ~5s. returns "" when the file cannot be located.
+func (e *CodexExecutor) findRolloutFile(ctx context.Context, sessionID string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	pattern := filepath.Join(home, ".codex", "sessions", "*", "*", "*", "rollout-*-"+sessionID+".jsonl")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		matches, _ := filepath.Glob(pattern)
+		if len(matches) > 0 {
+			return matches[0]
+		}
+		if time.Now().After(deadline) {
+			return ""
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// tailRolloutFile follows codex's session rollout JSONL file like `tail -f`,
+// parses each event, and emits human-readable progress lines via OutputHandler.
+// runs until ctx is canceled. on cancellation, drains any remaining buffered
+// lines before returning so late writes (e.g. codex flushing the final
+// assistant message just before exit) are not lost.
+func (e *CodexExecutor) tailRolloutFile(ctx context.Context, sessionID string, idleTouch func()) {
+	if e.OutputHandler == nil {
+		return
+	}
+	path := e.findRolloutFile(ctx, sessionID)
+	if path == "" {
+		return
+	}
+	f, err := os.Open(path) //nolint:gosec // path comes from codex's own session id
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	// accumulator holds bytes that may not yet form a complete line, so partial
+	// reads at EOF do not lose content — the next Read after codex appends more
+	// will complete the line.
+	var acc []byte
+	chunk := make([]byte, 4096)
+	drainOnce := func() {
+		for {
+			n, readErr := f.Read(chunk)
+			if n > 0 {
+				acc = append(acc, chunk[:n]...)
+				for {
+					i := bytes.IndexByte(acc, '\n')
+					if i < 0 {
+						break
+					}
+					if msg := e.formatRolloutEvent(acc[:i]); msg != "" {
+						e.OutputHandler(msg)
+						if idleTouch != nil {
+							idleTouch()
+						}
+					}
+					acc = acc[i+1:]
+				}
+			}
+			if readErr == io.EOF || n == 0 {
+				return
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}
+
+	for {
+		drainOnce()
+		select {
+		case <-ctx.Done():
+			// final drain after codex exits — pick up any late-flushed events
+			drainOnce()
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// rolloutEvent is the outer wrapper for each line in codex's session rollout
+// JSONL file. only `type` and `payload` are needed; we re-parse payload based
+// on the type.
+type rolloutEvent struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// rolloutPayload covers the union of response_item payload shapes we render:
+// assistant messages (payload.type=message, role=assistant), exec_command and
+// spawn_agent function calls. fields outside this subset are ignored.
+type rolloutPayload struct {
+	Type      string `json:"type"`
+	Role      string `json:"role"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Content   []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+// formatRolloutEvent turns one JSONL rollout line into a display string for
+// OutputHandler, or "" when the event has no user-visible substance. only
+// assistant message text (the model's actual reply, the codex equivalent of
+// claude's stream-json text blocks) is forwarded.
+//
+// reasoning records are skipped because their summaries are already streamed
+// live from stderr. all function_call records (exec_command for git/grep/file
+// reads, spawn_agent for parallel reviewer dispatch) and their outputs are
+// skipped because they are tool-machinery noise — the assistant message text
+// already announces what the model is doing narratively (e.g. "I'll launch
+// the five review agents together"). showing both yields redundant chatter.
+func (e *CodexExecutor) formatRolloutEvent(line []byte) string {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return ""
+	}
+	var ev rolloutEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return ""
+	}
+	if ev.Type != "response_item" {
+		return ""
+	}
+	var p rolloutPayload
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		return ""
+	}
+	if p.Type != "message" || p.Role != "assistant" {
+		return ""
+	}
+	var sb strings.Builder
+	for _, c := range p.Content {
+		if c.Type != "output_text" || c.Text == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(c.Text)
+	}
+	return sb.String()
+}
+
+// firstLine returns the first newline-delimited segment of s, or s when it
+// contains no newline. used to keep rollout event display lines compact.
+func (e *CodexExecutor) firstLine(s string) string {
+	head, _, _ := strings.Cut(s, "\n")
+	return head
 }

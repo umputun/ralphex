@@ -138,7 +138,10 @@ type startupInfo struct {
 	ProgressPath            string
 	Executor                string
 	PassClaudeMd            bool
-	PreserveAnthropicAPIKey bool // when true, surfaced in the banner so users can spot wrong-context runs before claude bills the wrong account
+	PreserveAnthropicAPIKey bool   // when true, surfaced in the banner so users can spot wrong-context runs before claude bills the wrong account
+	CodexModel              string // resolved model for codex executor; "" means codex picks from ~/.codex/config.toml
+	CodexEffort             string // resolved reasoning effort for codex executor; "" means codex default
+	CodexSandbox            string // resolved sandbox for codex executor; always non-empty when Executor == codex
 }
 
 // executePlanRequest holds parameters for plan execution.
@@ -565,6 +568,16 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		}
 	}
 
+	// resolve effective codex config (model+effort from task_model spec; sandbox
+	// from CodexExecutorSandbox accessor) so the banner reflects what codex
+	// actually receives, not the raw config fields. CLI --task-model wins over
+	// config task_model just like createRunner resolves it later.
+	taskModelSpec := req.Config.TaskModel
+	if o.TaskModel != "" {
+		taskModelSpec = o.TaskModel
+	}
+	codexModel, codexEffort := processor.ParseModelEffort(taskModelSpec)
+
 	// print startup info
 	printStartupInfo(startupInfo{
 		PlanFile:                req.PlanFile,
@@ -575,6 +588,9 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		Executor:                req.Config.Executor,
 		PassClaudeMd:            req.Config.PassClaudeMd,
 		PreserveAnthropicAPIKey: req.Config.PreserveAnthropicAPIKey,
+		CodexModel:              codexModel,
+		CodexEffort:             codexEffort,
+		CodexSandbox:            req.Config.CodexExecutorSandbox(),
 	}, req.Colors)
 
 	// create and run the runner
@@ -997,6 +1013,18 @@ func printExecutorInfo(info startupInfo, colors *progress.Colors) {
 		return
 	}
 	colors.Info().Printf("executor: codex (external review skipped)\n")
+	// codex effective config: skip lines we don't know (ralphex did not
+	// override them, so codex picks from ~/.codex/config.toml). sandbox is
+	// always resolved via CodexExecutorSandbox so it's always present.
+	if info.CodexModel != "" {
+		colors.Info().Printf("  model: %s\n", info.CodexModel)
+	}
+	if info.CodexSandbox != "" {
+		colors.Info().Printf("  sandbox: %s\n", info.CodexSandbox)
+	}
+	if info.CodexEffort != "" {
+		colors.Info().Printf("  reasoning effort: %s\n", info.CodexEffort)
+	}
 	if info.PassClaudeMd {
 		colors.Info().Printf("claude.md: project CLAUDE.md passthrough enabled\n")
 	}
@@ -1041,6 +1069,14 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	maxIter := resolveMaxIterations(o.MaxIterations, req.Config)
 
+	// resolve effective codex config so the plan-mode banner reflects what
+	// codex actually receives (same logic as executePlan above).
+	taskModelSpec := req.Config.TaskModel
+	if o.TaskModel != "" {
+		taskModelSpec = o.TaskModel
+	}
+	codexModel, codexEffort := processor.ParseModelEffort(taskModelSpec)
+
 	// print startup info for plan mode
 	printStartupInfo(startupInfo{
 		PlanDescription:         o.PlanDescription,
@@ -1051,6 +1087,9 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		Executor:                req.Config.Executor,
 		PassClaudeMd:            req.Config.PassClaudeMd,
 		PreserveAnthropicAPIKey: req.Config.PreserveAnthropicAPIKey,
+		CodexModel:              codexModel,
+		CodexEffort:             codexEffort,
+		CodexSandbox:            req.Config.CodexExecutorSandbox(),
 	}, req.Colors)
 
 	// create input collector

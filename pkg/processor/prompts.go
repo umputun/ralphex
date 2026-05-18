@@ -188,10 +188,15 @@ Report findings only - no positive observations.`, modelClause, subagent, prompt
 // it do not terminate the surrounding single-quoted task='...' literal. the agent
 // name is shared with pkg/executor.CodexReviewerAgentName so the spawn_agent call
 // here stays in sync with the codex -c agents.<name>.description registration.
+// the explicit "do not set fork_context" hint pre-empts a codex auto-optimization
+// that pairs fork_context=true with an explicit agent_type, which codex rejects
+// ("Full-history forked agents inherit the parent agent type, model, and reasoning
+// effort..."); without the hint each review iteration burns ~5 wasted spawn_agent
+// calls before codex retries without fork_context.
 func (r *Runner) formatAgentExpansionCodex(prompt string) string {
 	return fmt.Sprintf(`spawn_agent(agent='%s', task='%s')
 
-Report findings only - no positive observations.`, executor.CodexReviewerAgentName, r.escapeCodexSingleQuoted(prompt))
+Report findings only - no positive observations. Pass only agent and task; do not set fork_context.`, executor.CodexReviewerAgentName, r.escapeCodexSingleQuoted(prompt))
 }
 
 // escapeCodexSingleQuoted escapes the characters that would otherwise break a
