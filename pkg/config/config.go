@@ -28,6 +28,10 @@ const (
 )
 
 // Executor mode constants for the Config.Executor field.
+// ExecutorClaude is the default — the empty string is intentional so that an
+// unset `executor` field in config (or no flag on the CLI) resolves to the
+// claude pipeline without users having to spell it out. ExecutorCodex is the
+// opt-in first-class --codex path.
 const (
 	ExecutorClaude = ""
 	ExecutorCodex  = "codex"
