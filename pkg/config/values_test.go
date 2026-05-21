@@ -43,6 +43,41 @@ func TestValuesLoader_parseCommaSeparated(t *testing.T) {
 	}
 }
 
+func TestParseCommaSeparated(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected []string
+	}{
+		{name: "empty", value: "", expected: nil},
+		{name: "spaces only", value: "   ", expected: nil},
+		{name: "single", value: "codex", expected: []string{"codex"}},
+		{name: "trims multiple values", value: " codex, custom ", expected: []string{"codex", "custom"}},
+		{name: "filters empty entries", value: "codex,, custom, ", expected: []string{"codex", "custom"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, ParseCommaSeparated(tt.value))
+		})
+	}
+}
+
+func TestSelectExternalReviewers(t *testing.T) {
+	configured := []ExternalReviewer{
+		{Name: "codex", Driver: "codex"},
+		{Name: "deepseek", Driver: "script", Script: "/configured/deepseek.sh"},
+	}
+
+	selected := SelectExternalReviewers([]string{"deepseek", "codex", "new-reviewer"}, configured)
+
+	assert.Equal(t, []ExternalReviewer{
+		{Name: "deepseek", Driver: "script", Script: "/configured/deepseek.sh"},
+		{Name: "codex", Driver: "codex"},
+		{Name: "new-reviewer"},
+	}, selected)
+}
+
 func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	loader := newValuesLoader(defaultsFS)
 	values, err := loader.Load("", "")
@@ -1078,6 +1113,59 @@ func TestValuesLoader_Load_ExternalReviewTool(t *testing.T) {
 	}
 }
 
+func TestValuesLoader_Load_ExternalReviewers(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config")
+
+	configContent := `
+external_review_tool = custom
+external_reviewers = codex, deepseek
+
+[external_reviewer.codex]
+driver = codex
+
+[external_reviewer.deepseek]
+driver = script
+script = ~/reviewers/deepseek.sh
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", configPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "custom", values.ExternalReviewTool)
+	home, homeErr := os.UserHomeDir()
+	require.NoError(t, homeErr)
+	assert.Equal(t, []ExternalReviewer{
+		{Name: "codex", Driver: "codex"},
+		{Name: "deepseek", Driver: "script", Script: filepath.Join(home, "reviewers", "deepseek.sh")},
+	}, values.ExternalReviewers)
+	assert.Equal(t, values.ExternalReviewers, values.ExternalReviewerDefinitions)
+}
+
+func TestValuesLoader_Load_ExternalReviewerDefinitionsWithoutEnabledList(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config")
+
+	configContent := `
+[external_reviewer.deepseek]
+driver = script
+script = /path/to/deepseek.sh
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	loader := newValuesLoader(defaultsFS)
+	values, err := loader.Load("", configPath)
+	require.NoError(t, err)
+
+	assert.Empty(t, values.ExternalReviewers)
+	assert.False(t, values.ExternalReviewersSet)
+	assert.Equal(t, []ExternalReviewer{
+		{Name: "deepseek", Driver: "script", Script: "/path/to/deepseek.sh"},
+	}, values.ExternalReviewerDefinitions)
+}
+
 func TestValuesLoader_Load_CustomReviewScript(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
@@ -1569,6 +1657,24 @@ func TestValues_mergeFrom_ExternalReviewFields(t *testing.T) {
 		src := Values{CustomReviewScript: ""}
 		dst.mergeFrom(&src)
 		assert.Equal(t, "/old/script.sh", dst.CustomReviewScript)
+	})
+
+	t.Run("local reviewer names reuse global definitions without enabling globally", func(t *testing.T) {
+		dst := Values{
+			ExternalReviewerDefinitions: []ExternalReviewer{
+				{Name: "deepseek", Driver: "script", Script: "/global/deepseek.sh"},
+			},
+		}
+		src := Values{
+			ExternalReviewers:    []ExternalReviewer{{Name: "deepseek"}},
+			ExternalReviewersSet: true,
+		}
+
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []ExternalReviewer{
+			{Name: "deepseek", Driver: "script", Script: "/global/deepseek.sh"},
+		}, dst.ExternalReviewers)
 	})
 }
 

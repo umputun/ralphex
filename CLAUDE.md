@@ -110,6 +110,8 @@ Key files:
 Allows using custom scripts instead of codex for external code review:
 
 - Config: `external_review_tool = custom` and `custom_review_script = /path/to/script.sh`
+- Parallel named reviewers: `external_reviewers = codex, deepseek` with `[external_reviewer.<name>]` sections; supported drivers are `codex`, `script`, and `none`
+- CLI override: `--external-reviewers=codex,deepseek` selects configured reviewer names and conflicts with `--external-review-tool`
 - Script receives prompt file path as single argument
 - Script outputs findings to stdout (ralphex passes them to Claude for evaluation)
 - `{{DIFF_INSTRUCTION}}` template variable expands based on iteration:

@@ -574,6 +574,12 @@ ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
 # use provider overrides for one run without editing config
 ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
 
+# override external_reviewers config for one run
+ralphex --external-only --external-reviewers=codex,deepseek
+
+# disable external review for one run without editing config
+ralphex --external-only --external-reviewers=
+
 # set per-session timeout to kill hanging claude sessions
 ralphex --session-timeout=30m docs/plans/feature.md
 
@@ -608,6 +614,7 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `--claude-command` | Override the Claude-compatible command for this run | config/default |
 | `--claude-args` | Override Claude-compatible command arguments for this run. Use `--claude-args=` to clear configured/default args | config/default |
 | `--external-review-tool` | Override external review tool for this run (`codex`, `custom`, or `none`) | config/default |
+| `--external-reviewers` | Override `external_reviewers` config for this run as comma-separated names; empty disables external review | config/default |
 | `--custom-review-script` | Override custom external review script for this run | config/default |
 | `--wait` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `--session-timeout` | Per-session timeout for claude (e.g., `30m`, `1h`). Kills hanging sessions | disabled |
@@ -851,6 +858,7 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 | `codex_timeout_ms` | Codex timeout in ms | `3600000` |
 | `codex_sandbox` | Sandbox mode | `read-only` |
 | `external_review_tool` | External review tool (`codex`, `custom`, `none`) | `codex` |
+| `external_reviewers` | Named external reviewers to run in parallel, comma-separated. Reviewer definitions use `[external_reviewer.<name>]`; when set, takes precedence over `external_review_tool` | empty |
 | `custom_review_script` | Path to custom review script (when `external_review_tool = custom`) | - |
 | `max_external_iterations` | Override external review iteration limit (0 = auto, derived from `max_iterations`) | `0` |
 | `review_patience` | Terminate external review after N consecutive unchanged rounds (0 = disabled) | `0` |
@@ -906,6 +914,30 @@ custom_review_script = ~/.config/ralphex/scripts/my-review.sh
 ```
 
 For a one-off run without editing config, use `--external-review-tool=custom --custom-review-script=/path/to/script.sh`.
+
+To run Codex and a named OpenCode/DeepSeek reviewer in parallel during each external review iteration:
+
+```ini
+# in ~/.config/ralphex/config
+external_reviewers = codex, deepseek
+
+[external_reviewer.codex]
+driver = codex
+
+[external_reviewer.deepseek]
+driver = script
+script = ~/.config/ralphex/scripts/opencode-deepseek-review.sh
+```
+
+For a one-off run:
+
+```bash
+ralphex --external-only --external-reviewers=codex,deepseek
+```
+
+The CLI flag is an override for the config key: use `external_reviewers = codex, deepseek` for the default behavior, or `--external-reviewers=deepseek,codex` to reorder/subset configured reviewers for one run. Use `--external-reviewers=` to disable external review for one run without changing config.
+
+Each reviewer has a stable name used in logs and in the combined evaluation prompt. The `script` driver receives the prompt file path as its single argument, matching the legacy `custom_review_script` interface. If any configured reviewer fails, the external review iteration fails instead of evaluating an incomplete reviewer set.
 
 **Script interface:**
 
@@ -1039,6 +1071,19 @@ The default pairing is Claude for implementation and Codex for external review. 
 claude_command       = /path/to/scripts/codex-as-claude/codex-as-claude.sh
 external_review_tool = custom
 custom_review_script = /path/to/scripts/opencode/opencode-review.sh
+```
+
+To keep Codex as one external reviewer while also running an OpenCode-backed reviewer, use named reviewers instead:
+
+```ini
+external_reviewers = codex, deepseek
+
+[external_reviewer.codex]
+driver = codex
+
+[external_reviewer.deepseek]
+driver = script
+script = /path/to/scripts/opencode/opencode-review.sh
 ```
 
 The `claude_command` slot is documented above. The `custom_review_script` slot, including the script interface and expected output format, is documented in [Custom External Review](#custom-external-review).

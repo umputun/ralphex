@@ -59,8 +59,10 @@ type Config struct {
 	CodexTimeoutMsSet    bool   `json:"-"` // tracks if codex_timeout_ms was explicitly set in config
 	CodexSandbox         string `json:"codex_sandbox"`
 
-	ExternalReviewTool string `json:"external_review_tool"` // "codex", "custom", or "none"
-	CustomReviewScript string `json:"custom_review_script"` // path to custom review script
+	ExternalReviewTool          string             `json:"external_review_tool"`          // legacy: "codex", "custom", or "none"
+	ExternalReviewers           []ExternalReviewer `json:"external_reviewers"`            // ordered named external reviewers
+	ExternalReviewerDefinitions []ExternalReviewer `json:"external_reviewer_definitions"` // all named reviewer definitions from config
+	CustomReviewScript          string             `json:"custom_review_script"`          // legacy custom review script
 
 	IterationDelayMs      int  `json:"iteration_delay_ms"`
 	IterationDelayMsSet   bool `json:"-"` // tracks if iteration_delay_ms was explicitly set in config
@@ -134,6 +136,13 @@ type CustomAgent struct {
 	Name    string // filename without extension
 	Prompt  string // contents of the agent file (body after options header)
 	Options        // embedded: model and agent type parsed from frontmatter
+}
+
+// ExternalReviewer describes one named external reviewer.
+type ExternalReviewer struct {
+	Name   string `json:"name"`
+	Driver string `json:"driver"` // codex, script, or none
+	Script string `json:"script"` // path for script driver
 }
 
 // ColorConfig holds RGB values for output colors.
@@ -282,49 +291,51 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 
 	// assemble config
 	c := &Config{
-		ClaudeCommand:           values.ClaudeCommand,
-		ClaudeArgs:              values.ClaudeArgs,
-		TaskModel:               values.TaskModel,
-		ReviewModel:             values.ReviewModel,
-		CodexEnabled:            values.CodexEnabled,
-		CodexEnabledSet:         values.CodexEnabledSet,
-		CodexCommand:            values.CodexCommand,
-		CodexModel:              values.CodexModel,
-		CodexReasoningEffort:    values.CodexReasoningEffort,
-		CodexTimeoutMs:          values.CodexTimeoutMs,
-		CodexTimeoutMsSet:       values.CodexTimeoutMsSet,
-		CodexSandbox:            values.CodexSandbox,
-		ExternalReviewTool:      values.ExternalReviewTool,
-		CustomReviewScript:      values.CustomReviewScript,
-		IterationDelayMs:        values.IterationDelayMs,
-		IterationDelayMsSet:     values.IterationDelayMsSet,
-		TaskRetryCount:          values.TaskRetryCount,
-		TaskRetryCountSet:       values.TaskRetryCountSet,
-		MaxIterations:           values.MaxIterations,
-		MaxIterationsSet:        values.MaxIterationsSet,
-		MaxExternalIterations:   values.MaxExternalIterations,
-		ReviewPatience:          values.ReviewPatience,
-		FinalizeEnabled:         values.FinalizeEnabled,
-		FinalizeEnabledSet:      values.FinalizeEnabledSet,
-		PreserveAnthropicAPIKey: values.PreserveAnthropicAPIKey,
-		MovePlanOnCompletion:    values.MovePlanOnCompletion,
-		WorktreeEnabled:         values.WorktreeEnabled,
-		WorktreeEnabledSet:      values.WorktreeEnabledSet,
-		PlansDir:                values.PlansDir,
-		DefaultBranch:           values.DefaultBranch,
-		VcsCommand:              values.VcsCommand,
-		CommitTrailer:           values.CommitTrailer,
-		WatchDirs:               values.WatchDirs,
-		ClaudeErrorPatterns:     values.ClaudeErrorPatterns,
-		CodexErrorPatterns:      values.CodexErrorPatterns,
-		ClaudeLimitPatterns:     values.ClaudeLimitPatterns,
-		CodexLimitPatterns:      values.CodexLimitPatterns,
-		WaitOnLimit:             values.WaitOnLimit,
-		WaitOnLimitSet:          values.WaitOnLimitSet,
-		SessionTimeout:          values.SessionTimeout,
-		SessionTimeoutSet:       values.SessionTimeoutSet,
-		IdleTimeout:             values.IdleTimeout,
-		IdleTimeoutSet:          values.IdleTimeoutSet,
+		ClaudeCommand:               values.ClaudeCommand,
+		ClaudeArgs:                  values.ClaudeArgs,
+		TaskModel:                   values.TaskModel,
+		ReviewModel:                 values.ReviewModel,
+		CodexEnabled:                values.CodexEnabled,
+		CodexEnabledSet:             values.CodexEnabledSet,
+		CodexCommand:                values.CodexCommand,
+		CodexModel:                  values.CodexModel,
+		CodexReasoningEffort:        values.CodexReasoningEffort,
+		CodexTimeoutMs:              values.CodexTimeoutMs,
+		CodexTimeoutMsSet:           values.CodexTimeoutMsSet,
+		CodexSandbox:                values.CodexSandbox,
+		ExternalReviewTool:          values.ExternalReviewTool,
+		ExternalReviewers:           values.ExternalReviewers,
+		ExternalReviewerDefinitions: values.ExternalReviewerDefinitions,
+		CustomReviewScript:          values.CustomReviewScript,
+		IterationDelayMs:            values.IterationDelayMs,
+		IterationDelayMsSet:         values.IterationDelayMsSet,
+		TaskRetryCount:              values.TaskRetryCount,
+		TaskRetryCountSet:           values.TaskRetryCountSet,
+		MaxIterations:               values.MaxIterations,
+		MaxIterationsSet:            values.MaxIterationsSet,
+		MaxExternalIterations:       values.MaxExternalIterations,
+		ReviewPatience:              values.ReviewPatience,
+		FinalizeEnabled:             values.FinalizeEnabled,
+		FinalizeEnabledSet:          values.FinalizeEnabledSet,
+		PreserveAnthropicAPIKey:     values.PreserveAnthropicAPIKey,
+		MovePlanOnCompletion:        values.MovePlanOnCompletion,
+		WorktreeEnabled:             values.WorktreeEnabled,
+		WorktreeEnabledSet:          values.WorktreeEnabledSet,
+		PlansDir:                    values.PlansDir,
+		DefaultBranch:               values.DefaultBranch,
+		VcsCommand:                  values.VcsCommand,
+		CommitTrailer:               values.CommitTrailer,
+		WatchDirs:                   values.WatchDirs,
+		ClaudeErrorPatterns:         values.ClaudeErrorPatterns,
+		CodexErrorPatterns:          values.CodexErrorPatterns,
+		ClaudeLimitPatterns:         values.ClaudeLimitPatterns,
+		CodexLimitPatterns:          values.CodexLimitPatterns,
+		WaitOnLimit:                 values.WaitOnLimit,
+		WaitOnLimitSet:              values.WaitOnLimitSet,
+		SessionTimeout:              values.SessionTimeout,
+		SessionTimeoutSet:           values.SessionTimeoutSet,
+		IdleTimeout:                 values.IdleTimeout,
+		IdleTimeoutSet:              values.IdleTimeoutSet,
 		NotifyParams: notify.Params{
 			Channels:      values.NotifyChannels,
 			OnError:       values.NotifyOnError,

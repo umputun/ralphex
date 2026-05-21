@@ -82,6 +82,21 @@ codex_sandbox = read-only
 # default: codex
 external_review_tool = codex
 
+# external_reviewers: comma-separated named reviewers to run in parallel
+# when set, this takes precedence over external_review_tool
+# default: empty
+# external_reviewers =
+#
+# example:
+# external_reviewers = codex, deepseek
+#
+# [external_reviewer.codex]
+# driver = codex
+#
+# [external_reviewer.deepseek]
+# driver = script
+# script = ~/.config/ralphex/scripts/opencode-deepseek-review.sh
+
 # custom_review_script: path to custom review script
 # only used when external_review_tool = custom
 # script receives prompt file path as single argument

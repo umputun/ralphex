@@ -1968,14 +1968,14 @@ func TestRunner_ExternalReviewTool_ExplicitSet_OverridesLegacyCodexDisabled(t *t
 	appCfg := testAppConfig(t)
 	appCfg.ExternalReviewTool = "codex"
 
-	// legacy codex_enabled=false combined with an explicit ExternalReviewToolSet
+	// legacy codex_enabled=false combined with an explicit ExternalReviewExplicitSet
 	// (e.g. via --external-review-tool=codex) should run the chosen tool, not "none"
 	cfg := processor.Config{
-		Mode:                  processor.ModeCodexOnly,
-		MaxIterations:         50,
-		CodexEnabled:          false,
-		ExternalReviewToolSet: true,
-		AppConfig:             appCfg,
+		Mode:                      processor.ModeCodexOnly,
+		MaxIterations:             50,
+		CodexEnabled:              false,
+		ExternalReviewExplicitSet: true,
+		AppConfig:                 appCfg,
 	}
 	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
@@ -2090,6 +2090,229 @@ func TestRunner_ExternalReviewTool_Custom_NotConfigured(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom review script not configured")
+}
+
+func TestRunner_ExternalReviewers_CodexAndScript_Success(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "done", Signal: processor.SignalCodexDone},
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "codex found issue in foo.go:10"},
+	})
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewers = []config.ExternalReviewer{
+		{Name: "codex", Driver: "codex"},
+		{Name: "deepseek", Driver: "script", Script: "/path/to/deepseek.sh"},
+	}
+
+	deepseekExec := &executor.CustomExecutor{
+		Script:        "/path/to/deepseek.sh",
+		OutputHandler: func(text string) { log.PrintAligned(text) },
+	}
+	deepseekResultIdx := 0
+	deepseekExec.SetRunner(&mockCustomRunnerImpl{
+		results: []executor.Result{{Output: "deepseek found issue in bar.go:20"}},
+		idx:     &deepseekResultIdx,
+	})
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  true,
+		AppConfig:     appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{
+		Claude:          claude,
+		Codex:           codex,
+		ScriptReviewers: map[string]*executor.CustomExecutor{"deepseek": deepseekExec},
+	}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 1, "codex should run once")
+	assert.Len(t, claude.RunCalls(), 1, "claude should evaluate combined findings once")
+
+	evalPrompt := claude.RunCalls()[0].Prompt
+	assert.Contains(t, evalPrompt, "## codex review")
+	assert.Contains(t, evalPrompt, "codex found issue in foo.go:10")
+	assert.Contains(t, evalPrompt, "## deepseek review")
+	assert.Contains(t, evalPrompt, "deepseek found issue in bar.go:20")
+	assert.NotContains(t, evalPrompt, "Codex reviewed")
+}
+
+func TestRunner_ExternalReviewers_NoneWithOtherReviewerFails(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewers = []config.ExternalReviewer{
+		{Name: "none", Driver: "none"},
+		{Name: "codex", Driver: "codex"},
+	}
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  true,
+		AppConfig:     appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot combine none")
+	assert.Empty(t, codex.RunCalls())
+	assert.Empty(t, claude.RunCalls())
+}
+
+func TestRunner_ExternalReviewers_DuplicateReviewerFails(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewers = []config.ExternalReviewer{
+		{Name: "codex", Driver: "codex"},
+		{Name: "codex", Driver: "codex"},
+	}
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  true,
+		AppConfig:     appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate external reviewer")
+	assert.Empty(t, codex.RunCalls())
+	assert.Empty(t, claude.RunCalls())
+}
+
+func TestRunner_ExternalReviewers_ExplicitEmptyDisablesExternalReview(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewTool = ""
+	appCfg.ExternalReviewers = nil
+
+	cfg := processor.Config{
+		Mode:                      processor.ModeCodexOnly,
+		MaxIterations:             50,
+		CodexEnabled:              true,
+		ExternalReviewExplicitSet: true,
+		AppConfig:                 appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Empty(t, codex.RunCalls())
+	assert.Empty(t, claude.RunCalls())
+}
+
+func TestRunner_ExternalReviewers_MissingDriverFailsWithConfigHint(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor(nil)
+	codex := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewers = []config.ExternalReviewer{{Name: "deepseek"}}
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  true,
+		AppConfig:     appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `external reviewer "deepseek" has no driver configured`)
+	assert.Contains(t, err.Error(), "[external_reviewer.deepseek]")
+	assert.Empty(t, codex.RunCalls())
+	assert.Empty(t, claude.RunCalls())
+}
+
+func TestRunner_ExternalReviewers_CodexExecutorMissingFails(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor(nil)
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewers = []config.ExternalReviewer{{Name: "codex", Driver: "codex"}}
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  true,
+		AppConfig:     appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `codex external reviewer "codex" not configured`)
+	assert.Empty(t, claude.RunCalls())
+}
+
+func TestRunner_ExternalReviewers_MissingCodexBinaryDisablesNamedCodex(t *testing.T) {
+	log := newMockLogger("progress.txt")
+
+	appCfg := testAppConfig(t)
+	appCfg.CodexCommand = "missing-ralphex-codex-command"
+	appCfg.ExternalReviewers = []config.ExternalReviewer{{Name: "codex", Driver: "codex"}}
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  true,
+		AppConfig:     appCfg,
+	}
+	r := processor.New(cfg, log, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	var foundWarning bool
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, "disabling codex review phase") {
+			foundWarning = true
+			break
+		}
+	}
+	assert.True(t, foundWarning, "should log warning about missing codex")
+}
+
+func TestRunner_ExternalReviewers_OverridesLegacyCodexDisabled(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	claude := newMockExecutor([]executor.Result{
+		{Output: "done", Signal: processor.SignalCodexDone},
+	})
+	codex := newMockExecutor([]executor.Result{
+		{Output: "codex found issue"},
+	})
+
+	appCfg := testAppConfig(t)
+	appCfg.ExternalReviewers = []config.ExternalReviewer{{Name: "codex", Driver: "codex"}}
+
+	cfg := processor.Config{
+		Mode:          processor.ModeCodexOnly,
+		MaxIterations: 50,
+		CodexEnabled:  false,
+		AppConfig:     appCfg,
+	}
+	r := processor.NewWithExecutors(cfg, log, processor.Executors{Claude: claude, Codex: codex}, &status.PhaseHolder{})
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Len(t, codex.RunCalls(), 1, "external_reviewers should be treated as an explicit choice")
 }
 
 // mockCustomRunnerImpl is a mock implementation of executor.CustomRunner for testing.

@@ -15,51 +15,54 @@ import (
 // set in config. This allows distinguishing explicit false/0 from "not set", enabling
 // proper merge behavior where local config can override global config with zero values.
 type Values struct {
-	ClaudeCommand              string
-	ClaudeArgs                 string
-	TaskModel                  string   // model for task execution (e.g., "opus", "sonnet", "haiku")
-	ReviewModel                string   // model for review phases (falls back to TaskModel if empty)
-	ClaudeErrorPatterns        []string // patterns to detect in claude output (e.g., rate limit messages)
-	CodexEnabled               bool
-	CodexEnabledSet            bool // tracks if codex_enabled was explicitly set
-	CodexCommand               string
-	CodexModel                 string
-	CodexReasoningEffort       string
-	CodexTimeoutMs             int
-	CodexTimeoutMsSet          bool // tracks if codex_timeout_ms was explicitly set
-	CodexSandbox               string
-	CodexErrorPatterns         []string // patterns to detect in codex output (e.g., rate limit messages)
-	ClaudeLimitPatterns        []string // patterns to detect rate limits in claude output (for wait+retry)
-	CodexLimitPatterns         []string // patterns to detect rate limits in codex output (for wait+retry)
-	WaitOnLimit                time.Duration
-	WaitOnLimitSet             bool // tracks if wait_on_limit was explicitly set
-	SessionTimeout             time.Duration
-	SessionTimeoutSet          bool          // tracks if session_timeout was explicitly set
-	IdleTimeout                time.Duration // kill session after no output for this duration
-	IdleTimeoutSet             bool          // tracks if idle_timeout was explicitly set
-	ExternalReviewTool         string        // "codex", "custom", or "none"
-	CustomReviewScript         string        // path to custom review script (when ExternalReviewTool = "custom")
-	IterationDelayMs           int
-	IterationDelayMsSet        bool // tracks if iteration_delay_ms was explicitly set
-	TaskRetryCount             int
-	TaskRetryCountSet          bool // tracks if task_retry_count was explicitly set
-	MaxIterations              int
-	MaxIterationsSet           bool // tracks if max_iterations was explicitly set
-	MaxExternalIterations      int  // override external review iteration limit (0 = auto)
-	ReviewPatience             int  // terminate external review after N unchanged rounds (0 = disabled)
-	FinalizeEnabled            bool
-	FinalizeEnabledSet         bool // tracks if finalize_enabled was explicitly set
-	PreserveAnthropicAPIKey    bool
-	PreserveAnthropicAPIKeySet bool // tracks if preserve_anthropic_api_key was explicitly set
-	MovePlanOnCompletion       bool
-	MovePlanOnCompletionSet    bool // tracks if move_plan_on_completion was explicitly set
-	WorktreeEnabled            bool
-	WorktreeEnabledSet         bool   // tracks if use_worktree was explicitly set
-	VcsCommand                 string // custom VCS command (default: "git")
-	CommitTrailer              string // trailer line to append to all commits (e.g., "Co-authored-by: ...")
-	PlansDir                   string
-	DefaultBranch              string   // override auto-detected default branch
-	WatchDirs                  []string // directories to watch for progress files
+	ClaudeCommand               string
+	ClaudeArgs                  string
+	TaskModel                   string   // model for task execution (e.g., "opus", "sonnet", "haiku")
+	ReviewModel                 string   // model for review phases (falls back to TaskModel if empty)
+	ClaudeErrorPatterns         []string // patterns to detect in claude output (e.g., rate limit messages)
+	CodexEnabled                bool
+	CodexEnabledSet             bool // tracks if codex_enabled was explicitly set
+	CodexCommand                string
+	CodexModel                  string
+	CodexReasoningEffort        string
+	CodexTimeoutMs              int
+	CodexTimeoutMsSet           bool // tracks if codex_timeout_ms was explicitly set
+	CodexSandbox                string
+	CodexErrorPatterns          []string // patterns to detect in codex output (e.g., rate limit messages)
+	ClaudeLimitPatterns         []string // patterns to detect rate limits in claude output (for wait+retry)
+	CodexLimitPatterns          []string // patterns to detect rate limits in codex output (for wait+retry)
+	WaitOnLimit                 time.Duration
+	WaitOnLimitSet              bool // tracks if wait_on_limit was explicitly set
+	SessionTimeout              time.Duration
+	SessionTimeoutSet           bool          // tracks if session_timeout was explicitly set
+	IdleTimeout                 time.Duration // kill session after no output for this duration
+	IdleTimeoutSet              bool          // tracks if idle_timeout was explicitly set
+	ExternalReviewTool          string        // "codex", "custom", or "none"
+	ExternalReviewers           []ExternalReviewer
+	ExternalReviewerDefinitions []ExternalReviewer
+	ExternalReviewersSet        bool
+	CustomReviewScript          string // path to custom review script (when ExternalReviewTool = "custom")
+	IterationDelayMs            int
+	IterationDelayMsSet         bool // tracks if iteration_delay_ms was explicitly set
+	TaskRetryCount              int
+	TaskRetryCountSet           bool // tracks if task_retry_count was explicitly set
+	MaxIterations               int
+	MaxIterationsSet            bool // tracks if max_iterations was explicitly set
+	MaxExternalIterations       int  // override external review iteration limit (0 = auto)
+	ReviewPatience              int  // terminate external review after N unchanged rounds (0 = disabled)
+	FinalizeEnabled             bool
+	FinalizeEnabledSet          bool // tracks if finalize_enabled was explicitly set
+	PreserveAnthropicAPIKey     bool
+	PreserveAnthropicAPIKeySet  bool // tracks if preserve_anthropic_api_key was explicitly set
+	MovePlanOnCompletion        bool
+	MovePlanOnCompletionSet     bool // tracks if move_plan_on_completion was explicitly set
+	WorktreeEnabled             bool
+	WorktreeEnabledSet          bool   // tracks if use_worktree was explicitly set
+	VcsCommand                  string // custom VCS command (default: "git")
+	CommitTrailer               string // trailer line to append to all commits (e.g., "Co-authored-by: ...")
+	PlansDir                    string
+	DefaultBranch               string   // override auto-detected default branch
+	WatchDirs                   []string // directories to watch for progress files
 
 	// notification settings
 	NotifyChannels        []string // channels to use: telegram, email, webhook, slack, custom
@@ -229,6 +232,8 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	if key, err := section.GetKey("external_review_tool"); err == nil {
 		values.ExternalReviewTool = key.String()
 	}
+	values.ExternalReviewerDefinitions = vl.parseExternalReviewerDefinitions(cfg)
+	values.ExternalReviewers, values.ExternalReviewersSet = vl.parseExternalReviewers(cfg, values.ExternalReviewerDefinitions)
 	if key, err := section.GetKey("custom_review_script"); err == nil {
 		values.CustomReviewScript = expandTilde(key.String())
 	}
@@ -456,6 +461,10 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.CodexEnabledSet {
 		dst.CodexEnabled = src.CodexEnabled
 		dst.CodexEnabledSet = true
+		if !src.CodexEnabled && !src.ExternalReviewersSet {
+			dst.ExternalReviewers = nil
+			dst.ExternalReviewersSet = false
+		}
 	}
 	if src.CodexCommand != "" {
 		dst.CodexCommand = src.CodexCommand
@@ -475,6 +484,18 @@ func (dst *Values) mergeFrom(src *Values) {
 	}
 	if src.ExternalReviewTool != "" {
 		dst.ExternalReviewTool = src.ExternalReviewTool
+		if !src.ExternalReviewersSet {
+			dst.ExternalReviewers = nil
+			dst.ExternalReviewersSet = false
+		}
+	}
+	if len(src.ExternalReviewerDefinitions) > 0 {
+		dst.ExternalReviewerDefinitions = mergeExternalReviewerDefinitions(dst.ExternalReviewerDefinitions, src.ExternalReviewerDefinitions)
+	}
+	if src.ExternalReviewersSet {
+		dst.ExternalReviewers = SelectExternalReviewers(externalReviewerNames(src.ExternalReviewers),
+			append(append([]ExternalReviewer{}, dst.ExternalReviewerDefinitions...), src.ExternalReviewers...))
+		dst.ExternalReviewersSet = true
 	}
 	if src.CustomReviewScript != "" {
 		dst.CustomReviewScript = src.CustomReviewScript
@@ -748,7 +769,43 @@ func (vl *valuesLoader) parseCommaSeparated(section *ini.Section, key string) []
 	if err != nil {
 		return nil
 	}
-	val := strings.TrimSpace(k.String())
+	return ParseCommaSeparated(k.String())
+}
+
+func (vl *valuesLoader) parseExternalReviewerDefinitions(cfg *ini.File) []ExternalReviewer {
+	var reviewers []ExternalReviewer
+	for _, section := range cfg.Sections() {
+		name, ok := strings.CutPrefix(section.Name(), "external_reviewer.")
+		if !ok || name == "" {
+			continue
+		}
+		reviewer := ExternalReviewer{Name: name}
+		if key, err := section.GetKey("driver"); err == nil {
+			reviewer.Driver = strings.TrimSpace(key.String())
+		}
+		if key, err := section.GetKey("script"); err == nil {
+			reviewer.Script = expandTilde(strings.TrimSpace(key.String()))
+		}
+		reviewers = append(reviewers, reviewer)
+	}
+	return reviewers
+}
+
+func (vl *valuesLoader) parseExternalReviewers(cfg *ini.File, definitions []ExternalReviewer) ([]ExternalReviewer, bool) {
+	if _, err := cfg.Section("").GetKey("external_reviewers"); err != nil {
+		return nil, false
+	}
+	names := vl.parseCommaSeparated(cfg.Section(""), "external_reviewers")
+	if len(names) == 0 {
+		return nil, true
+	}
+
+	return SelectExternalReviewers(names, definitions), true
+}
+
+// ParseCommaSeparated splits a comma-separated config or CLI value, trims whitespace, and filters empty strings.
+func ParseCommaSeparated(value string) []string {
+	val := strings.TrimSpace(value)
 	if val == "" {
 		return nil
 	}
@@ -759,6 +816,60 @@ func (vl *valuesLoader) parseCommaSeparated(section *ini.Section, key string) []
 		}
 	}
 	return result
+}
+
+// SelectExternalReviewers returns reviewers in requested order, preserving configured definitions.
+func SelectExternalReviewers(names []string, configured []ExternalReviewer) []ExternalReviewer {
+	if len(names) == 0 {
+		return nil
+	}
+	byName := make(map[string]ExternalReviewer, len(configured))
+	for _, reviewer := range configured {
+		if existing, ok := byName[reviewer.Name]; ok && reviewer.Driver == "" && reviewer.Script == "" &&
+			(existing.Driver != "" || existing.Script != "") {
+			continue
+		}
+		byName[reviewer.Name] = reviewer
+	}
+
+	selected := make([]ExternalReviewer, 0, len(names))
+	for _, name := range names {
+		reviewer, ok := byName[name]
+		if !ok {
+			reviewer = ExternalReviewer{Name: name}
+		}
+		selected = append(selected, reviewer)
+	}
+	return selected
+}
+
+func mergeExternalReviewerDefinitions(dst, src []ExternalReviewer) []ExternalReviewer {
+	merged := make([]ExternalReviewer, 0, len(dst)+len(src))
+	indexByName := make(map[string]int, len(dst)+len(src))
+	for _, reviewer := range dst {
+		indexByName[reviewer.Name] = len(merged)
+		merged = append(merged, reviewer)
+	}
+	for _, reviewer := range src {
+		if idx, ok := indexByName[reviewer.Name]; ok {
+			merged[idx] = reviewer
+			continue
+		}
+		indexByName[reviewer.Name] = len(merged)
+		merged = append(merged, reviewer)
+	}
+	return merged
+}
+
+func externalReviewerNames(reviewers []ExternalReviewer) []string {
+	if len(reviewers) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(reviewers))
+	for _, reviewer := range reviewers {
+		names = append(names, reviewer.Name)
+	}
+	return names
 }
 
 // expandTilde expands a leading ~ in a path to the user's home directory.

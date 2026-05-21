@@ -895,6 +895,38 @@ custom_review_script = /path/to/my-review.sh
 	assert.Equal(t, "/path/to/my-review.sh", cfg.CustomReviewScript)
 }
 
+func TestLoad_ExternalReviewersConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "ralphex")
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(configDir, "agents"), 0o700))
+
+	configContent := `
+external_review_tool = codex
+external_reviewers = codex, deepseek
+custom_review_script = /path/to/my-review.sh
+
+[external_reviewer.codex]
+driver = codex
+
+[external_reviewer.deepseek]
+driver = script
+script = /path/to/deepseek-review.sh
+`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config"), []byte(configContent), 0o600))
+
+	cfg, err := Load(configDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "codex", cfg.ExternalReviewTool)
+	assert.Equal(t, []ExternalReviewer{
+		{Name: "codex", Driver: "codex"},
+		{Name: "deepseek", Driver: "script", Script: "/path/to/deepseek-review.sh"},
+	}, cfg.ExternalReviewers)
+	assert.Equal(t, "/path/to/my-review.sh", cfg.CustomReviewScript)
+}
+
 func TestLoad_ExternalReviewToolDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "ralphex")
@@ -910,6 +942,7 @@ func TestLoad_ExternalReviewToolDefaults(t *testing.T) {
 
 	// external_review_tool should default to "codex"
 	assert.Equal(t, "codex", cfg.ExternalReviewTool)
+	assert.Empty(t, cfg.ExternalReviewers)
 	assert.Empty(t, cfg.CustomReviewScript)
 }
 
@@ -999,6 +1032,92 @@ func TestLocalConfig_LocalOverridesExternalReviewTool(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "none", cfg.ExternalReviewTool)
+}
+
+func TestLocalConfig_LocalOverridesExternalReviewers(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+	localDir := filepath.Join(tmpDir, ".ralphex")
+
+	require.NoError(t, os.MkdirAll(globalDir, 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	globalConfig := `external_reviewers = codex, deepseek`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+
+	localConfig := `
+external_reviewers = deepseek
+
+[external_reviewer.deepseek]
+driver = script
+script = /path/to/deepseek-review.sh
+`
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(localConfig), 0o600))
+
+	cfg, err := loadWithLocal(globalDir, localDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, []ExternalReviewer{
+		{Name: "deepseek", Driver: "script", Script: "/path/to/deepseek-review.sh"},
+	}, cfg.ExternalReviewers)
+}
+
+func TestLocalConfig_LocalExternalReviewToolClearsGlobalExternalReviewers(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+	localDir := filepath.Join(tmpDir, ".ralphex")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	globalConfig := `
+external_reviewers = codex, deepseek
+
+[external_reviewer.deepseek]
+driver = script
+script = /path/to/deepseek-review.sh
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(`external_review_tool = none`), 0o600))
+
+	cfg, err := loadWithLocal(globalDir, localDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "none", cfg.ExternalReviewTool)
+	assert.Empty(t, cfg.ExternalReviewers)
+}
+
+func TestLocalConfig_LocalExternalReviewerNamesReuseGlobalDefinitions(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "global")
+	localDir := filepath.Join(tmpDir, ".ralphex")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "prompts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalDir, "agents"), 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	globalConfig := `
+external_reviewers = codex, deepseek
+
+[external_reviewer.codex]
+driver = codex
+
+[external_reviewer.deepseek]
+driver = script
+script = /path/to/deepseek-review.sh
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalConfig), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "config"), []byte(`external_reviewers = deepseek`), 0o600))
+
+	cfg, err := loadWithLocal(globalDir, localDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, []ExternalReviewer{
+		{Name: "deepseek", Driver: "script", Script: "/path/to/deepseek-review.sh"},
+	}, cfg.ExternalReviewers)
 }
 
 func TestLoad_NotifyParamsPopulated(t *testing.T) {

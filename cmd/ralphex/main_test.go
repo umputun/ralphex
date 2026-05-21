@@ -689,6 +689,59 @@ func TestProviderOverrideFlags(t *testing.T) {
 		assert.Equal(t, "custom", cfg.ExternalReviewTool)
 	})
 
+	t.Run("external_reviewers_overrides_config", func(t *testing.T) {
+		cfg := &config.Config{
+			ExternalReviewTool: "codex",
+			ExternalReviewerDefinitions: []config.ExternalReviewer{
+				{Name: "codex", Driver: "codex"},
+				{Name: "deepseek", Driver: "script", Script: "/configured/deepseek.sh"},
+			},
+			ExternalReviewers: []config.ExternalReviewer{
+				{Name: "codex", Driver: "codex"},
+				{Name: "deepseek", Driver: "script", Script: "/configured/deepseek.sh"},
+			},
+		}
+		o := parseTestOpts(t, "--external-reviewers=deepseek,codex")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Empty(t, cfg.ExternalReviewTool)
+		assert.Equal(t, []config.ExternalReviewer{
+			{Name: "deepseek", Driver: "script", Script: "/configured/deepseek.sh"},
+			{Name: "codex", Driver: "codex"},
+		}, cfg.ExternalReviewers)
+	})
+
+	t.Run("external_reviewers_uses_configured_definitions", func(t *testing.T) {
+		cfg := &config.Config{
+			ExternalReviewTool: "codex",
+			ExternalReviewerDefinitions: []config.ExternalReviewer{
+				{Name: "deepseek", Driver: "script", Script: "/configured/deepseek.sh"},
+			},
+		}
+		o := parseTestOpts(t, "--external-reviewers=deepseek")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Empty(t, cfg.ExternalReviewTool)
+		assert.Equal(t, []config.ExternalReviewer{
+			{Name: "deepseek", Driver: "script", Script: "/configured/deepseek.sh"},
+		}, cfg.ExternalReviewers)
+	})
+
+	t.Run("external_review_tool_clears_named_reviewers", func(t *testing.T) {
+		cfg := &config.Config{
+			ExternalReviewTool: "codex",
+			ExternalReviewers:  []config.ExternalReviewer{{Name: "codex", Driver: "codex"}},
+		}
+		o := parseTestOpts(t, "--external-review-tool=custom")
+
+		applyCLIOverrides(o, cfg)
+
+		assert.Equal(t, "custom", cfg.ExternalReviewTool)
+		assert.Empty(t, cfg.ExternalReviewers)
+	})
+
 	t.Run("custom_review_script_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{CustomReviewScript: "/configured/review.sh"}
 		o := parseTestOpts(t, "--custom-review-script", "/tmp/review.sh")
@@ -699,7 +752,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 	})
 
 	t.Run("external_review_tool_cli_override_does_not_mutate_codex_enabled", func(t *testing.T) {
-		// CLI explicitness is plumbed to the runner via ExternalReviewToolSet,
+		// CLI explicitness is plumbed to the runner via ExternalReviewExplicitSet,
 		// so applyCLIOverrides no longer needs to flip CodexEnabled.
 		cfg := &config.Config{
 			CodexEnabled:       false,
@@ -906,6 +959,17 @@ func TestValidateFlags(t *testing.T) {
 		{name: "plan_flag_only_is_valid", opts: opts{PlanDescription: "add feature"}, wantErr: false},
 		{name: "plan_file_only_is_valid", opts: opts{PlanFile: "docs/plans/test.md"}, wantErr: false},
 		{name: "both_plan_and_planfile_conflicts", opts: opts{PlanDescription: "add feature", PlanFile: "docs/plans/test.md"}, wantErr: true, errMsg: "conflicts"},
+		{
+			name: "external_review_tool_and_reviewers_conflict",
+			opts: opts{
+				ExternalReviewTool:    "codex",
+				ExternalReviewers:     "codex,deepseek",
+				externalReviewToolSet: true,
+				externalReviewersSet:  true,
+			},
+			wantErr: true,
+			errMsg:  "conflicts",
+		},
 		{name: "negative_wait_is_invalid", opts: opts{Wait: -30 * time.Minute}, wantErr: true, errMsg: "non-negative"},
 		{name: "positive_wait_is_valid", opts: opts{Wait: time.Hour}, wantErr: false},
 		{name: "zero_wait_is_valid", opts: opts{Wait: 0}, wantErr: false},

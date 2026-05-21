@@ -39,6 +39,7 @@ type opts struct {
 	ClaudeCommand           string        `long:"claude-command" description:"override claude-compatible command for this run"`
 	ClaudeArgs              string        `long:"claude-args" description:"override claude-compatible command args for this run"`
 	ExternalReviewTool      string        `long:"external-review-tool" choice:"codex" choice:"custom" choice:"none" description:"override external review tool for this run"`
+	ExternalReviewers       string        `long:"external-reviewers" description:"override external_reviewers config for this run as comma-separated names; empty disables external review"`
 	CustomReviewScript      string        `long:"custom-review-script" description:"override custom external review script for this run"`
 	Review                  bool          `short:"r" long:"review" description:"skip task execution, run full review pipeline"`
 	ExternalOnly            bool          `short:"e" long:"external-only" description:"skip tasks and first review, run only external review loop"`
@@ -75,6 +76,7 @@ type opts struct {
 	claudeCommandSet      bool
 	claudeArgsSet         bool
 	externalReviewToolSet bool
+	externalReviewersSet  bool
 	customReviewScriptSet bool
 }
 
@@ -90,6 +92,7 @@ func (o *opts) markFlagsSet(parser *flags.Parser) {
 	o.claudeCommandSet = isFlagSet(parser, "claude-command")
 	o.claudeArgsSet = isFlagSet(parser, "claude-args")
 	o.externalReviewToolSet = isFlagSet(parser, "external-review-tool")
+	o.externalReviewersSet = isFlagSet(parser, "external-reviewers")
 	o.customReviewScriptSet = isFlagSet(parser, "custom-review-script")
 }
 
@@ -865,6 +868,9 @@ func validateFlags(o opts) error {
 	if o.PlanDescription != "" && o.PlanFile != "" {
 		return errors.New("--plan flag conflicts with plan file argument; use one or the other")
 	}
+	if o.externalReviewToolSet && o.externalReviewersSet {
+		return errors.New("--external-review-tool conflicts with --external-reviewers; use one or the other")
+	}
 	if o.Wait < 0 {
 		return fmt.Errorf("--wait must be non-negative, got %s", o.Wait)
 	}
@@ -909,23 +915,23 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 	}
 
 	r := processor.New(processor.Config{
-		PlanFile:              req.PlanFile,
-		ProgressPath:          log.Path(),
-		Mode:                  req.Mode,
-		MaxIterations:         resolveMaxIterations(o.MaxIterations, req.Config),
-		MaxExternalIterations: maxExtIter,
-		ReviewPatience:        reviewPatience,
-		Debug:                 o.Debug,
-		NoColor:               o.NoColor,
-		IterationDelayMs:      req.Config.IterationDelayMs,
-		TaskRetryCount:        req.Config.TaskRetryCount,
-		CodexEnabled:          codexEnabled,
-		ExternalReviewToolSet: o.externalReviewToolSet,
-		FinalizeEnabled:       req.Config.FinalizeEnabled,
-		DefaultBranch:         req.BaseRef,
-		TaskModel:             taskModel,
-		ReviewModel:           reviewModel,
-		AppConfig:             req.Config,
+		PlanFile:                  req.PlanFile,
+		ProgressPath:              log.Path(),
+		Mode:                      req.Mode,
+		MaxIterations:             resolveMaxIterations(o.MaxIterations, req.Config),
+		MaxExternalIterations:     maxExtIter,
+		ReviewPatience:            reviewPatience,
+		Debug:                     o.Debug,
+		NoColor:                   o.NoColor,
+		IterationDelayMs:          req.Config.IterationDelayMs,
+		TaskRetryCount:            req.Config.TaskRetryCount,
+		CodexEnabled:              codexEnabled,
+		ExternalReviewExplicitSet: o.externalReviewToolSet || o.externalReviewersSet,
+		FinalizeEnabled:           req.Config.FinalizeEnabled,
+		DefaultBranch:             req.BaseRef,
+		TaskModel:                 taskModel,
+		ReviewModel:               reviewModel,
+		AppConfig:                 req.Config,
 	}, log, holder)
 	if req.GitSvc != nil {
 		r.SetGitChecker(req.GitSvc)
@@ -1306,6 +1312,12 @@ func applyCLIOverrides(o opts, cfg *config.Config) {
 	}
 	if o.externalReviewToolSet {
 		cfg.ExternalReviewTool = o.ExternalReviewTool
+		cfg.ExternalReviewers = nil
+	}
+	if o.externalReviewersSet {
+		cfg.ExternalReviewTool = ""
+		cfg.ExternalReviewers = config.SelectExternalReviewers(config.ParseCommaSeparated(o.ExternalReviewers),
+			append(append([]config.ExternalReviewer{}, cfg.ExternalReviewerDefinitions...), cfg.ExternalReviewers...))
 	}
 	if o.customReviewScriptSet {
 		cfg.CustomReviewScript = o.CustomReviewScript

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os/exec"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/config"
@@ -42,24 +44,24 @@ const (
 
 // Config holds runner configuration.
 type Config struct {
-	PlanFile              string         // path to plan file (required for full mode)
-	PlanDescription       string         // plan description for interactive plan creation mode
-	ProgressPath          string         // path to progress file
-	Mode                  Mode           // execution mode
-	MaxIterations         int            // maximum iterations for task phase
-	MaxExternalIterations int            // override external review iteration limit (0 = auto)
-	ReviewPatience        int            // terminate external review after N unchanged rounds (0 = disabled)
-	Debug                 bool           // enable debug output
-	NoColor               bool           // disable color output
-	IterationDelayMs      int            // delay between iterations in milliseconds
-	TaskRetryCount        int            // number of times to retry failed tasks
-	TaskModel             string         // model[:effort] spec for task execution; parsed via ParseModelEffort (empty = CLI defaults)
-	ReviewModel           string         // model[:effort] spec for review phases; empty falls back to TaskModel
-	CodexEnabled          bool           // whether codex review is enabled
-	ExternalReviewToolSet bool           // when true, AppConfig.ExternalReviewTool is an explicit choice that overrides legacy codex_enabled=false back-compat
-	FinalizeEnabled       bool           // whether finalize step is enabled
-	DefaultBranch         string         // default branch name (detected from repo)
-	AppConfig             *config.Config // full application config (for executors and prompts)
+	PlanFile                  string         // path to plan file (required for full mode)
+	PlanDescription           string         // plan description for interactive plan creation mode
+	ProgressPath              string         // path to progress file
+	Mode                      Mode           // execution mode
+	MaxIterations             int            // maximum iterations for task phase
+	MaxExternalIterations     int            // override external review iteration limit (0 = auto)
+	ReviewPatience            int            // terminate external review after N unchanged rounds (0 = disabled)
+	Debug                     bool           // enable debug output
+	NoColor                   bool           // disable color output
+	IterationDelayMs          int            // delay between iterations in milliseconds
+	TaskRetryCount            int            // number of times to retry failed tasks
+	TaskModel                 string         // model[:effort] spec for task execution; parsed via ParseModelEffort (empty = CLI defaults)
+	ReviewModel               string         // model[:effort] spec for review phases; empty falls back to TaskModel
+	CodexEnabled              bool           // whether codex review is enabled
+	ExternalReviewExplicitSet bool           // when true, explicit CLI external review choice overrides legacy codex_enabled=false back-compat
+	FinalizeEnabled           bool           // whether finalize step is enabled
+	DefaultBranch             string         // default branch name (detected from repo)
+	AppConfig                 *config.Config // full application config (for executors and prompts)
 }
 
 //go:generate moq -out mocks/executor.go -pkg mocks -skip-ensure -fmt goimports . Executor
@@ -98,10 +100,12 @@ type GitChecker interface {
 
 // Executors groups the executor dependencies for the Runner.
 type Executors struct {
-	Claude       Executor
-	ReviewClaude Executor // optional: separate executor for review phases (nil = use Claude)
-	Codex        Executor
-	Custom       *executor.CustomExecutor
+	Claude          Executor
+	ReviewClaude    Executor // optional: separate executor for review phases (nil = use Claude)
+	Codex           Executor
+	Custom          *executor.CustomExecutor
+	ScriptReviewers map[string]*executor.CustomExecutor
+	OutputMu        *sync.Mutex
 }
 
 // Runner orchestrates the execution loop.
@@ -112,6 +116,8 @@ type Runner struct {
 	reviewClaude        Executor // executor for review phases (may differ in model)
 	codex               Executor
 	custom              *executor.CustomExecutor
+	scriptReviewers     map[string]*executor.CustomExecutor
+	outputMu            *sync.Mutex
 	git                 GitChecker
 	inputCollector      InputCollector
 	phaseHolder         *status.PhaseHolder
@@ -127,12 +133,21 @@ type Runner struct {
 // New creates a new Runner with the given configuration and shared phase holder.
 // If codex is enabled but the binary is not found in PATH, it is automatically disabled with a warning.
 func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
+	if cfg.AppConfig != nil {
+		appConfig := *cfg.AppConfig
+		cfg.AppConfig = &appConfig
+	}
+
 	// build claude executor with config values
+	outputMu := &sync.Mutex{}
+	outputHandler := func(text string) {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		log.PrintAligned(text)
+	}
 	claudeExec := &executor.ClaudeExecutor{
-		OutputHandler: func(text string) {
-			log.PrintAligned(text)
-		},
-		Debug: cfg.Debug,
+		OutputHandler: outputHandler,
+		Debug:         cfg.Debug,
 	}
 	if cfg.AppConfig != nil {
 		claudeExec.Command = cfg.AppConfig.ClaudeCommand
@@ -176,10 +191,8 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 
 	// build codex executor with config values
 	codexExec := &executor.CodexExecutor{
-		OutputHandler: func(text string) {
-			log.PrintAligned(text)
-		},
-		Debug: cfg.Debug,
+		OutputHandler: outputHandler,
+		Debug:         cfg.Debug,
 	}
 	if cfg.AppConfig != nil {
 		codexExec.Command = cfg.AppConfig.CodexCommand
@@ -195,12 +208,24 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 	var customExec *executor.CustomExecutor
 	if cfg.AppConfig != nil && cfg.AppConfig.CustomReviewScript != "" {
 		customExec = &executor.CustomExecutor{
-			Script: cfg.AppConfig.CustomReviewScript,
-			OutputHandler: func(text string) {
-				log.PrintAligned(text)
-			},
+			Script:        cfg.AppConfig.CustomReviewScript,
+			OutputHandler: outputHandler,
 			ErrorPatterns: cfg.AppConfig.CodexErrorPatterns, // reuse codex error patterns
 			LimitPatterns: cfg.AppConfig.CodexLimitPatterns, // reuse codex limit patterns
+		}
+	}
+	scriptReviewers := make(map[string]*executor.CustomExecutor)
+	if cfg.AppConfig != nil {
+		for _, reviewer := range cfg.AppConfig.ExternalReviewers {
+			if reviewer.Driver != "script" || reviewer.Script == "" {
+				continue
+			}
+			scriptReviewers[reviewer.Name] = &executor.CustomExecutor{
+				Script:        reviewer.Script,
+				OutputHandler: outputHandler,
+				ErrorPatterns: cfg.AppConfig.CodexErrorPatterns,
+				LimitPatterns: cfg.AppConfig.CodexLimitPatterns,
+			}
 		}
 	}
 
@@ -214,10 +239,47 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		if _, err := exec.LookPath(codexCmd); err != nil {
 			log.Print("warning: codex not found (%s: %v), disabling codex review phase", codexCmd, err)
 			cfg.CodexEnabled = false
+			cfg.disableCodexExternalReviewers()
 		}
 	}
 
-	return NewWithExecutors(cfg, log, Executors{Claude: claudeExec, ReviewClaude: reviewExec, Codex: codexExec, Custom: customExec}, holder)
+	return NewWithExecutors(cfg, log, Executors{
+		Claude:          claudeExec,
+		ReviewClaude:    reviewExec,
+		Codex:           codexExec,
+		Custom:          customExec,
+		ScriptReviewers: scriptReviewers,
+		OutputMu:        outputMu,
+	}, holder)
+}
+
+func (cfg *Config) disableCodexExternalReviewers() {
+	if cfg.AppConfig == nil {
+		return
+	}
+	if len(cfg.AppConfig.ExternalReviewers) == 0 {
+		if cfg.AppConfig.ExternalReviewTool == "codex" {
+			cfg.AppConfig.ExternalReviewTool = "none"
+		}
+		return
+	}
+
+	filtered := make([]config.ExternalReviewer, 0, len(cfg.AppConfig.ExternalReviewers))
+	for _, reviewer := range cfg.AppConfig.ExternalReviewers {
+		driver := reviewer.Driver
+		if driver == "" {
+			driver = reviewer.Name
+		}
+		if driver == "codex" {
+			continue
+		}
+		filtered = append(filtered, reviewer)
+	}
+	if len(filtered) == 0 {
+		cfg.AppConfig.ExternalReviewers = []config.ExternalReviewer{{Name: "none", Driver: "none"}}
+		return
+	}
+	cfg.AppConfig.ExternalReviewers = filtered
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
@@ -248,18 +310,24 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 	if reviewClaude == nil {
 		reviewClaude = execs.Claude
 	}
+	outputMu := execs.OutputMu
+	if outputMu == nil {
+		outputMu = &sync.Mutex{}
+	}
 
 	return &Runner{
-		cfg:            cfg,
-		log:            log,
-		claude:         execs.Claude,
-		reviewClaude:   reviewClaude,
-		codex:          execs.Codex,
-		custom:         execs.Custom,
-		phaseHolder:    holder,
-		iterationDelay: iterDelay,
-		taskRetryCount: retryCount,
-		waitOnLimit:    waitOnLimit,
+		cfg:             cfg,
+		log:             log,
+		claude:          execs.Claude,
+		reviewClaude:    reviewClaude,
+		codex:           execs.Codex,
+		custom:          execs.Custom,
+		scriptReviewers: execs.ScriptReviewers,
+		outputMu:        outputMu,
+		phaseHolder:     holder,
+		iterationDelay:  iterDelay,
+		taskRetryCount:  retryCount,
+		waitOnLimit:     waitOnLimit,
 	}
 }
 
@@ -408,7 +476,7 @@ func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
 	r.phaseHolder.Set(status.PhaseReview)
 
 	var commitPrefix string
-	if r.externalReviewTool() != "none" {
+	if r.hasExternalReview() {
 		commitPrefix = "IMPORTANT: Before starting the review, run `git status`. " +
 			"If there are uncommitted changes from previous review phases, " +
 			"stage and commit them with message: " +
@@ -679,61 +747,33 @@ func (r *Runner) updateStalemate(headBefore, diffBefore string, unchangedRounds 
 	return unchangedRounds, false
 }
 
-// externalReviewTool returns the effective external review tool to use.
+// hasExternalReview reports whether any external review tool is enabled.
 // an explicit ExternalReviewTool choice (e.g. via --external-review-tool) wins
 // over legacy codex_enabled=false back-compat; otherwise codex_enabled=false
 // is treated as "none" so users with only that legacy setting still skip
 // external review.
-func (r *Runner) externalReviewTool() string {
-	if r.cfg.ExternalReviewToolSet && r.cfg.AppConfig != nil && r.cfg.AppConfig.ExternalReviewTool != "" {
-		return r.cfg.AppConfig.ExternalReviewTool
-	}
-
-	if !r.cfg.CodexEnabled {
-		return "none"
-	}
-
-	if r.cfg.AppConfig != nil && r.cfg.AppConfig.ExternalReviewTool != "" {
-		return r.cfg.AppConfig.ExternalReviewTool
-	}
-
-	return "codex"
+func (r *Runner) hasExternalReview() bool {
+	reviewers := r.externalReviewers()
+	return len(reviewers) > 0 && !slices.ContainsFunc(reviewers, func(reviewer config.ExternalReviewer) bool {
+		return r.externalReviewerDriver(reviewer) == "none"
+	})
 }
 
-// runCodexLoop runs the external review loop (codex or custom) until no findings.
+// runCodexLoop runs the external review loop until no findings.
 func (r *Runner) runCodexLoop(ctx context.Context) (bool, error) {
-	tool := r.externalReviewTool()
-
-	// skip external review phase if disabled
-	if tool == "none" {
+	configs, err := r.externalReviewConfigs()
+	if err != nil {
+		return false, err
+	}
+	if len(configs) == 0 {
 		r.log.Print("external review disabled, skipping...")
 		return false, nil
 	}
-
-	// custom review tool
-	if tool == "custom" {
-		if r.custom == nil {
-			return false, errors.New("custom review script not configured")
-		}
-		return r.runExternalReviewLoop(ctx, externalReviewConfig{
-			name:            "custom",
-			runReview:       func(ctx context.Context, prompt string) executor.Result { return r.custom.Run(ctx, prompt) },
-			buildPrompt:     r.buildCustomReviewPrompt,
-			buildEvalPrompt: r.buildCustomEvaluationPrompt,
-			showSummary:     func(string) {}, // no-op: custom output already streamed via OutputHandler
-			makeSection:     status.NewCustomIterationSection,
-		})
+	if len(configs) == 1 {
+		return r.runExternalReviewLoop(ctx, configs[0])
 	}
 
-	// default: codex review
-	return r.runExternalReviewLoop(ctx, externalReviewConfig{
-		name:            "codex",
-		runReview:       r.codex.Run,
-		buildPrompt:     r.buildCodexPrompt,
-		buildEvalPrompt: r.buildCodexEvaluationPrompt,
-		showSummary:     r.showCodexSummary,
-		makeSection:     status.NewCodexIterationSection,
-	})
+	return r.runParallelExternalReviewLoop(ctx, configs)
 }
 
 // externalReviewConfig holds callbacks for running an external review tool.
@@ -744,6 +784,314 @@ type externalReviewConfig struct {
 	buildEvalPrompt func(output string) string                               // build evaluation prompt for claude
 	showSummary     func(output string)                                      // display review findings summary
 	makeSection     func(iteration int) status.Section                       // create section header
+}
+
+// externalReviewConfigs returns the effective external reviewers in configured order.
+func (r *Runner) externalReviewConfigs() ([]externalReviewConfig, error) {
+	reviewers := r.externalReviewers()
+	if len(reviewers) == 0 {
+		return nil, nil
+	}
+
+	if slices.ContainsFunc(reviewers, func(reviewer config.ExternalReviewer) bool {
+		return r.externalReviewerDriver(reviewer) == "none"
+	}) {
+		if len(reviewers) == 1 {
+			return nil, nil
+		}
+		return nil, errors.New("external_reviewers cannot combine none with other reviewers")
+	}
+
+	configs := make([]externalReviewConfig, 0, len(reviewers))
+	seen := make(map[string]struct{}, len(reviewers))
+	for _, reviewer := range reviewers {
+		if _, ok := seen[reviewer.Name]; ok {
+			return nil, fmt.Errorf("duplicate external reviewer: %s", reviewer.Name)
+		}
+		seen[reviewer.Name] = struct{}{}
+		switch r.externalReviewerDriver(reviewer) {
+		case "custom":
+			if r.custom == nil {
+				return nil, errors.New("custom review script not configured")
+			}
+			configs = append(configs, externalReviewConfig{
+				name:            "custom",
+				runReview:       func(ctx context.Context, prompt string) executor.Result { return r.custom.Run(ctx, prompt) },
+				buildPrompt:     r.buildCustomReviewPrompt,
+				buildEvalPrompt: r.buildCustomEvaluationPrompt,
+				showSummary:     func(string) {}, // no-op: custom output already streamed via OutputHandler
+				makeSection:     status.NewCustomIterationSection,
+			})
+		case "script":
+			scriptExec, err := r.scriptReviewerExecutor(reviewer)
+			if err != nil {
+				return nil, err
+			}
+			configs = append(configs, externalReviewConfig{
+				name:            reviewer.Name,
+				runReview:       func(ctx context.Context, prompt string) executor.Result { return scriptExec.Run(ctx, prompt) },
+				buildPrompt:     r.buildCustomReviewPrompt,
+				buildEvalPrompt: r.buildCustomEvaluationPrompt,
+				showSummary:     func(string) {}, // no-op: script output already streamed via OutputHandler
+				makeSection:     status.NewCustomIterationSection,
+			})
+		case "codex":
+			if r.codex == nil {
+				return nil, fmt.Errorf("codex external reviewer %q not configured", reviewer.Name)
+			}
+			configs = append(configs, externalReviewConfig{
+				name:            reviewer.Name,
+				runReview:       r.codex.Run,
+				buildPrompt:     r.buildCodexPrompt,
+				buildEvalPrompt: r.buildCodexEvaluationPrompt,
+				showSummary:     r.showCodexSummary,
+				makeSection:     status.NewCodexIterationSection,
+			})
+		default:
+			if reviewer.Driver == "" {
+				return nil, fmt.Errorf("external reviewer %q has no driver configured; set driver = codex|script in [external_reviewer.%s]",
+					reviewer.Name, reviewer.Name)
+			}
+			return nil, fmt.Errorf("unknown external reviewer driver %q for %s", reviewer.Driver, reviewer.Name)
+		}
+	}
+	return configs, nil
+}
+
+// externalReviewers returns the effective external reviewers.
+func (r *Runner) externalReviewers() []config.ExternalReviewer {
+	if r.cfg.ExternalReviewExplicitSet && r.cfg.AppConfig != nil {
+		if len(r.cfg.AppConfig.ExternalReviewers) > 0 {
+			return r.cfg.AppConfig.ExternalReviewers
+		}
+		if r.cfg.AppConfig.ExternalReviewTool != "" {
+			return []config.ExternalReviewer{{Name: r.cfg.AppConfig.ExternalReviewTool, Driver: r.cfg.AppConfig.ExternalReviewTool}}
+		}
+		return []config.ExternalReviewer{{Name: "none", Driver: "none"}}
+	}
+
+	if r.cfg.AppConfig != nil {
+		if len(r.cfg.AppConfig.ExternalReviewers) > 0 {
+			return r.cfg.AppConfig.ExternalReviewers
+		}
+		if r.cfg.AppConfig.ExternalReviewTool != "" {
+			if !r.cfg.CodexEnabled {
+				return []config.ExternalReviewer{{Name: "none", Driver: "none"}}
+			}
+			return []config.ExternalReviewer{{
+				Name:   r.cfg.AppConfig.ExternalReviewTool,
+				Driver: r.cfg.AppConfig.ExternalReviewTool,
+			}}
+		}
+	}
+
+	if !r.cfg.CodexEnabled {
+		return []config.ExternalReviewer{{Name: "none", Driver: "none"}}
+	}
+
+	return []config.ExternalReviewer{{Name: "codex", Driver: "codex"}}
+}
+
+func (r *Runner) externalReviewerDriver(reviewer config.ExternalReviewer) string {
+	if reviewer.Driver != "" {
+		return reviewer.Driver
+	}
+	switch reviewer.Name {
+	case "codex", "none":
+		return reviewer.Name
+	default:
+		return ""
+	}
+}
+
+func (r *Runner) scriptReviewerExecutor(reviewer config.ExternalReviewer) (*executor.CustomExecutor, error) {
+	if reviewer.Script == "" {
+		return nil, fmt.Errorf("script external reviewer %q missing script", reviewer.Name)
+	}
+	if r.scriptReviewers != nil {
+		if scriptExec, ok := r.scriptReviewers[reviewer.Name]; ok {
+			return scriptExec, nil
+		}
+	}
+	scriptExec := &executor.CustomExecutor{
+		Script: reviewer.Script,
+		OutputHandler: func(text string) {
+			if r.outputMu != nil {
+				r.outputMu.Lock()
+				defer r.outputMu.Unlock()
+			}
+			r.log.PrintAligned(text)
+		},
+	}
+	if r.cfg.AppConfig != nil {
+		scriptExec.ErrorPatterns = r.cfg.AppConfig.CodexErrorPatterns
+		scriptExec.LimitPatterns = r.cfg.AppConfig.CodexLimitPatterns
+	}
+	return scriptExec, nil
+}
+
+type externalReviewRunResult struct {
+	index  int
+	config externalReviewConfig
+	result executor.Result
+}
+
+// runParallelExternalReviewLoop runs multiple external reviewers concurrently per iteration.
+func (r *Runner) runParallelExternalReviewLoop(ctx context.Context, configs []externalReviewConfig) (bool, error) {
+	maxIterations := max(minCodexIterations, r.cfg.MaxIterations/codexIterationDivisor)
+	if r.cfg.MaxExternalIterations > 0 {
+		maxIterations = r.cfg.MaxExternalIterations
+	}
+
+	loopCtx, loopCancel := r.breakContext(ctx)
+	defer loopCancel()
+
+	var claudeResponse string
+	var unchangedRounds int
+	firstCompleted := false
+	hadFindings := false
+
+	for i := 1; i <= maxIterations; i++ {
+		select {
+		case <-loopCtx.Done():
+			if r.isBreak(loopCtx, ctx) {
+				r.log.Print("manual break requested, external review terminated early")
+				return hadFindings, nil
+			}
+			return hadFindings, fmt.Errorf("external review loop: %w", ctx.Err())
+		default:
+		}
+
+		r.log.PrintSection(status.NewGenericSection(fmt.Sprintf("external review iteration %d", i)))
+		results := r.runParallelExternalReviews(loopCtx, configs, !firstCompleted, claudeResponse)
+		if r.isBreak(loopCtx, ctx) {
+			r.log.Print("manual break requested, external review terminated early")
+			return hadFindings, nil
+		}
+
+		combinedOutput, err := r.combineExternalReviewOutputs(results)
+		if err != nil {
+			return hadFindings, err
+		}
+		if combinedOutput == "" {
+			r.log.Print("external reviewers returned no output, skipping...")
+			break
+		}
+
+		var headBefore, diffBefore string
+		if r.cfg.ReviewPatience > 0 {
+			headBefore = r.headHash()
+			diffBefore = r.diffFingerprint()
+		}
+
+		r.phaseHolder.Set(status.PhaseClaudeEval)
+		r.log.PrintSection(status.NewClaudeEvalSection())
+		claudeResult := r.runWithLimitRetry(loopCtx, r.reviewClaude.Run,
+			r.buildCustomEvaluationPrompt(combinedOutput), "claude")
+
+		r.phaseHolder.Set(status.PhaseCodex)
+		if claudeResult.Error != nil {
+			if r.isBreak(loopCtx, ctx) {
+				r.log.Print("manual break requested, external review terminated early")
+				return hadFindings, nil
+			}
+			if err := r.handlePatternMatchError(claudeResult.Error, "claude"); err != nil {
+				return hadFindings, err
+			}
+			return hadFindings, fmt.Errorf("claude execution: %w", claudeResult.Error)
+		}
+
+		if r.lastSessionTimedOut {
+			r.log.Print("claude eval session timed out, retrying external review iteration...")
+			continue
+		}
+
+		firstCompleted = true
+		claudeResponse = claudeResult.Output
+
+		if isCodexDone(claudeResult.Signal) {
+			r.log.Print("external review complete - no more findings")
+			return hadFindings, nil
+		}
+
+		hadFindings = true
+
+		var stalemate bool
+		unchangedRounds, stalemate = r.updateStalemate(headBefore, diffBefore, unchangedRounds)
+		if stalemate {
+			return hadFindings, nil
+		}
+
+		if err := r.sleepWithContext(loopCtx, r.iterationDelay); err != nil {
+			if r.isBreak(loopCtx, ctx) {
+				r.log.Print("manual break requested, external review terminated early")
+				return hadFindings, nil
+			}
+			return hadFindings, fmt.Errorf("interrupted: %w", err)
+		}
+	}
+
+	r.log.Print("max external review iterations reached, continuing to next phase...")
+	return hadFindings, nil
+}
+
+func (r *Runner) runParallelExternalReviews(ctx context.Context, configs []externalReviewConfig,
+	isFirst bool, claudeResponse string) []externalReviewRunResult {
+	results := make([]externalReviewRunResult, len(configs))
+	var wg sync.WaitGroup
+	for i, cfg := range configs {
+		results[i] = externalReviewRunResult{index: i, config: cfg}
+		wg.Go(func() {
+			prompt := cfg.buildPrompt(isFirst, claudeResponse)
+			result := r.runExternalWithLimitRetry(ctx, cfg.runReview, prompt, cfg.name)
+			results[i] = externalReviewRunResult{index: i, config: cfg, result: result}
+		})
+	}
+	wg.Wait()
+	return results
+}
+
+func (r *Runner) runExternalWithLimitRetry(ctx context.Context, run func(context.Context, string) executor.Result,
+	prompt, toolName string) executor.Result {
+	for {
+		result := run(ctx, prompt)
+		if result.Error == nil {
+			return result
+		}
+
+		var limitErr *executor.LimitPatternError
+		if !errors.As(result.Error, &limitErr) {
+			return result
+		}
+		if r.waitOnLimit <= 0 {
+			return result
+		}
+
+		r.log.Print("rate limit detected: %q in %s output, waiting %s before retry...",
+			limitErr.Pattern, toolName, r.waitOnLimit)
+		if err := r.sleepWithContext(ctx, r.waitOnLimit); err != nil {
+			return executor.Result{Error: fmt.Errorf("interrupted during limit wait: %w", err)}
+		}
+	}
+}
+
+func (r *Runner) combineExternalReviewOutputs(results []externalReviewRunResult) (string, error) {
+	var sections []string
+	for _, item := range results {
+		if item.result.Error != nil {
+			if err := r.handlePatternMatchError(item.result.Error, item.config.name); err != nil {
+				return "", err
+			}
+			return "", fmt.Errorf("%s execution: %w", item.config.name, item.result.Error)
+		}
+		if item.result.Output == "" {
+			r.log.Print("%s review returned no output, skipping...", item.config.name)
+			continue
+		}
+		item.config.showSummary(item.result.Output)
+		sections = append(sections, fmt.Sprintf("## %s review\n\n%s", item.config.name, item.result.Output))
+	}
+	return strings.Join(sections, "\n\n"), nil
 }
 
 // runExternalReviewLoop runs a generic external review tool-claude loop.
@@ -1366,6 +1714,15 @@ func (r *Runner) sleepWithContext(ctx context.Context, d time.Duration) error {
 func needsCodexBinary(appConfig *config.Config) bool {
 	if appConfig == nil {
 		return true // default behavior assumes codex
+	}
+	if len(appConfig.ExternalReviewers) > 0 {
+		return slices.ContainsFunc(appConfig.ExternalReviewers, func(reviewer config.ExternalReviewer) bool {
+			driver := reviewer.Driver
+			if driver == "" {
+				driver = reviewer.Name
+			}
+			return driver == "codex"
+		})
 	}
 	switch appConfig.ExternalReviewTool {
 	case "custom", "none":

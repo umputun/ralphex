@@ -45,6 +45,29 @@ ralphex --claude-command=/path/to/wrapper.sh --claude-args= --external-review-to
 
 `--external-review-tool` accepts `codex`, `custom`, or `none`. When `custom` is selected, `--custom-review-script` points at the script that receives the external review prompt file path.
 
+Use `--external-reviewers=codex,deepseek` to run configured named reviewers in parallel during each external review iteration:
+
+```bash
+ralphex --external-only --external-reviewers=codex,deepseek
+```
+
+This flag is the CLI override for the `external_reviewers` config key. Define reusable reviewers in config, then use the flag to reorder or subset them for one run; pass an empty value (`--external-reviewers=`) to disable external review for one run.
+
+The config equivalent is:
+
+```ini
+external_reviewers = codex, deepseek
+
+[external_reviewer.codex]
+driver = codex
+
+[external_reviewer.deepseek]
+driver = script
+script = ~/.config/ralphex/scripts/opencode-deepseek-review.sh
+```
+
+Each reviewer name is used in logs and in the combined evaluation prompt. The `script` driver receives the prompt file path as its single argument, so it can wrap OpenCode with DeepSeek Reasoner or any other review provider. If any configured reviewer fails, the external review iteration fails instead of evaluating an incomplete reviewer set.
+
 ## Codex wrapper (included example)
 
 The repository includes a working wrapper at `scripts/codex-as-claude/codex-as-claude.sh` that translates codex JSONL events to Claude stream-json format.
