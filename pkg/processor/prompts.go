@@ -257,6 +257,38 @@ func (r *Runner) prependCodexReviewGuidance(prompt string) string {
 	return codexReviewGuidance + prompt
 }
 
+// codexTaskGuidance is the directive block prepended to the task-execution
+// prompt by prependCodexTaskGuidance when the codex executor is active. it
+// tells codex that ralphex's task prompt is authoritative so that any
+// auto-activating codex skill whose workflow overlaps this prompt cannot
+// compete with ralphex's orchestration or flood the progress stream with
+// recited skill text. deliberately generic — it names no specific skill,
+// since which skills a user has installed varies per machine.
+const codexTaskGuidance = `=== Codex task-execution directives ===
+
+The instructions in this prompt are the complete and authoritative
+task-execution workflow. One of your skills may auto-activate because this
+prompt resembles work it handles; if any such skill defines its own workflow
+that overlaps or conflicts with the steps below, do NOT follow that skill —
+this prompt takes precedence. Following a competing workflow duplicates or
+contradicts these steps. Your built-in tools (file edits, shell commands,
+etc.) remain available — use them normally.
+
+=======================================
+
+`
+
+// prependCodexTaskGuidance returns prompt with codexTaskGuidance prepended when
+// the codex executor is active; otherwise returns prompt unchanged. injected at
+// build time so the directive applies whether the user kept the embedded task
+// prompt or replaced it with a customized one.
+func (r *Runner) prependCodexTaskGuidance(prompt string) string {
+	if !r.cfg.isCodexExecutor() {
+		return prompt
+	}
+	return codexTaskGuidance + prompt
+}
+
 // escapeCodexSingleQuoted escapes the characters that would otherwise break a
 // Python-style single-quoted string literal — which is what spawn_agent(task='...')
 // expects. supported escapes: backslash (must be escaped first so subsequent

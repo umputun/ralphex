@@ -1331,6 +1331,35 @@ func TestRunner_prependCodexReviewGuidance(t *testing.T) {
 	})
 }
 
+func TestRunner_prependCodexTaskGuidance(t *testing.T) {
+	body := "Execute the next task."
+
+	t.Run("codex executor prepends guidance", func(t *testing.T) {
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: config.ExecutorCodex}}, log: newMockLogger("")}
+		result := r.prependCodexTaskGuidance(body)
+
+		assert.True(t, strings.HasPrefix(result, "=== Codex task-execution directives ==="), "guidance block must be at the top")
+		assert.Contains(t, result, "do NOT follow that skill", "skill-precedence directive present")
+		assert.Contains(t, result, "this prompt takes precedence", "authoritative-prompt directive present")
+		assert.NotContains(t, result, "plan-execution", "directive must stay generic — no specific skill named")
+		assert.True(t, strings.HasSuffix(result, body), "original prompt preserved at the end")
+	})
+
+	t.Run("claude executor returns prompt unchanged", func(t *testing.T) {
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: "claude"}}, log: newMockLogger("")}
+		result := r.prependCodexTaskGuidance(body)
+
+		assert.Equal(t, body, result, "non-codex executor must not see codex-specific directives")
+	})
+
+	t.Run("empty executor (default claude) returns prompt unchanged", func(t *testing.T) {
+		r := &Runner{cfg: Config{AppConfig: &config.Config{}}, log: newMockLogger("")}
+		result := r.prependCodexTaskGuidance(body)
+
+		assert.Equal(t, body, result, "unset executor must not see codex-specific directives")
+	})
+}
+
 func TestRunner_formatAgentExpansion_AllFiveDefaultAgents(t *testing.T) {
 	// load the 5 embedded default agents (quality, implementation, testing, simplification, documentation)
 	appCfg := testAppConfig(t)

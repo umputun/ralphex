@@ -567,7 +567,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 	if r.taskPhaseOverride != nil {
 		return r.taskPhaseOverride(ctx)
 	}
-	prompt := r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt)
+	prompt := r.prependCodexTaskGuidance(r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt))
 	retryCount := 0
 
 	for i := 1; i <= r.cfg.MaxIterations; i++ {
