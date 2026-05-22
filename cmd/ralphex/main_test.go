@@ -1455,6 +1455,28 @@ func TestPrintStartupInfo(t *testing.T) {
 		assert.NotContains(t, out, "review model:")
 		assert.NotContains(t, out, "review reasoning effort:")
 	})
+
+	t.Run("shows only review effort line when review model matches but effort differs", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile: "/path/to/plan.md", Branch: "feature-branch", Mode: processor.ModeFull, MaxIterations: 50,
+			ProgressPath: "progress.txt", Executor: config.ExecutorCodex, CodexSandbox: "danger-full-access",
+			CodexModel: "gpt-5.5", CodexEffort: "high", CodexReviewModel: "gpt-5.5", CodexReviewEffort: "low",
+		}
+		out := captureStdout(t, func() { printStartupInfo(info, colors) })
+		assert.NotContains(t, out, "review model:", "review model line omitted when model matches task")
+		assert.Contains(t, out, "review reasoning effort: low")
+	})
+
+	t.Run("shows only review model line when model differs but effort matches", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile: "/path/to/plan.md", Branch: "feature-branch", Mode: processor.ModeFull, MaxIterations: 50,
+			ProgressPath: "progress.txt", Executor: config.ExecutorCodex, CodexSandbox: "danger-full-access",
+			CodexModel: "gpt-5.6", CodexEffort: "xhigh", CodexReviewModel: "gpt-5.5", CodexReviewEffort: "xhigh",
+		}
+		out := captureStdout(t, func() { printStartupInfo(info, colors) })
+		assert.Contains(t, out, "review model: gpt-5.5")
+		assert.NotContains(t, out, "review reasoning effort:", "review effort line omitted when effort matches task")
+	})
 }
 
 func TestToRelPath(t *testing.T) {

@@ -4374,22 +4374,27 @@ func TestResolveCodexModelEffort(t *testing.T) {
 	tests := []struct {
 		name       string
 		spec       string
+		defModel   string
+		defEffort  string
 		wantModel  string
 		wantEffort string
 		wantMax    bool
 	}{
-		{name: "empty spec keeps defaults", spec: "", wantModel: "gpt-5.5", wantEffort: "xhigh"},
-		{name: "model only", spec: "gpt-5.6", wantModel: "gpt-5.6", wantEffort: "xhigh"},
-		{name: "model and effort", spec: "gpt-5.6:high", wantModel: "gpt-5.6", wantEffort: "high"},
-		{name: "effort only keeps default model", spec: ":low", wantModel: "gpt-5.5", wantEffort: "low"},
-		{name: "trailing colon keeps default effort", spec: "gpt-5.6:", wantModel: "gpt-5.6", wantEffort: "xhigh"},
-		{name: "max effort dropped, default kept", spec: "gpt-5.6:max", wantModel: "gpt-5.6", wantEffort: "xhigh", wantMax: true},
-		{name: "max effort case-insensitive", spec: ":MAX", wantModel: "gpt-5.5", wantEffort: "xhigh", wantMax: true},
+		{name: "empty spec keeps defaults", spec: "", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.5", wantEffort: "xhigh"},
+		{name: "model only", spec: "gpt-5.6", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "xhigh"},
+		{name: "model and effort", spec: "gpt-5.6:high", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "high"},
+		{name: "effort only keeps default model", spec: ":low", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.5", wantEffort: "low"},
+		{name: "trailing colon keeps default effort", spec: "gpt-5.6:", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "xhigh"},
+		{name: "max effort dropped, default kept", spec: "gpt-5.6:max", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "xhigh", wantMax: true},
+		{name: "max effort case-insensitive", spec: ":MAX", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.5", wantEffort: "xhigh", wantMax: true},
+		{name: "empty spec with empty defaults stays empty", spec: "", defModel: "", defEffort: "", wantModel: "", wantEffort: ""},
+		{name: "model-only spec with empty default effort", spec: "gpt-5.6", defModel: "", defEffort: "", wantModel: "gpt-5.6", wantEffort: ""},
+		{name: "effort-only spec with empty default model", spec: ":low", defModel: "", defEffort: "", wantModel: "", wantEffort: "low"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			model, effort, maxDropped := processor.ResolveCodexModelEffort(tc.spec, "gpt-5.5", "xhigh")
+			model, effort, maxDropped := processor.ResolveCodexModelEffort(tc.spec, tc.defModel, tc.defEffort)
 			assert.Equal(t, tc.wantModel, model)
 			assert.Equal(t, tc.wantEffort, effort)
 			assert.Equal(t, tc.wantMax, maxDropped)

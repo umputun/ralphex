@@ -573,7 +573,13 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	// resolve effective codex model/effort for the banner so it reflects what
 	// the codex task and review executors actually receive (--task-model /
 	// --review-model resolved against codex_model / codex_reasoning_effort).
-	codex := codexModelBanner(o, req.Config)
+	// only under the codex executor — in claude mode the banner codex lines are
+	// not shown and the max-effort warning would be a false positive (max is a
+	// valid claude effort).
+	var codex codexBannerInfo
+	if req.Config.Executor == config.ExecutorCodex {
+		codex = codexModelBanner(o, req.Config)
+	}
 
 	// print startup info
 	printStartupInfo(startupInfo{
@@ -1117,8 +1123,12 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	maxIter := resolveMaxIterations(o.MaxIterations, req.Config)
 
 	// resolve effective codex model/effort so the plan-mode banner reflects what
-	// the codex executor receives (same logic as executePlan above).
-	codex := codexModelBanner(o, req.Config)
+	// the codex executor receives (same logic as executePlan above) — codex
+	// executor only, so the max-effort warning is not a false positive in claude mode.
+	var codex codexBannerInfo
+	if req.Config.Executor == config.ExecutorCodex {
+		codex = codexModelBanner(o, req.Config)
+	}
 
 	// print startup info for plan mode
 	printStartupInfo(startupInfo{
