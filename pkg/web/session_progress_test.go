@@ -512,6 +512,28 @@ func TestPhaseFromSection(t *testing.T) {
 	}
 }
 
+// regression coverage for round-3 dashboard-routing fix: internal review section
+// labels MUST NOT contain the executor name (e.g. "codex") because phaseFromSection
+// matches "codex" before "review". the fix uses a fixed "review N: ..." label so
+// that under --codex, internal review sections still route to PhaseReview and not
+// PhaseCodex (which is reserved for the external review phase).
+func TestPhaseFromSection_InternalReviewLabelRoutesToReview(t *testing.T) {
+	tests := []struct {
+		name     string
+		section  string
+		expected status.Phase
+	}{
+		{"first review all findings", "review 0: all findings", status.PhaseReview},
+		{"review loop iteration", "review 1: critical/major", status.PhaseReview},
+		{"review loop higher iteration", "review 7: critical/major", status.PhaseReview},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, phaseFromSection(tt.section))
+		})
+	}
+}
+
 func TestSessionManager_LoadProgressFileIntoSessionLargeBuffer(t *testing.T) {
 	t.Run("handles lines larger than default scanner buffer", func(t *testing.T) {
 		dir := t.TempDir()

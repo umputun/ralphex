@@ -2,10 +2,22 @@ package processor
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/executor"
 )
+
+// ResetClaudeMdHintOnceForTest resets the package-level sync.Once that gates the
+// CLAUDE.md setup hint so each test can exercise the first-emit path.
+func ResetClaudeMdHintOnceForTest() {
+	claudeMdHintOnce = sync.Once{}
+}
+
+// EmitClaudeMdSetupHintForTest exposes the hint helper for unit tests.
+func EmitClaudeMdSetupHintForTest(log Logger) {
+	maybeEmitClaudeMdSetupHint(log)
+}
 
 // TestRunnerConfig provides test access to runner's internal configuration.
 // this file is only compiled during test builds (`go test`).
@@ -66,13 +78,17 @@ func (r *Runner) TestDrainBreakCh() {
 	r.drainBreakCh()
 }
 
-// TestClaudeExecutor returns the task-phase Claude executor for inspection.
-func (r *Runner) TestClaudeExecutor() Executor {
-	return r.claude
+// TestTaskExecutor returns the task-phase executor for inspection.
+func (r *Runner) TestTaskExecutor() Executor {
+	return r.task
 }
 
-// TestReviewClaudeExecutor returns the review-phase Claude executor for inspection.
-// Returns the same value as TestClaudeExecutor when no separate review executor was built.
-func (r *Runner) TestReviewClaudeExecutor() Executor {
-	return r.reviewClaude
+// TestReviewExecutor returns the review-phase executor for inspection.
+func (r *Runner) TestReviewExecutor() Executor {
+	return r.review
+}
+
+// TestExternalExecutor returns the external review executor for inspection.
+func (r *Runner) TestExternalExecutor() Executor {
+	return r.external
 }

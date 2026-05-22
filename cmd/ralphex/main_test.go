@@ -435,13 +435,31 @@ func TestCheckClaudeDep(t *testing.T) {
 	})
 
 	t.Run("falls_back_to_claude_when_empty", func(t *testing.T) {
+		// force PATH lookup to fail deterministically so the assertion runs on dev machines too
+		t.Setenv("PATH", "")
 		cfg := &config.Config{ClaudeCommand: ""}
 		err := checkClaudeDep(cfg)
-		// may pass or fail depending on whether claude is installed
-		// but error message should reference "claude" not empty string
-		if err != nil {
-			assert.Contains(t, err.Error(), "claude")
-		}
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "claude")
+	})
+}
+
+func TestCheckCodexDep(t *testing.T) {
+	t.Run("uses_configured_command", func(t *testing.T) {
+		cfg := &config.Config{CodexCommand: "nonexistent-codex-12345"}
+		err := checkCodexDep(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nonexistent-codex-12345")
+		assert.Contains(t, err.Error(), "not found in PATH")
+	})
+
+	t.Run("falls_back_to_codex_when_empty", func(t *testing.T) {
+		// force PATH lookup to fail deterministically so the assertion runs on dev machines too
+		t.Setenv("PATH", "")
+		cfg := &config.Config{CodexCommand: ""}
+		err := checkCodexDep(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "codex")
 	})
 }
 
@@ -627,7 +645,7 @@ func TestPreserveAnthropicAPIKeyFlag(t *testing.T) {
 		cfg := &config.Config{PreserveAnthropicAPIKey: false}
 		o := parseTestOpts(t, "--preserve-anthropic-api-key")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.True(t, cfg.PreserveAnthropicAPIKey, "CLI flag should enable preserve in config")
 	})
@@ -636,7 +654,7 @@ func TestPreserveAnthropicAPIKeyFlag(t *testing.T) {
 		cfg := &config.Config{PreserveAnthropicAPIKey: true}
 		o := parseTestOpts(t)
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.True(t, cfg.PreserveAnthropicAPIKey, "config-set true should be preserved when flag absent")
 	})
@@ -645,7 +663,7 @@ func TestPreserveAnthropicAPIKeyFlag(t *testing.T) {
 		cfg := &config.Config{PreserveAnthropicAPIKey: false}
 		o := parseTestOpts(t)
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.False(t, cfg.PreserveAnthropicAPIKey)
 	})
@@ -656,7 +674,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		cfg := &config.Config{ClaudeCommand: "configured-claude"}
 		o := parseTestOpts(t, "--claude-command", "/tmp/run-claude")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.Equal(t, "/tmp/run-claude", cfg.ClaudeCommand)
 	})
@@ -665,7 +683,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		cfg := &config.Config{ClaudeArgs: "--configured"}
 		o := parseTestOpts(t, "--claude-args=--wrapper --stream")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.Equal(t, "--wrapper --stream", cfg.ClaudeArgs)
 	})
@@ -674,7 +692,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		cfg := &config.Config{ClaudeArgs: "--configured --args"}
 		o := parseTestOpts(t, "--claude-args=")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.Empty(t, cfg.ClaudeArgs)
 		assert.True(t, cfg.ClaudeArgsSet)
@@ -684,7 +702,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		cfg := &config.Config{ExternalReviewTool: "codex"}
 		o := parseTestOpts(t, "--external-review-tool", "custom")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.Equal(t, "custom", cfg.ExternalReviewTool)
 	})
@@ -693,7 +711,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		cfg := &config.Config{CustomReviewScript: "/configured/review.sh"}
 		o := parseTestOpts(t, "--custom-review-script", "/tmp/review.sh")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.Equal(t, "/tmp/review.sh", cfg.CustomReviewScript)
 	})
@@ -708,7 +726,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		}
 		o := parseTestOpts(t, "--external-review-tool", "custom")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.Equal(t, "custom", cfg.ExternalReviewTool)
 		assert.False(t, cfg.CodexEnabled)
@@ -719,7 +737,7 @@ func TestProviderOverrideFlags(t *testing.T) {
 		cfg := &config.Config{CodexEnabled: false, CodexEnabledSet: true, ExternalReviewTool: "codex"}
 		o := parseTestOpts(t, "--external-review-tool", "none")
 
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 
 		assert.Equal(t, "none", cfg.ExternalReviewTool)
 		assert.False(t, cfg.CodexEnabled)
@@ -759,7 +777,7 @@ func TestWaitFlag(t *testing.T) {
 	t.Run("wait_cli_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{WaitOnLimit: 10 * time.Minute, WaitOnLimitSet: true}
 		o := opts{Wait: 2 * time.Hour}
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 2*time.Hour, cfg.WaitOnLimit)
 		assert.True(t, cfg.WaitOnLimitSet)
 	})
@@ -767,7 +785,7 @@ func TestWaitFlag(t *testing.T) {
 	t.Run("wait_zero_preserves_config", func(t *testing.T) {
 		cfg := &config.Config{WaitOnLimit: 30 * time.Minute, WaitOnLimitSet: true}
 		o := opts{Wait: 0} // not set
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 30*time.Minute, cfg.WaitOnLimit, "config value should be preserved when CLI not set")
 		assert.True(t, cfg.WaitOnLimitSet)
 	})
@@ -775,7 +793,7 @@ func TestWaitFlag(t *testing.T) {
 	t.Run("wait_cli_sets_unset_config", func(t *testing.T) {
 		cfg := &config.Config{} // wait_on_limit not set
 		o := opts{Wait: 1 * time.Hour}
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 1*time.Hour, cfg.WaitOnLimit)
 		assert.True(t, cfg.WaitOnLimitSet)
 	})
@@ -785,7 +803,7 @@ func TestSessionTimeoutFlag(t *testing.T) {
 	t.Run("cli_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{SessionTimeout: 10 * time.Minute, SessionTimeoutSet: true}
 		o := opts{SessionTimeout: 2 * time.Hour}
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 2*time.Hour, cfg.SessionTimeout)
 		assert.True(t, cfg.SessionTimeoutSet)
 	})
@@ -793,7 +811,7 @@ func TestSessionTimeoutFlag(t *testing.T) {
 	t.Run("zero_preserves_config", func(t *testing.T) {
 		cfg := &config.Config{SessionTimeout: 30 * time.Minute, SessionTimeoutSet: true}
 		o := opts{SessionTimeout: 0} // not set
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 30*time.Minute, cfg.SessionTimeout, "config value should be preserved when CLI not set")
 		assert.True(t, cfg.SessionTimeoutSet)
 	})
@@ -801,7 +819,7 @@ func TestSessionTimeoutFlag(t *testing.T) {
 	t.Run("cli_sets_unset_config", func(t *testing.T) {
 		cfg := &config.Config{} // session_timeout not set
 		o := opts{SessionTimeout: 1 * time.Hour}
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 1*time.Hour, cfg.SessionTimeout)
 		assert.True(t, cfg.SessionTimeoutSet)
 	})
@@ -811,7 +829,7 @@ func TestIdleTimeoutFlag(t *testing.T) {
 	t.Run("cli_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{IdleTimeout: 10 * time.Minute, IdleTimeoutSet: true}
 		o := opts{IdleTimeout: 5 * time.Minute}
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 5*time.Minute, cfg.IdleTimeout)
 		assert.True(t, cfg.IdleTimeoutSet)
 	})
@@ -819,7 +837,7 @@ func TestIdleTimeoutFlag(t *testing.T) {
 	t.Run("zero_preserves_config", func(t *testing.T) {
 		cfg := &config.Config{IdleTimeout: 10 * time.Minute, IdleTimeoutSet: true}
 		o := opts{IdleTimeout: 0} // not set
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 10*time.Minute, cfg.IdleTimeout, "config value should be preserved when CLI not set")
 		assert.True(t, cfg.IdleTimeoutSet)
 	})
@@ -827,7 +845,7 @@ func TestIdleTimeoutFlag(t *testing.T) {
 	t.Run("cli_sets_unset_config", func(t *testing.T) {
 		cfg := &config.Config{} // idle_timeout not set
 		o := opts{IdleTimeout: 5 * time.Minute}
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, 5*time.Minute, cfg.IdleTimeout)
 		assert.True(t, cfg.IdleTimeoutSet)
 	})
@@ -848,7 +866,7 @@ func TestExplicitZeroOverridesConfig(t *testing.T) {
 	t.Run("idle_timeout_zero_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{IdleTimeout: 5 * time.Minute, IdleTimeoutSet: true}
 		o := makeOpts("idle-timeout")
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, time.Duration(0), cfg.IdleTimeout)
 		assert.True(t, cfg.IdleTimeoutSet)
 	})
@@ -856,7 +874,7 @@ func TestExplicitZeroOverridesConfig(t *testing.T) {
 	t.Run("session_timeout_zero_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{SessionTimeout: 30 * time.Minute, SessionTimeoutSet: true}
 		o := makeOpts("session-timeout")
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, time.Duration(0), cfg.SessionTimeout)
 		assert.True(t, cfg.SessionTimeoutSet)
 	})
@@ -864,7 +882,7 @@ func TestExplicitZeroOverridesConfig(t *testing.T) {
 	t.Run("wait_zero_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{WaitOnLimit: 1 * time.Hour, WaitOnLimitSet: true}
 		o := makeOpts("wait")
-		applyCLIOverrides(o, cfg)
+		require.NoError(t, applyCLIOverrides(o, cfg))
 		assert.Equal(t, time.Duration(0), cfg.WaitOnLimit)
 		assert.True(t, cfg.WaitOnLimitSet)
 	})
@@ -915,6 +933,14 @@ func TestValidateFlags(t *testing.T) {
 		{name: "negative_idle_timeout_is_invalid", opts: opts{IdleTimeout: -5 * time.Minute}, wantErr: true, errMsg: "non-negative"},
 		{name: "positive_idle_timeout_is_valid", opts: opts{IdleTimeout: 5 * time.Minute}, wantErr: false},
 		{name: "zero_idle_timeout_is_valid", opts: opts{IdleTimeout: 0}, wantErr: false},
+		{name: "codex_alone_is_valid", opts: opts{Codex: true}, wantErr: false},
+		{name: "codex_with_pass_claude_md_is_valid", opts: opts{Codex: true, PassClaudeMd: true}, wantErr: false},
+		// the --codex / --external-only / --codex-only / --external-review-tool / --pass-claude-md
+		// mutex checks moved to applyCodexOverrides so config-file executor=codex is also enforced;
+		// validateFlags accepts those combos at CLI parse time and the post-merge gate rejects them.
+		{name: "codex_with_external_only_accepted_at_cli_stage", opts: opts{Codex: true, ExternalOnly: true}, wantErr: false},
+		{name: "codex_with_codex_only_accepted_at_cli_stage", opts: opts{Codex: true, CodexOnly: true}, wantErr: false},
+		{name: "pass_claude_md_without_codex_is_valid_at_cli_stage", opts: opts{PassClaudeMd: true}, wantErr: false},
 	}
 
 	for _, tc := range tests {
@@ -928,6 +954,215 @@ func TestValidateFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyCodexOverrides_PostMergeMutexChecks(t *testing.T) {
+	// the --codex / --external-only / --codex-only / --external-review-tool / --pass-claude-md
+	// mutex gate runs in applyCodexOverrides after config merge, so the same CLI flag
+	// is rejected whether the codex executor comes from --codex on the CLI or from
+	// executor=codex in the config file.
+	t.Run("cli_codex_plus_external_only_rejected", func(t *testing.T) {
+		cfg := &config.Config{}
+		o := parseTestOpts(t, "--codex", "--external-only")
+		var warnBuf bytes.Buffer
+		err := applyCodexOverrides(o, cfg, &warnBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--external-only is incompatible with codex executor")
+	})
+
+	t.Run("config_executor_codex_plus_cli_external_only_rejected", func(t *testing.T) {
+		// MAJOR finding 1: executor=codex from config + --external-only on CLI must be rejected.
+		cfg := &config.Config{Executor: config.ExecutorCodex}
+		o := parseTestOpts(t, "--external-only")
+		var warnBuf bytes.Buffer
+		err := applyCodexOverrides(o, cfg, &warnBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--external-only is incompatible with codex executor")
+	})
+
+	t.Run("config_executor_codex_plus_cli_codex_only_rejected", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex}
+		o := parseTestOpts(t, "--codex-only")
+		var warnBuf bytes.Buffer
+		err := applyCodexOverrides(o, cfg, &warnBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--codex-only is incompatible with codex executor")
+	})
+
+	t.Run("cli_codex_plus_external_review_tool_codex_rejected", func(t *testing.T) {
+		cfg := &config.Config{}
+		o := parseTestOpts(t, "--codex", "--external-review-tool", "codex")
+		var warnBuf bytes.Buffer
+		err := applyCodexOverrides(o, cfg, &warnBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--external-review-tool is incompatible with codex executor")
+	})
+
+	t.Run("cli_codex_plus_external_review_tool_custom_rejected", func(t *testing.T) {
+		cfg := &config.Config{}
+		o := parseTestOpts(t, "--codex", "--external-review-tool", "custom")
+		var warnBuf bytes.Buffer
+		err := applyCodexOverrides(o, cfg, &warnBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--external-review-tool is incompatible with codex executor")
+	})
+
+	t.Run("config_executor_codex_plus_cli_external_review_tool_custom_rejected", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex}
+		o := parseTestOpts(t, "--external-review-tool", "custom")
+		var warnBuf bytes.Buffer
+		err := applyCodexOverrides(o, cfg, &warnBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--external-review-tool is incompatible with codex executor")
+	})
+
+	t.Run("cli_codex_plus_external_review_tool_none_allowed", func(t *testing.T) {
+		cfg := &config.Config{}
+		o := parseTestOpts(t, "--codex", "--external-review-tool", "none")
+		var warnBuf bytes.Buffer
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+	})
+
+	t.Run("config_executor_codex_plus_cli_external_review_tool_none_allowed", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex}
+		o := parseTestOpts(t, "--external-review-tool", "none")
+		var warnBuf bytes.Buffer
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+	})
+
+	t.Run("non_codex_executor_does_not_reject_external_only", func(t *testing.T) {
+		// when executor is not codex, --external-only is fine; the codex mutex gate
+		// must not over-reach.
+		cfg := &config.Config{}
+		o := parseTestOpts(t, "--external-only")
+		var warnBuf bytes.Buffer
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+	})
+}
+
+func TestCodexFlag_ApplyCLIOverrides(t *testing.T) {
+	t.Run("codex_flag_sets_executor_and_forces_external_review_none", func(t *testing.T) {
+		cfg := &config.Config{ExternalReviewTool: "codex"}
+		o := parseTestOpts(t, "--codex")
+
+		require.NoError(t, applyCLIOverrides(o, cfg))
+
+		assert.Equal(t, config.ExecutorCodex, cfg.Executor)
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+	})
+
+	t.Run("pass_claude_md_flag_sets_pass_claude_md", func(t *testing.T) {
+		cfg := &config.Config{}
+		o := parseTestOpts(t, "--codex", "--pass-claude-md")
+
+		require.NoError(t, applyCLIOverrides(o, cfg))
+
+		assert.True(t, cfg.PassClaudeMd)
+	})
+
+	t.Run("absent_codex_flag_does_not_touch_executor", func(t *testing.T) {
+		cfg := &config.Config{Executor: "", ExternalReviewTool: "codex"}
+		o := parseTestOpts(t)
+
+		require.NoError(t, applyCLIOverrides(o, cfg))
+
+		assert.Empty(t, cfg.Executor)
+		assert.Equal(t, "codex", cfg.ExternalReviewTool)
+	})
+
+	t.Run("config_executor_codex_user_set_external_review_tool_warns", func(t *testing.T) {
+		// user explicitly set external_review_tool in their config — warn that it's being
+		// overridden to "none" because of executor=codex.
+		cfg := &config.Config{Executor: config.ExecutorCodex, ExternalReviewTool: "codex", ExternalReviewToolSet: true}
+		o := parseTestOpts(t)
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+		assert.Contains(t, warnBuf.String(), "executor=codex")
+		assert.Contains(t, warnBuf.String(), "overridden to")
+	})
+
+	t.Run("config_executor_codex_embedded_default_does_not_warn", func(t *testing.T) {
+		// user did NOT set external_review_tool — the value is just the embedded default.
+		// no warning should fire (this was the spurious-warning bug on vanilla --codex runs).
+		cfg := &config.Config{Executor: config.ExecutorCodex, ExternalReviewTool: "codex", ExternalReviewToolSet: false}
+		o := parseTestOpts(t)
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+		assert.Empty(t, warnBuf.String(), "no warning expected when external_review_tool is from embedded default")
+	})
+
+	t.Run("config_executor_codex_with_external_review_none_no_warning", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, ExternalReviewTool: "none", ExternalReviewToolSet: true}
+		o := parseTestOpts(t)
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+		assert.Empty(t, warnBuf.String())
+	})
+
+	t.Run("cli_external_review_tool_explicit_does_not_emit_warning", func(t *testing.T) {
+		// validateFlags now accepts --codex with --external-review-tool=none at the CLI
+		// stage (see TestValidateFlags), so applyCodexOverrides runs after it. this guards
+		// the no-warning branch: a user explicitly setting the flag to "none" should not
+		// see the codex-override warning.
+		cfg := &config.Config{Executor: config.ExecutorCodex, ExternalReviewTool: "none"}
+		o := parseTestOpts(t, "--external-review-tool", "none")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "none", cfg.ExternalReviewTool)
+		assert.Empty(t, warnBuf.String())
+	})
+
+	t.Run("config_executor_codex_plus_cli_pass_claude_md_succeeds", func(t *testing.T) {
+		// post-merge gate: --pass-claude-md is acceptable when executor=codex
+		// comes from config file, even without --codex on the CLI.
+		cfg := &config.Config{Executor: config.ExecutorCodex, ExternalReviewTool: "none"}
+		o := parseTestOpts(t, "--pass-claude-md")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.True(t, cfg.PassClaudeMd)
+		assert.Equal(t, config.ExecutorCodex, cfg.Executor)
+		assert.Empty(t, warnBuf.String())
+	})
+
+	t.Run("cli_pass_claude_md_without_any_codex_fails_post_merge", func(t *testing.T) {
+		// post-merge gate: --pass-claude-md without codex executor (neither CLI nor config)
+		// is rejected with a clear error message.
+		cfg := &config.Config{Executor: "", ExternalReviewTool: "none"}
+		o := parseTestOpts(t, "--pass-claude-md")
+		var warnBuf bytes.Buffer
+
+		err := applyCodexOverrides(o, cfg, &warnBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--pass-claude-md requires --codex")
+		assert.Contains(t, err.Error(), "executor = codex in config")
+	})
+
+	t.Run("cli_codex_plus_pass_claude_md_succeeds_post_merge", func(t *testing.T) {
+		// redundant but valid: both flags on CLI.
+		cfg := &config.Config{Executor: "", ExternalReviewTool: "none"}
+		o := parseTestOpts(t, "--codex", "--pass-claude-md")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.True(t, cfg.PassClaudeMd)
+		assert.Equal(t, config.ExecutorCodex, cfg.Executor)
+	})
 }
 
 func TestPrintStartupInfo(t *testing.T) {
@@ -1005,6 +1240,91 @@ func TestPrintStartupInfo(t *testing.T) {
 		})
 		assert.Contains(t, out, "ANTHROPIC_API_KEY passthrough enabled",
 			"plan mode banner must surface API key passthrough")
+	})
+
+	t.Run("shows codex executor line when enabled", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+			Executor:      config.ExecutorCodex,
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.Contains(t, out, "executor: codex (external review skipped)")
+	})
+
+	t.Run("shows claude md passthrough line when enabled", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+			Executor:      config.ExecutorCodex,
+			PassClaudeMd:  true,
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.Contains(t, out, "claude.md: project CLAUDE.md passthrough enabled")
+	})
+
+	t.Run("hides executor line for default claude", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.NotContains(t, out, "executor:")
+	})
+
+	t.Run("shows codex detail lines when config fields are set", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+			Executor:      config.ExecutorCodex,
+			CodexModel:    "gpt-5.5",
+			CodexSandbox:  "danger-full-access",
+			CodexEffort:   "xhigh",
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.Contains(t, out, "model: gpt-5.5")
+		assert.Contains(t, out, "sandbox: danger-full-access")
+		assert.Contains(t, out, "reasoning effort: xhigh")
+	})
+
+	t.Run("omits empty codex detail lines so codex resolves them itself", func(t *testing.T) {
+		// empty CodexModel/CodexEffort mean ralphex did not override them — the
+		// banner must stay silent so codex's own resolved header surfaces them.
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+			Executor:      config.ExecutorCodex,
+			CodexSandbox:  "read-only",
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.NotContains(t, out, "model:")
+		assert.NotContains(t, out, "reasoning effort:")
+		assert.Contains(t, out, "sandbox: read-only", "sandbox is always resolved, so it is always shown")
 	})
 }
 

@@ -39,6 +39,17 @@ claude_args = --dangerously-skip-permissions --output-format stream-json --verbo
 # codex executor
 # ------------------------------------------------------------------------------
 
+# executor: primary executor for task, review, and finalize phases
+# empty/default uses Claude Code; "codex" runs the full pipeline through codex
+# and skips the external review phase
+# executor =
+
+# pass_claude_md: when executor = codex, let codex read project CLAUDE.md via
+# project_doc_fallback_filenames. user-level ~/.claude/CLAUDE.md is not
+# auto-passed; ralphex prints a one-time symlink hint instead.
+# default: false
+# pass_claude_md = false
+
 # codex_enabled: whether to run codex external review phase
 # set to false to skip codex review entirely
 # default: true
@@ -49,13 +60,17 @@ codex_enabled = true
 codex_command = codex
 
 # codex_model: model ID for codex
-# available models: gpt-5.4, gpt-5.3-codex, gpt-5.3-codex-mini
-# default: gpt-5.4
-codex_model = gpt-5.4
+# available models: gpt-5.5, gpt-5.3-codex, gpt-5.3-codex-mini
+# default: gpt-5.5
+# (set to an empty value, "codex_model =", to inherit from ~/.codex/config.toml instead;
+# commenting the line out keeps the gpt-5.5 default)
+codex_model = gpt-5.5
 
 # codex_reasoning_effort: reasoning effort level for codex
 # available: low, medium, high, xhigh
 # default: xhigh
+# (set to an empty value, "codex_reasoning_effort =", to inherit from ~/.codex/config.toml
+# instead; commenting the line out keeps the xhigh default)
 codex_reasoning_effort = xhigh
 
 # codex_timeout_ms: timeout for codex execution in milliseconds
@@ -64,9 +79,11 @@ codex_timeout_ms = 3600000
 
 # codex_sandbox: sandbox mode for codex execution
 # available: read-only, workspace-write, danger-full-access
-# read-only: codex can read files but not write (safest for code review)
+# read-only: codex can read files but not write (safest for external review)
+# danger-full-access: codex runs without filesystem sandboxing, matching autonomous claude mode
+# note: first-class executor = codex uses danger-full-access unless codex_sandbox is explicitly set in user config
 # note: in docker, sandbox is auto-disabled (landlock doesn't work in containers)
-# default: read-only
+# default: read-only for external codex review, danger-full-access for executor = codex
 codex_sandbox = read-only
 
 # ------------------------------------------------------------------------------
@@ -163,15 +180,20 @@ task_retry_count = 1
 # default: 0
 # review_patience = 0
 
-# session_timeout: maximum duration for a single claude session
+# session_timeout: maximum duration for a single executor session
 # kills hanging sessions (e.g., agent started a blocking operation)
+# applies to claude in default executor mode; under --codex applies to every executor call;
+# external codex/custom review in Claude mode is not affected
 # uses Go duration format (e.g., "30m", "1h", "1h30m")
 # omit or leave empty to disable (no timeout)
 # session_timeout =
 
-# idle_timeout: kill claude session after no output for this duration
+# idle_timeout: kill executor session after no output for this duration
 # unlike session_timeout (fixed wall-clock limit), idle timeout resets on each
 # output line and only fires when the session goes silent
+# applies to the claude executor in default mode and to every executor call
+# under --codex; external codex review in default-claude mode is NOT affected;
+# custom external review is not affected
 # uses Go duration format (e.g., "5m", "10m", "30m")
 # omit or leave empty to disable (no timeout)
 # idle_timeout =

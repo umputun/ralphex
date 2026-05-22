@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,6 +44,54 @@ func mockWaitError(err error) func() error {
 	return func() error { return err }
 }
 
+func TestExecCodexRunner_childEnv(t *testing.T) {
+	tests := []struct {
+		name              string
+		stripAnthropicKey bool
+		env               []string
+		want              []string
+	}{
+		{
+			name:              "first-class --codex strips ANTHROPIC_API_KEY and CLAUDECODE",
+			stripAnthropicKey: true,
+			env:               []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+			want:              []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name:              "external codex review (claude mode) preserves ANTHROPIC_API_KEY",
+			stripAnthropicKey: false,
+			env:               []string{"PATH=/usr/bin", "CLAUDECODE=1", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+			want:              []string{"PATH=/usr/bin", "ANTHROPIC_API_KEY=secret", "HOME=/home/user"},
+		},
+		{
+			name:              "CLAUDECODE always stripped regardless of mode",
+			stripAnthropicKey: false,
+			env:               []string{"PATH=/usr/bin", "CLAUDECODE=1", "HOME=/home/user"},
+			want:              []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name:              "does not match partial keys like ANTHROPIC_API_KEY_OLD when stripping",
+			stripAnthropicKey: true,
+			env:               []string{"ANTHROPIC_API_KEY_OLD=old", "ANTHROPIC_API_KEY=new", "CLAUDECODE=1"},
+			want:              []string{"ANTHROPIC_API_KEY_OLD=old"},
+		},
+		{
+			name:              "passes through other keys unchanged",
+			stripAnthropicKey: true,
+			env:               []string{"OPENAI_API_KEY=ok", "FOO=bar"},
+			want:              []string{"OPENAI_API_KEY=ok", "FOO=bar"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &execCodexRunner{stripAnthropicKey: tc.stripAnthropicKey}
+			got := r.childEnv(tc.env)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestCodexExecutor_Run_Success(t *testing.T) {
 	// stdout contains the actual response (captured in Result.Output)
 	// stderr contains progress info (streamed to OutputHandler)
@@ -60,7 +112,10 @@ func TestCodexExecutor_Run_Success(t *testing.T) {
 }
 
 func TestCodexExecutor_Run_StreamsStderr(t *testing.T) {
-	// stderr contains header block and bold summaries for progress display
+	// header block (workdir/model/sandbox/session-id) is now suppressed to
+	// match the claude executor; only bold summaries flow through stderr.
+	// session id is still captured internally for the rollout tailer (covered
+	// by TestCodexExecutor_processStderr_emitsSessionID).
 	stderr := `--------
 OpenAI Codex v1.2.3
 model: gpt-5
@@ -92,17 +147,21 @@ Even more noise`
 
 	require.NoError(t, result.Error)
 
-	// verify header block is shown (between first two "--------" separators)
-	assert.Contains(t, streamedLines, "--------", "separator should be shown")
-	assert.Contains(t, streamedLines, "OpenAI Codex v1.2.3", "header content should be shown")
-	assert.Contains(t, streamedLines, "model: gpt-5", "header content should be shown")
-	assert.Contains(t, streamedLines, "sandbox: read-only", "header content should be shown")
+	// on this first run, codex's resolved config (model/sandbox/effort) leaks
+	// through the header block so the user knows what codex actually picked.
+	// other header lines (separators, OpenAI banner, workdir) stay hidden.
+	assert.NotContains(t, streamedLines, "--------", "separator must not appear")
+	assert.Contains(t, streamedLines, "model: gpt-5", "first-run model: line should leak")
+	assert.Contains(t, streamedLines, "sandbox: read-only", "first-run sandbox: line should leak")
+	for _, hidden := range []string{"OpenAI Codex v1.2.3", "workdir: /tmp/test"} {
+		assert.NotContains(t, streamedLines, hidden, "header line %q must be hidden", hidden)
+	}
 
-	// verify bold summaries are shown (stripped of ** markers)
+	// verify bold summaries are still shown (stripped of ** markers)
 	assert.Contains(t, streamedLines, "Summary: Found 2 issues", "bold summary should be shown")
 	assert.Contains(t, streamedLines, "Details: processing...", "bold summary should be shown")
 
-	// verify noise is filtered
+	// verify non-bold post-header noise is filtered
 	for _, line := range streamedLines {
 		assert.NotContains(t, line, "Some thinking noise", "thinking noise should be filtered")
 		assert.NotContains(t, line, "More thinking", "noise should be filtered")
@@ -216,15 +275,65 @@ func TestCodexExecutor_Run_DefaultSettings(t *testing.T) {
 
 	require.NoError(t, result.Error)
 
-	// verify default settings
+	// verify default settings: model and reasoning effort must NOT be set on the codex CLI
+	// when ralphex config does not specify them — codex inherits from ~/.codex/config.toml
 	argsStr := strings.Join(capturedArgs, " ")
-	assert.Contains(t, argsStr, `model="gpt-5.4"`)
-	assert.Contains(t, argsStr, "model_reasoning_effort=xhigh")
+	assert.NotContains(t, argsStr, "-c model=", "model must not be passed when not explicitly configured")
+	assert.NotContains(t, argsStr, "model_reasoning_effort=", "reasoning effort must not be passed when not explicitly configured")
 	assert.Contains(t, argsStr, "stream_idle_timeout_ms=3600000")
 	assert.Contains(t, argsStr, "--sandbox read-only")
+	assert.NotContains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox",
+		"sandbox bypass must not be emitted for read-only mode")
 
 	// prompt must not appear in CLI args (passed via stdin to avoid Windows 8191-char limit)
 	assert.NotContains(t, capturedArgs, "test prompt", "prompt should be passed via stdin, not as CLI arg")
+}
+
+func TestCodexExecutor_Run_DangerFullAccessBypassesSandbox(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	t.Run("first-class --codex emits bypass flag", func(t *testing.T) {
+		// MultiAgent=true is the first-class --codex signal (set by buildCodexExecutor).
+		// danger-full-access requires the bypass flag for unattended runs.
+		var capturedArgs []string
+		mock := &mockCodexRunner{
+			runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+				capturedArgs = args
+				return mockStreams("", "result"), mockWait(), nil
+			},
+		}
+		e := &CodexExecutor{runner: mock, Sandbox: "danger-full-access", MultiAgent: true}
+
+		result := e.Run(context.Background(), "test prompt")
+
+		require.NoError(t, result.Error)
+		argsStr := strings.Join(capturedArgs, " ")
+		assert.Contains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox")
+		assert.Contains(t, argsStr, "--sandbox danger-full-access")
+	})
+
+	t.Run("external codex review (claude mode) omits bypass flag in danger-full-access", func(t *testing.T) {
+		// MultiAgent=false signals external codex review (built by buildExternalCodexExecutor).
+		// Master never emitted --dangerously-bypass-approvals-and-sandbox; gating it on MultiAgent
+		// preserves master semantics for default-claude users (esp. Docker mode where the sandbox
+		// is forced to danger-full-access).
+		var capturedArgs []string
+		mock := &mockCodexRunner{
+			runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+				capturedArgs = args
+				return mockStreams("", "result"), mockWait(), nil
+			},
+		}
+		e := &CodexExecutor{runner: mock, Sandbox: "danger-full-access"}
+
+		result := e.Run(context.Background(), "test prompt")
+
+		require.NoError(t, result.Error)
+		argsStr := strings.Join(capturedArgs, " ")
+		assert.NotContains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox",
+			"external codex review must keep master semantics — no bypass flag")
+		assert.Contains(t, argsStr, "--sandbox danger-full-access")
+	})
 }
 
 func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
@@ -264,22 +373,27 @@ func TestCodexExecutor_Run_CustomSettings(t *testing.T) {
 	assert.Contains(t, argsStr, "stream_idle_timeout_ms=1000")
 	assert.Contains(t, argsStr, "--sandbox off")
 	assert.Contains(t, argsStr, `project_doc="/path/to/doc.md"`)
+	assert.NotContains(t, argsStr, "--dangerously-bypass-approvals-and-sandbox",
+		"sandbox bypass must only fire for danger-full-access mode")
 
 	// prompt must not appear in CLI args (passed via stdin to avoid Windows 8191-char limit)
 	assert.NotContains(t, capturedArgs, "test", "prompt should be passed via stdin, not as CLI arg")
 }
 
 func TestCodexExecutor_shouldDisplay_headerBlock(t *testing.T) {
+	// the startup banner (separators + workdir/model/session-id lines) is
+	// intentionally suppressed to match claude executor and avoid repeating
+	// the same config block per task/review iteration. only bold summaries
+	// outside the header block flow through to OutputHandler.
 	e := &CodexExecutor{}
 
 	tests := []struct {
 		name       string
 		lines      []string
-		wantShown  []string
 		wantHidden []string
 	}{
 		{
-			name: "header block between separators",
+			name: "header block between separators suppressed",
 			lines: []string{
 				"--------",
 				"OpenAI Codex v1.2.3",
@@ -288,11 +402,10 @@ func TestCodexExecutor_shouldDisplay_headerBlock(t *testing.T) {
 				"--------",
 				"noise after header",
 			},
-			wantShown:  []string{"--------", "OpenAI Codex v1.2.3", "model: gpt-5", "workdir: /tmp/test", "--------"},
-			wantHidden: []string{"noise after header"},
+			wantHidden: []string{"--------", "OpenAI Codex v1.2.3", "model: gpt-5", "workdir: /tmp/test", "noise after header"},
 		},
 		{
-			name: "third separator not shown",
+			name: "trailing separators also suppressed",
 			lines: []string{
 				"--------",
 				"header content",
@@ -300,8 +413,7 @@ func TestCodexExecutor_shouldDisplay_headerBlock(t *testing.T) {
 				"--------",
 				"more content",
 			},
-			wantShown:  []string{"--------", "header content", "--------"},
-			wantHidden: []string{"more content"},
+			wantHidden: []string{"--------", "header content", "more content"},
 		},
 	}
 
@@ -314,25 +426,10 @@ func TestCodexExecutor_shouldDisplay_headerBlock(t *testing.T) {
 					shown = append(shown, out)
 				}
 			}
-			for _, want := range tc.wantShown {
-				assert.Contains(t, shown, want, "expected shown: %s", want)
-			}
+			assert.Empty(t, shown, "header block must produce no displayed output")
 			for _, notWant := range tc.wantHidden {
 				assert.NotContains(t, shown, notWant, "expected hidden: %s", notWant)
 			}
-			// verify separator count matches expected
-			wantSepCount, gotSepCount := 0, 0
-			for _, s := range tc.wantShown {
-				if s == "--------" {
-					wantSepCount++
-				}
-			}
-			for _, s := range shown {
-				if s == "--------" {
-					gotSepCount++
-				}
-			}
-			assert.Equal(t, wantSepCount, gotSepCount, "separator count mismatch")
 		})
 	}
 }
@@ -453,7 +550,7 @@ func TestCodexExecutor_processStderr_contextCancellation(t *testing.T) {
 	}()
 
 	e := &CodexExecutor{}
-	res := e.processStderr(ctx, pr)
+	res := e.processStderr(ctx, pr, stderrStreamOpts{})
 
 	// should return context.Canceled or nil (depending on timing)
 	if res.err != nil {
@@ -542,7 +639,7 @@ func TestCodexExecutor_processStderr_readError(t *testing.T) {
 	e := &CodexExecutor{}
 	errReader := &failingReader{err: errors.New("read failed")}
 
-	res := e.processStderr(context.Background(), errReader)
+	res := e.processStderr(context.Background(), errReader, stderrStreamOpts{})
 
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "read stderr")
@@ -569,7 +666,7 @@ func TestCodexExecutor_processStderr_lastLines(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &CodexExecutor{}
-			res := e.processStderr(context.Background(), strings.NewReader(tc.stderr))
+			res := e.processStderr(context.Background(), strings.NewReader(tc.stderr), stderrStreamOpts{})
 			require.NoError(t, res.err)
 			assert.Equal(t, tc.wantLines, res.lastLines)
 		})
@@ -604,14 +701,88 @@ func TestCodexExecutor_Run_ErrorPriority(t *testing.T) {
 	assert.Contains(t, result.Error.Error(), "stderr")
 }
 
+func TestCodexExecutor_finalError(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		stderrRes stderrResult
+		stdoutErr error
+		waitErr   error
+		wantNil   bool
+		wantSubs  []string
+	}{
+		{name: "all nil", ctx: context.Background(), wantNil: true},
+		{
+			name:      "stderr error wins over stdout and wait",
+			ctx:       context.Background(),
+			stderrRes: stderrResult{err: errors.New("stderr boom")},
+			stdoutErr: errors.New("stdout boom"),
+			waitErr:   errors.New("wait boom"),
+			wantSubs:  []string{"stderr boom"},
+		},
+		{
+			name:      "canceled stderr error falls through to stdout error",
+			ctx:       context.Background(),
+			stderrRes: stderrResult{err: context.Canceled},
+			stdoutErr: errors.New("stdout boom"),
+			wantSubs:  []string{"stdout boom"},
+		},
+		{
+			name:      "stdout error returned when no stderr error",
+			ctx:       context.Background(),
+			stdoutErr: errors.New("stdout boom"),
+			wantSubs:  []string{"stdout boom"},
+		},
+		{
+			name:     "wait error without stderr tail",
+			ctx:      context.Background(),
+			waitErr:  errors.New("exit status 1"),
+			wantSubs: []string{"codex exited with error", "exit status 1"},
+		},
+		{
+			name:      "wait error with stderr tail includes last lines",
+			ctx:       context.Background(),
+			stderrRes: stderrResult{lastLines: []string{"line a", "line b"}},
+			waitErr:   errors.New("exit status 1"),
+			wantSubs:  []string{"codex exited with error", "exit status 1", "stderr:", "line a", "line b"},
+		},
+		{
+			name:     "wait error with canceled context reports context error",
+			ctx:      canceledCtx,
+			waitErr:  errors.New("killed"),
+			wantSubs: []string{"context error"},
+		},
+	}
+
+	e := &CodexExecutor{}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := e.finalError(tc.ctx, tc.stderrRes, tc.stdoutErr, tc.waitErr)
+			if tc.wantNil {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, sub := range tc.wantSubs {
+				assert.Contains(t, err.Error(), sub)
+			}
+		})
+	}
+}
+
 func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
+	// header block is now suppressed entirely; only bold summaries flow through
+	// and they are deduplicated so the same "**X**" line shown twice in a row
+	// (or with other lines between) is emitted only once.
 	e := &CodexExecutor{}
 
 	tests := []struct {
-		name       string
-		lines      []string
-		wantShown  []string
-		wantHidden []string
+		name      string
+		lines     []string
+		wantShown []string
 	}{
 		{
 			name: "duplicate bold summaries filtered",
@@ -626,8 +797,7 @@ func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
 				"**Questions**",      // duplicate
 				"**Change Summary**", // duplicate
 			},
-			wantShown:  []string{"--------", "header", "Findings", "Questions", "Change Summary"},
-			wantHidden: []string{},
+			wantShown: []string{"Findings", "Questions", "Change Summary"},
 		},
 		{
 			name: "non-consecutive duplicates filtered",
@@ -639,19 +809,17 @@ func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
 				"**Done**",
 				"**Processing...**", // non-consecutive duplicate
 			},
-			wantShown:  []string{"--------", "model: gpt-5", "Processing...", "Done"},
-			wantHidden: []string{},
+			wantShown: []string{"Processing...", "Done"},
 		},
 		{
-			name: "separators not deduplicated",
+			name: "separators alone produce no output",
 			lines: []string{
 				"--------",
 				"header content",
 				"--------",
-				"--------", // third separator, should not be shown (headerCount > 2)
+				"--------",
 			},
-			wantShown:  []string{"--------", "header content", "--------"},
-			wantHidden: []string{},
+			wantShown: nil,
 		},
 	}
 
@@ -664,24 +832,15 @@ func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
 					shown = append(shown, out)
 				}
 			}
+			assert.Equal(t, tc.wantShown, shown)
 
-			// verify all expected lines are shown at least once
-			for _, want := range tc.wantShown {
-				assert.True(t, slices.Contains(shown, want), "expected %q to appear in shown output", want)
-			}
-
-			// verify no duplicates in shown output (except separators which can repeat)
+			// no displayed line should appear more than once (full dedup)
 			seenLines := make(map[string]int)
 			for _, s := range shown {
 				seenLines[s]++
 			}
 			for line, count := range seenLines {
-				if line == "--------" {
-					// separators can appear twice (start and end of header block)
-					assert.LessOrEqual(t, count, 2, "separator should appear at most twice")
-				} else {
-					assert.Equal(t, 1, count, "duplicate line found: %q", line)
-				}
+				assert.Equal(t, 1, count, "duplicate line found: %q", line)
 			}
 		})
 	}
@@ -704,9 +863,11 @@ func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 			if tc.size >= 65*1024*1024 && testing.Short() {
 				t.Skip("skipping 65MB allocation in short mode")
 			}
-			// create a large line in header block (which gets displayed)
+			// embed the large content in a bold summary so it flows through
+			// the (only) display path. header block content is suppressed and
+			// can't be used to verify large-line capture anymore.
 			largeContent := strings.Repeat("x", tc.size)
-			stderr := "--------\n" + largeContent + "\n--------\n"
+			stderr := "**" + largeContent + "**\n"
 
 			var shown []string
 			e := &CodexExecutor{
@@ -715,7 +876,7 @@ func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 				},
 			}
 
-			res := e.processStderr(context.Background(), strings.NewReader(stderr))
+			res := e.processStderr(context.Background(), strings.NewReader(stderr), stderrStreamOpts{})
 
 			require.NoError(t, res.err, "should handle %d byte line without error", tc.size)
 			assert.Contains(t, shown, largeContent, "large content should be captured")
@@ -724,13 +885,15 @@ func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 }
 
 func TestCodexExecutor_Run_largeOutput(t *testing.T) {
-	// test end-to-end with large stderr and stdout
+	// test end-to-end with large stderr and stdout. header block is now
+	// suppressed, so the large stderr content is wrapped in a bold summary
+	// (the only display path) to verify the executor does not truncate it.
 	largeStderr := strings.Repeat("x", 200*1024) // 200KB
 	largeStdout := strings.Repeat("y", 500*1024) // 500KB
 
 	mock := &mockCodexRunner{
 		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
-			stderr := "--------\n" + largeStderr + "\n--------\n"
+			stderr := "**" + largeStderr + "**\n"
 			return mockStreams(stderr, largeStdout), mockWait(), nil
 		},
 	}
@@ -745,7 +908,7 @@ func TestCodexExecutor_Run_largeOutput(t *testing.T) {
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, largeStdout, result.Output, "stdout should be fully captured")
-	// verify large stderr was processed (appears in header block)
+	// verify large stderr was processed (flows through as bold summary)
 	found := false
 	for _, c := range captured {
 		if strings.Contains(c, strings.Repeat("x", 100)) {
@@ -1321,4 +1484,580 @@ func TestIsCodexErrorLine(t *testing.T) {
 			assert.Equal(t, tc.want, isCodexErrorLine(tc.line))
 		})
 	}
+}
+
+func TestCodexExecutor_configOverrides(t *testing.T) {
+	reviewerDesc := fmt.Sprintf("agents.%s.description=%q", CodexReviewerAgentName, codexReviewerDescription)
+	const fallbackArg = `project_doc_fallback_filenames=["CLAUDE.md"]`
+
+	tests := []struct {
+		name string
+		exec *CodexExecutor
+		want []string
+	}{
+		{
+			name: "no flags produce no overrides",
+			exec: &CodexExecutor{},
+			want: nil,
+		},
+		{
+			name: "MultiAgent only adds feature flag and reviewer registration",
+			exec: &CodexExecutor{MultiAgent: true},
+			want: []string{"-c", "features.multi_agent=true", "-c", reviewerDesc},
+		},
+		{
+			name: "PassClaudeMd only adds project_doc_fallback_filenames",
+			exec: &CodexExecutor{PassClaudeMd: true},
+			want: []string{"-c", fallbackArg},
+		},
+		{
+			name: "both flags emit all overrides with multi-agent first",
+			exec: &CodexExecutor{MultiAgent: true, PassClaudeMd: true},
+			want: []string{"-c", "features.multi_agent=true", "-c", reviewerDesc, "-c", fallbackArg},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.exec.configOverrides())
+		})
+	}
+}
+
+func TestCodexExecutor_configOverrides_reviewerPairsWithMultiAgent(t *testing.T) {
+	// agent registration is meaningless without features.multi_agent=true,
+	// so PassClaudeMd alone must NOT emit any agents.reviewer override.
+	e := CodexExecutor{PassClaudeMd: true}
+	args := e.configOverrides()
+	joined := strings.Join(args, " ")
+	assert.NotContains(t, joined, "agents.reviewer", "reviewer agent must only be registered alongside multi_agent")
+	assert.NotContains(t, joined, "features.multi_agent", "multi_agent flag must not appear when only fallback is set")
+}
+
+func TestCodexExecutor_Run_SplicesMultiAgentArgs(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	var capturedArgs []string
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+			capturedArgs = args
+			return mockStreams("", "result"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock, MultiAgent: true}
+
+	result := e.Run(context.Background(), "test prompt")
+	require.NoError(t, result.Error)
+
+	require.NotEmpty(t, capturedArgs)
+	assert.Equal(t, "exec", capturedArgs[0], "exec must be first arg")
+	// multi-agent overrides splice right after exec, before --sandbox
+	require.GreaterOrEqual(t, len(capturedArgs), 5)
+	assert.Equal(t, "-c", capturedArgs[1])
+	assert.Equal(t, "features.multi_agent=true", capturedArgs[2])
+	assert.Equal(t, "-c", capturedArgs[3])
+	expectedReviewerDesc := fmt.Sprintf("agents.%s.description=%q", CodexReviewerAgentName, codexReviewerDescription)
+	assert.Equal(t, expectedReviewerDesc, capturedArgs[4], "exact reviewer description literal")
+	assert.Contains(t, strings.Join(capturedArgs, " "), "--sandbox read-only", "default sandbox still emitted")
+}
+
+func TestCodexExecutor_Run_SplicesFallbackArgs(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	var capturedArgs []string
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+			capturedArgs = args
+			return mockStreams("", "result"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock, PassClaudeMd: true}
+
+	result := e.Run(context.Background(), "test prompt")
+	require.NoError(t, result.Error)
+
+	argsStr := strings.Join(capturedArgs, " ")
+	assert.Contains(t, argsStr, `project_doc_fallback_filenames=["CLAUDE.md"]`)
+	assert.NotContains(t, argsStr, "features.multi_agent", "no multi_agent flag when only fallback is set")
+}
+
+func TestCodexExecutor_Run_NoOverridesByDefault(t *testing.T) {
+	t.Setenv("RALPHEX_DOCKER", "")
+
+	var capturedArgs []string
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, args ...string) (CodexStreams, func() error, error) {
+			capturedArgs = args
+			return mockStreams("", "result"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock}
+
+	result := e.Run(context.Background(), "test prompt")
+	require.NoError(t, result.Error)
+
+	argsStr := strings.Join(capturedArgs, " ")
+	assert.NotContains(t, argsStr, "features.multi_agent")
+	assert.NotContains(t, argsStr, "agents.reviewer")
+	assert.NotContains(t, argsStr, "project_doc_fallback_filenames")
+}
+
+func TestCodexExecutor_Run_IdleTimeoutFires(t *testing.T) {
+	// idle timeout fires when stderr emits one line then goes silent and stdout produces no further output
+	stderrPipeR, stderrPipeW := io.Pipe()
+	stdoutPipeR, stdoutPipeW := io.Pipe()
+
+	mock := &mockCodexRunner{
+		runFunc: func(ctx context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer stderrPipeW.Close()
+				defer stdoutPipeW.Close()
+				_, _ = stderrPipeW.Write([]byte("--------\nworking...\n"))
+				<-ctx.Done() // wait for idle timeout to cancel context
+			}()
+			return CodexStreams{Stderr: stderrPipeR, Stdout: stdoutPipeR}, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	e := &CodexExecutor{runner: mock, IdleTimeout: 100 * time.Millisecond}
+	result := e.Run(context.Background(), "analyze code")
+
+	require.NoError(t, result.Error, "idle timeout should not produce an error")
+	assert.True(t, result.IdleTimedOut, "IdleTimedOut should be set when idle timeout fires")
+}
+
+func TestCodexExecutor_Run_IdleTimeoutResetsOnStderrLines(t *testing.T) {
+	stderrPipeR, stderrPipeW := io.Pipe()
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer stderrPipeW.Close()
+				for range 5 {
+					_, _ = stderrPipeW.Write([]byte("--------\n"))
+					time.Sleep(50 * time.Millisecond)
+				}
+			}()
+			return CodexStreams{Stderr: stderrPipeR, Stdout: strings.NewReader("final answer")},
+				func() error { return nil }, nil
+		},
+	}
+
+	// 10x margin between writer sleep (50ms) and IdleTimeout (500ms): tight 2x margins
+	// cause spurious "idle timed out" failures on loaded CI runners.
+	e := &CodexExecutor{runner: mock, IdleTimeout: 500 * time.Millisecond}
+	result := e.Run(context.Background(), "analyze code")
+
+	require.NoError(t, result.Error)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false when stderr keeps emitting")
+	assert.Equal(t, "final answer", result.Output)
+}
+
+func TestCodexExecutor_Run_IdleTimeoutResetsOnStdoutChunks(t *testing.T) {
+	stdoutPipeR, stdoutPipeW := io.Pipe()
+	done := make(chan struct{})
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer close(done)
+				defer stdoutPipeW.Close()
+				for _, chunk := range []string{"one", " two", " three", " four"} {
+					_, _ = stdoutPipeW.Write([]byte(chunk))
+					time.Sleep(50 * time.Millisecond)
+				}
+			}()
+			return CodexStreams{Stderr: strings.NewReader(""), Stdout: stdoutPipeR}, func() error {
+				<-done
+				return nil
+			}, nil
+		},
+	}
+
+	// 10x margin between writer sleep (50ms) and IdleTimeout (500ms): tight 2x margins
+	// cause spurious "idle timed out" failures on loaded CI runners.
+	e := &CodexExecutor{runner: mock, IdleTimeout: 500 * time.Millisecond}
+	result := e.Run(context.Background(), "analyze code")
+
+	require.NoError(t, result.Error)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false when stdout keeps emitting")
+	assert.Equal(t, "one two three four", result.Output)
+}
+
+func TestCodexExecutor_Run_IdleTimeoutDisabledWhenZero(t *testing.T) {
+	// default behavior: IdleTimeout=0 means no idle timeout, runs normally
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams("", "done"), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{runner: mock} // IdleTimeout is zero (default)
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error)
+	assert.Equal(t, "done", result.Output)
+	assert.Zero(t, e.IdleTimeout)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should be false when idle timeout is disabled")
+}
+
+func TestCodexExecutor_Run_IdleTimeoutDetectsLimitPattern(t *testing.T) {
+	// when idle timeout fires after a stderr quota diagnostic, the limit pattern
+	// must be detected so runWithLimitRetry can wait-and-retry.
+	stderrPipeR, stderrPipeW := io.Pipe()
+
+	mock := &mockCodexRunner{
+		runFunc: func(ctx context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			go func() {
+				defer stderrPipeW.Close()
+				_, _ = stderrPipeW.Write([]byte("ERROR: You've hit your usage limit\n"))
+				<-ctx.Done()
+			}()
+			return CodexStreams{Stderr: stderrPipeR, Stdout: strings.NewReader("")}, func() error {
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}, nil
+		},
+	}
+
+	e := &CodexExecutor{
+		runner:        mock,
+		IdleTimeout:   100 * time.Millisecond,
+		LimitPatterns: []string{"You've hit your usage limit"},
+	}
+	result := e.Run(context.Background(), "analyze code")
+
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr, "should return LimitPatternError")
+	assert.Equal(t, "You've hit your usage limit", limitErr.Pattern)
+	assert.Equal(t, "codex /status", limitErr.HelpCmd)
+	assert.False(t, result.IdleTimedOut, "IdleTimedOut should not be set when pattern matched")
+}
+
+func TestCodexExecutor_Run_NoFalsePositiveOnLongStreamingOutput(t *testing.T) {
+	// regression: long streaming codex output that mentions rate-limit phrases in
+	// reasoning text (without the error:/fatal:/panic: prefix) must NOT trigger
+	// a pattern match. the isCodexErrorLine gate in scanLineForPatterns enforces
+	// this, but verify it still holds across many lines of streaming output.
+	stderrLines := make([]string, 0, 3+200*2)
+	stderrLines = append(stderrLines, "--------", "workdir: /tmp/test", "--------")
+	// 200 lines of progress chatter that legitimately mention "rate limit" in code-review reasoning
+	for i := range 200 {
+		stderrLines = append(stderrLines,
+			fmt.Sprintf("**Reviewing rate limit handler at line %d**", i),
+			fmt.Sprintf("checking whether quota exceeded path is reachable from handler %d", i),
+		)
+	}
+	stderr := strings.Join(stderrLines, "\n") + "\n"
+	stdout := "Analysis complete: no real rate-limit hits.\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, stdout), mockWait(), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"rate limit", "quota exceeded"},
+		ErrorPatterns: []string{"rate limit", "quota exceeded"},
+	}
+
+	result := e.Run(context.Background(), "review code")
+
+	require.NoError(t, result.Error,
+		"non-prefixed stderr chatter mentioning rate-limit phrases must not trigger pattern match")
+	var limitErr *LimitPatternError
+	assert.NotErrorAs(t, result.Error, &limitErr)
+	var patternErr *PatternMatchError
+	assert.NotErrorAs(t, result.Error, &patternErr)
+	assert.Contains(t, result.Output, "Analysis complete")
+}
+
+func TestTouchReader_Read(t *testing.T) {
+	t.Run("non-empty read calls touch", func(t *testing.T) {
+		var touched int
+		r := &touchReader{r: strings.NewReader("hello"), touch: func() { touched++ }}
+		buf := make([]byte, 5)
+		n, err := r.Read(buf)
+		require.NoError(t, err)
+		assert.Equal(t, 5, n)
+		assert.Equal(t, 1, touched, "touch must be called once for a non-empty read")
+	})
+
+	t.Run("zero-byte read does not call touch", func(t *testing.T) {
+		// EOF on an empty reader returns (0, io.EOF); touch must not fire
+		var touched int
+		r := &touchReader{r: strings.NewReader(""), touch: func() { touched++ }}
+		buf := make([]byte, 8)
+		n, err := r.Read(buf)
+		require.ErrorIs(t, err, io.EOF)
+		assert.Zero(t, n)
+		assert.Zero(t, touched, "touch must NOT be called when n == 0")
+	})
+
+	t.Run("error after partial read still calls touch", func(t *testing.T) {
+		// io.MultiReader returns partial then EOF; touch must fire for the partial read
+		var touched int
+		r := &touchReader{r: strings.NewReader("ab"), touch: func() { touched++ }}
+		buf := make([]byte, 4)
+		n, _ := r.Read(buf)
+		assert.Equal(t, 2, n)
+		assert.Equal(t, 1, touched, "non-zero n must trigger touch even when accompanied by error")
+	})
+
+	t.Run("nil touch is safe", func(t *testing.T) {
+		r := &touchReader{r: strings.NewReader("data"), touch: nil}
+		buf := make([]byte, 4)
+		n, err := r.Read(buf)
+		require.NoError(t, err)
+		assert.Equal(t, 4, n)
+	})
+}
+
+func TestCodexExecutor_extractSessionID(t *testing.T) {
+	e := &CodexExecutor{}
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "header line", line: "[26-05-18 10:40:06] session id: 019e3bbe-9788-79f1-b668-6c5790788775", want: "019e3bbe-9788-79f1-b668-6c5790788775"},
+		{name: "bare prefix", line: "session id: 019e3bbe-9788-79f1-b668-6c5790788775", want: "019e3bbe-9788-79f1-b668-6c5790788775"},
+		{name: "uppercase Session ID", line: "Session ID: 019E3BBE-9788-79F1-B668-6C5790788775", want: "019E3BBE-9788-79F1-B668-6C5790788775"},
+		{name: "no match", line: "[26-05-18 10:40:06] model: gpt-5.5", want: ""},
+		{name: "malformed uuid", line: "session id: not-a-uuid", want: ""},
+		{name: "empty", line: "", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, e.extractSessionID(tc.line))
+		})
+	}
+}
+
+func TestCodexExecutor_formatRolloutEvent(t *testing.T) {
+	e := &CodexExecutor{}
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{
+			name: "assistant message renders text",
+			line: `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello world"}]}}`,
+			want: "hello world",
+		},
+		{
+			name: "user message dropped",
+			line: `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"output_text","text":"prompt body"}]}}`,
+			want: "",
+		},
+		{
+			name: "assistant multi-block joins with newline",
+			line: `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first"},{"type":"output_text","text":"second"}]}}`,
+			want: "first\nsecond",
+		},
+		{
+			name: "exec_command skipped",
+			line: `{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"git status --short\"}"}}`,
+			want: "",
+		},
+		{
+			name: "spawn_agent skipped",
+			line: `{"type":"response_item","payload":{"type":"function_call","name":"spawn_agent","arguments":"{\"agent_type\":\"reviewer\",\"message\":\"qa-expert: review the diff\"}"}}`,
+			want: "",
+		},
+		{name: "reasoning skipped", line: `{"type":"response_item","payload":{"type":"reasoning","summary":[]}}`, want: ""},
+		{name: "function_call_output skipped", line: `{"type":"response_item","payload":{"type":"function_call_output","output":"ok"}}`, want: ""},
+		{name: "session_meta skipped", line: `{"type":"session_meta","payload":{}}`, want: ""},
+		{name: "turn_context skipped", line: `{"type":"turn_context","payload":{}}`, want: ""},
+		{name: "event_msg skipped", line: `{"type":"event_msg","payload":{}}`, want: ""},
+		{name: "malformed json", line: `not json`, want: ""},
+		{name: "empty line", line: ``, want: ""},
+		{name: "whitespace only", line: `   `, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, e.formatRolloutEvent([]byte(tc.line)))
+		})
+	}
+}
+
+func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
+	// craft a fake rollout file matching codex's path scheme so findRolloutFile
+	// can resolve it via the same glob the real runtime uses.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sessionID := "019e3bbe-9788-79f1-b668-deadbeefcafe"
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "18")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	path := filepath.Join(dir, "rollout-2026-05-18T10-40-06-"+sessionID+".jsonl")
+	f, err := os.Create(path) //nolint:gosec // test temp file
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	// OutputHandler is called from the tailer goroutine, so guard the test-side
+	// slice with a mutex; otherwise -race flags concurrent slice appends.
+	var (
+		capturedMu sync.Mutex
+		captured   []string
+	)
+	snapshot := func() []string {
+		capturedMu.Lock()
+		defer capturedMu.Unlock()
+		out := make([]string, len(captured))
+		copy(out, captured)
+		return out
+	}
+	e := &CodexExecutor{OutputHandler: func(text string) {
+		capturedMu.Lock()
+		captured = append(captured, text)
+		capturedMu.Unlock()
+	}}
+
+	// pre-write some events, then start tailer, then append more — verifies
+	// both initial-drain and follow-on append behavior.
+	preEvents := []string{
+		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first reply"}]}}`,
+		`{"type":"response_item","payload":{"type":"reasoning","summary":[]}}`,
+	}
+	for _, ev := range preEvents {
+		_, writeErr := f.WriteString(ev + "\n")
+		require.NoError(t, writeErr)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	tailDone := make(chan struct{})
+	go func() {
+		defer close(tailDone)
+		e.tailRolloutFile(ctx, sessionID, nil)
+	}()
+
+	// wait briefly for initial drain
+	deadline := time.Now().Add(2 * time.Second)
+	for len(snapshot()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// append a late event after the tailer has started
+	_, err = f.WriteString(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"late reply after first read"}]}}` + "\n")
+	require.NoError(t, err)
+
+	// give the tailer a poll cycle to pick it up
+	deadline = time.Now().Add(2 * time.Second)
+	for len(snapshot()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	cancel()
+	<-tailDone
+
+	final := snapshot()
+	require.GreaterOrEqual(t, len(final), 2, "expected at least 2 emissions, got %v", final)
+	assert.Contains(t, final[0], "first reply")
+	assert.Contains(t, final[1], "late reply after first read")
+}
+
+func TestCodexExecutor_findRolloutFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	e := &CodexExecutor{}
+
+	t.Run("returns empty when no file", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		got := e.findRolloutFile(ctx, "019e3bbe-9788-79f1-b668-000000000000")
+		assert.Empty(t, got)
+	})
+
+	t.Run("resolves matching path", func(t *testing.T) {
+		sessionID := "019e3bbe-9788-79f1-b668-111111111111"
+		dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "18")
+		require.NoError(t, os.MkdirAll(dir, 0o750))
+		path := filepath.Join(dir, "rollout-2026-05-18T10-40-06-"+sessionID+".jsonl")
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+		got := e.findRolloutFile(context.Background(), sessionID)
+		assert.Equal(t, path, got)
+	})
+
+	t.Run("respects ctx cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		got := e.findRolloutFile(ctx, "019e3bbe-9788-79f1-b668-222222222222")
+		assert.Empty(t, got)
+	})
+}
+
+func TestCodexExecutor_processStderr_emitsSessionID(t *testing.T) {
+	e := &CodexExecutor{}
+	const id = "019e3bbe-9788-79f1-b668-aaaaaaaaaaaa"
+	stderr := "--------\n[26-05-18 10:40:06] workdir: /tmp/x\n[26-05-18 10:40:06] session id: " + id + "\n--------\n"
+	ch := make(chan string, 1)
+	res := e.processStderr(context.Background(), strings.NewReader(stderr), stderrStreamOpts{sessionIDCh: ch})
+	require.NoError(t, res.err)
+
+	select {
+	case got := <-ch:
+		assert.Equal(t, id, got)
+	default:
+		t.Fatal("session id was not delivered to channel")
+	}
+}
+
+func TestCodexExecutor_firstRunHeaderEmission(t *testing.T) {
+	stderr := "--------\nworkdir: /tmp/x\nmodel: gpt-5.5\nprovider: openai\nsandbox: danger-full-access\nreasoning effort: high\nreasoning summaries: auto\nsession id: 019e3bbe-9788-79f1-b668-000000000000\n--------\n**Thinking**\n"
+
+	t.Run("first run leaks whitelisted header lines", func(t *testing.T) {
+		var captured []string
+		e := &CodexExecutor{
+			runner: &mockCodexRunner{
+				runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+					return mockStreams(stderr, "ok"), mockWait(), nil
+				},
+			},
+			OutputHandler: func(text string) { captured = append(captured, strings.TrimSuffix(text, "\n")) },
+		}
+		result := e.Run(context.Background(), "x")
+		require.NoError(t, result.Error)
+
+		assert.Contains(t, captured, "model: gpt-5.5", "first-run model: should leak")
+		assert.Contains(t, captured, "sandbox: danger-full-access", "first-run sandbox: should leak")
+		assert.Contains(t, captured, "reasoning effort: high", "first-run effort: should leak")
+		assert.Contains(t, captured, "Thinking", "bold summary should appear")
+		for _, hidden := range []string{"--------", "workdir: /tmp/x", "provider: openai", "reasoning summaries: auto"} {
+			assert.NotContains(t, captured, hidden, "%q must stay hidden", hidden)
+		}
+		for _, line := range captured {
+			assert.NotContains(t, line, "session id:", "session id must not leak (privacy/noise)")
+		}
+	})
+
+	t.Run("second run on same executor suppresses entire header", func(t *testing.T) {
+		var firstCaptured, secondCaptured []string
+		makeHandler := func(dst *[]string) func(string) {
+			return func(text string) { *dst = append(*dst, strings.TrimSuffix(text, "\n")) }
+		}
+		e := &CodexExecutor{
+			runner: &mockCodexRunner{
+				runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+					return mockStreams(stderr, "ok"), mockWait(), nil
+				},
+			},
+		}
+		e.OutputHandler = makeHandler(&firstCaptured)
+		require.NoError(t, e.Run(context.Background(), "x").Error)
+
+		e.OutputHandler = makeHandler(&secondCaptured)
+		require.NoError(t, e.Run(context.Background(), "x").Error)
+
+		assert.Contains(t, firstCaptured, "model: gpt-5.5", "first run must include model:")
+		for _, hidden := range []string{"model: gpt-5.5", "sandbox: danger-full-access", "reasoning effort: high"} {
+			assert.NotContains(t, secondCaptured, hidden, "second-run %q must be suppressed", hidden)
+		}
+		assert.Contains(t, secondCaptured, "Thinking", "bold summary still shown on second run")
+	})
 }

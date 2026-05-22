@@ -5,11 +5,12 @@ import "fmt"
 // SectionType represents the semantic type of a section header.
 // the web layer uses these types to emit appropriate boundary events:
 //   - SectionTaskIteration: emits task_start/task_end events
-//   - SectionClaudeReview, SectionCodexIteration: emits iteration_start events
+//   - SectionInternalReview, SectionCodexIteration: emits iteration_start events
 //   - SectionGeneric, SectionClaudeEval: no boundary events, just section headers
 //
 // invariants:
-//   - Iteration > 0 for SectionTaskIteration, SectionClaudeReview, SectionCodexIteration
+//   - Iteration > 0 for SectionTaskIteration, SectionCodexIteration
+//   - Iteration >= 0 for SectionInternalReview (first review pass uses 0)
 //   - Iteration == 0 for SectionGeneric, SectionClaudeEval
 //
 // prefer using the constructor functions (NewTaskIterationSection, etc.) to ensure
@@ -21,8 +22,8 @@ const (
 	SectionGeneric SectionType = iota
 	// SectionTaskIteration represents a task execution iteration.
 	SectionTaskIteration
-	// SectionClaudeReview represents a Claude review iteration.
-	SectionClaudeReview
+	// SectionInternalReview represents an internal review iteration.
+	SectionInternalReview
 	// SectionCodexIteration represents a Codex review iteration.
 	SectionCodexIteration
 	// SectionClaudeEval represents Claude evaluating codex findings.
@@ -58,9 +59,22 @@ func NewTaskIterationSection(iteration int) Section {
 // suffix is appended after the iteration number (e.g., ": critical/major").
 func NewClaudeReviewSection(iteration int, suffix string) Section {
 	return Section{
-		Type:      SectionClaudeReview,
+		Type:      SectionInternalReview,
 		Iteration: iteration,
 		Label:     fmt.Sprintf("claude review %d%s", iteration, suffix),
+	}
+}
+
+// NewInternalReviewSection creates a section for executor-neutral internal review iteration.
+// the label uses a fixed "review" prefix (no executor name) because the web
+// dashboard's name-based phase routing (phaseFromSection) matches "codex"
+// before "review" — embedding executor names in the label would misroute
+// the codex-executor internal review into PhaseCodex on file-replay.
+func NewInternalReviewSection(iteration int, suffix string) Section {
+	return Section{
+		Type:      SectionInternalReview,
+		Iteration: iteration,
+		Label:     fmt.Sprintf("review %d%s", iteration, suffix),
 	}
 }
 

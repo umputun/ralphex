@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -120,7 +121,15 @@ func (c *Colors) Error() *color.Color { return c.err }
 func (c *Colors) Signal() *color.Color { return c.signal }
 
 // Logger writes timestamped output to both file and stdout.
+// writeMu serializes file + stdout writes so concurrent callers (e.g., codex
+// stderr processor + rollout-file tailer both feeding OutputHandler) cannot
+// interleave at byte level on the same fmt.Fprintf. The OS guarantees atomicity
+// for individual small writes to a regular file or tty, but a single
+// writeTimestamped call invokes both writeFile AND writeStdout, and we want
+// those two writes (plus the inner fmt.Fprintf framing) to ship as one logical
+// unit per concurrent producer.
 type Logger struct {
+	writeMu   sync.Mutex
 	file      *os.File
 	stdout    io.Writer
 	startTime time.Time
@@ -219,12 +228,16 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		colors:    colors,
 	}
 
+	// hold writeMu around the construction-time write so writeFileLocked's
+	// caller-holds-the-lock contract is honored on every call path.
+	l.writeMu.Lock()
 	if restart {
 		// write restart separator (matches sectionRegex in web parser)
-		l.writeFile("\n\n--- restarted at %s ---\n\n", time.Now().Format("2006-01-02 15:04:05"))
+		l.writeFileLocked("\n\n--- restarted at %s ---\n\n", time.Now().Format("2006-01-02 15:04:05"))
 	} else {
 		l.writeHeader(cfg)
 	}
+	l.writeMu.Unlock()
 
 	return l, nil
 }
@@ -235,12 +248,12 @@ func (l *Logger) writeHeader(cfg Config) {
 	if planStr == "" {
 		planStr = "(no plan - review only)"
 	}
-	l.writeFile("# Ralphex Progress Log\n")
-	l.writeFile("Plan: %s\n", planStr)
-	l.writeFile("Branch: %s\n", cfg.Branch)
-	l.writeFile("Mode: %s\n", cfg.Mode)
-	l.writeFile("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
-	l.writeFile("%s\n\n", separatorLine)
+	l.writeFileLocked("# Ralphex Progress Log\n")
+	l.writeFileLocked("Plan: %s\n", planStr)
+	l.writeFileLocked("Branch: %s\n", cfg.Branch)
+	l.writeFileLocked("Mode: %s\n", cfg.Mode)
+	l.writeFileLocked("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	l.writeFileLocked("%s\n\n", separatorLine)
 }
 
 // Path returns the progress file path.
@@ -259,13 +272,17 @@ const timestampFormat = "06-01-02 15:04:05"
 var separatorLine = strings.Repeat("-", 60)
 
 // writeTimestamped writes a message to both file and stdout with timestamp and optional prefix.
+// Holds l.writeMu across the file + stdout pair so concurrent producers cannot
+// split the two sinks (e.g., file gets producer A then B while stdout gets B then A).
 func (l *Logger) writeTimestamped(prefix string, clr *color.Color, msg string) {
 	timestamp := time.Now().Format(timestampFormat)
-	l.writeFile("[%s] %s%s\n", timestamp, prefix, msg)
-
 	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
 	coloredMsg := clr.Sprintf("%s%s", prefix, msg)
-	l.writeStdout("%s %s\n", tsStr, coloredMsg)
+
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.writeFileLocked("[%s] %s%s\n", timestamp, prefix, msg)
+	l.writeStdoutLocked("%s %s\n", tsStr, coloredMsg)
 }
 
 // Print writes a timestamped message to both file and stdout.
@@ -274,18 +291,25 @@ func (l *Logger) Print(format string, args ...any) {
 }
 
 // PrintRaw writes without timestamp (for streaming output).
+// Holds l.writeMu across the file + stdout pair, see writeTimestamped.
 func (l *Logger) PrintRaw(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.writeFile("%s", msg)
-	l.writeStdout("%s", msg)
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.writeFileLocked("%s", msg)
+	l.writeStdoutLocked("%s", msg)
 }
 
 // PrintSection writes a section header without timestamp in yellow.
 // format: "\n--- {label} ---\n"
+// Holds l.writeMu across the file + stdout pair, see writeTimestamped.
 func (l *Logger) PrintSection(section status.Section) {
 	header := fmt.Sprintf("\n--- %s ---\n", section.Label)
-	l.writeFile("%s", header)
-	l.writeStdout("%s", l.colors.Warn().Sprint(header))
+	coloredHeader := l.colors.Warn().Sprint(header)
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.writeFileLocked("%s", header)
+	l.writeStdoutLocked("%s", coloredHeader)
 }
 
 // getTerminalWidth returns terminal width, using COLUMNS env var or syscall.
@@ -414,7 +438,6 @@ func (l *Logger) PrintAligned(text string) {
 		// timestamp each line
 		timestamp := time.Now().Format(timestampFormat)
 		tsPrefix := l.colors.Timestamp().Sprintf("[%s]", timestamp)
-		l.writeFile("[%s] %s\n", timestamp, displayLine)
 
 		// use red for signal lines
 		lineColor := phaseColor
@@ -425,7 +448,13 @@ func (l *Logger) PrintAligned(text string) {
 			lineColor = l.colors.Signal()
 		}
 
-		l.writeStdout("%s %s\n", tsPrefix, lineColor.Sprint(displayLine))
+		// hold writeMu across the file + stdout pair so concurrent producers
+		// cannot split a single line's two sinks (file gets producer A while
+		// stdout shows producer B, or vice versa).
+		l.writeMu.Lock()
+		l.writeFileLocked("[%s] %s\n", timestamp, line)
+		l.writeStdoutLocked("%s %s\n", tsPrefix, lineColor.Sprint(displayLine))
+		l.writeMu.Unlock()
 	}
 }
 
@@ -491,17 +520,21 @@ func (l *Logger) Warn(format string, args ...any) {
 
 // LogQuestion logs a question and its options for plan creation mode.
 // format: QUESTION: <question>\n OPTIONS: <opt1>, <opt2>, ...
+// Holds l.writeMu across the full 4-write sequence so another producer cannot
+// split the QUESTION line from its companion OPTIONS line on either sink.
 func (l *Logger) LogQuestion(question string, options []string) {
 	timestamp := time.Now().Format(timestampFormat)
-
-	l.writeFile("[%s] QUESTION: %s\n", timestamp, question)
-	l.writeFile("[%s] OPTIONS: %s\n", timestamp, strings.Join(options, ", "))
-
 	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
 	questionStr := l.colors.Info().Sprintf("QUESTION: %s", question)
 	optionsStr := l.colors.Info().Sprintf("OPTIONS: %s", strings.Join(options, ", "))
-	l.writeStdout("%s %s\n", tsStr, questionStr)
-	l.writeStdout("%s %s\n", tsStr, optionsStr)
+	optionsJoined := strings.Join(options, ", ")
+
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.writeFileLocked("[%s] QUESTION: %s\n", timestamp, question)
+	l.writeFileLocked("[%s] OPTIONS: %s\n", timestamp, optionsJoined)
+	l.writeStdoutLocked("%s %s\n", tsStr, questionStr)
+	l.writeStdoutLocked("%s %s\n", tsStr, optionsStr)
 }
 
 // LogAnswer logs the user's answer for plan creation mode.
@@ -513,30 +546,38 @@ func (l *Logger) LogAnswer(answer string) {
 // LogDraftReview logs the user's draft review action and optional feedback.
 // format: DRAFT REVIEW: <action>
 // if feedback is non-empty: FEEDBACK: <feedback>
+// Holds l.writeMu across the full 2- or 4-write sequence so the DRAFT REVIEW
+// and FEEDBACK lines stay grouped on both sinks under concurrent producers.
 func (l *Logger) LogDraftReview(action, feedback string) {
 	timestamp := time.Now().Format(timestampFormat)
-
-	l.writeFile("[%s] DRAFT REVIEW: %s\n", timestamp, action)
-
 	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
 	actionStr := l.colors.Info().Sprintf("DRAFT REVIEW: %s", action)
-	l.writeStdout("%s %s\n", tsStr, actionStr)
+
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.writeFileLocked("[%s] DRAFT REVIEW: %s\n", timestamp, action)
+	l.writeStdoutLocked("%s %s\n", tsStr, actionStr)
 
 	if feedback != "" {
-		l.writeFile("[%s] FEEDBACK: %s\n", timestamp, feedback)
 		feedbackStr := l.colors.Info().Sprintf("FEEDBACK: %s", feedback)
-		l.writeStdout("%s %s\n", tsStr, feedbackStr)
+		l.writeFileLocked("[%s] FEEDBACK: %s\n", timestamp, feedback)
+		l.writeStdoutLocked("%s %s\n", tsStr, feedbackStr)
 	}
 }
 
 // LogDiffStats writes git diff stats to the progress file (file-only, no stdout).
 // format: [timestamp] DIFFSTATS: files=F additions=A deletions=D
+// Takes l.writeMu so a concurrent producer mid-pair (e.g., Print holding the
+// mutex across its file + stdout sequence) cannot have this single write
+// slip between its two sinks.
 func (l *Logger) LogDiffStats(files, additions, deletions int) {
 	if l.file == nil || files <= 0 {
 		return
 	}
 	timestamp := time.Now().Format(timestampFormat)
-	l.writeFile("[%s] DIFFSTATS: files=%d additions=%d deletions=%d\n",
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.writeFileLocked("[%s] DIFFSTATS: files=%d additions=%d deletions=%d\n",
 		timestamp, files, additions, deletions)
 }
 
@@ -561,19 +602,23 @@ func (l *Logger) SetFailed(reason error) {
 // Close writes footer, releases the file lock, and closes the progress file.
 // Writes "Completed:" footer on success, or "Failed: ... - <reason>" if SetFailed
 // was called with a non-nil error.
+// Holds l.writeMu across the footer write sequence so a concurrent in-flight
+// Print or PrintAligned cannot split the separator from the Completed/Failed line.
 func (l *Logger) Close() error {
 	if l.file == nil {
 		return nil
 	}
 
-	l.writeFile("\n%s\n", separatorLine)
 	ts := time.Now().Format("2006-01-02 15:04:05")
+	l.writeMu.Lock()
+	l.writeFileLocked("\n%s\n", separatorLine)
 	if l.runErr == nil {
-		l.writeFile("Completed: %s (%s)\n", ts, l.Elapsed())
+		l.writeFileLocked("Completed: %s (%s)\n", ts, l.Elapsed())
 	} else {
 		reason := sanitizeFailureReason(l.runErr.Error())
-		l.writeFile("Failed: %s (%s) - %s\n", ts, l.Elapsed(), reason)
+		l.writeFileLocked("Failed: %s (%s) - %s\n", ts, l.Elapsed(), reason)
 	}
+	l.writeMu.Unlock()
 
 	// release file lock before closing
 	_ = unlockFile(l.file)
@@ -613,13 +658,23 @@ func sanitizeFailureReason(s string) string {
 	return out
 }
 
-func (l *Logger) writeFile(format string, args ...any) {
+// writeFileLocked and writeStdoutLocked require l.writeMu to be held by the
+// caller. Each public method that emits a full timestamped log line (file +
+// stdout pair) takes the mutex ONCE around the whole sequence so the two
+// sinks stay in step under concurrent producers (codex stderr processor and
+// rollout-file tailer both call OutputHandler -> Print on the same Logger).
+// Locking inside the inner writers would only serialize each fmt.Fprintf
+// individually, allowing another producer to slip in between a method's
+// writeFile and writeStdout calls and split related output (e.g., the file
+// gets producer A's line while stdout shows producer B's, or LogQuestion's
+// QUESTION line and OPTIONS line get separated).
+func (l *Logger) writeFileLocked(format string, args ...any) {
 	if l.file != nil {
 		fmt.Fprintf(l.file, format, args...)
 	}
 }
 
-func (l *Logger) writeStdout(format string, args ...any) {
+func (l *Logger) writeStdoutLocked(format string, args ...any) {
 	fmt.Fprintf(l.stdout, format, args...)
 }
 

@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/config"
@@ -56,10 +59,17 @@ type Config struct {
 	TaskModel             string         // model[:effort] spec for task execution; parsed via ParseModelEffort (empty = CLI defaults)
 	ReviewModel           string         // model[:effort] spec for review phases; empty falls back to TaskModel
 	CodexEnabled          bool           // whether codex review is enabled
-	ExternalReviewToolSet bool           // when true, AppConfig.ExternalReviewTool is an explicit choice that overrides legacy codex_enabled=false back-compat
+	ExternalReviewToolSet bool           // when true, AppConfig.ExternalReviewTool is an explicit choice that overrides codex_enabled=false back-compat
 	FinalizeEnabled       bool           // whether finalize step is enabled
 	DefaultBranch         string         // default branch name (detected from repo)
 	AppConfig             *config.Config // full application config (for executors and prompts)
+}
+
+// isCodexExecutor reports whether the configured task/review executor is codex
+// (the --codex first-class mode). returns false when AppConfig is nil or the
+// executor is anything else (claude is the default).
+func (c Config) isCodexExecutor() bool {
+	return c.AppConfig != nil && c.AppConfig.Executor == config.ExecutorCodex
 }
 
 //go:generate moq -out mocks/executor.go -pkg mocks -skip-ensure -fmt goimports . Executor
@@ -97,115 +107,56 @@ type GitChecker interface {
 }
 
 // Executors groups the executor dependencies for the Runner.
+// Role-named: Task is used for the task phase, Review for review phases (nil = use Task),
+// External for the external review phase (nil = no external review), Custom is the
+// custom external review script executor.
 type Executors struct {
-	Claude       Executor
-	ReviewClaude Executor // optional: separate executor for review phases (nil = use Claude)
-	Codex        Executor
-	Custom       *executor.CustomExecutor
+	Task     Executor
+	Review   Executor // optional: separate executor for review phases (nil = use Task)
+	External Executor // external review executor (codex or wrapper); nil when Executor=codex or external review disabled
+	Custom   *executor.CustomExecutor
 }
 
 // Runner orchestrates the execution loop.
 type Runner struct {
-	cfg                 Config
-	log                 Logger
-	claude              Executor // executor for task phase
-	reviewClaude        Executor // executor for review phases (may differ in model)
-	codex               Executor
-	custom              *executor.CustomExecutor
-	git                 GitChecker
-	inputCollector      InputCollector
-	phaseHolder         *status.PhaseHolder
-	iterationDelay      time.Duration
-	taskRetryCount      int
-	waitOnLimit         time.Duration
-	breakCh             <-chan struct{}                 // nil = feature disabled; receives one value per break signal
-	pauseHandler        func(ctx context.Context) bool  // called on break during task phase; true = resume, false = abort
-	lastSessionTimedOut bool                            // set by runWithSessionTimeout, checked by review loops
-	taskPhaseOverride   func(ctx context.Context) error // test seam: override runTaskPhase result (nil = normal execution)
+	cfg                    Config
+	log                    Logger
+	task                   Executor // executor for task phase
+	review                 Executor // executor for review phases (may differ in model)
+	external               Executor // executor for the external review phase (codex by default)
+	custom                 *executor.CustomExecutor
+	git                    GitChecker
+	inputCollector         InputCollector
+	phaseHolder            *status.PhaseHolder
+	iterationDelay         time.Duration
+	taskRetryCount         int
+	waitOnLimit            time.Duration
+	breakCh                <-chan struct{}                 // nil = feature disabled; receives one value per break signal
+	pauseHandler           func(ctx context.Context) bool  // called on break during task phase; true = resume, false = abort
+	lastSessionTimedOut    bool                            // set by runWithSessionTimeout, checked by review loops
+	taskPhaseOverride      func(ctx context.Context) error // test seam: override runTaskPhase result (nil = normal execution)
+	codexFrontmatterWarned map[string]bool                 // tracks per-agent codex frontmatter-discard warnings (one log per agent name)
 }
 
 // New creates a new Runner with the given configuration and shared phase holder.
 // If codex is enabled but the binary is not found in PATH, it is automatically disabled with a warning.
 func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
-	// build claude executor with config values
-	claudeExec := &executor.ClaudeExecutor{
-		OutputHandler: func(text string) {
-			log.PrintAligned(text)
-		},
-		Debug: cfg.Debug,
-	}
-	if cfg.AppConfig != nil {
-		claudeExec.Command = cfg.AppConfig.ClaudeCommand
-		claudeExec.Args = cfg.AppConfig.ClaudeArgs
-		claudeExec.ArgsSet = cfg.AppConfig.ClaudeArgsSet
-		claudeExec.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
-		claudeExec.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
-		claudeExec.IdleTimeout = cfg.AppConfig.IdleTimeout
-		claudeExec.PreserveAPIKey = cfg.AppConfig.PreserveAnthropicAPIKey
-	}
-	taskModel, taskEffort := ParseModelEffort(cfg.TaskModel)
-	claudeExec.Model, claudeExec.Effort = taskModel, taskEffort
+	customExec := cfg.buildCustomExecutor(log)
 
-	// build review executor (shares base config, may use a different model or effort).
-	// compare parsed tuples rather than raw strings so equivalent specs like "opus" and
-	// "opus:" don't produce a redundant second executor.
-	reviewSpec := cfg.ReviewModel
-	if reviewSpec == "" {
-		reviewSpec = cfg.TaskModel // fall back to task model spec
-	}
-	reviewModel, reviewEffort := ParseModelEffort(reviewSpec)
-	var reviewExec Executor
-	if reviewModel != taskModel || reviewEffort != taskEffort {
-		re := &executor.ClaudeExecutor{
-			OutputHandler: claudeExec.OutputHandler,
-			Debug:         cfg.Debug,
-			Model:         reviewModel,
-			Effort:        reviewEffort,
+	if cfg.isCodexExecutor() {
+		if cfg.AppConfig.PassClaudeMd {
+			maybeEmitClaudeMdSetupHint(log)
 		}
-		if cfg.AppConfig != nil {
-			re.Command = cfg.AppConfig.ClaudeCommand
-			re.Args = cfg.AppConfig.ClaudeArgs
-			re.ArgsSet = cfg.AppConfig.ClaudeArgsSet
-			re.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
-			re.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
-			re.IdleTimeout = cfg.AppConfig.IdleTimeout
-			re.PreserveAPIKey = cfg.AppConfig.PreserveAnthropicAPIKey
-		}
-		reviewExec = re
+		// one shared codex executor with multi_agent always enabled — task, review, and
+		// finalize all run the same codex configuration so any prompt can use
+		// {{agent:...}} expansions if the user customizes it.
+		codexExec := cfg.buildCodexExecutor(log)
+		return NewWithExecutors(cfg, log, Executors{Task: codexExec, Review: codexExec, External: nil, Custom: customExec}, holder)
 	}
 
-	// build codex executor with config values
-	codexExec := &executor.CodexExecutor{
-		OutputHandler: func(text string) {
-			log.PrintAligned(text)
-		},
-		Debug: cfg.Debug,
-	}
-	if cfg.AppConfig != nil {
-		codexExec.Command = cfg.AppConfig.CodexCommand
-		codexExec.Model = cfg.AppConfig.CodexModel
-		codexExec.ReasoningEffort = cfg.AppConfig.CodexReasoningEffort
-		codexExec.TimeoutMs = cfg.AppConfig.CodexTimeoutMs
-		codexExec.Sandbox = cfg.AppConfig.CodexSandbox
-		codexExec.ErrorPatterns = cfg.AppConfig.CodexErrorPatterns
-		codexExec.LimitPatterns = cfg.AppConfig.CodexLimitPatterns
-	}
+	claudeExec, reviewExec := cfg.buildClaudeExecutors(log)
+	codexExec := cfg.buildExternalCodexExecutor(log)
 
-	// build custom executor if custom review script is configured
-	var customExec *executor.CustomExecutor
-	if cfg.AppConfig != nil && cfg.AppConfig.CustomReviewScript != "" {
-		customExec = &executor.CustomExecutor{
-			Script: cfg.AppConfig.CustomReviewScript,
-			OutputHandler: func(text string) {
-				log.PrintAligned(text)
-			},
-			ErrorPatterns: cfg.AppConfig.CodexErrorPatterns, // reuse codex error patterns
-			LimitPatterns: cfg.AppConfig.CodexLimitPatterns, // reuse codex limit patterns
-		}
-	}
-
-	// auto-disable codex if the binary is not installed AND we need codex
-	// (skip this check if using custom external review tool or external review is disabled)
 	if cfg.CodexEnabled && needsCodexBinary(cfg.AppConfig) {
 		codexCmd := codexExec.Command
 		if codexCmd == "" {
@@ -217,7 +168,124 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		}
 	}
 
-	return NewWithExecutors(cfg, log, Executors{Claude: claudeExec, ReviewClaude: reviewExec, Codex: codexExec, Custom: customExec}, holder)
+	return NewWithExecutors(cfg, log, Executors{Task: claudeExec, Review: reviewExec, External: codexExec, Custom: customExec}, holder)
+}
+
+// buildClaudeExecutors constructs the claude executors for task and review phases.
+// returns a single executor in the Review slot only when review_model differs from
+// task_model — otherwise the task executor handles both roles.
+func (cfg Config) buildClaudeExecutors(log Logger) (*executor.ClaudeExecutor, Executor) {
+	claudeExec := &executor.ClaudeExecutor{
+		OutputHandler: func(text string) {
+			log.PrintAligned(text)
+		},
+		Debug: cfg.Debug,
+	}
+	cfg.applyClaudeAppConfig(claudeExec)
+
+	taskModel, taskEffort := ParseModelEffort(cfg.TaskModel)
+	claudeExec.Model, claudeExec.Effort = taskModel, taskEffort
+
+	reviewSpec := cfg.ReviewModel
+	if reviewSpec == "" {
+		reviewSpec = cfg.TaskModel
+	}
+	reviewModel, reviewEffort := ParseModelEffort(reviewSpec)
+	if reviewModel == taskModel && reviewEffort == taskEffort {
+		return claudeExec, nil
+	}
+
+	reviewExec := &executor.ClaudeExecutor{
+		OutputHandler: claudeExec.OutputHandler,
+		Debug:         cfg.Debug,
+		Model:         reviewModel,
+		Effort:        reviewEffort,
+	}
+	cfg.applyClaudeAppConfig(reviewExec)
+	return claudeExec, reviewExec
+}
+
+// applyClaudeAppConfig copies AppConfig-sourced fields onto a claude executor.
+// no-op when AppConfig is nil.
+func (cfg Config) applyClaudeAppConfig(e *executor.ClaudeExecutor) {
+	if cfg.AppConfig == nil {
+		return
+	}
+	e.Command = cfg.AppConfig.ClaudeCommand
+	e.Args = cfg.AppConfig.ClaudeArgs
+	e.ArgsSet = cfg.AppConfig.ClaudeArgsSet
+	e.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
+	e.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
+	e.IdleTimeout = cfg.AppConfig.IdleTimeout
+	e.PreserveAPIKey = cfg.AppConfig.PreserveAnthropicAPIKey
+}
+
+// buildExternalCodexExecutor builds the codex executor used for the external review
+// phase in claude mode. MultiAgent stays off (the external review prompt does not use
+// spawn_agent) and PassClaudeMd stays off (rejected for claude mode by applyCodexOverrides).
+func (cfg Config) buildExternalCodexExecutor(log Logger) *executor.CodexExecutor {
+	e := cfg.newBaseCodexExecutor(log)
+	if cfg.AppConfig != nil {
+		e.Sandbox = cfg.AppConfig.CodexSandbox
+	}
+	return e
+}
+
+// buildCodexExecutor builds the codex executor used for first-class --codex mode.
+// MultiAgent is always enabled so any phase (task, review, finalize) can spawn sub-agents,
+// and PassClaudeMd is sourced from config. IdleTimeout is wired here (and only here)
+// because the user explicitly opted into --codex; the external-review codex used in
+// claude mode keeps master semantics with no idle timeout.
+func (cfg Config) buildCodexExecutor(log Logger) *executor.CodexExecutor {
+	e := cfg.newBaseCodexExecutor(log)
+	e.MultiAgent = true
+	if cfg.AppConfig != nil {
+		e.Sandbox = cfg.AppConfig.CodexExecutorSandbox()
+		e.PassClaudeMd = cfg.AppConfig.PassClaudeMd
+		e.IdleTimeout = cfg.AppConfig.IdleTimeout
+	}
+	return e
+}
+
+// newBaseCodexExecutor returns a CodexExecutor populated with the fields shared
+// between the external-review and first-class --codex builders. Callers layer on
+// Sandbox, MultiAgent, PassClaudeMd, and IdleTimeout as appropriate for their
+// role — see buildCodexExecutor (first-class) and buildExternalCodexExecutor
+// (claude mode). IdleTimeout is intentionally NOT set here: applying it to the
+// external codex review path silently shortened previously-idle-tolerant
+// review sessions for default-claude users, so it is wired only by
+// buildCodexExecutor where the user opted into --codex.
+func (cfg Config) newBaseCodexExecutor(log Logger) *executor.CodexExecutor {
+	e := &executor.CodexExecutor{
+		OutputHandler: func(text string) { log.PrintAligned(text) },
+		Debug:         cfg.Debug,
+	}
+	if cfg.AppConfig == nil {
+		return e
+	}
+	e.Command = cfg.AppConfig.CodexCommand
+	e.Model = cfg.AppConfig.CodexModel
+	e.ReasoningEffort = cfg.AppConfig.CodexReasoningEffort
+	e.TimeoutMs = cfg.AppConfig.CodexTimeoutMs
+	e.ErrorPatterns = cfg.AppConfig.CodexErrorPatterns
+	e.LimitPatterns = cfg.AppConfig.CodexLimitPatterns
+	return e
+}
+
+// buildCustomExecutor returns the optional custom external review executor.
+// returns nil when no custom_review_script is configured.
+func (cfg Config) buildCustomExecutor(log Logger) *executor.CustomExecutor {
+	if cfg.AppConfig == nil || cfg.AppConfig.CustomReviewScript == "" {
+		return nil
+	}
+	return &executor.CustomExecutor{
+		Script: cfg.AppConfig.CustomReviewScript,
+		OutputHandler: func(text string) {
+			log.PrintAligned(text)
+		},
+		ErrorPatterns: cfg.AppConfig.CodexErrorPatterns,
+		LimitPatterns: cfg.AppConfig.CodexLimitPatterns,
+	}
 }
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
@@ -244,23 +312,57 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 	}
 
 	// if no separate review executor, use the same as task executor
-	reviewClaude := execs.ReviewClaude
-	if reviewClaude == nil {
-		reviewClaude = execs.Claude
+	review := execs.Review
+	if review == nil {
+		review = execs.Task
 	}
 
 	return &Runner{
 		cfg:            cfg,
 		log:            log,
-		claude:         execs.Claude,
-		reviewClaude:   reviewClaude,
-		codex:          execs.Codex,
+		task:           execs.Task,
+		review:         review,
+		external:       execs.External,
 		custom:         execs.Custom,
 		phaseHolder:    holder,
 		iterationDelay: iterDelay,
 		taskRetryCount: retryCount,
 		waitOnLimit:    waitOnLimit,
 	}
+}
+
+// claudeMdHintOnce ensures the user-level CLAUDE.md setup hint emits at most once
+// per process, regardless of how many runners or phases are constructed.
+var claudeMdHintOnce sync.Once
+
+// maybeEmitClaudeMdSetupHint prints a one-time hint when ~/.claude/CLAUDE.md exists
+// but ~/.codex/AGENTS.md does not. ralphex never creates the symlink itself; the
+// user owns ~/.codex/. probing errors are swallowed so a missing or unreadable
+// home directory simply suppresses the hint.
+func maybeEmitClaudeMdSetupHint(log Logger) {
+	claudeMdHintOnce.Do(func() {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return
+		}
+		claudeMd := filepath.Join(home, ".claude", "CLAUDE.md")
+		codexAgents := filepath.Join(home, ".codex", "AGENTS.md")
+		if !fileExists(claudeMd) {
+			return
+		}
+		if fileExists(codexAgents) {
+			return
+		}
+		log.Print("hint: ~/.claude/CLAUDE.md exists but ~/.codex/AGENTS.md does not. " +
+			"to get user-level CLAUDE.md content into codex, link it: " +
+			"ln -s ~/.claude/CLAUDE.md ~/.codex/AGENTS.md")
+	})
+}
+
+// fileExists reports whether path exists.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // SetInputCollector sets the input collector for plan creation mode.
@@ -327,14 +429,14 @@ func (r *Runner) runFull(ctx context.Context) error {
 
 	// phase 2: first review pass - address ALL findings
 	r.phaseHolder.Set(status.PhaseReview)
-	r.log.PrintSection(status.NewGenericSection("claude review 0: all findings"))
+	r.log.PrintSection(r.reviewSection(0, ": all findings"))
 
-	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
+	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)), "first review pass"); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
-	// phase 2.1: claude review loop (critical/major) before codex
-	if err := r.runClaudeReviewLoop(ctx); err != nil {
+	// phase 2.1: review loop (critical/major) before codex external review
+	if err := r.runReviewLoop(ctx); err != nil {
 		return fmt.Errorf("pre-codex review loop: %w", err)
 	}
 
@@ -351,14 +453,14 @@ func (r *Runner) runFull(ctx context.Context) error {
 func (r *Runner) runReviewOnly(ctx context.Context) error {
 	// phase 1: first review
 	r.phaseHolder.Set(status.PhaseReview)
-	r.log.PrintSection(status.NewGenericSection("claude review 0: all findings"))
+	r.log.PrintSection(r.reviewSection(0, ": all findings"))
 
-	if err := r.runClaudeReview(ctx, r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)); err != nil {
+	if err := r.runReview(ctx, r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewFirstPrompt)), "first review pass"); err != nil {
 		return fmt.Errorf("first review: %w", err)
 	}
 
-	// phase 1.1: claude review loop (critical/major) before codex
-	if err := r.runClaudeReviewLoop(ctx); err != nil {
+	// phase 1.1: review loop (critical/major) before codex external review
+	if err := r.runReviewLoop(ctx); err != nil {
 		return fmt.Errorf("pre-codex review loop: %w", err)
 	}
 
@@ -384,6 +486,16 @@ func (r *Runner) runCodexOnly(ctx context.Context) error {
 // runCodexAndPostReview runs the shared codex → post-codex claude review → finalize pipeline.
 // used by runFull, runReviewOnly, and runCodexOnly to avoid duplicating this sequence.
 func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
+	// short-circuit when external review is disabled: skip the misleading
+	// "codex external review" section header and codex phase marker entirely,
+	// and proceed straight to finalize. without this, dashboards would show
+	// a "codex external review" header immediately followed by
+	// "external review disabled, skipping..." from runCodexLoop.
+	if r.externalReviewTool() == "none" {
+		r.log.Print("external review disabled, skipping...")
+		return r.runFinalize(ctx)
+	}
+
 	// codex external review loop
 	r.phaseHolder.Set(status.PhaseCodex)
 	r.log.PrintSection(status.NewGenericSection("codex external review"))
@@ -415,7 +527,7 @@ func (r *Runner) runCodexAndPostReview(ctx context.Context) error {
 			"`fix: address code review findings`\n" +
 			"Then continue with the sequence below.\n\n"
 	}
-	if err := r.runClaudeReviewLoop(ctx, commitPrefix); err != nil {
+	if err := r.runReviewLoop(ctx, commitPrefix); err != nil {
 		return fmt.Errorf("post-codex review loop: %w", err)
 	}
 
@@ -455,7 +567,7 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 	if r.taskPhaseOverride != nil {
 		return r.taskPhaseOverride(ctx)
 	}
-	prompt := r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt)
+	prompt := r.prependCodexTaskGuidance(r.replacePromptVariables(r.cfg.AppConfig.TaskPrompt))
 	retryCount := 0
 
 	for i := 1; i <= r.cfg.MaxIterations; i++ {
@@ -475,7 +587,8 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 		// create per-iteration break context so Ctrl+\ cancels only the current session
 		loopCtx, loopCancel := r.breakContext(ctx)
 
-		result := r.runWithLimitRetry(loopCtx, r.claude.Run, prompt, "claude")
+		execName := r.executorName()
+		result := r.runWithLimitRetry(loopCtx, r.task.Run, prompt, execName)
 
 		// check break before calling loopCancel — cancel would make loopCtx.Err() non-nil
 		manualBreak := r.isBreak(loopCtx, ctx)
@@ -495,10 +608,10 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 		}
 
 		if result.Error != nil {
-			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+			if err := r.handlePatternMatchError(result.Error, execName); err != nil {
 				return err
 			}
-			return fmt.Errorf("claude execution: %w", result.Error)
+			return fmt.Errorf("%s execution: %w", execName, result.Error)
 		}
 
 		if result.Signal == SignalCompleted {
@@ -533,30 +646,47 @@ func (r *Runner) runTaskPhase(ctx context.Context) error {
 	return fmt.Errorf("max iterations (%d) reached without completion", r.cfg.MaxIterations)
 }
 
-// runClaudeReview runs Claude review with the given prompt until REVIEW_DONE.
-func (r *Runner) runClaudeReview(ctx context.Context, prompt string) error {
-	result := r.runWithLimitRetry(ctx, r.reviewClaude.Run, prompt, "claude")
+// runReview runs the configured review executor with the given prompt until REVIEW_DONE.
+// phaseLabel identifies the phase in error messages and the soft-warning log line
+// (today only "first review pass" but parameterized so a future caller doesn't ship
+// a misleading message).
+func (r *Runner) runReview(ctx context.Context, prompt, phaseLabel string) error {
+	execName := r.executorName()
+	result := r.runWithLimitRetry(ctx, r.review.Run, prompt, execName)
 	if result.Error != nil {
-		if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+		if err := r.handlePatternMatchError(result.Error, execName); err != nil {
 			return err
 		}
-		return fmt.Errorf("claude execution: %w", result.Error)
+		return fmt.Errorf("%s execution: %w", execName, result.Error)
 	}
 
 	if result.Signal == SignalFailed {
 		return errors.New("review failed (FAILED signal received)")
 	}
 
+	// session/idle timeout cleared result.Error and result.Signal inside runWithSessionTimeout.
+	// under first-class --codex the comprehensive first review is the only place we can
+	// catch findings — silently advancing on timeout drops them — so surface the timeout as
+	// an error. claude-default mode keeps master's soft-warning + continue behavior so
+	// existing users with --session-timeout / --idle-timeout don't see new run failures.
+	if r.lastSessionTimedOut {
+		if r.cfg.isCodexExecutor() {
+			return fmt.Errorf("%s timed out", phaseLabel)
+		}
+		r.log.Print("warning: %s did not complete cleanly (session timed out), continuing...", phaseLabel)
+		return nil
+	}
+
 	if !isReviewDone(result.Signal) {
-		r.log.Print("warning: first review pass did not complete cleanly, continuing...")
+		r.log.Print("warning: %s did not complete cleanly, continuing...", phaseLabel)
 	}
 
 	return nil
 }
 
-// runClaudeReviewLoop runs claude review iterations using second review prompt.
+// runReviewLoop runs review iterations using second review prompt.
 // optional promptPrefix is prepended to the review prompt (used for commit-pending instruction after codex).
-func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string) error {
+func (r *Runner) runReviewLoop(ctx context.Context, promptPrefix ...string) error {
 	// review iterations = 10% of max_iterations
 	maxReviewIterations := max(minReviewIterations, r.cfg.MaxIterations/reviewIterationDivisor)
 
@@ -565,6 +695,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 		prefix = promptPrefix[0]
 	}
 
+	execName := r.executorName()
 	for i := 1; i <= maxReviewIterations; i++ {
 		select {
 		case <-ctx.Done():
@@ -572,18 +703,18 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 		default:
 		}
 
-		r.log.PrintSection(status.NewClaudeReviewSection(i, ": critical/major"))
+		r.log.PrintSection(r.reviewSection(i, ": critical/major"))
 
-		// capture HEAD hash before running claude for no-commit detection
+		// capture HEAD hash before running review executor for no-commit detection
 		headBefore := r.headHash()
 
-		result := r.runWithLimitRetry(ctx, r.reviewClaude.Run,
-			prefix+r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt), "claude")
+		result := r.runWithLimitRetry(ctx, r.review.Run,
+			prefix+r.prependCodexReviewGuidance(r.replacePromptVariables(r.cfg.AppConfig.ReviewSecondPrompt)), execName)
 		if result.Error != nil {
-			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+			if err := r.handlePatternMatchError(result.Error, execName); err != nil {
 				return err
 			}
-			return fmt.Errorf("claude execution: %w", result.Error)
+			return fmt.Errorf("%s execution: %w", execName, result.Error)
 		}
 
 		if result.Signal == SignalFailed {
@@ -591,7 +722,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 		}
 
 		if isReviewDone(result.Signal) {
-			r.log.Print("claude review complete - no more findings")
+			r.log.Print("%s review complete - no more findings", execName)
 			return nil
 		}
 
@@ -602,10 +733,10 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 			continue
 		}
 
-		// fallback: if HEAD hash hasn't changed, claude found nothing to fix
+		// fallback: if HEAD hash hasn't changed, the reviewer found nothing to fix
 		if headBefore != "" {
 			if headAfter := r.headHash(); headAfter == headBefore {
-				r.log.Print("claude review complete - no changes detected")
+				r.log.Print("%s review complete - no changes detected", execName)
 				return nil
 			}
 		}
@@ -616,7 +747,7 @@ func (r *Runner) runClaudeReviewLoop(ctx context.Context, promptPrefix ...string
 		}
 	}
 
-	r.log.Print("max claude review iterations reached, continuing...")
+	r.log.Print("max %s review iterations reached, continuing...", execName)
 	return nil
 }
 
@@ -681,8 +812,8 @@ func (r *Runner) updateStalemate(headBefore, diffBefore string, unchangedRounds 
 
 // externalReviewTool returns the effective external review tool to use.
 // an explicit ExternalReviewTool choice (e.g. via --external-review-tool) wins
-// over legacy codex_enabled=false back-compat; otherwise codex_enabled=false
-// is treated as "none" so users with only that legacy setting still skip
+// over codex_enabled=false back-compat; otherwise codex_enabled=false
+// is treated as "none" so users with only that older setting still skip
 // external review.
 func (r *Runner) externalReviewTool() string {
 	if r.cfg.ExternalReviewToolSet && r.cfg.AppConfig != nil && r.cfg.AppConfig.ExternalReviewTool != "" {
@@ -728,7 +859,7 @@ func (r *Runner) runCodexLoop(ctx context.Context) (bool, error) {
 	// default: codex review
 	return r.runExternalReviewLoop(ctx, externalReviewConfig{
 		name:            "codex",
-		runReview:       r.codex.Run,
+		runReview:       r.external.Run,
 		buildPrompt:     r.buildCodexPrompt,
 		buildEvalPrompt: r.buildCodexEvaluationPrompt,
 		showSummary:     r.showCodexSummary,
@@ -793,6 +924,13 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 			return hadFindings, fmt.Errorf("%s execution: %w", cfg.name, reviewResult.Error)
 		}
 
+		// idle/session timeout on external review: partial or empty output can't be trusted as a clean review.
+		// retry on the next iteration with a fresh session instead of treating it as a clean skip.
+		if r.lastSessionTimedOut {
+			r.log.Print("%s review session timed out, retrying on next iteration...", cfg.name)
+			continue
+		}
+
 		if reviewResult.Output == "" {
 			r.log.Print("%s review returned no output, skipping...", cfg.name)
 			break
@@ -811,7 +949,7 @@ func (r *Runner) runExternalReviewLoop(ctx context.Context, cfg externalReviewCo
 		// pass output to claude for evaluation and fixing
 		r.phaseHolder.Set(status.PhaseClaudeEval)
 		r.log.PrintSection(status.NewClaudeEvalSection())
-		claudeResult := r.runWithLimitRetry(loopCtx, r.reviewClaude.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
+		claudeResult := r.runWithLimitRetry(loopCtx, r.review.Run, cfg.buildEvalPrompt(reviewResult.Output), "claude")
 
 		// restore codex phase for next iteration
 		r.phaseHolder.Set(status.PhaseCodex)
@@ -1139,12 +1277,13 @@ func (r *Runner) runPlanCreation(ctx context.Context) error {
 			prompt = fmt.Sprintf("%s\n\n---\nPREVIOUS DRAFT FEEDBACK:\nUser requested revisions with this feedback:\n%s\n\nPlease revise the plan accordingly and present a new PLAN_DRAFT.", prompt, lastRevisionFeedback)
 		}
 
-		result := r.runWithLimitRetry(ctx, r.claude.Run, prompt, "claude")
+		execName := r.executorName()
+		result := r.runWithLimitRetry(ctx, r.task.Run, prompt, execName)
 		if result.Error != nil {
-			if err := r.handlePatternMatchError(result.Error, "claude"); err != nil {
+			if err := r.handlePatternMatchError(result.Error, execName); err != nil {
 				return err
 			}
-			return fmt.Errorf("claude execution: %w", result.Error)
+			return fmt.Errorf("%s execution: %w", execName, result.Error)
 		}
 
 		if result.Signal == SignalFailed {
@@ -1259,22 +1398,23 @@ func (r *Runner) runWithLimitRetry(ctx context.Context, run func(context.Context
 }
 
 // runWithSessionTimeout runs the executor with an optional session timeout.
-// if SessionTimeout > 0 and toolName is "claude", wraps ctx with context.WithTimeout before calling run.
+// when SessionTimeout > 0, wraps ctx with context.WithTimeout before calling run.
 // on session timeout (child timed out but parent alive), logs a warning and clears the error
 // so callers treat it as a non-completing iteration that continues naturally.
-// only applies to claude sessions; codex and custom executors are not affected.
+// applies to: claude calls in default executor mode (any toolName=="claude" call), every executor call under
+// --codex (task, review, finalize, evaluation). external codex/custom review in default executor mode is
+// NOT subject to session_timeout — preserves existing behavior. toolName is used
+// for both gating and log message phrasing.
 func (r *Runner) runWithSessionTimeout(ctx context.Context, run func(context.Context, string) executor.Result,
 	prompt, toolName string) executor.Result {
 	r.lastSessionTimedOut = false
 	sessionTimeout := r.sessionTimeout()
-	if sessionTimeout <= 0 || toolName != "claude" {
-		result := run(ctx, prompt) // no timeout configured or non-claude tool
-		// idle timeout without signal looks like "nothing to fix" to review loops;
-		// treat it like session timeout so they retry instead of exiting.
-		if result.IdleTimedOut && result.Signal == "" {
-			r.log.Print("warning: %s session idle timed out, no output activity detected", toolName)
-			r.lastSessionTimedOut = true
-		}
+	codexMode := r.cfg.isCodexExecutor()
+	useTimeout := sessionTimeout > 0 && (codexMode || toolName == "claude")
+
+	if !useTimeout {
+		result := run(ctx, prompt)
+		r.handleIdleTimeout(result, toolName)
 		return result
 	}
 
@@ -1293,13 +1433,21 @@ func (r *Runner) runWithSessionTimeout(ctx context.Context, run func(context.Con
 		result.Error = nil
 		result.Signal = "" // clear any signal emitted before timeout; can't trust partial session
 		r.lastSessionTimedOut = true
-	} else if result.IdleTimedOut && result.Signal == "" {
-		// idle timeout without signal: same treatment as session timeout for review loops
+		return result
+	}
+
+	r.handleIdleTimeout(result, toolName)
+	return result
+}
+
+// handleIdleTimeout logs the idle-timeout diagnostic and flags it as a session-timeout
+// equivalent for review loops. an idle timeout without a signal looks like "nothing to
+// fix", so callers must distinguish it from a clean completion or they exit prematurely.
+func (r *Runner) handleIdleTimeout(result executor.Result, toolName string) {
+	if result.IdleTimedOut && result.Signal == "" {
 		r.log.Print("warning: %s session idle timed out, no output activity detected", toolName)
 		r.lastSessionTimedOut = true
 	}
-
-	return result
 }
 
 // sessionTimeout returns the configured session timeout duration.
@@ -1309,6 +1457,23 @@ func (r *Runner) sessionTimeout() time.Duration {
 		return 0
 	}
 	return r.cfg.AppConfig.SessionTimeout
+}
+
+// executorName returns the name used in user-facing log messages and pattern-error
+// help text for the configured task/review executor. "codex" when --codex is in
+// effect, "claude" otherwise. external review uses its own label.
+func (r *Runner) executorName() string {
+	if r.cfg.isCodexExecutor() {
+		return "codex"
+	}
+	return "claude"
+}
+
+func (r *Runner) reviewSection(iteration int, suffix string) status.Section {
+	if r.cfg.isCodexExecutor() {
+		return status.NewInternalReviewSection(iteration, suffix)
+	}
+	return status.NewClaudeReviewSection(iteration, suffix)
 }
 
 // runFinalize executes the optional finalize step after successful reviews.
@@ -1323,7 +1488,8 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 	r.log.PrintSection(status.NewGenericSection("finalize step"))
 
 	prompt := r.replacePromptVariables(r.cfg.AppConfig.FinalizePrompt)
-	result := r.runWithLimitRetry(ctx, r.reviewClaude.Run, prompt, "claude")
+	execName := r.executorName()
+	result := r.runWithLimitRetry(ctx, r.review.Run, prompt, execName)
 
 	if result.Error != nil {
 		// propagate context cancellation - user wants to abort
@@ -1331,7 +1497,7 @@ func (r *Runner) runFinalize(ctx context.Context) error {
 			return fmt.Errorf("finalize step: %w", result.Error)
 		}
 		// pattern match (rate limit or error) - log via shared helper, but don't fail (best-effort)
-		if r.handlePatternMatchError(result.Error, "claude") != nil {
+		if r.handlePatternMatchError(result.Error, execName) != nil {
 			return nil //nolint:nilerr // intentional: best-effort semantics, log but don't propagate
 		}
 		// best-effort: log error but don't fail
@@ -1361,8 +1527,8 @@ func (r *Runner) sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// needsCodexBinary returns true if the current configuration requires the codex binary.
-// returns false when external_review_tool is "custom" or "none", since codex isn't used.
+// needsCodexBinary returns true when external codex review needs the codex binary.
+// first-class codex executor dependency checks happen in cmd/ralphex before runner construction.
 func needsCodexBinary(appConfig *config.Config) bool {
 	if appConfig == nil {
 		return true // default behavior assumes codex

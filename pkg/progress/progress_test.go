@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -176,6 +177,46 @@ func TestLogger_Print(t *testing.T) {
 
 	// check stdout (no color)
 	assert.Contains(t, buf.String(), "test message 42")
+}
+
+func TestLogger_ConcurrentWritesNoInterleave(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	holder := &status.PhaseHolder{}
+	l, err := NewLogger(Config{Mode: "full", Branch: "test", NoColor: true}, testColors(), holder)
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	var buf bytes.Buffer
+	l.stdout = &buf
+
+	const producers = 8
+	const linesPerProducer = 50
+
+	var wg sync.WaitGroup
+	for p := range producers {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := range linesPerProducer {
+				l.Print("producer-%d-line-%d", id, j)
+			}
+		}(p)
+	}
+	wg.Wait()
+
+	// writeMu serializes the file+stdout pair so no producer's line can be
+	// split by another's; every stdout line must be one complete unit. run
+	// with -race to also catch a dropped lock racing on the shared buffer.
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	assert.Len(t, lines, producers*linesPerProducer, "every Print call must yield exactly one complete line")
+	for _, line := range lines {
+		assert.Equal(t, 1, strings.Count(line, "producer-"),
+			"line must carry exactly one producer message, got interleaved output: %q", line)
+	}
 }
 
 func TestLogger_PrintRaw(t *testing.T) {
