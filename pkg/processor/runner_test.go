@@ -4370,6 +4370,33 @@ func TestParseModelEffort(t *testing.T) {
 	}
 }
 
+func TestResolveCodexModelEffort(t *testing.T) {
+	tests := []struct {
+		name       string
+		spec       string
+		wantModel  string
+		wantEffort string
+		wantMax    bool
+	}{
+		{name: "empty spec keeps defaults", spec: "", wantModel: "gpt-5.5", wantEffort: "xhigh"},
+		{name: "model only", spec: "gpt-5.6", wantModel: "gpt-5.6", wantEffort: "xhigh"},
+		{name: "model and effort", spec: "gpt-5.6:high", wantModel: "gpt-5.6", wantEffort: "high"},
+		{name: "effort only keeps default model", spec: ":low", wantModel: "gpt-5.5", wantEffort: "low"},
+		{name: "trailing colon keeps default effort", spec: "gpt-5.6:", wantModel: "gpt-5.6", wantEffort: "xhigh"},
+		{name: "max effort dropped, default kept", spec: "gpt-5.6:max", wantModel: "gpt-5.6", wantEffort: "xhigh", wantMax: true},
+		{name: "max effort case-insensitive", spec: ":MAX", wantModel: "gpt-5.5", wantEffort: "xhigh", wantMax: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model, effort, maxDropped := processor.ResolveCodexModelEffort(tc.spec, "gpt-5.5", "xhigh")
+			assert.Equal(t, tc.wantModel, model)
+			assert.Equal(t, tc.wantEffort, effort)
+			assert.Equal(t, tc.wantMax, maxDropped)
+		})
+	}
+}
+
 func TestRunner_New_ModelEffortWiring(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	holder := &status.PhaseHolder{}
@@ -4415,6 +4442,61 @@ func TestRunner_New_ModelEffortWiring(t *testing.T) {
 
 			if tc.sameExecutor {
 				assert.Same(t, taskExec, reviewExec, "review executor should be the same instance as task executor when specs equivalent")
+			} else {
+				assert.NotSame(t, taskExec, reviewExec, "review executor should be a distinct instance when specs differ")
+			}
+		})
+	}
+}
+
+func TestRunner_New_CodexModelEffortWiring(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	holder := &status.PhaseHolder{}
+
+	tests := []struct {
+		name         string
+		taskModel    string
+		reviewModel  string
+		wantTask     [2]string // {model, effort}
+		wantReview   [2]string
+		sameExecutor bool
+	}{
+		{name: "empty specs use codex config defaults", taskModel: "", reviewModel: "", wantTask: [2]string{"gpt-5.5", "xhigh"}, wantReview: [2]string{"gpt-5.5", "xhigh"}, sameExecutor: true},
+		{name: "task model only", taskModel: "gpt-5.6", reviewModel: "", wantTask: [2]string{"gpt-5.6", "xhigh"}, wantReview: [2]string{"gpt-5.6", "xhigh"}, sameExecutor: true},
+		{name: "task model with effort", taskModel: "gpt-5.6:high", reviewModel: "", wantTask: [2]string{"gpt-5.6", "high"}, wantReview: [2]string{"gpt-5.6", "high"}, sameExecutor: true},
+		{name: "effort only keeps default model", taskModel: ":low", reviewModel: "", wantTask: [2]string{"gpt-5.5", "low"}, wantReview: [2]string{"gpt-5.5", "low"}, sameExecutor: true},
+		{name: "review model differs in effort — separate executor", taskModel: "gpt-5.6", reviewModel: "gpt-5.6:low", wantTask: [2]string{"gpt-5.6", "xhigh"}, wantReview: [2]string{"gpt-5.6", "low"}, sameExecutor: false},
+		{name: "review model differs in model — separate executor", taskModel: "gpt-5.6:high", reviewModel: "gpt-5.5:low", wantTask: [2]string{"gpt-5.6", "high"}, wantReview: [2]string{"gpt-5.5", "low"}, sameExecutor: false},
+		{name: "review model only leaves task at default", taskModel: "", reviewModel: "gpt-5.6:low", wantTask: [2]string{"gpt-5.5", "xhigh"}, wantReview: [2]string{"gpt-5.6", "low"}, sameExecutor: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			appCfg := testAppConfig(t)
+			appCfg.Executor = config.ExecutorCodex
+			appCfg.CodexModel = "gpt-5.5"
+			appCfg.CodexReasoningEffort = "xhigh"
+			cfg := processor.Config{
+				Mode:          processor.ModeReview,
+				MaxIterations: 50,
+				TaskModel:     tc.taskModel,
+				ReviewModel:   tc.reviewModel,
+				AppConfig:     appCfg,
+			}
+			r := processor.New(cfg, log, holder)
+
+			taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
+			require.True(t, ok, "task executor should be *executor.CodexExecutor")
+			assert.Equal(t, tc.wantTask[0], taskExec.Model, "task model")
+			assert.Equal(t, tc.wantTask[1], taskExec.ReasoningEffort, "task effort")
+
+			reviewExec, ok := r.TestReviewExecutor().(*executor.CodexExecutor)
+			require.True(t, ok, "review executor should be *executor.CodexExecutor")
+			assert.Equal(t, tc.wantReview[0], reviewExec.Model, "review model")
+			assert.Equal(t, tc.wantReview[1], reviewExec.ReasoningEffort, "review effort")
+
+			if tc.sameExecutor {
+				assert.Same(t, taskExec, reviewExec, "review executor should be the same instance when specs equivalent")
 			} else {
 				assert.NotSame(t, taskExec, reviewExec, "review executor should be a distinct instance when specs differ")
 			}

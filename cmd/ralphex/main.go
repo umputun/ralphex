@@ -139,8 +139,10 @@ type startupInfo struct {
 	Executor                string
 	PassClaudeMd            bool
 	PreserveAnthropicAPIKey bool   // when true, surfaced in the banner so users can spot wrong-context runs before claude bills the wrong account
-	CodexModel              string // resolved model for codex executor; "" means codex picks from ~/.codex/config.toml
-	CodexEffort             string // resolved reasoning effort for codex executor; "" means codex default
+	CodexModel              string // resolved model for codex task phase; "" means codex picks from ~/.codex/config.toml
+	CodexEffort             string // resolved reasoning effort for codex task phase; "" means codex default
+	CodexReviewModel        string // resolved model for codex review phase; shown only when it differs from CodexModel
+	CodexReviewEffort       string // resolved reasoning effort for codex review phase; shown only when it differs from CodexEffort
 	CodexSandbox            string // resolved sandbox for codex executor; always non-empty when Executor == codex
 }
 
@@ -568,14 +570,10 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		}
 	}
 
-	// resolve effective codex config (model+effort + sandbox) so the banner
-	// reflects what codex actually receives. Under --codex the executor reads
-	// cfg.AppConfig.CodexModel / CodexReasoningEffort directly — NOT TaskModel
-	// (which feeds the claude executor) — so the banner must read the same
-	// fields. Sandbox comes from CodexExecutorSandbox() which already accounts
-	// for the first-class-vs-external default-mode difference.
-	codexModel := req.Config.CodexModel
-	codexEffort := req.Config.CodexReasoningEffort
+	// resolve effective codex model/effort for the banner so it reflects what
+	// the codex task and review executors actually receive (--task-model /
+	// --review-model resolved against codex_model / codex_reasoning_effort).
+	codex := codexModelBanner(o, req.Config)
 
 	// print startup info
 	printStartupInfo(startupInfo{
@@ -587,10 +585,15 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		Executor:                req.Config.Executor,
 		PassClaudeMd:            req.Config.PassClaudeMd,
 		PreserveAnthropicAPIKey: req.Config.PreserveAnthropicAPIKey,
-		CodexModel:              codexModel,
-		CodexEffort:             codexEffort,
+		CodexModel:              codex.taskModel,
+		CodexEffort:             codex.taskEffort,
+		CodexReviewModel:        codex.reviewModel,
+		CodexReviewEffort:       codex.reviewEffort,
 		CodexSandbox:            req.Config.CodexExecutorSandbox(),
 	}, req.Colors)
+	if codex.maxDropped {
+		req.Colors.Warn().Printf("codex does not support 'max' reasoning effort; ignoring (valid: low, medium, high, xhigh)\n")
+	}
 
 	// create and run the runner
 	r := createRunner(req, o, runnerLog, plr.holder)
@@ -1024,9 +1027,54 @@ func printExecutorInfo(info startupInfo, colors *progress.Colors) {
 	if info.CodexEffort != "" {
 		colors.Info().Printf("  reasoning effort: %s\n", info.CodexEffort)
 	}
+	// review model/effort lines appear only when the review phase resolves to a
+	// different model or effort than the task phase (separate --review-model).
+	if info.CodexReviewModel != "" && info.CodexReviewModel != info.CodexModel {
+		colors.Info().Printf("  review model: %s\n", info.CodexReviewModel)
+	}
+	if info.CodexReviewEffort != "" && info.CodexReviewEffort != info.CodexEffort {
+		colors.Info().Printf("  review reasoning effort: %s\n", info.CodexReviewEffort)
+	}
 	if info.PassClaudeMd {
 		colors.Info().Printf("claude.md: project CLAUDE.md passthrough enabled\n")
 	}
+}
+
+// codexBannerInfo holds the resolved codex task/review model and effort for the
+// startup banner.
+type codexBannerInfo struct {
+	taskModel, taskEffort     string
+	reviewModel, reviewEffort string
+	maxDropped                bool // a claude-only "max" effort was requested and dropped
+}
+
+// codexModelBanner resolves the codex task and review model/effort for the startup
+// banner from the task/review model specs (--task-model / --review-model CLI flag >
+// task_model / review_model config) against codex_model / codex_reasoning_effort. it
+// mirrors the resolution buildCodexExecutors performs so the banner shows what the
+// codex executors will actually receive. review fields equal the task fields unless a
+// distinct review spec is given.
+func codexModelBanner(o opts, cfg *config.Config) codexBannerInfo {
+	taskSpec := cfg.TaskModel
+	if o.TaskModel != "" {
+		taskSpec = o.TaskModel
+	}
+	reviewSpec := cfg.ReviewModel
+	if o.ReviewModel != "" {
+		reviewSpec = o.ReviewModel
+	}
+	taskModel, taskEffort, taskMax := processor.ResolveCodexModelEffort(taskSpec, cfg.CodexModel, cfg.CodexReasoningEffort)
+	info := codexBannerInfo{
+		taskModel: taskModel, taskEffort: taskEffort,
+		reviewModel: taskModel, reviewEffort: taskEffort,
+		maxDropped: taskMax,
+	}
+	if reviewSpec != "" {
+		reviewModel, reviewEffort, reviewMax := processor.ResolveCodexModelEffort(reviewSpec, cfg.CodexModel, cfg.CodexReasoningEffort)
+		info.reviewModel, info.reviewEffort = reviewModel, reviewEffort
+		info.maxDropped = info.maxDropped || reviewMax
+	}
+	return info
 }
 
 // runPlanMode executes interactive plan creation mode.
@@ -1068,11 +1116,9 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 
 	maxIter := resolveMaxIterations(o.MaxIterations, req.Config)
 
-	// resolve effective codex config so the plan-mode banner reflects what
-	// codex actually receives (same logic as executePlan above): the executor
-	// reads cfg.AppConfig.CodexModel / CodexReasoningEffort, not TaskModel.
-	codexModel := req.Config.CodexModel
-	codexEffort := req.Config.CodexReasoningEffort
+	// resolve effective codex model/effort so the plan-mode banner reflects what
+	// the codex executor receives (same logic as executePlan above).
+	codex := codexModelBanner(o, req.Config)
 
 	// print startup info for plan mode
 	printStartupInfo(startupInfo{
@@ -1084,10 +1130,15 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		Executor:                req.Config.Executor,
 		PassClaudeMd:            req.Config.PassClaudeMd,
 		PreserveAnthropicAPIKey: req.Config.PreserveAnthropicAPIKey,
-		CodexModel:              codexModel,
-		CodexEffort:             codexEffort,
+		CodexModel:              codex.taskModel,
+		CodexEffort:             codex.taskEffort,
+		CodexReviewModel:        codex.reviewModel,
+		CodexReviewEffort:       codex.reviewEffort,
 		CodexSandbox:            req.Config.CodexExecutorSandbox(),
 	}, req.Colors)
+	if codex.maxDropped {
+		req.Colors.Warn().Printf("codex does not support 'max' reasoning effort; ignoring (valid: low, medium, high, xhigh)\n")
+	}
 
 	// create input collector
 	collector := input.NewTerminalCollector(o.NoColor)
@@ -1435,38 +1486,7 @@ func applyCodexOverrides(o opts, cfg *config.Config, warnW io.Writer) error {
 		fmt.Fprintf(warnW, "warning: config-file external_review_tool=%q overridden to \"none\" because executor=codex\n", cfg.ExternalReviewTool)
 	}
 	cfg.ExternalReviewTool = "none"
-	applyCodexModelOverride(o, cfg, warnW)
 	return nil
-}
-
-// applyCodexModelOverride maps the --task-model / --review-model CLI flags onto
-// the codex executor's model and reasoning effort. codex runs a single executor
-// for task, review, and finalize, so there is no per-phase model split:
-// --task-model wins, --review-model is the fallback. config-file task_model /
-// review_model are not bridged — codex keeps its own codex_model /
-// codex_reasoning_effort keys for persistent config, and the CLI flags are the
-// one-off override. only the populated half of a model[:effort] spec is applied,
-// so --task-model=:high changes effort only. mutates cfg in place.
-func applyCodexModelOverride(o opts, cfg *config.Config, warnW io.Writer) {
-	spec := o.TaskModel
-	if spec == "" {
-		spec = o.ReviewModel
-	}
-	if spec == "" {
-		return
-	}
-	model, effort := processor.ParseModelEffort(spec)
-	if model != "" {
-		cfg.CodexModel = model
-	}
-	if effort == "" {
-		return
-	}
-	if strings.EqualFold(effort, "max") {
-		fmt.Fprintf(warnW, "warning: codex does not support 'max' reasoning effort; ignoring (valid: low, medium, high, xhigh)\n")
-		return
-	}
-	cfg.CodexReasoningEffort = effort
 }
 
 // isFlagSet returns true if the named CLI flag was explicitly provided on the command line.
