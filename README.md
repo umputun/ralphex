@@ -8,9 +8,9 @@
   <a href="https://goreportcard.com/report/github.com/umputun/ralphex"><img src="https://goreportcard.com/badge/github.com/umputun/ralphex?v=2" alt="Go Report Card"></a>
 </p>
 
-<h2 align="center">Autonomous plan execution with Claude Code</h2>
+<h2 align="center">Autonomous plan execution with Claude Code and codex</h2>
 
-*ralphex is a standalone CLI tool that runs in your terminal from the root of a git repository. It orchestrates Claude Code to execute implementation plans autonomously - no IDE plugins or cloud services required, just Claude Code and a single binary.*
+*ralphex is a standalone CLI tool that runs in your terminal from the root of a git repository. It orchestrates Claude Code or codex to execute implementation plans autonomously - no IDE plugins or cloud services required, just a coding agent and a single binary.*
 
 Claude Code is powerful but interactive - it requires you to watch, approve, and guide each step. For complex features spanning multiple tasks, this means hours of babysitting. Worse, as context fills up during long sessions, the model's quality degrades - it starts making mistakes, forgetting earlier decisions, and producing worse code.
 
