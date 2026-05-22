@@ -130,7 +130,7 @@ github.com/pmezard/go-difflib/difflib
 github.com/rivo/uniseg
 # github.com/rogpeppe/go-internal v1.14.1
 ## explicit; go 1.23
-# github.com/slack-go/slack v0.23.0
+# github.com/slack-go/slack v0.23.1
 ## explicit; go 1.25
 github.com/slack-go/slack
 github.com/slack-go/slack/internal/backoff
