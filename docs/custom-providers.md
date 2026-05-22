@@ -465,6 +465,6 @@ echo '{"type":"result","result":""}'
 
 **Timeout / stuck:**
 - ralphex supports an optional per-session timeout via `--session-timeout` flag or `session_timeout` config option (e.g., `30m`, `1h`). In default Claude executor mode it applies to Claude calls only; under `--codex` it applies to every executor call. External codex/custom review in Claude mode is not affected.
-- ralphex also supports `--idle-timeout` flag or `idle_timeout` config option (e.g., `5m`). Unlike session timeout (fixed wall-clock limit), idle timeout resets on each output line and fires only when the session goes silent. It applies to Claude and Codex executors, including external codex review; custom review is not affected.
+- ralphex also supports `--idle-timeout` flag or `idle_timeout` config option (e.g., `5m`). Unlike session timeout (fixed wall-clock limit), idle timeout resets on each output line and fires only when the session goes silent. It applies to the Claude executor in default mode and to every executor call under `--codex`; external codex review in default-claude mode is not affected. Custom review is not affected.
 - Check if the underlying tool has its own timeout settings
 - For codex: adjust `CODEX_SANDBOX` if the sandbox is blocking operations

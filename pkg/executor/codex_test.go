@@ -550,7 +550,7 @@ func TestCodexExecutor_processStderr_contextCancellation(t *testing.T) {
 	}()
 
 	e := &CodexExecutor{}
-	res := e.processStderr(ctx, pr, nil, nil, false)
+	res := e.processStderr(ctx, pr, stderrStreamOpts{})
 
 	// should return context.Canceled or nil (depending on timing)
 	if res.err != nil {
@@ -639,7 +639,7 @@ func TestCodexExecutor_processStderr_readError(t *testing.T) {
 	e := &CodexExecutor{}
 	errReader := &failingReader{err: errors.New("read failed")}
 
-	res := e.processStderr(context.Background(), errReader, nil, nil, false)
+	res := e.processStderr(context.Background(), errReader, stderrStreamOpts{})
 
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "read stderr")
@@ -666,7 +666,7 @@ func TestCodexExecutor_processStderr_lastLines(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &CodexExecutor{}
-			res := e.processStderr(context.Background(), strings.NewReader(tc.stderr), nil, nil, false)
+			res := e.processStderr(context.Background(), strings.NewReader(tc.stderr), stderrStreamOpts{})
 			require.NoError(t, res.err)
 			assert.Equal(t, tc.wantLines, res.lastLines)
 		})
@@ -699,6 +699,78 @@ func TestCodexExecutor_Run_ErrorPriority(t *testing.T) {
 
 	require.Error(t, result.Error)
 	assert.Contains(t, result.Error.Error(), "stderr")
+}
+
+func TestCodexExecutor_finalError(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		stderrRes stderrResult
+		stdoutErr error
+		waitErr   error
+		wantNil   bool
+		wantSubs  []string
+	}{
+		{name: "all nil", ctx: context.Background(), wantNil: true},
+		{
+			name:      "stderr error wins over stdout and wait",
+			ctx:       context.Background(),
+			stderrRes: stderrResult{err: errors.New("stderr boom")},
+			stdoutErr: errors.New("stdout boom"),
+			waitErr:   errors.New("wait boom"),
+			wantSubs:  []string{"stderr boom"},
+		},
+		{
+			name:      "canceled stderr error falls through to stdout error",
+			ctx:       context.Background(),
+			stderrRes: stderrResult{err: context.Canceled},
+			stdoutErr: errors.New("stdout boom"),
+			wantSubs:  []string{"stdout boom"},
+		},
+		{
+			name:      "stdout error returned when no stderr error",
+			ctx:       context.Background(),
+			stdoutErr: errors.New("stdout boom"),
+			wantSubs:  []string{"stdout boom"},
+		},
+		{
+			name:     "wait error without stderr tail",
+			ctx:      context.Background(),
+			waitErr:  errors.New("exit status 1"),
+			wantSubs: []string{"codex exited with error", "exit status 1"},
+		},
+		{
+			name:      "wait error with stderr tail includes last lines",
+			ctx:       context.Background(),
+			stderrRes: stderrResult{lastLines: []string{"line a", "line b"}},
+			waitErr:   errors.New("exit status 1"),
+			wantSubs:  []string{"codex exited with error", "exit status 1", "stderr:", "line a", "line b"},
+		},
+		{
+			name:     "wait error with canceled context reports context error",
+			ctx:      canceledCtx,
+			waitErr:  errors.New("killed"),
+			wantSubs: []string{"context error"},
+		},
+	}
+
+	e := &CodexExecutor{}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := e.finalError(tc.ctx, tc.stderrRes, tc.stdoutErr, tc.waitErr)
+			if tc.wantNil {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, sub := range tc.wantSubs {
+				assert.Contains(t, err.Error(), sub)
+			}
+		})
+	}
 }
 
 func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
@@ -804,7 +876,7 @@ func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 				},
 			}
 
-			res := e.processStderr(context.Background(), strings.NewReader(stderr), nil, nil, false)
+			res := e.processStderr(context.Background(), strings.NewReader(stderr), stderrStreamOpts{})
 
 			require.NoError(t, res.err, "should handle %d byte line without error", tc.size)
 			assert.Contains(t, shown, largeContent, "large content should be captured")
@@ -1925,7 +1997,7 @@ func TestCodexExecutor_processStderr_emitsSessionID(t *testing.T) {
 	const id = "019e3bbe-9788-79f1-b668-aaaaaaaaaaaa"
 	stderr := "--------\n[26-05-18 10:40:06] workdir: /tmp/x\n[26-05-18 10:40:06] session id: " + id + "\n--------\n"
 	ch := make(chan string, 1)
-	res := e.processStderr(context.Background(), strings.NewReader(stderr), nil, ch, false)
+	res := e.processStderr(context.Background(), strings.NewReader(stderr), stderrStreamOpts{sessionIDCh: ch})
 	require.NoError(t, res.err)
 
 	select {

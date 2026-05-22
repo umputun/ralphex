@@ -228,12 +228,16 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		colors:    colors,
 	}
 
+	// hold writeMu around the construction-time write so writeFileLocked's
+	// caller-holds-the-lock contract is honored on every call path.
+	l.writeMu.Lock()
 	if restart {
 		// write restart separator (matches sectionRegex in web parser)
 		l.writeFileLocked("\n\n--- restarted at %s ---\n\n", time.Now().Format("2006-01-02 15:04:05"))
 	} else {
 		l.writeHeader(cfg)
 	}
+	l.writeMu.Unlock()
 
 	return l, nil
 }

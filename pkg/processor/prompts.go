@@ -154,9 +154,21 @@ func (r *Runner) replaceVariablesWithIteration(prompt string, isFirstIteration b
 	return r.appendCommitTrailerInstruction(result)
 }
 
+// reviewContextInstruction returns the lead-in prepended to every review agent
+// body. agent body files describe WHAT to review; this supplies WHERE — each
+// spawned agent runs in a fresh context with no pointer to the branch diff or
+// changed files unless told to fetch them itself.
+func (r *Runner) reviewContextInstruction() string {
+	branch := r.getDefaultBranch()
+	return fmt.Sprintf("First run `git diff %s...HEAD` and `git diff --stat %s...HEAD` to get the "+
+		"changes, then read the changed source files in full context.\n\n", branch, branch)
+}
+
 // formatAgentExpansion creates the agent invocation block for an agent, respecting frontmatter overrides.
 // claude executor produces a Task tool instruction; codex executor produces a spawn_agent block.
+// the review-context lead-in is prepended so the spawned agent knows which diff to review.
 func (r *Runner) formatAgentExpansion(prompt string, opts config.Options) string {
+	prompt = r.reviewContextInstruction() + prompt
 	if r.cfg.isCodexExecutor() {
 		return r.formatAgentExpansionCodex(prompt)
 	}

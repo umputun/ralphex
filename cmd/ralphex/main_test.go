@@ -1286,6 +1286,46 @@ func TestPrintStartupInfo(t *testing.T) {
 		})
 		assert.NotContains(t, out, "executor:")
 	})
+
+	t.Run("shows codex detail lines when config fields are set", func(t *testing.T) {
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+			Executor:      config.ExecutorCodex,
+			CodexModel:    "gpt-5.5",
+			CodexSandbox:  "danger-full-access",
+			CodexEffort:   "xhigh",
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.Contains(t, out, "model: gpt-5.5")
+		assert.Contains(t, out, "sandbox: danger-full-access")
+		assert.Contains(t, out, "reasoning effort: xhigh")
+	})
+
+	t.Run("omits empty codex detail lines so codex resolves them itself", func(t *testing.T) {
+		// empty CodexModel/CodexEffort mean ralphex did not override them — the
+		// banner must stay silent so codex's own resolved header surfaces them.
+		info := startupInfo{
+			PlanFile:      "/path/to/plan.md",
+			Branch:        "feature-branch",
+			Mode:          processor.ModeFull,
+			MaxIterations: 50,
+			ProgressPath:  "progress.txt",
+			Executor:      config.ExecutorCodex,
+			CodexSandbox:  "read-only",
+		}
+		out := captureStdout(t, func() {
+			printStartupInfo(info, colors)
+		})
+		assert.NotContains(t, out, "model:")
+		assert.NotContains(t, out, "reasoning effort:")
+		assert.Contains(t, out, "sandbox: read-only", "sandbox is always resolved, so it is always shown")
+	})
 }
 
 func TestToRelPath(t *testing.T) {

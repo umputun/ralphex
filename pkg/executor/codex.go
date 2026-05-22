@@ -35,7 +35,7 @@ type CodexRunner interface {
 // the prompt via pipe instead of a CLI argument to avoid Windows 8191-char cmd limit).
 // stripAnthropicKey scopes ANTHROPIC_API_KEY filtering to first-class --codex runs;
 // external codex review in default claude mode keeps the host env intact so custom
-// codex wrappers proxying through Anthropic (e.g., scripts/codex-as-claude.sh) keep
+// codex wrappers proxying through Anthropic (e.g., scripts/codex-as-claude/codex-as-claude.sh) keep
 // authenticating. CLAUDECODE is always stripped regardless of mode to prevent
 // nested-session errors when codex is launched from inside a Claude Code session.
 type execCodexRunner struct {
@@ -107,9 +107,9 @@ type CodexExecutor struct {
 	ErrorPatterns   []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns   []string          // patterns to detect rate limits (checked before error patterns)
 	MultiAgent      bool              // enable codex multi_agent feature + reviewer agent registration; set to true on the review-phase codex instance built by processor.New() for first-class --codex mode
-	headerEmitted   atomic.Bool       // tracks first invocation across Run() calls; false until first task/review then suppressed permanently — used to emit codex's resolved model/sandbox/effort once at the top of the run
 	PassClaudeMd    bool              // pass project-level CLAUDE.md to codex via project_doc_fallback_filenames (set by processor.New() only when cfg.AppConfig.Executor == ExecutorCodex)
 	IdleTimeout     time.Duration     // kill session after this duration of no output, zero = disabled
+	headerEmitted   atomic.Bool       // tracks first invocation across Run() calls; false until first task/review then suppressed permanently — used to emit codex's resolved model/sandbox/effort once at the top of the run
 	runner          CodexRunner       // for testing, nil uses default
 }
 
@@ -245,7 +245,11 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	sessionIDCh := make(chan string, 1)
 	stderrDone := make(chan stderrResult, 1)
 	go func() {
-		stderrDone <- e.processStderr(execCtx, streams.Stderr, idleTouch, sessionIDCh, firstRun)
+		stderrDone <- e.processStderr(execCtx, streams.Stderr, stderrStreamOpts{
+			idleTouch:   idleTouch,
+			sessionIDCh: sessionIDCh,
+			firstRun:    firstRun,
+		})
 	}()
 
 	tailCancel, tailDone := e.startRolloutTail(execCtx, sessionIDCh, idleTouch)
@@ -261,12 +265,15 @@ func (e *CodexExecutor) Run(ctx context.Context, prompt string) Result {
 	// wait for stderr processing to complete
 	stderrRes := <-stderrDone
 
-	// codex has exited; signal tailer to drain remaining file content and stop
+	// wait for command completion; once wait() returns the codex process has
+	// fully exited and flushed the last assistant message to its rollout file
+	waitErr := wait()
+
+	// codex has exited; signal tailer to do its final drain and stop. done
+	// after wait() so the tailer keeps following until the rollout file is
+	// guaranteed complete and the final assistant line is not dropped.
 	tailCancel()
 	<-tailDone
-
-	// wait for command completion
-	waitErr := wait()
 
 	// detect signal in stdout (the actual response)
 	signal := detectSignal(stdoutContent)
@@ -408,32 +415,32 @@ type stderrResult struct {
 	err        error
 }
 
+// stderrStreamOpts bundles the per-invocation streaming inputs for processStderr.
+type stderrStreamOpts struct {
+	idleTouch   func()        // invoked for every stderr line to reset the idle-timeout timer; pass a no-op when idle timeout is disabled
+	sessionIDCh chan<- string // when non-nil, receives the first detected "session id: <uuid>" (non-blocking, buffered channel expected)
+	firstRun    bool          // gates the one-time emission of codex's resolved model/sandbox/effort header lines
+}
+
 // processStderr reads stderr line-by-line, filters for progress display, and
 // scans each line for configured limit/error patterns. shows header block
 // (between first two "--------" separators) and bold summaries. captures last
 // lines of unfiltered output for error reporting AND records the first
 // limit/error pattern hit (untruncated, un-evicted) so callers can rely on it
-// regardless of how much chatter follows. idleTouch is invoked for every
-// stderr line so the idle-timeout timer is reset while codex is producing
-// progress output; pass a no-op when idle timeout is disabled.
-// when sessionIDCh is non-nil, the first detected "session id: <uuid>" line
-// in the header block is written to it (non-blocking, buffered channel
-// expected) so the caller can start tailing the rollout file in parallel.
-// firstRun gates the one-time emission of codex's resolved model/sandbox/
-// effort header lines so the user can see what codex actually picked from
-// ~/.codex/config.toml; on subsequent invocations the header stays hidden.
-func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader, idleTouch func(), sessionIDCh chan<- string, firstRun bool) stderrResult {
+// regardless of how much chatter follows. see stderrStreamOpts for the
+// per-invocation streaming inputs.
+func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader, opts stderrStreamOpts) stderrResult {
 	const maxTailLines = 5    // keep last N lines for error context
 	const maxLineLength = 256 // truncate long lines to avoid oversized error strings
 
-	state := &codexFilterState{firstRun: firstRun}
+	state := &codexFilterState{firstRun: opts.firstRun}
 	var tail []string
 	var limitMatch, errorMatch string
 	sessionIDSent := false
 
 	err := readLines(ctx, r, func(line string) {
-		if idleTouch != nil {
-			idleTouch() // reset idle timer on every stderr line
+		if opts.idleTouch != nil {
+			opts.idleTouch() // reset idle timer on every stderr line
 		}
 		// scan untruncated line for patterns first; record only the first hit
 		// per category so detection is eviction- and truncation-resistant.
@@ -442,10 +449,10 @@ func (e *CodexExecutor) processStderr(ctx context.Context, r io.Reader, idleTouc
 
 		// surface session id from header block to caller (once) so the rollout
 		// file can be tailed in parallel for assistant-message streaming.
-		if !sessionIDSent && sessionIDCh != nil {
+		if !sessionIDSent && opts.sessionIDCh != nil {
 			if id := e.extractSessionID(line); id != "" {
 				select {
-				case sessionIDCh <- id:
+				case opts.sessionIDCh <- id:
 				default:
 				}
 				sessionIDSent = true
@@ -685,10 +692,16 @@ func (e *CodexExecutor) tailRolloutFile(ctx context.Context, sessionID string, i
 	}
 	path := e.findRolloutFile(ctx, sessionID)
 	if path == "" {
+		// suppress the diagnostic when the session was canceled — findRolloutFile
+		// also returns "" on ctx.Done(), and that is not a failure worth logging.
+		if ctx.Err() == nil {
+			log.Printf("codex rollout file not found for session %s; assistant output streaming disabled for this session", sessionID)
+		}
 		return
 	}
 	f, err := os.Open(path) //nolint:gosec // path comes from codex's own session id
 	if err != nil {
+		log.Printf("codex rollout file open failed (%s): %v; assistant output streaming disabled for this session", path, err)
 		return
 	}
 	defer func() { _ = f.Close() }()
@@ -702,6 +715,13 @@ func (e *CodexExecutor) tailRolloutFile(ctx context.Context, sessionID string, i
 		for {
 			n, readErr := f.Read(chunk)
 			if n > 0 {
+				// any rollout bytes count as liveness — reset the idle timer
+				// before display filtering so a session actively dispatching
+				// tool calls (function_call records that formatRolloutEvent
+				// drops) is not killed as idle while still making progress.
+				if idleTouch != nil {
+					idleTouch()
+				}
 				acc = append(acc, chunk[:n]...)
 				for {
 					i := bytes.IndexByte(acc, '\n')
@@ -710,9 +730,6 @@ func (e *CodexExecutor) tailRolloutFile(ctx context.Context, sessionID string, i
 					}
 					if msg := e.formatRolloutEvent(acc[:i]); msg != "" {
 						e.OutputHandler(msg)
-						if idleTouch != nil {
-							idleTouch()
-						}
 					}
 					acc = acc[i+1:]
 				}

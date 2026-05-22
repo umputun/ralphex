@@ -1255,10 +1255,28 @@ func TestRunner_formatAgentExpansion_ClaudeShape(t *testing.T) {
 	result := r.expandAgentReferences("Run {{agent:scanner}} now.")
 
 	assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent with this prompt:")
-	assert.Contains(t, result, `"scan code"`)
+	assert.Contains(t, result, "scan code")
+	assert.Contains(t, result, "git diff master...HEAD", "agent body must carry the review-context lead-in")
 	assert.Contains(t, result, "Report findings only - no positive observations.")
 	assert.NotContains(t, result, "spawn_agent")
 	assert.NotContains(t, result, "{{agent:scanner}}")
+}
+
+func TestRunner_reviewContextInstruction(t *testing.T) {
+	t.Run("uses default branch fallback", func(t *testing.T) {
+		r := &Runner{cfg: Config{}, log: newMockLogger("")}
+		got := r.reviewContextInstruction()
+		assert.Contains(t, got, "git diff master...HEAD")
+		assert.Contains(t, got, "git diff --stat master...HEAD")
+		assert.Contains(t, got, "read the changed source files")
+	})
+
+	t.Run("respects configured default branch", func(t *testing.T) {
+		r := &Runner{cfg: Config{DefaultBranch: "develop"}, log: newMockLogger("")}
+		got := r.reviewContextInstruction()
+		assert.Contains(t, got, "git diff develop...HEAD")
+		assert.NotContains(t, got, "master")
+	})
 }
 
 func TestRunner_formatAgentExpansion_CodexShape(t *testing.T) {
@@ -1273,7 +1291,9 @@ func TestRunner_formatAgentExpansion_CodexShape(t *testing.T) {
 
 	result := r.expandAgentReferences("Run {{agent:scanner}} now.")
 
-	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='scan code')")
+	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
+	assert.Contains(t, result, "scan code')", "agent body is the tail of the task argument")
+	assert.Contains(t, result, `git diff master...HEAD`, "agent body must carry the review-context lead-in")
 	assert.Contains(t, result, "Report findings only - no positive observations.")
 	// fork_context guidance lives in the section-level codexReviewGuidance block
 	// (injected by prependCodexReviewGuidance), not in the per-agent expansion.
@@ -1384,7 +1404,8 @@ func TestRunner_formatAgentExpansion_CodexIgnoresFrontmatterOverrides(t *testing
 
 	result := r.expandAgentReferences("{{agent:reviewer}}")
 
-	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='do a review')")
+	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
+	assert.Contains(t, result, "do a review')", "agent body is the tail of the task argument")
 	assert.NotContains(t, result, "qa-expert")
 	assert.NotContains(t, result, "with model=opus")
 
