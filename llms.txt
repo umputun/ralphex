@@ -40,6 +40,9 @@ ralphex --codex docs/plans/feature.md
 # codex executor mode with project CLAUDE.md passthrough (codex reads CLAUDE.md as AGENTS.md)
 ralphex --codex --pass-claude-md docs/plans/feature.md
 
+# codex executor mode with model/effort override (--task-model overrides codex_model/codex_reasoning_effort)
+ralphex --codex --task-model=gpt-5.5:high docs/plans/feature.md
+
 # limit external review iterations (0 = auto, derived from max-iterations)
 ralphex --max-external-iterations=5 docs/plans/feature.md
 
@@ -132,6 +135,8 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 **Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when Claude produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and Claude can't agree on findings.
 
 **Per-phase model configuration:** `task_model` config option (or `--task-model` CLI flag) sets the model for task execution using `model[:effort]` syntax. Examples: `opus` (model only), `opus:high` (both), `:medium` (effort only). Effort levels: `low`, `medium`, `high`, `xhigh`, `max`. `review_model` (or `--review-model`) sets the model/effort for review phases; falls back to `task_model` if empty. Parts are appended to the configured `claude_command` as `--model <m>` and/or `--effort <e>`. Custom wrappers may ignore the flags (default behavior via `*) shift ;;`) or map them to their own selection. Empty by default (uses Claude CLI's defaults).
+
+Under the codex executor (`--codex` or `executor = codex`), the `--task-model`/`--review-model` CLI flags override `codex_model`/`codex_reasoning_effort` instead. Codex runs a single executor for task, review, and finalize, so there is no per-phase split — `--task-model` takes precedence, `--review-model` is the fallback. Only the populated half of a `model[:effort]` spec is applied (`--task-model=:high` changes effort only). Config-file `task_model`/`review_model` are not bridged to codex — codex keeps its own `codex_model`/`codex_reasoning_effort` config keys; the CLI flags are the one-off override. The `max` effort level does not exist in codex — passing it under `--codex` prints a warning and is ignored.
 
 ```ini
 # in ~/.config/ralphex/config

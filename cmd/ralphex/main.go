@@ -1435,7 +1435,38 @@ func applyCodexOverrides(o opts, cfg *config.Config, warnW io.Writer) error {
 		fmt.Fprintf(warnW, "warning: config-file external_review_tool=%q overridden to \"none\" because executor=codex\n", cfg.ExternalReviewTool)
 	}
 	cfg.ExternalReviewTool = "none"
+	applyCodexModelOverride(o, cfg, warnW)
 	return nil
+}
+
+// applyCodexModelOverride maps the --task-model / --review-model CLI flags onto
+// the codex executor's model and reasoning effort. codex runs a single executor
+// for task, review, and finalize, so there is no per-phase model split:
+// --task-model wins, --review-model is the fallback. config-file task_model /
+// review_model are not bridged — codex keeps its own codex_model /
+// codex_reasoning_effort keys for persistent config, and the CLI flags are the
+// one-off override. only the populated half of a model[:effort] spec is applied,
+// so --task-model=:high changes effort only. mutates cfg in place.
+func applyCodexModelOverride(o opts, cfg *config.Config, warnW io.Writer) {
+	spec := o.TaskModel
+	if spec == "" {
+		spec = o.ReviewModel
+	}
+	if spec == "" {
+		return
+	}
+	model, effort := processor.ParseModelEffort(spec)
+	if model != "" {
+		cfg.CodexModel = model
+	}
+	if effort == "" {
+		return
+	}
+	if strings.EqualFold(effort, "max") {
+		fmt.Fprintf(warnW, "warning: codex does not support 'max' reasoning effort; ignoring (valid: low, medium, high, xhigh)\n")
+		return
+	}
+	cfg.CodexReasoningEffort = effort
 }
 
 // isFlagSet returns true if the named CLI flag was explicitly provided on the command line.

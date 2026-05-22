@@ -1165,6 +1165,96 @@ func TestCodexFlag_ApplyCLIOverrides(t *testing.T) {
 	})
 }
 
+func TestApplyCodexModelOverride(t *testing.T) {
+	t.Run("task_model_overrides_codex_model", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		o := parseTestOpts(t, "--codex", "--task-model", "gpt-5.6")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.6", cfg.CodexModel)
+		assert.Equal(t, "xhigh", cfg.CodexReasoningEffort, "effort untouched when spec has no effort part")
+		assert.Empty(t, warnBuf.String())
+	})
+
+	t.Run("task_model_with_effort_overrides_both", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		o := parseTestOpts(t, "--codex", "--task-model", "gpt-5.6:high")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.6", cfg.CodexModel)
+		assert.Equal(t, "high", cfg.CodexReasoningEffort)
+	})
+
+	t.Run("effort_only_spec_overrides_effort_only", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		o := parseTestOpts(t, "--codex", "--task-model", ":medium")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.5", cfg.CodexModel, "model untouched for effort-only spec")
+		assert.Equal(t, "medium", cfg.CodexReasoningEffort)
+	})
+
+	t.Run("review_model_used_as_fallback", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, CodexModel: "gpt-5.5"}
+		o := parseTestOpts(t, "--codex", "--review-model", "gpt-5.6:high")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.6", cfg.CodexModel)
+		assert.Equal(t, "high", cfg.CodexReasoningEffort)
+	})
+
+	t.Run("task_model_wins_over_review_model", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, CodexModel: "gpt-5.5"}
+		o := parseTestOpts(t, "--codex", "--task-model", "gpt-5.6", "--review-model", "gpt-5.7")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.6", cfg.CodexModel)
+	})
+
+	t.Run("max_effort_warns_and_is_ignored", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		o := parseTestOpts(t, "--codex", "--task-model", "gpt-5.6:max")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.6", cfg.CodexModel, "model still applied")
+		assert.Equal(t, "xhigh", cfg.CodexReasoningEffort, "max effort not applied")
+		assert.Contains(t, warnBuf.String(), "max")
+	})
+
+	t.Run("no_model_flags_leaves_codex_config_intact", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex, CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		o := parseTestOpts(t, "--codex")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.5", cfg.CodexModel)
+		assert.Equal(t, "xhigh", cfg.CodexReasoningEffort)
+	})
+
+	t.Run("non_codex_executor_does_not_bridge_task_model", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorClaude, CodexModel: "gpt-5.5"}
+		o := parseTestOpts(t, "--task-model", "opus:high")
+		var warnBuf bytes.Buffer
+
+		require.NoError(t, applyCodexOverrides(o, cfg, &warnBuf))
+
+		assert.Equal(t, "gpt-5.5", cfg.CodexModel, "claude executor must not touch codex model")
+	})
+}
+
 func TestPrintStartupInfo(t *testing.T) {
 	colors := testColors()
 
