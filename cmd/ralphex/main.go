@@ -1034,16 +1034,29 @@ func printExecutorInfo(info startupInfo, colors *progress.Colors) {
 		colors.Info().Printf("  reasoning effort: %s\n", info.CodexEffort)
 	}
 	// review model/effort lines appear only when the review phase resolves to a
-	// different model or effort than the task phase (separate --review-model).
-	if info.CodexReviewModel != "" && info.CodexReviewModel != info.CodexModel {
-		colors.Info().Printf("  review model: %s\n", info.CodexReviewModel)
+	// different model or effort than the task phase (separate --review-model). an
+	// empty review value that still differs from a set task value means the review
+	// executor inherits codex's own config — render that explicitly so the banner
+	// does not imply the review phase reuses the task value.
+	if info.CodexReviewModel != info.CodexModel {
+		colors.Info().Printf("  review model: %s\n", codexBannerValue(info.CodexReviewModel))
 	}
-	if info.CodexReviewEffort != "" && info.CodexReviewEffort != info.CodexEffort {
-		colors.Info().Printf("  review reasoning effort: %s\n", info.CodexReviewEffort)
+	if info.CodexReviewEffort != info.CodexEffort {
+		colors.Info().Printf("  review reasoning effort: %s\n", codexBannerValue(info.CodexReviewEffort))
 	}
 	if info.PassClaudeMd {
 		colors.Info().Printf("claude.md: project CLAUDE.md passthrough enabled\n")
 	}
+}
+
+// codexBannerValue renders a resolved codex model/effort value for the startup
+// banner. an empty value means the codex executor inherits that field from the
+// user's ~/.codex/config.toml, so it is labelled explicitly rather than shown blank.
+func codexBannerValue(v string) string {
+	if v == "" {
+		return "(inherits ~/.codex/config.toml)"
+	}
+	return v
 }
 
 // codexBannerInfo holds the resolved codex task/review model and effort for the

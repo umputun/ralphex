@@ -1477,6 +1477,19 @@ func TestPrintStartupInfo(t *testing.T) {
 		assert.Contains(t, out, "review model: gpt-5.5")
 		assert.NotContains(t, out, "review reasoning effort:", "review effort line omitted when effort matches task")
 	})
+
+	t.Run("labels empty review value that differs from a set task value", func(t *testing.T) {
+		// review effort empty (inherits ~/.codex/config.toml) but task effort set:
+		// the line must render explicitly so the banner does not imply review reuses task.
+		info := startupInfo{
+			PlanFile: "/path/to/plan.md", Branch: "feature-branch", Mode: processor.ModeFull, MaxIterations: 50,
+			ProgressPath: "progress.txt", Executor: config.ExecutorCodex, CodexSandbox: "danger-full-access",
+			CodexModel: "gpt-5.6", CodexEffort: "high", CodexReviewModel: "gpt-5.6", CodexReviewEffort: "",
+		}
+		out := captureStdout(t, func() { printStartupInfo(info, colors) })
+		assert.Contains(t, out, "review reasoning effort: (inherits ~/.codex/config.toml)")
+		assert.NotContains(t, out, "review model:", "review model line omitted when model matches task")
+	})
 }
 
 func TestToRelPath(t *testing.T) {
