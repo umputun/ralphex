@@ -147,11 +147,11 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 		if cfg.AppConfig.PassClaudeMd {
 			maybeEmitClaudeMdSetupHint(log)
 		}
-		// one shared codex executor with multi_agent always enabled — task, review, and
-		// finalize all run the same codex configuration so any prompt can use
-		// {{agent:...}} expansions if the user customizes it.
-		codexExec := cfg.buildCodexExecutor(log)
-		return NewWithExecutors(cfg, log, Executors{Task: codexExec, Review: codexExec, External: nil, Custom: customExec}, holder)
+		// codex executors for task and review phases — multi_agent is always on so any
+		// phase can use {{agent:...}} expansions. a separate review executor exists only
+		// when --review-model resolves to a different model/effort than --task-model.
+		codexTask, codexReview := cfg.buildCodexExecutors(log)
+		return NewWithExecutors(cfg, log, Executors{Task: codexTask, Review: codexReview, External: nil, Custom: customExec}, holder)
 	}
 
 	claudeExec, reviewExec := cfg.buildClaudeExecutors(log)
@@ -245,6 +245,33 @@ func (cfg Config) buildCodexExecutor(log Logger) *executor.CodexExecutor {
 		e.IdleTimeout = cfg.AppConfig.IdleTimeout
 	}
 	return e
+}
+
+// buildCodexExecutors constructs the codex executors for the task and review phases
+// in first-class --codex mode. the review slot is non-nil only when the resolved
+// review model/effort differs from task — otherwise the task executor handles review
+// and finalize too. --task-model / --review-model (and their config equivalents) are
+// resolved against codex_model / codex_reasoning_effort: --review-model falls back to
+// --task-model when unset, and an unset spec inherits the codex config defaults.
+func (cfg Config) buildCodexExecutors(log Logger) (*executor.CodexExecutor, Executor) {
+	var defModel, defEffort string
+	if cfg.AppConfig != nil {
+		defModel, defEffort = cfg.AppConfig.CodexModel, cfg.AppConfig.CodexReasoningEffort
+	}
+	taskModel, taskEffort, _ := ResolveCodexModelEffort(cfg.TaskModel, defModel, defEffort)
+	reviewModel, reviewEffort := taskModel, taskEffort
+	if cfg.ReviewModel != "" {
+		reviewModel, reviewEffort, _ = ResolveCodexModelEffort(cfg.ReviewModel, defModel, defEffort)
+	}
+
+	taskExec := cfg.buildCodexExecutor(log)
+	taskExec.Model, taskExec.ReasoningEffort = taskModel, taskEffort
+	if reviewModel == taskModel && reviewEffort == taskEffort {
+		return taskExec, nil
+	}
+	reviewExec := cfg.buildCodexExecutor(log)
+	reviewExec.Model, reviewExec.ReasoningEffort = reviewModel, reviewEffort
+	return taskExec, reviewExec
 }
 
 // newBaseCodexExecutor returns a CodexExecutor populated with the fields shared
@@ -1550,4 +1577,27 @@ func needsCodexBinary(appConfig *config.Config) bool {
 func ParseModelEffort(s string) (model, effort string) {
 	model, effort, _ = strings.Cut(s, ":")
 	return model, effort
+}
+
+// ResolveCodexModelEffort resolves a "model[:effort]" spec against codex default
+// model and effort. an empty spec returns the defaults unchanged. each populated
+// half of the spec overrides its default. the claude-only "max" effort is not valid
+// for codex: maxDropped reports that the spec requested it (the caller surfaces the
+// warning) and the default effort is kept.
+func ResolveCodexModelEffort(spec, defModel, defEffort string) (model, effort string, maxDropped bool) {
+	model, effort = defModel, defEffort
+	if spec == "" {
+		return model, effort, false
+	}
+	m, e := ParseModelEffort(spec)
+	if m != "" {
+		model = m
+	}
+	if e == "" {
+		return model, effort, false
+	}
+	if strings.EqualFold(e, "max") {
+		return model, effort, true
+	}
+	return model, e, false
 }
