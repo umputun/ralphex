@@ -161,7 +161,7 @@ Mutual exclusion: `--codex` cannot be combined with `--external-only`, `--codex-
 
 Codex defaults that differ by mode:
 - `codex_sandbox` default is `read-only` for external codex review (default claude mode) and `danger-full-access` for first-class `executor = codex` (task/review/finalize need to write git metadata and commit). The accessor `CodexExecutorSandbox()` returns the role-appropriate default unless the user sets `codex_sandbox` explicitly.
-- `codex_model` and `codex_reasoning_effort` defaults (`gpt-5.5` / `xhigh`) ship as active values in the embedded config so external codex review in default-claude mode keeps stable settings across upgrades. Comment those lines out in your user config to inherit from `~/.codex/config.toml` instead.
+- `codex_model` and `codex_reasoning_effort` defaults (`gpt-5.5` / `xhigh`) ship as active values in the embedded config so external codex review in default-claude mode keeps stable settings across upgrades. Set either to an empty value (e.g. `codex_model =`) in your user config to inherit that field from `~/.codex/config.toml` instead; commenting the line out keeps the embedded default.
 - `idle_timeout` applies to first-class `--codex` sessions only. External codex review in default-claude mode keeps master semantics (no idle timeout) so users with `idle_timeout` configured for claude don't see new early-terminations on the external review phase.
 - ANTHROPIC_API_KEY is stripped from codex child env only under first-class `--codex`. External codex review in default-claude mode preserves the host env so custom codex wrappers proxying through Anthropic (e.g., `scripts/codex-as-claude/codex-as-claude.sh`) keep authenticating.
 

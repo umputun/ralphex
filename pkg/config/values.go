@@ -24,7 +24,9 @@ type Values struct {
 	CodexEnabledSet            bool // tracks if codex_enabled was explicitly set
 	CodexCommand               string
 	CodexModel                 string
+	CodexModelSet              bool // tracks if codex_model was explicitly set outside embedded defaults
 	CodexReasoningEffort       string
+	CodexReasoningEffortSet    bool // tracks if codex_reasoning_effort was explicitly set outside embedded defaults
 	CodexTimeoutMs             int
 	CodexTimeoutMsSet          bool // tracks if codex_timeout_ms was explicitly set
 	CodexSandbox               string
@@ -172,6 +174,8 @@ func (vl *valuesLoader) parseValuesFromEmbedded() (Values, error) {
 	if err != nil {
 		return Values{}, err
 	}
+	values.CodexModelSet = false
+	values.CodexReasoningEffortSet = false
 	values.CodexSandboxSet = false
 	values.ExternalReviewToolSet = false
 	return values, nil
@@ -218,9 +222,11 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	}
 	if key, err := section.GetKey("codex_model"); err == nil {
 		values.CodexModel = key.String()
+		values.CodexModelSet = true
 	}
 	if key, err := section.GetKey("codex_reasoning_effort"); err == nil {
 		values.CodexReasoningEffort = key.String()
+		values.CodexReasoningEffortSet = true
 	}
 	if key, err := section.GetKey("codex_timeout_ms"); err == nil {
 		val, intErr := key.Int()
@@ -495,10 +501,16 @@ func (dst *Values) mergeFrom(src *Values) {
 	if src.CodexCommand != "" {
 		dst.CodexCommand = src.CodexCommand
 	}
-	if src.CodexModel != "" {
+	if src.CodexModelSet {
+		dst.CodexModel = src.CodexModel
+		dst.CodexModelSet = true
+	} else if src.CodexModel != "" {
 		dst.CodexModel = src.CodexModel
 	}
-	if src.CodexReasoningEffort != "" {
+	if src.CodexReasoningEffortSet {
+		dst.CodexReasoningEffort = src.CodexReasoningEffort
+		dst.CodexReasoningEffortSet = true
+	} else if src.CodexReasoningEffort != "" {
 		dst.CodexReasoningEffort = src.CodexReasoningEffort
 	}
 	if src.CodexTimeoutMsSet {

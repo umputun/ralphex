@@ -55,7 +55,9 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.True(t, values.CodexEnabledSet)
 	assert.Equal(t, "codex", values.CodexCommand)
 	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded gpt-5.5")
+	assert.False(t, values.CodexModelSet, "embedded default carries the value but not the explicit-set flag")
 	assert.Equal(t, "xhigh", values.CodexReasoningEffort, "codex_reasoning_effort defaults to embedded xhigh")
+	assert.False(t, values.CodexReasoningEffortSet, "embedded default carries the value but not the explicit-set flag")
 	assert.Equal(t, 3600000, values.CodexTimeoutMs)
 	assert.Equal(t, "read-only", values.CodexSandbox)
 	assert.False(t, values.CodexSandboxSet)
@@ -591,6 +593,62 @@ func TestValues_mergeFrom_Executor(t *testing.T) {
 	})
 }
 
+func TestValues_mergeFrom_CodexModel(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		src := Values{CodexModel: "gpt-5.3-codex", CodexModelSet: true, CodexReasoningEffort: "low", CodexReasoningEffortSet: true}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "gpt-5.3-codex", dst.CodexModel)
+		assert.True(t, dst.CodexModelSet)
+		assert.Equal(t, "low", dst.CodexReasoningEffort)
+		assert.True(t, dst.CodexReasoningEffortSet)
+	})
+
+	t.Run("unset flag preserves dst", func(t *testing.T) {
+		dst := Values{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		src := Values{CodexModel: "", CodexReasoningEffort: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "gpt-5.5", dst.CodexModel)
+		assert.Equal(t, "xhigh", dst.CodexReasoningEffort)
+	})
+
+	t.Run("explicit empty overrides non-empty dst", func(t *testing.T) {
+		dst := Values{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		src := Values{CodexModel: "", CodexModelSet: true, CodexReasoningEffort: "", CodexReasoningEffortSet: true}
+		dst.mergeFrom(&src)
+		assert.Empty(t, dst.CodexModel)
+		assert.True(t, dst.CodexModelSet)
+		assert.Empty(t, dst.CodexReasoningEffort)
+		assert.True(t, dst.CodexReasoningEffortSet)
+	})
+
+	t.Run("explicit empty in user config clears embedded default", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(configPath, []byte("codex_model =\ncodex_reasoning_effort ="), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", configPath)
+		require.NoError(t, err)
+		assert.Empty(t, values.CodexModel, "explicit empty clears embedded gpt-5.5 so codex inherits from ~/.codex/config.toml")
+		assert.True(t, values.CodexModelSet)
+		assert.Empty(t, values.CodexReasoningEffort)
+		assert.True(t, values.CodexReasoningEffortSet)
+	})
+
+	t.Run("omitted in user config keeps embedded default", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(configPath, []byte(`# unrelated`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", configPath)
+		require.NoError(t, err)
+		assert.Equal(t, "gpt-5.5", values.CodexModel)
+		assert.Equal(t, "xhigh", values.CodexReasoningEffort)
+	})
+}
+
 func TestValues_mergeFrom_PassClaudeMd(t *testing.T) {
 	t.Run("set flag merges", func(t *testing.T) {
 		dst := Values{PassClaudeMd: false, PassClaudeMdSet: false}
@@ -764,7 +822,9 @@ plans_dir = my/plans
 	assert.True(t, values.CodexEnabledSet)
 	assert.Equal(t, "/custom/codex", values.CodexCommand)
 	assert.Equal(t, "custom-model", values.CodexModel)
+	assert.True(t, values.CodexModelSet)
 	assert.Equal(t, "low", values.CodexReasoningEffort)
+	assert.True(t, values.CodexReasoningEffortSet)
 	assert.Equal(t, 1000, values.CodexTimeoutMs)
 	assert.Equal(t, "none", values.CodexSandbox)
 	assert.True(t, values.CodexSandboxSet)

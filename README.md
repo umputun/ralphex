@@ -240,7 +240,7 @@ When `executor = codex` is set in config and the user has also set `external_rev
 
 **Requirements:** `--codex` requires the codex CLI version 0.130.0 or newer. The mode relies on `[features] multi_agent`, `[agents.<name>]` agent registration, and (with `--pass-claude-md`) `project_doc_fallback_filenames`, all supported in 0.130.0. Older codex versions silently ignore unknown `-c` overrides, so a misconfigured run will not error visibly — it will simply behave as if the overrides were absent. There is no runtime version check; verify your codex version with `codex --version` if behavior is unexpected.
 
-**Model selection under `--codex`:** `--task-model` and `--review-model` (and their config equivalents `task_model` / `review_model`) only feed the claude executor — they are appended as `--model`/`--effort` to `claude_command`. Under `--codex` they are ignored. Codex model selection follows this order: `codex_model` / `codex_reasoning_effort` in ralphex config (default `gpt-5.5` / `xhigh`) are applied as `-c` overrides to the codex CLI; comment those lines out in your user config to inherit from `~/.codex/config.toml` instead. The startup banner under `--codex` reflects whatever the codex executor will actually receive (i.e. `cfg.AppConfig.CodexModel` / `CodexReasoningEffort`).
+**Model selection under `--codex`:** `--task-model` and `--review-model` (and their config equivalents `task_model` / `review_model`) only feed the claude executor — they are appended as `--model`/`--effort` to `claude_command`. Under `--codex` they are ignored. Codex model selection follows this order: `codex_model` / `codex_reasoning_effort` in ralphex config (default `gpt-5.5` / `xhigh`) are applied as `-c` overrides to the codex CLI; set either to an empty value (e.g. `codex_model =`) in your user config to inherit that field from `~/.codex/config.toml` instead. Commenting the line out keeps the embedded default. The startup banner under `--codex` reflects whatever the codex executor will actually receive (i.e. `cfg.AppConfig.CodexModel` / `CodexReasoningEffort`).
 
 ### Worktree Isolation
 
@@ -889,8 +889,8 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 | `review_model` | Model for review phases as `model[:effort]`. Falls back to `task_model` if empty. Same syntax and wrapper behavior as `task_model` | empty |
 | `codex_enabled` | Enable codex review phase | `true` |
 | `codex_command` | Codex CLI command | `codex` |
-| `codex_model` | Codex model ID. Comment the line out in user config to inherit from `~/.codex/config.toml` instead | `gpt-5.5` |
-| `codex_reasoning_effort` | Reasoning effort level. Comment the line out in user config to inherit from `~/.codex/config.toml` instead | `xhigh` |
+| `codex_model` | Codex model ID. Set to an empty value (`codex_model =`) in user config to inherit from `~/.codex/config.toml` instead | `gpt-5.5` |
+| `codex_reasoning_effort` | Reasoning effort level. Set to an empty value (`codex_reasoning_effort =`) in user config to inherit from `~/.codex/config.toml` instead | `xhigh` |
 | `codex_timeout_ms` | Codex timeout in ms | `3600000` |
 | `codex_sandbox` | Sandbox mode. External codex review defaults to `read-only`; first-class `executor = codex` uses `danger-full-access` (task/review/finalize need to write git metadata and commit) unless explicitly overridden | `read-only` (claude mode) / `danger-full-access` (codex mode) |
 | `external_review_tool` | External review tool (`codex`, `custom`, `none`) | `codex` |
