@@ -1051,7 +1051,7 @@ func printExecutorInfo(info startupInfo, colors *progress.Colors) {
 
 // codexBannerValue renders a resolved codex model/effort value for the startup
 // banner. an empty value means the codex executor inherits that field from the
-// user's ~/.codex/config.toml, so it is labelled explicitly rather than shown blank.
+// user's ~/.codex/config.toml, so it is labeled explicitly rather than shown blank.
 func codexBannerValue(v string) string {
 	if v == "" {
 		return "(inherits ~/.codex/config.toml)"
