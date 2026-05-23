@@ -52,12 +52,17 @@ type DiffStats struct {
 	Deletions int // lines deleted
 }
 
+// defaultWorktreeBase is the default base directory (relative to the repo
+// root) for engine-created worktrees. Overridable via SetWorktreePath.
+const defaultWorktreeBase = ".ralphex/worktrees"
+
 // Service provides git operations for ralphex workflows.
 // It is the single public API for the git package.
 type Service struct {
-	repo    backend
-	log     Logger
-	trailer string // optional trailer line appended to all commits
+	repo         backend
+	log          Logger
+	trailer      string // optional trailer line appended to all commits
+	worktreeBase string // base directory for engine-created worktrees; empty means use defaultWorktreeBase
 }
 
 // NewService opens a git repository and returns a Service.
@@ -80,6 +85,28 @@ func NewService(path string, log Logger, vcsCmd ...string) (*Service, error) {
 // when set, a blank line and the trailer are appended after the commit message.
 func (s *Service) SetCommitTrailer(trailer string) {
 	s.trailer = trailer
+}
+
+// SetWorktreePath overrides the base directory used for engine-created worktrees.
+// An empty path resets to the default (".ralphex/worktrees").
+// Relative paths are resolved against the repo root; absolute paths are used as-is.
+// The per-plan worktree directory is appended as <base>/<branch>.
+func (s *Service) SetWorktreePath(path string) {
+	s.worktreeBase = path
+}
+
+// worktreePath returns the absolute base directory for engine-created worktrees,
+// resolving relative paths against the repo root and falling back to the default
+// when no override has been configured.
+func (s *Service) worktreePath() string {
+	base := s.worktreeBase
+	if base == "" {
+		base = defaultWorktreeBase
+	}
+	if filepath.IsAbs(base) {
+		return base
+	}
+	return filepath.Join(s.repo.root(), base)
 }
 
 // appendTrailer appends the configured trailer to a commit message.
@@ -269,7 +296,9 @@ func (s *Service) CreateBranchForPlan(planFile, defaultBranch, branchOverride st
 
 // CreateWorktreeForPlan creates an isolated git worktree for plan execution.
 // must be called from the default branch (same guard as CreateBranchForPlan).
-// derives branch name from plan file, creates worktree at .ralphex/worktrees/<branch>.
+// derives branch name from plan file, creates worktree at <worktree-base>/<branch>.
+// the base directory defaults to ".ralphex/worktrees" and can be overridden via
+// SetWorktreePath (typically wired to the worktree_path config option).
 // returns (worktree path, planNeedsCommit, error). when planNeedsCommit is true the caller
 // must commit the plan file in the worktree context (via CommitPlanFile on the worktree's
 // git service) so the commit lands on the feature branch rather than the default branch.
@@ -281,7 +310,7 @@ func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch, branchOverride 
 	// check worktree existence early, before preparePlanBranch runs hasChangesOtherThan
 	// (an existing worktree dir would show up as untracked and fail the dirty check)
 	earlyBranch := s.EffectiveBranchName(planFile, branchOverride)
-	wtPath := filepath.Join(s.repo.root(), ".ralphex", "worktrees", earlyBranch)
+	wtPath := filepath.Join(s.worktreePath(), earlyBranch)
 
 	// prune stale worktree entries first
 	if pruneErr := s.repo.pruneWorktrees(); pruneErr != nil {

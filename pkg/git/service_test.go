@@ -1452,6 +1452,95 @@ func TestService_CommitPlanFile(t *testing.T) {
 	})
 }
 
+func TestService_SetWorktreePath(t *testing.T) {
+	t.Run("default base when unset", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "default-path.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "master", "")
+		require.NoError(t, err)
+		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // test cleanup
+
+		assert.Contains(t, wtPath, filepath.Join(".ralphex", "worktrees", "default-path"))
+	})
+
+	t.Run("relative path resolves under repo root", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+		svc.SetWorktreePath(filepath.Join("tmp", "wt"))
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "rel-path.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "master", "")
+		require.NoError(t, err)
+		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // test cleanup
+
+		// resolve symlinks for stable comparison (macOS /var → /private/var)
+		expectedRoot, err := filepath.EvalSymlinks(dir)
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(expectedRoot, "tmp", "wt", "rel-path"), wtPath)
+	})
+
+	t.Run("absolute path used as-is", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// place the worktree base in a sibling temp dir so it lives outside the repo root
+		absBase := filepath.Join(t.TempDir(), "external-wt-base")
+		svc.SetWorktreePath(absBase)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "abs-path.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "master", "")
+		require.NoError(t, err)
+		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // test cleanup
+
+		// the actual on-disk path may have symlinks resolved (macOS /var → /private/var);
+		// resolve both sides for comparison so the test passes regardless of the temp
+		// directory's symlink layout.
+		expected, err := filepath.EvalSymlinks(filepath.Join(absBase, "abs-path"))
+		require.NoError(t, err)
+		actual, err := filepath.EvalSymlinks(wtPath)
+		require.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("empty path resets to default", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		// override then reset
+		svc.SetWorktreePath("custom/base")
+		svc.SetWorktreePath("")
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "reset-path.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		wtPath, _, err := svc.CreateWorktreeForPlan(planFile, "master", "")
+		require.NoError(t, err)
+		defer svc.RemoveWorktree(wtPath) //nolint:errcheck // test cleanup
+
+		assert.Contains(t, wtPath, filepath.Join(".ralphex", "worktrees", "reset-path"))
+	})
+}
+
 func TestService_RemoveWorktree(t *testing.T) {
 	t.Run("removes existing worktree", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)

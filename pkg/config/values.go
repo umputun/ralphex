@@ -63,6 +63,7 @@ type Values struct {
 	MovePlanOnCompletionSet    bool // tracks if move_plan_on_completion was explicitly set
 	WorktreeEnabled            bool
 	WorktreeEnabledSet         bool   // tracks if use_worktree was explicitly set
+	WorktreePath               string // base directory for engine-created worktrees (relative to repo root); default ".ralphex/worktrees"
 	VcsCommand                 string // custom VCS command (default: "git")
 	CommitTrailer              string // trailer line to append to all commits (e.g., "Co-authored-by: ...")
 	PlansDir                   string
@@ -368,6 +369,9 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 		values.WorktreeEnabled = val
 		values.WorktreeEnabledSet = true
 	}
+	if key, err := section.GetKey("worktree_path"); err == nil {
+		values.WorktreePath = strings.TrimSpace(key.String())
+	}
 
 	// paths
 	if key, err := section.GetKey("plans_dir"); err == nil {
@@ -586,6 +590,9 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	if src.WorktreeEnabledSet {
 		dst.WorktreeEnabled = src.WorktreeEnabled
 		dst.WorktreeEnabledSet = true
+	}
+	if src.WorktreePath != "" {
+		dst.WorktreePath = src.WorktreePath
 	}
 	if src.PlansDir != "" {
 		dst.PlansDir = src.PlansDir

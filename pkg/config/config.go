@@ -94,8 +94,9 @@ type Config struct {
 
 	MovePlanOnCompletion bool `json:"move_plan_on_completion"`
 
-	WorktreeEnabled    bool `json:"worktree_enabled"`
-	WorktreeEnabledSet bool `json:"-"` // tracks if use_worktree was explicitly set in config
+	WorktreeEnabled    bool   `json:"worktree_enabled"`
+	WorktreeEnabledSet bool   `json:"-"`             // tracks if use_worktree was explicitly set in config
+	WorktreePath       string `json:"worktree_path"` // base directory for engine-created worktrees (relative to repo root, or absolute); default ".ralphex/worktrees"
 
 	PlansDir      string   `json:"plans_dir"`
 	WatchDirs     []string `json:"watch_dirs"`     // directories to watch for progress files
@@ -330,6 +331,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		MovePlanOnCompletion:    values.MovePlanOnCompletion,
 		WorktreeEnabled:         values.WorktreeEnabled,
 		WorktreeEnabledSet:      values.WorktreeEnabledSet,
+		WorktreePath:            values.WorktreePath,
 		PlansDir:                values.PlansDir,
 		DefaultBranch:           values.DefaultBranch,
 		VcsCommand:              values.VcsCommand,

@@ -146,9 +146,17 @@ move_plan_on_completion = true
 # ------------------------------------------------------------------------------
 
 # use_worktree: run each plan in an isolated git worktree
-# creates .ralphex/worktrees/<plan-name> for parallel execution
+# creates <worktree_path>/<plan-name> for parallel execution
 # default: false
 # use_worktree = false
+
+# worktree_path: base directory for engine-created worktrees (use_worktree = true)
+# relative paths are resolved against the repo root; absolute paths are used as-is.
+# the per-plan directory is appended as <worktree_path>/<branch>.
+# does not apply when ralphex is launched from a pre-existing worktree (no engine
+# worktree is created in that case).
+# default: .ralphex/worktrees
+# worktree_path = .ralphex/worktrees
 
 # ------------------------------------------------------------------------------
 # timing
