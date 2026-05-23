@@ -97,6 +97,13 @@ type Config struct {
 	WorktreeEnabled    bool `json:"worktree_enabled"`
 	WorktreeEnabledSet bool `json:"-"` // tracks if use_worktree was explicitly set in config
 
+	// RequireWorktree, when true, refuses to run from the main repo's working tree on
+	// the default branch without --worktree. Operators who want a worktree-first
+	// workflow set this to surface the missing worktree before any agent invocation
+	// rather than letting the engine create a feature branch in the main checkout.
+	RequireWorktree    bool `json:"require_worktree"`
+	RequireWorktreeSet bool `json:"-"` // tracks if require_worktree was explicitly set in config
+
 	PlansDir      string   `json:"plans_dir"`
 	WatchDirs     []string `json:"watch_dirs"`     // directories to watch for progress files
 	DefaultBranch string   `json:"default_branch"` // override auto-detected default branch
@@ -330,6 +337,8 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		MovePlanOnCompletion:    values.MovePlanOnCompletion,
 		WorktreeEnabled:         values.WorktreeEnabled,
 		WorktreeEnabledSet:      values.WorktreeEnabledSet,
+		RequireWorktree:         values.RequireWorktree,
+		RequireWorktreeSet:      values.RequireWorktreeSet,
 		PlansDir:                values.PlansDir,
 		DefaultBranch:           values.DefaultBranch,
 		VcsCommand:              values.VcsCommand,

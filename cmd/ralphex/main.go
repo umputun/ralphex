@@ -370,6 +370,17 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 		return runWithWorktree(ctx, o, req)
 	}
 
+	// require_worktree safety: when the operator opts into a worktree-first workflow,
+	// refuse to create a feature branch in the main checkout. fires only when a branch
+	// would otherwise be created (mode requires it AND we are on the default branch).
+	// runs before EnsureLocalGitignore so the .ralphex/.gitignore is not written into
+	// the main checkout as a side effect of an aborted run.
+	if req.Config.RequireWorktree && planFile != "" && modeRequiresBranch(req.Mode) {
+		if rwErr := enforceRequireWorktree(req); rwErr != nil {
+			return rwErr
+		}
+	}
+
 	if err := req.GitSvc.EnsureLocalGitignore(); err != nil {
 		return fmt.Errorf("ensure gitignore: %w", err)
 	}
@@ -380,6 +391,29 @@ func selectAndExecutePlan(ctx context.Context, o opts, req executePlanRequest, s
 	}
 
 	return executePlan(ctx, o, req)
+}
+
+// enforceRequireWorktree returns an error when the operator launched ralphex from
+// the main checkout's default branch without --worktree. The check fires only when
+// require_worktree is set (caller's responsibility). When the operator is already
+// on a feature branch (presumably inside a pre-existing worktree, or a branch in
+// the main checkout), the check is satisfied and returns nil.
+func enforceRequireWorktree(req executePlanRequest) error {
+	isDefault, err := req.GitSvc.IsDefaultBranch(req.DefaultBranch)
+	if err != nil {
+		return fmt.Errorf("require_worktree: check default branch: %w", err)
+	}
+	if !isDefault {
+		return nil
+	}
+	branch, _ := req.GitSvc.CurrentBranch() // best-effort, only used for the error message
+	return fmt.Errorf("require_worktree is enabled but ralphex was launched on the default branch %q without --worktree\n\n"+
+		"ralphex would create a feature branch in this checkout. require_worktree forbids that.\n\n"+
+		"options:\n"+
+		"  git worktree add ../<branch> -b <branch>   # create a worktree, then cd into it and rerun\n"+
+		"  ralphex --worktree <plan>                  # let ralphex create the worktree (see worktree_path config)\n"+
+		"  unset require_worktree in your config       # accept in-place branch creation",
+		branch)
 }
 
 // getCurrentBranch returns the current git branch name or "unknown" if unavailable.

@@ -150,6 +150,14 @@ move_plan_on_completion = true
 # default: false
 # use_worktree = false
 
+# require_worktree: refuse to run from the main checkout's default branch without
+# --worktree. for operators who manage worktrees externally and want the engine to
+# fail fast when launched from the wrong place, before any agent invocation.
+# leaves the in-place flow untouched on feature branches (the typical "launch from
+# a pre-existing worktree" case).
+# default: false
+# require_worktree = false
+
 # ------------------------------------------------------------------------------
 # timing
 # ------------------------------------------------------------------------------

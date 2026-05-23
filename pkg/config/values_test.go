@@ -380,6 +380,91 @@ func TestValuesLoader_Load_WorktreeEnabled(t *testing.T) {
 	})
 }
 
+func TestValuesLoader_Load_RequireWorktree(t *testing.T) {
+	t.Run("parse require_worktree true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`require_worktree = true`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.True(t, values.RequireWorktree)
+		assert.True(t, values.RequireWorktreeSet)
+	})
+
+	t.Run("parse require_worktree false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`require_worktree = false`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.False(t, values.RequireWorktree)
+		assert.True(t, values.RequireWorktreeSet)
+	})
+
+	t.Run("not set leaves default false", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.False(t, values.RequireWorktree)
+		assert.False(t, values.RequireWorktreeSet)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`require_worktree = false`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`require_worktree = true`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.True(t, values.RequireWorktree)
+		assert.True(t, values.RequireWorktreeSet)
+	})
+
+	t.Run("invalid value returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`require_worktree = notabool`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		_, err := loader.Load("", cfgPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid require_worktree")
+	})
+}
+
+func TestValues_mergeFrom_RequireWorktree(t *testing.T) {
+	t.Run("set flag merges", func(t *testing.T) {
+		dst := Values{RequireWorktree: false, RequireWorktreeSet: false}
+		src := Values{RequireWorktree: true, RequireWorktreeSet: true}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.RequireWorktree)
+		assert.True(t, dst.RequireWorktreeSet)
+	})
+
+	t.Run("unset flag does not merge", func(t *testing.T) {
+		dst := Values{RequireWorktree: true, RequireWorktreeSet: true}
+		src := Values{RequireWorktree: false, RequireWorktreeSet: false}
+		dst.mergeFrom(&src)
+		assert.True(t, dst.RequireWorktree)
+		assert.True(t, dst.RequireWorktreeSet)
+	})
+
+	t.Run("set flag can disable", func(t *testing.T) {
+		dst := Values{RequireWorktree: true, RequireWorktreeSet: true}
+		src := Values{RequireWorktree: false, RequireWorktreeSet: true}
+		dst.mergeFrom(&src)
+		assert.False(t, dst.RequireWorktree)
+		assert.True(t, dst.RequireWorktreeSet)
+	})
+}
+
 func TestValues_mergeFrom_WorktreeEnabled(t *testing.T) {
 	t.Run("set flag merges", func(t *testing.T) {
 		dst := Values{WorktreeEnabled: false, WorktreeEnabledSet: false}
