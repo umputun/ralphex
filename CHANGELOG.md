@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### New Features
+
+- Configurable base directory for engine-created worktrees via the `worktree_path`
+  config option. Defaults to `.ralphex/worktrees` (relative to the repo root) so
+  the change is non-breaking. Absolute paths are supported for placing worktrees
+  outside the repo (e.g., `/var/lib/ralphex-worktrees` or a sibling directory
+  next to the main checkout).
+
 ## v1.3.1 - 2026-05-22
 
 ### New Features

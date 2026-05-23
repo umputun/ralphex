@@ -380,6 +380,50 @@ func TestValuesLoader_Load_WorktreeEnabled(t *testing.T) {
 	})
 }
 
+func TestValuesLoader_Load_WorktreePath(t *testing.T) {
+	t.Run("parse relative worktree_path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`worktree_path = tmp/wt`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "tmp/wt", values.WorktreePath)
+	})
+
+	t.Run("parse absolute worktree_path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`worktree_path = /var/lib/ralphex-worktrees`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "/var/lib/ralphex-worktrees", values.WorktreePath)
+	})
+
+	t.Run("not set leaves empty (caller uses default)", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Empty(t, values.WorktreePath)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`worktree_path = /global/path`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`worktree_path = /local/path`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, "/local/path", values.WorktreePath)
+	})
+}
+
 func TestValues_mergeFrom_WorktreeEnabled(t *testing.T) {
 	t.Run("set flag merges", func(t *testing.T) {
 		dst := Values{WorktreeEnabled: false, WorktreeEnabledSet: false}

@@ -304,6 +304,7 @@ func run(ctx context.Context, o opts) error {
 		return fmt.Errorf("open git repo: %w", err)
 	}
 	gitSvc.SetCommitTrailer(cfg.CommitTrailer)
+	gitSvc.SetWorktreePath(cfg.WorktreePath)
 
 	// ensure repository has commits (prompts to create initial commit if empty)
 	if ensureErr := ensureRepoHasCommits(ctx, gitSvc, os.Stdin, os.Stdout); ensureErr != nil {
@@ -754,6 +755,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 		return fmt.Errorf("open worktree git service: %w", err)
 	}
 	wtGitSvc.SetCommitTrailer(req.Config.CommitTrailer)
+	wtGitSvc.SetWorktreePath(req.Config.WorktreePath)
 
 	// resolve plan file path inside the worktree so Claude operates on the local copy,
 	// not the original in the main repo. the plan was copied by CreateWorktreeForPlan.
