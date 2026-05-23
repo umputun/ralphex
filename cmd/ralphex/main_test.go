@@ -913,6 +913,124 @@ func TestGetCurrentBranch(t *testing.T) {
 	})
 }
 
+func TestEnforceRequireWorktree(t *testing.T) {
+	t.Run("returns nil on a feature branch (typical worktree case)", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		runGit(t, dir, "checkout", "-b", "feat/some-work")
+
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+
+		err = enforceRequireWorktree(executePlanRequest{
+			GitSvc:        gitSvc,
+			DefaultBranch: "master",
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("errors on the default branch", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+
+		err = enforceRequireWorktree(executePlanRequest{
+			GitSvc:        gitSvc,
+			DefaultBranch: "master",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "require_worktree is enabled")
+		assert.Contains(t, err.Error(), "master")
+		// the message should also tell the operator what to do
+		assert.Contains(t, err.Error(), "git worktree add")
+		assert.Contains(t, err.Error(), "--worktree")
+	})
+
+	t.Run("treats empty default branch as main/master fallback", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+
+		// no explicit default: IsDefaultBranch falls back to checking main/master
+		err = enforceRequireWorktree(executePlanRequest{
+			GitSvc:        gitSvc,
+			DefaultBranch: "",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "require_worktree is enabled")
+	})
+}
+
+func TestSelectAndExecutePlan_RequireWorktree(t *testing.T) {
+	t.Run("blocks default-branch launch when require_worktree is set", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+
+		// fzf-less plan selection: pass the plan file via PlanFile and let the selector resolve it
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "feat-branch-name.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n\n### Task 1: do thing\n- [ ] do it\n"), 0o600))
+
+		// cd into the repo so plan.Selector resolves the plan path correctly
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		cfg := &config.Config{RequireWorktree: true, RequireWorktreeSet: true}
+		req := executePlanRequest{
+			PlanFile:      planFile,
+			Mode:          processor.ModeFull,
+			GitSvc:        gitSvc,
+			Config:        cfg,
+			Colors:        testColors(),
+			DefaultBranch: "master",
+			BaseRef:       "master",
+		}
+		selector := plan.NewSelector("", testColors())
+		err = selectAndExecutePlan(context.Background(), opts{PlanFile: planFile}, req, selector)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "require_worktree is enabled")
+
+		// verify ralphex did NOT proceed: no .ralphex/.gitignore should have been written
+		// (the EnsureLocalGitignore call sits after the safety check)
+		_, statErr := os.Stat(filepath.Join(dir, ".ralphex", ".gitignore"))
+		assert.True(t, os.IsNotExist(statErr), "ralphex must abort before EnsureLocalGitignore writes")
+
+		// and no feature branch should have been created
+		assert.False(t, gitHasBranch(t, dir, "feat-branch-name"))
+	})
+
+	t.Run("permits feature-branch launch when require_worktree is set", func(t *testing.T) {
+		dir := setupTestRepo(t)
+		runGit(t, dir, "checkout", "-b", "feat/some-work")
+
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+
+		cfg := &config.Config{RequireWorktree: true, RequireWorktreeSet: true}
+		req := executePlanRequest{
+			GitSvc:        gitSvc,
+			Config:        cfg,
+			DefaultBranch: "master",
+		}
+
+		// directly verify the guard returns nil for a feature branch; selectAndExecutePlan
+		// would proceed to execute the plan which requires claude on PATH (covered separately).
+		err = enforceRequireWorktree(req)
+		require.NoError(t, err)
+	})
+}
+
+// gitHasBranch returns true if the given branch exists in the repo.
+func gitHasBranch(t *testing.T, dir, name string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	cmd.Dir = dir
+	return cmd.Run() == nil
+}
+
 func TestValidateFlags(t *testing.T) {
 	tests := []struct {
 		name    string
