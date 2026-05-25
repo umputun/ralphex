@@ -77,6 +77,48 @@ ralphex docs/plans/my-feature.md
 
 ralphex will create a branch, execute tasks, commit results, run multi-phase reviews, and move the plan to `completed/` when done.
 
+> **Note: Anthropic Agent SDK billing change on June 15, 2026**
+>
+> Anthropic is moving `claude -p` / `claude --print`, Claude Agent SDK, and Claude Code GitHub Actions usage to a separate monthly Agent SDK credit pool for Claude subscription users. The default Claude mode in ralphex uses `claude --print` internally, so unattended ralphex runs are part of that pool. See Anthropic's [Agent SDK credit article](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) for the current billing rules.
+>
+> Practical options:
+>
+> 1. Do nothing. Light use may fit inside the included monthly credit. This should also be transparent for users who already run Claude Code through API-key billing, Bedrock, Vertex, Foundry, or another non-subscription provider path.
+> 2. Use a skill-based flow in an interactive Claude Code session. The author's [`umputun/cc-thingz`](https://github.com/umputun/cc-thingz) plugin collection includes the `planning` family (`/planning:make` and `/planning:exec`). That keeps work inside the normal interactive Claude Code flow instead of `claude --print`.
+> 3. Switch the ralphex executor to codex. First-class [`--codex`](#codex-executor-mode) support routes task execution, both review phases, and finalize through the codex CLI and skips the external codex review phase.
+> 4. Use a `claude -p` compatible wrapper that drives an interactive Claude Code session and emits Claude-compatible `stream-json`. Examples include [`umputun/fya`](https://github.com/umputun/fya), [`Equality-Machine/claude-p`](https://github.com/Equality-Machine/claude-p), [`melonamin/agentrun`](https://github.com/melonamin/agentrun), and [`kcosr/claude-pty-wrapper`](https://github.com/kcosr/claude-pty-wrapper). These wrappers are unofficial and may break if Anthropic changes or blocks this pattern.
+
+<details markdown>
+<summary>Wrapper configuration examples</summary>
+
+Install `fya` with Homebrew:
+
+```bash
+brew install umputun/apps/fya
+command -v fya
+```
+
+Use the absolute path printed by `command -v fya` in ralphex config. On Apple Silicon Homebrew this is normally `/opt/homebrew/bin/fya`:
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /opt/homebrew/bin/fya
+claude_args = --dangerously-skip-permissions --output-format stream-json --verbose
+```
+
+On Intel Homebrew the path is normally `/usr/local/bin/fya`. If `command -v fya` prints another path, use that exact path instead.
+
+For `agentrun`, use its tmux-backed path if the goal is avoiding direct `claude --print`:
+
+```ini
+claude_command = /absolute/path/to/agentrun
+claude_args = --persist-session --no-session-persistence --dangerously-skip-permissions --output-format stream-json --verbose
+```
+
+These tools depend on interactive Claude Code behavior and local transcript files staying usable. Anthropic may detect or block wrapper-style automation later, so test the exact tool before relying on it.
+
+</details>
+
 ## How It Works
 
 ralphex executes plans in four phases with automated code reviews, plus an optional finalize step.
