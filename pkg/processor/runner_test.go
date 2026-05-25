@@ -4454,6 +4454,115 @@ func TestRunner_New_ModelEffortWiring(t *testing.T) {
 	}
 }
 
+func TestRunner_New_PlanModelEffortWiring(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	holder := &status.PhaseHolder{}
+
+	t.Run("plan mode uses plan model", func(t *testing.T) {
+		cfg := processor.Config{
+			Mode:          processor.ModePlan,
+			MaxIterations: 50,
+			PlanModel:     "opus:high",
+			TaskModel:     "sonnet:medium",
+			AppConfig:     testAppConfig(t),
+		}
+		r := processor.New(cfg, log, holder)
+
+		taskExec, ok := r.TestTaskExecutor().(*executor.ClaudeExecutor)
+		require.True(t, ok, "task executor should be *executor.ClaudeExecutor")
+		assert.Equal(t, "opus", taskExec.Model)
+		assert.Equal(t, "high", taskExec.Effort)
+	})
+
+	t.Run("plan mode falls back to task model", func(t *testing.T) {
+		cfg := processor.Config{
+			Mode:          processor.ModePlan,
+			MaxIterations: 50,
+			TaskModel:     "sonnet:medium",
+			AppConfig:     testAppConfig(t),
+		}
+		r := processor.New(cfg, log, holder)
+
+		taskExec, ok := r.TestTaskExecutor().(*executor.ClaudeExecutor)
+		require.True(t, ok, "task executor should be *executor.ClaudeExecutor")
+		assert.Equal(t, "sonnet", taskExec.Model)
+		assert.Equal(t, "medium", taskExec.Effort)
+	})
+
+	t.Run("task mode ignores plan model", func(t *testing.T) {
+		cfg := processor.Config{
+			Mode:          processor.ModeTasksOnly,
+			MaxIterations: 50,
+			PlanModel:     "opus:high",
+			TaskModel:     "sonnet:medium",
+			AppConfig:     testAppConfig(t),
+		}
+		r := processor.New(cfg, log, holder)
+
+		taskExec, ok := r.TestTaskExecutor().(*executor.ClaudeExecutor)
+		require.True(t, ok, "task executor should be *executor.ClaudeExecutor")
+		assert.Equal(t, "sonnet", taskExec.Model)
+		assert.Equal(t, "medium", taskExec.Effort)
+	})
+}
+
+func TestRunner_New_CodexPlanModelEffortWiring(t *testing.T) {
+	log := newMockLogger("progress.txt")
+	holder := &status.PhaseHolder{}
+
+	appCfg := testAppConfig(t)
+	appCfg.Executor = config.ExecutorCodex
+	appCfg.CodexModel = "gpt-5.5"
+	appCfg.CodexReasoningEffort = "xhigh"
+
+	t.Run("plan mode uses plan model", func(t *testing.T) {
+		cfg := processor.Config{
+			Mode:          processor.ModePlan,
+			MaxIterations: 50,
+			PlanModel:     "gpt-5.6:high",
+			TaskModel:     "gpt-5.5:low",
+			AppConfig:     appCfg,
+		}
+		r := processor.New(cfg, log, holder)
+
+		taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
+		require.True(t, ok, "task executor should be *executor.CodexExecutor")
+		assert.Equal(t, "gpt-5.6", taskExec.Model)
+		assert.Equal(t, "high", taskExec.ReasoningEffort)
+	})
+
+	t.Run("plan mode falls back to task model", func(t *testing.T) {
+		cfg := processor.Config{
+			Mode:          processor.ModePlan,
+			MaxIterations: 50,
+			TaskModel:     "gpt-5.6:low",
+			AppConfig:     appCfg,
+		}
+		r := processor.New(cfg, log, holder)
+
+		taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
+		require.True(t, ok, "task executor should be *executor.CodexExecutor")
+		assert.Equal(t, "gpt-5.6", taskExec.Model)
+		assert.Equal(t, "low", taskExec.ReasoningEffort)
+	})
+
+	t.Run("task mode ignores plan model", func(t *testing.T) {
+		cfg := processor.Config{
+			Mode:          processor.ModeTasksOnly,
+			MaxIterations: 50,
+			PlanModel:     "gpt-5.6:high",
+			TaskModel:     "gpt-5.5:low",
+			AppConfig:     appCfg,
+		}
+		r := processor.New(cfg, log, holder)
+
+		taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
+		require.True(t, ok, "task executor should be *executor.CodexExecutor")
+		assert.Equal(t, "gpt-5.5", taskExec.Model)
+		assert.Equal(t, "low", taskExec.ReasoningEffort)
+	})
+}
+
 func TestRunner_New_CodexModelEffortWiring(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	holder := &status.PhaseHolder{}

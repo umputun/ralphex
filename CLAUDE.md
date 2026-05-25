@@ -75,7 +75,7 @@ docs/plans/         # plan files location
 - Codex task-phase skill-conflict directive: `prependCodexTaskGuidance` (`pkg/processor/prompts.go`) injects the `=== Codex task-execution directives ===` block (`codexTaskGuidance`) atop `TaskPrompt` when `cfg.isCodexExecutor()` is true (no-op for claude). Wired at one call site — `runTaskPhase` in `pkg/processor/runner.go`. It tells codex that ralphex's task prompt is authoritative and a conflicting auto-activated skill from `~/.codex/skills/` must not be followed. Deliberately generic (names no specific skill); a soft prompt-level mitigation, not a hard guard — codex 0.133.0 has no per-invocation skill-disable flag. Task-phase only
 - Codex output streaming: codex has no `stream-json` equivalent, so assistant message text + tool dispatch land only in the session rollout file at `~/.codex/sessions/<y>/<m>/<d>/rollout-<ts>-<session-id>.jsonl`. `CodexExecutor.Run` extracts the session id from the stderr header banner (`extractSessionID` + buffered `sessionIDCh`) and spawns `tailRolloutFile` to follow it. `formatRolloutEvent` forwards only assistant message text — reasoning records are covered by the stderr bold-summary stream, `function_call` records are skipped as tool-machinery noise. `tailCtx` is canceled after stdout EOF so the tailer drains once more and exits
 - Codex stderr filtering: `shouldDisplay` (`pkg/executor/codex.go`) suppresses the per-iteration startup banner, but on the executor's first `Run()` call (`headerEmitted atomic.Bool`) whitelists three header lines — `model:`, `sandbox:`, `reasoning effort:` — so users see what codex resolved from `~/.codex/config.toml`. Bold reasoning summaries always flow through. The ralphex-side banner (`printExecutorInfo`, `cmd/ralphex/main.go`) emits `sandbox:` (and `model:` / `reasoning effort:` when `codex_model` / `codex_reasoning_effort` are set; empty values skipped)
-- `--task-model`/`--review-model` resolve per-phase model/effort. Claude mode injects `--model`/`--effort` into `claude_command`. Codex mode: `ResolveCodexModelEffort` (`pkg/processor/runner.go`) resolves the `model[:effort]` spec against `codex_model`/`codex_reasoning_effort` defaults; `buildCodexExecutors` builds a separate review `CodexExecutor` when review differs from task. `max` effort does not exist in codex — kept default, `maxDropped` reported, `codexModelBanner` (`cmd/ralphex/main.go`) warns
+- `--plan-model`/`--task-model`/`--review-model` resolve per-phase model/effort. `plan_model` falls back to `task_model`; `review_model` falls back to `task_model`. Claude mode injects `--model`/`--effort` into `claude_command`. Codex mode: `ResolveCodexModelEffort` (`pkg/processor/runner.go`) resolves the `model[:effort]` spec against `codex_model`/`codex_reasoning_effort` defaults; `buildCodexExecutors` builds a separate review `CodexExecutor` when review differs from task. `max` effort does not exist in codex — kept default, `maxDropped` reported, `codexModelBanner` / `codexPlanBanner` (`cmd/ralphex/main.go`) warns
 
 ### Finalize Step
 
@@ -225,7 +225,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Precedence: CLI flags > local config > global config > embedded defaults
 - Custom prompts: `~/.config/ralphex/prompts/*.txt` or `.ralphex/prompts/*.txt`
 - Custom agents: `~/.config/ralphex/agents/*.txt` or `.ralphex/agents/*.txt`
-- `task_model` / `review_model` config options: `model[:effort]` for task / review phases; `review_model` falls back to `task_model`. CLI flags `--task-model`/`--review-model` take precedence. Parsed by `ParseModelEffort` (pkg/processor/runner.go). See the `--task-model`/`--review-model` Key Patterns bullet for claude- vs codex-executor behavior. Disabled by default (empty = Claude CLI defaults)
+- `plan_model` / `task_model` / `review_model` config options: `model[:effort]` for plan creation / task / review phases; `plan_model` and `review_model` fall back to `task_model`. CLI flags `--plan-model`/`--task-model`/`--review-model` take precedence. Parsed by `ParseModelEffort` (pkg/processor/runner.go). See the Key Patterns bullet for claude- vs codex-executor behavior. Disabled by default (empty = Claude CLI defaults)
 - `default_branch` config option: override auto-detected default branch for review diffs
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
 - `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
@@ -357,7 +357,7 @@ Tests cover: dashboard loading, SSE connection and reconnection, phase sections,
 
 ## End-to-End Testing
 
-Unit tests mock external calls. After ANY code changes, run e2e test with a toy project to verify actual claude/codex integration and output streaming.
+Unit tests mock external calls. After ANY code changes, ask the user before running an e2e test with a toy project because it can take time and consume claude/codex credits. Run it only after explicit approval to verify actual claude/codex integration and output streaming.
 
 ### Create Toy Project
 
@@ -421,7 +421,7 @@ tail -50 .ralphex/progress/progress-*.txt
 
 1. Run unit tests: `make test`
 2. Run linter: `make lint`
-3. **MUST** run end-to-end test with toy project (see above)
+3. **MUST** ask the user before running the toy end-to-end test (see above); run it only after explicit approval
 4. Monitor `tail -f .ralphex/progress/progress-*.txt` to verify output streaming works
 
 Unit tests don't verify actual codex/claude integration or output formatting. The toy project test is the only way to verify streaming output works correctly.

@@ -58,6 +58,7 @@ type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`
 	ClaudeArgsSet bool   `json:"-"`            // tracks runtime overrides, including an explicit empty --claude-args=
+	PlanModel     string `json:"plan_model"`   // model[:effort] spec for plan creation (falls back to TaskModel)
 	TaskModel     string `json:"task_model"`   // model[:effort] spec for task execution (e.g., "opus", "opus:high", ":medium")
 	ReviewModel   string `json:"review_model"` // model[:effort] spec for review phases (falls back to TaskModel)
 
@@ -300,6 +301,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 	c := &Config{
 		ClaudeCommand:           values.ClaudeCommand,
 		ClaudeArgs:              values.ClaudeArgs,
+		PlanModel:               values.PlanModel,
 		TaskModel:               values.TaskModel,
 		ReviewModel:             values.ReviewModel,
 		CodexEnabled:            values.CodexEnabled,

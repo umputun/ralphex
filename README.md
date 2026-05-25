@@ -286,7 +286,7 @@ When `executor = codex` is set in config and the user has also set `external_rev
 
 **Requirements:** `--codex` requires the codex CLI version 0.130.0 or newer. The mode relies on `[features] multi_agent`, `[agents.<name>]` agent registration, and (with `--pass-claude-md`) `project_doc_fallback_filenames`, all supported in 0.130.0. Older codex versions silently ignore unknown `-c` overrides, so a misconfigured run will not error visibly. It will simply behave as if the overrides were absent. There is no runtime version check; verify your codex version with `codex --version` if behavior is unexpected.
 
-**Model selection under `--codex`:** under `--codex` the `--task-model` / `--review-model` flags (and their config equivalents `task_model` / `review_model`) select the model and effort per phase. `--task-model` sets plan creation and the task phase; `--review-model` sets the review phase and falls back to `--task-model` when unset. Codex builds a separate review executor when the resolved review model/effort differs from task, so tasks and reviews can run on different codex models. Each `model[:effort]` spec is resolved against `codex_model` / `codex_reasoning_effort` (default `gpt-5.5` / `xhigh`): an unset spec inherits those defaults, and each populated half overrides its default (`--task-model=:high` changes effort only). The `max` effort level is claude-only. A spec requesting it under `--codex` is warned about and ignored. So codex model selection is: `--task-model` / `--review-model` (CLI or config), then `codex_model` / `codex_reasoning_effort` in ralphex config, applied as `-c` overrides to the codex CLI; set either codex value to empty (e.g. `codex_model =`) in your user config to inherit that field from `~/.codex/config.toml` instead. Commenting the line out keeps the embedded default. The startup banner under `--codex` shows the resolved task model/effort, plus a separate `review model` / `review reasoning effort` line when the review phase resolves differently.
+**Model selection under `--codex`:** under `--codex` the `--plan-model` / `--task-model` / `--review-model` flags (and their config equivalents `plan_model` / `task_model` / `review_model`) select the model and effort per phase. `--plan-model` sets plan creation and falls back to `--task-model` when unset. `--task-model` sets the task phase. `--review-model` sets the review phase and falls back to `--task-model` when unset. Codex builds a separate review executor when the resolved review model/effort differs from task, so tasks and reviews can run on different codex models. Each `model[:effort]` spec is resolved against `codex_model` / `codex_reasoning_effort` (default `gpt-5.5` / `xhigh`): an unset spec inherits those defaults, and each populated half overrides its default (`--task-model=:high` changes effort only). The `max` effort level is claude-only. A spec requesting it under `--codex` is warned about and ignored. So codex model selection is: `--plan-model` / `--task-model` / `--review-model` (CLI or config), then `codex_model` / `codex_reasoning_effort` in ralphex config, applied as `-c` overrides to the codex CLI; set either codex value to empty (e.g. `codex_model =`) in your user config to inherit that field from `~/.codex/config.toml` instead. Commenting the line out keeps the embedded default. The startup banner under `--codex` shows the resolved plan/task model/effort for the current mode, plus a separate `review model` / `review reasoning effort` line when the review phase resolves differently.
 
 ### Worktree Isolation
 
@@ -653,8 +653,11 @@ ralphex --review-patience=3 docs/plans/feature.md
 # wait and retry on rate limit (instead of exiting)
 ralphex --wait=1h docs/plans/feature.md
 
-# use different models for tasks vs reviews (e.g., opus for tasks, sonnet for reviews)
-ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
+# use a stronger model for plan creation
+ralphex --plan-model=opus:high --plan "add caching"
+
+# use different models for tasks and reviews
+ralphex --task-model=sonnet --review-model=sonnet:low docs/plans/feature.md
 
 # use provider overrides for one run without editing config
 ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
@@ -690,7 +693,8 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
-| `--task-model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort values: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags. Under `--codex`, selects the codex plan-creation and task-phase model/effort instead (see *Model selection under `--codex`*) | empty |
+| `--plan-model` | Model for plan creation as `model[:effort]` (falls back to `--task-model`). Same syntax and wrapper behavior as `--task-model`. Under `--codex`, selects the codex plan-creation model/effort | empty |
+| `--task-model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort values: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags. Under `--codex`, selects the codex task-phase model/effort instead (see *Model selection under `--codex`*) | empty |
 | `--review-model` | Model for review phases as `model[:effort]` (falls back to `--task-model`). Same syntax and wrapper behavior as `--task-model`. Under `--codex`, selects the codex review-phase model/effort | empty |
 | `--claude-command` | Override the Claude-compatible command for this run | config/default |
 | `--claude-args` | Override Claude-compatible command arguments for this run. Use `--claude-args=` to clear configured/default args | config/default |
@@ -931,7 +935,8 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 | `claude_args` | Claude CLI arguments | `--dangerously-skip-permissions --output-format stream-json --verbose` |
 | `executor` | Executor for plan creation, task, review, and finalize phases. `""` (default) uses Claude Code; `codex` routes the full pipeline through the codex CLI and skips the external review phase. CLI flag `--codex` takes precedence | empty |
 | `pass_claude_md` | When `executor = codex`, pass project `CLAUDE.md` to codex as `AGENTS.md` via `-c project_doc_fallback_filenames=["CLAUDE.md"]`. CLI flag `--pass-claude-md` takes precedence | `false` |
-| `task_model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags. Under `--codex`, selects the codex plan-creation and task-phase model/effort instead (see *Model selection under `--codex`*) | empty |
+| `plan_model` | Model for plan creation as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Falls back to `task_model` if empty. Same syntax and wrapper behavior as `task_model`. Under `--codex`, selects the codex plan-creation model/effort instead (see *Model selection under `--codex`*) | empty |
+| `task_model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags. Under `--codex`, selects the codex task-phase model/effort instead (see *Model selection under `--codex`*) | empty |
 | `review_model` | Model for review phases as `model[:effort]`. Falls back to `task_model` if empty. Same syntax and wrapper behavior as `task_model`. Under `--codex`, selects the codex review-phase model/effort | empty |
 | `codex_enabled` | Enable codex review phase | `true` |
 | `codex_command` | Codex CLI command | `codex` |

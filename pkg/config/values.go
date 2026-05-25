@@ -17,6 +17,7 @@ import (
 type Values struct {
 	ClaudeCommand              string
 	ClaudeArgs                 string
+	PlanModel                  string   // model for plan creation (falls back to TaskModel if empty)
 	TaskModel                  string   // model for task execution (e.g., "opus", "sonnet", "haiku")
 	ReviewModel                string   // model for review phases (falls back to TaskModel if empty)
 	ClaudeErrorPatterns        []string // patterns to detect in claude output (e.g., rate limit messages)
@@ -200,6 +201,9 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	}
 	if key, err := section.GetKey("claude_args"); err == nil {
 		values.ClaudeArgs = key.String()
+	}
+	if key, err := section.GetKey("plan_model"); err == nil {
+		values.PlanModel = key.String()
 	}
 	if key, err := section.GetKey("task_model"); err == nil {
 		values.TaskModel = key.String()
@@ -487,6 +491,9 @@ func (dst *Values) mergeFrom(src *Values) {
 	}
 	if src.ClaudeArgs != "" {
 		dst.ClaudeArgs = src.ClaudeArgs
+	}
+	if src.PlanModel != "" {
+		dst.PlanModel = src.PlanModel
 	}
 	if src.TaskModel != "" {
 		dst.TaskModel = src.TaskModel

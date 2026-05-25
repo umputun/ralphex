@@ -22,17 +22,22 @@ claude_command = claude
 # --verbose: enable detailed logging
 claude_args = --dangerously-skip-permissions --output-format stream-json --verbose
 
-# task_model: model to use for task execution
+# plan_model: model to use for interactive plan creation
 # syntax: model[:effort] where model is opus/sonnet/haiku (or a full model ID like
 # claude-sonnet-4-5-20250929) and effort is low/medium/high/xhigh/max.
 # either part is optional: "opus" sets model only, ":high" sets effort only,
-# "opus:high" sets both. leave empty to use Claude CLI's defaults.
-# under the codex executor (executor = codex) this instead selects the codex
-# task-phase model/effort, resolved against codex_model/codex_reasoning_effort.
+# "opus:high" sets both. falls back to task_model when empty.
+# under the codex executor (executor = codex) this selects the codex plan-creation
+# model/effort, resolved against codex_model/codex_reasoning_effort.
+# plan_model =
+
+# task_model: model to use for task execution
+# same model[:effort] syntax as plan_model. leave empty to use Claude CLI's defaults.
+# under the codex executor this selects the codex task-phase model/effort.
 # task_model =
 
 # review_model: model to use for review phases (first review, fix loops, finalize)
-# same model[:effort] syntax as task_model.
+# same model[:effort] syntax as plan_model.
 # falls back to task_model if not set, then to Claude CLI's defaults.
 # use a cheaper/faster model (e.g., sonnet) or lower effort for reviews to reduce cost.
 # under the codex executor this selects the codex review-phase model/effort.

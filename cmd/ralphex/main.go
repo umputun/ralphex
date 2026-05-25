@@ -34,6 +34,7 @@ type opts struct {
 	MaxIterations           int           `short:"m" long:"max-iterations" description:"maximum task iterations (default: 50)"`
 	MaxExternalIterations   int           `long:"max-external-iterations" default:"0" description:"override external review iteration limit (0 = auto)"`
 	ReviewPatience          int           `long:"review-patience" default:"0" description:"terminate external review after N unchanged rounds (0 = disabled)"`
+	PlanModel               string        `long:"plan-model" description:"model for plan creation as model[:effort] (falls back to --task-model)"`
 	TaskModel               string        `long:"task-model" description:"model for task execution as model[:effort] (e.g., opus, opus:high, :medium)"`
 	ReviewModel             string        `long:"review-model" description:"model for review phases as model[:effort] (falls back to --task-model)"`
 	ClaudeCommand           string        `long:"claude-command" description:"override claude-compatible command for this run"`
@@ -139,8 +140,8 @@ type startupInfo struct {
 	Executor                string
 	PassClaudeMd            bool
 	PreserveAnthropicAPIKey bool   // when true, surfaced in the banner so users can spot wrong-context runs before claude bills the wrong account
-	CodexModel              string // resolved model for codex task phase; "" means codex picks from ~/.codex/config.toml
-	CodexEffort             string // resolved reasoning effort for codex task phase; "" means codex default
+	CodexModel              string // resolved model for codex plan/task phase; "" means codex picks from ~/.codex/config.toml
+	CodexEffort             string // resolved reasoning effort for codex plan/task phase; "" means codex default
 	CodexReviewModel        string // resolved model for codex review phase; shown only when it differs from CodexModel
 	CodexReviewEffort       string // resolved reasoning effort for codex review phase; shown only when it differs from CodexEffort
 	CodexSandbox            string // resolved sandbox for codex executor; always non-empty when Executor == codex
@@ -952,6 +953,12 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		reviewPatience = o.ReviewPatience
 	}
 
+	// resolve plan model: CLI flag > config file > empty (falls back to task_model in processor)
+	planModel := req.Config.PlanModel
+	if o.PlanModel != "" {
+		planModel = o.PlanModel
+	}
+
 	// resolve task model: CLI flag > config file > empty (use CLI default)
 	taskModel := req.Config.TaskModel
 	if o.TaskModel != "" {
@@ -979,6 +986,7 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		ExternalReviewToolSet: o.externalReviewToolSet,
 		FinalizeEnabled:       req.Config.FinalizeEnabled,
 		DefaultBranch:         req.BaseRef,
+		PlanModel:             planModel,
 		TaskModel:             taskModel,
 		ReviewModel:           reviewModel,
 		AppConfig:             req.Config,
@@ -1059,8 +1067,8 @@ func codexBannerValue(v string) string {
 	return v
 }
 
-// codexBannerInfo holds the resolved codex task/review model and effort for the
-// startup banner.
+// codexBannerInfo holds the resolved codex primary/review model and effort for
+// the startup banner.
 type codexBannerInfo struct {
 	taskModel, taskEffort     string
 	reviewModel, reviewEffort string
@@ -1094,6 +1102,28 @@ func codexModelBanner(o opts, cfg *config.Config) codexBannerInfo {
 		info.maxDropped = info.maxDropped || reviewMax
 	}
 	return info
+}
+
+// codexPlanBanner resolves the codex model/effort for plan creation. plan_model
+// falls back to task_model, then to codex_model/codex_reasoning_effort defaults.
+func codexPlanBanner(o opts, cfg *config.Config) codexBannerInfo {
+	taskSpec := cfg.TaskModel
+	if o.TaskModel != "" {
+		taskSpec = o.TaskModel
+	}
+	planSpec := cfg.PlanModel
+	if o.PlanModel != "" {
+		planSpec = o.PlanModel
+	}
+	if planSpec == "" {
+		planSpec = taskSpec
+	}
+	planModel, planEffort, maxDropped := processor.ResolveCodexModelEffort(planSpec, cfg.CodexModel, cfg.CodexReasoningEffort)
+	return codexBannerInfo{
+		taskModel: planModel, taskEffort: planEffort,
+		reviewModel: planModel, reviewEffort: planEffort,
+		maxDropped: maxDropped,
+	}
 }
 
 // runPlanMode executes interactive plan creation mode.
@@ -1136,11 +1166,11 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	maxIter := resolveMaxIterations(o.MaxIterations, req.Config)
 
 	// resolve effective codex model/effort so the plan-mode banner reflects what
-	// the codex executor receives (same logic as executePlan above) — codex
-	// executor only, so the max-effort warning is not a false positive in claude mode.
+	// the codex executor receives. codex executor only, so the max-effort warning
+	// is not a false positive in claude mode.
 	var codex codexBannerInfo
 	if req.Config.Executor == config.ExecutorCodex {
-		codex = codexModelBanner(o, req.Config)
+		codex = codexPlanBanner(o, req.Config)
 	}
 
 	// print startup info for plan mode
@@ -1170,10 +1200,13 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	startTime := time.Now()
 
 	// create and configure runner
-	// resolve task model for plan creation (same precedence as task execution)
-	planTaskModel := req.Config.TaskModel
+	planModel := req.Config.PlanModel
+	if o.PlanModel != "" {
+		planModel = o.PlanModel
+	}
+	taskModel := req.Config.TaskModel
 	if o.TaskModel != "" {
-		planTaskModel = o.TaskModel
+		taskModel = o.TaskModel
 	}
 
 	r := processor.New(processor.Config{
@@ -1185,7 +1218,8 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		NoColor:          o.NoColor,
 		IterationDelayMs: req.Config.IterationDelayMs,
 		DefaultBranch:    req.BaseRef,
-		TaskModel:        planTaskModel,
+		PlanModel:        planModel,
+		TaskModel:        taskModel,
 		AppConfig:        req.Config,
 	}, baseLog, holder)
 	r.SetInputCollector(collector)
