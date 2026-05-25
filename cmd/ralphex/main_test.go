@@ -1290,6 +1290,14 @@ func TestCodexPlanBanner(t *testing.T) {
 		assert.Equal(t, "low", got.taskEffort)
 	})
 
+	t.Run("plan_model_falls_back_to_cli_task_model", func(t *testing.T) {
+		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		got := codexPlanBanner(parseTestOpts(t, "--codex", "--task-model", "gpt-5.7:high"), cfg)
+
+		assert.Equal(t, "gpt-5.7", got.taskModel)
+		assert.Equal(t, "high", got.taskEffort)
+	})
+
 	t.Run("cli_plan_model_overrides_config_and_task_model", func(t *testing.T) {
 		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh", PlanModel: "gpt-5.6:high", TaskModel: "gpt-5.5:low"}
 		got := codexPlanBanner(parseTestOpts(t, "--codex", "--plan-model", "gpt-5.7:medium"), cfg)

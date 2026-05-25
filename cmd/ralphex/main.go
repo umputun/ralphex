@@ -953,12 +953,6 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		reviewPatience = o.ReviewPatience
 	}
 
-	// resolve plan model: CLI flag > config file > empty (falls back to task_model in processor)
-	planModel := req.Config.PlanModel
-	if o.PlanModel != "" {
-		planModel = o.PlanModel
-	}
-
 	// resolve task model: CLI flag > config file > empty (use CLI default)
 	taskModel := req.Config.TaskModel
 	if o.TaskModel != "" {
@@ -986,7 +980,6 @@ func createRunner(req executePlanRequest, o opts, log processor.Logger, holder *
 		ExternalReviewToolSet: o.externalReviewToolSet,
 		FinalizeEnabled:       req.Config.FinalizeEnabled,
 		DefaultBranch:         req.BaseRef,
-		PlanModel:             planModel,
 		TaskModel:             taskModel,
 		ReviewModel:           reviewModel,
 		AppConfig:             req.Config,
@@ -1200,13 +1193,15 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 	startTime := time.Now()
 
 	// create and configure runner
-	planModel := req.Config.PlanModel
-	if o.PlanModel != "" {
-		planModel = o.PlanModel
-	}
 	taskModel := req.Config.TaskModel
 	if o.TaskModel != "" {
 		taskModel = o.TaskModel
+	}
+	if req.Config.PlanModel != "" {
+		taskModel = req.Config.PlanModel
+	}
+	if o.PlanModel != "" {
+		taskModel = o.PlanModel
 	}
 
 	r := processor.New(processor.Config{
@@ -1218,7 +1213,6 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		NoColor:          o.NoColor,
 		IterationDelayMs: req.Config.IterationDelayMs,
 		DefaultBranch:    req.BaseRef,
-		PlanModel:        planModel,
 		TaskModel:        taskModel,
 		AppConfig:        req.Config,
 	}, baseLog, holder)

@@ -552,6 +552,7 @@ func TestLoad_AllUserValues(t *testing.T) {
 	configContent := `
 claude_command = /custom/claude
 claude_args = --custom
+plan_model = opus:high
 codex_enabled = false
 codex_command = /custom/codex
 codex_model = custom-model
@@ -570,6 +571,7 @@ plans_dir = my/plans
 	// all values should be user-specified, not defaults
 	assert.Equal(t, "/custom/claude", cfg.ClaudeCommand)
 	assert.Equal(t, "--custom", cfg.ClaudeArgs)
+	assert.Equal(t, "opus:high", cfg.PlanModel)
 	assert.False(t, cfg.CodexEnabled)
 	assert.Equal(t, "/custom/codex", cfg.CodexCommand)
 	assert.Equal(t, "custom-model", cfg.CodexModel)

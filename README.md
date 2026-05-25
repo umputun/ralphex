@@ -654,13 +654,13 @@ ralphex --review-patience=3 docs/plans/feature.md
 ralphex --wait=1h docs/plans/feature.md
 
 # use a stronger model for plan creation
-ralphex --plan-model=opus:high --plan "add caching"
+ralphex --plan-model=opus:high --plan="add caching"
 
 # use different models for tasks and reviews
-ralphex --task-model=sonnet --review-model=sonnet:low docs/plans/feature.md
+ralphex --task-model=opus --review-model=sonnet:low docs/plans/feature.md
 
 # use provider overrides for one run without editing config
-ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
+ralphex --claude-command=/path/to/codex-as-claude.sh --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
 
 # set per-session timeout to kill hanging sessions (external review in Claude mode excluded)
 ralphex --session-timeout=30m docs/plans/feature.md
@@ -1091,7 +1091,6 @@ To use the included Copilot wrapper:
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
-claude_args =
 ```
 
 Authenticate with `copilot login` or set one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`. Set `COPILOT_MODEL` to choose the model.
@@ -1103,16 +1102,15 @@ To use the included codex wrapper:
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
-claude_args =
 ```
 
 Or choose it for one invocation:
 
 ```bash
-ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh --claude-args= docs/plans/feature.md
+ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh docs/plans/feature.md
 ```
 
-Setting `claude_args` to empty in config is optional. Note that default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`) may still be passed due to config fallback behavior. Use the CLI form `--claude-args=` when you need to explicitly clear configured/default args for a single run. Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all.
+Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all. If a wrapper cannot tolerate the default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`), use `--claude-args=` to explicitly clear configured/default args for that single run.
 
 The included Codex and Copilot wrappers require `jq` on `PATH` for JSON translation.
 
@@ -1279,7 +1277,6 @@ Yes. Use one of the included wrapper scripts that translate provider output to C
 
 ```ini
 claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
-claude_args =
 ```
 
 For Copilot, authenticate with `copilot login` or one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`, and set `COPILOT_MODEL` if you want to override the default model.
@@ -1290,7 +1287,6 @@ Codex works the same way through its wrapper:
 
 ```ini
 claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
-claude_args =
 ```
 
 Set `CODEX_MODEL` env var to choose the model. See [Using Alternative Providers](#using-alternative-providers-for-claude-phases) and [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for the included Copilot example and for writing wrappers for other tools.

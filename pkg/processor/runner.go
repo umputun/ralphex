@@ -56,7 +56,6 @@ type Config struct {
 	NoColor               bool           // disable color output
 	IterationDelayMs      int            // delay between iterations in milliseconds
 	TaskRetryCount        int            // number of times to retry failed tasks
-	PlanModel             string         // model[:effort] spec for plan creation; empty falls back to TaskModel
 	TaskModel             string         // model[:effort] spec for task execution; parsed via ParseModelEffort (empty = CLI defaults)
 	ReviewModel           string         // model[:effort] spec for review phases; empty falls back to TaskModel
 	CodexEnabled          bool           // whether codex review is enabled
@@ -71,13 +70,6 @@ type Config struct {
 // executor is anything else (claude is the default).
 func (c Config) isCodexExecutor() bool {
 	return c.AppConfig != nil && c.AppConfig.Executor == config.ExecutorCodex
-}
-
-func (c Config) taskExecutorModelSpec() string {
-	if c.Mode == ModePlan && c.PlanModel != "" {
-		return c.PlanModel
-	}
-	return c.TaskModel
 }
 
 //go:generate moq -out mocks/executor.go -pkg mocks -skip-ensure -fmt goimports . Executor
@@ -191,13 +183,12 @@ func (cfg Config) buildClaudeExecutors(log Logger) (*executor.ClaudeExecutor, Ex
 	}
 	cfg.applyClaudeAppConfig(claudeExec)
 
-	taskSpec := cfg.taskExecutorModelSpec()
-	taskModel, taskEffort := ParseModelEffort(taskSpec)
+	taskModel, taskEffort := ParseModelEffort(cfg.TaskModel)
 	claudeExec.Model, claudeExec.Effort = taskModel, taskEffort
 
 	reviewSpec := cfg.ReviewModel
-	if reviewSpec == "" || cfg.Mode == ModePlan {
-		reviewSpec = taskSpec
+	if reviewSpec == "" {
+		reviewSpec = cfg.TaskModel
 	}
 	reviewModel, reviewEffort := ParseModelEffort(reviewSpec)
 	if reviewModel == taskModel && reviewEffort == taskEffort {
@@ -259,19 +250,17 @@ func (cfg Config) buildCodexExecutor(log Logger) *executor.CodexExecutor {
 // buildCodexExecutors constructs the codex executors for the task and review phases
 // in first-class --codex mode. the review slot is non-nil only when the resolved
 // review model/effort differs from task — otherwise the task executor handles review
-// and finalize too. --plan-model / --task-model / --review-model (and their config
-// equivalents) are resolved against codex_model / codex_reasoning_effort:
-// plan_model falls back to task_model, review_model falls back to task_model when
-// unset, and an unset spec inherits the codex config defaults.
+// and finalize too. --task-model / --review-model (and their config equivalents) are
+// resolved against codex_model / codex_reasoning_effort: review_model falls back to
+// task_model when unset, and an unset spec inherits the codex config defaults.
 func (cfg Config) buildCodexExecutors(log Logger) (*executor.CodexExecutor, Executor) {
 	var defModel, defEffort string
 	if cfg.AppConfig != nil {
 		defModel, defEffort = cfg.AppConfig.CodexModel, cfg.AppConfig.CodexReasoningEffort
 	}
-	taskSpec := cfg.taskExecutorModelSpec()
-	taskModel, taskEffort, _ := ResolveCodexModelEffort(taskSpec, defModel, defEffort)
+	taskModel, taskEffort, _ := ResolveCodexModelEffort(cfg.TaskModel, defModel, defEffort)
 	reviewModel, reviewEffort := taskModel, taskEffort
-	if cfg.ReviewModel != "" && cfg.Mode != ModePlan {
+	if cfg.ReviewModel != "" {
 		reviewModel, reviewEffort, _ = ResolveCodexModelEffort(cfg.ReviewModel, defModel, defEffort)
 	}
 
@@ -1580,8 +1569,8 @@ func needsCodexBinary(appConfig *config.Config) bool {
 }
 
 // ParseModelEffort splits a "model[:effort]" spec into separate parts.
-// Used by New to parse plan_model/task_model/review_model config values into
-// the ClaudeExecutor.Model and ClaudeExecutor.Effort fields.
+// Used by New to parse phase model config values into the ClaudeExecutor.Model
+// and ClaudeExecutor.Effort fields.
 // Empty input returns ("", ""). Missing colon returns (s, "").
 // A leading colon (":high") returns ("", "high"); a trailing colon ("opus:") returns ("opus", "").
 // Only the first colon is treated as the separator; anything after is passed through as effort.
