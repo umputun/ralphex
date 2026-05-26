@@ -39,6 +39,17 @@ func TestPromptBuilder_FinalPrompts(t *testing.T) {
 	assert.Equal(t, "finalize implementation of plan at docs/plans/test.md", builder.FinalizePrompt())
 }
 
+func TestPromptBuilder_NilConfigDependencies(t *testing.T) {
+	builder := newPromptBuilder(promptBuilderOpts{cfg: Config{}, log: newMockLogger()})
+
+	assert.NotPanics(t, func() {
+		assert.Empty(t, builder.TaskPrompt())
+		assert.Empty(t, builder.FirstReviewPrompt())
+		assert.Empty(t, builder.CodexEvaluationPrompt("findings"))
+		assert.Empty(t, builder.FinalizePrompt())
+	})
+}
+
 func TestPromptBuilder_CodexTaskGuidance(t *testing.T) {
 	appCfg := &config.Config{TaskPrompt: "do work", Executor: config.ExecutorCodex}
 	cfg := Config{AppConfig: appCfg}

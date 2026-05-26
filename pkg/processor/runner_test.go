@@ -155,6 +155,21 @@ func TestRunner_RunFull_NoPlanFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "plan file required")
 }
 
+func TestRunner_NewWithExecutors_NilPhaseHolder(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
+
+	log := newRunnerMockLogger("progress.txt")
+	task := newMockExecutor([]executor.Result{{Output: "done", Signal: status.Completed}})
+	cfg := Config{Mode: ModeTasksOnly, PlanFile: planFile, MaxIterations: 1, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: task}, nil)
+
+	require.NotNil(t, r.phaseHolder)
+	require.NoError(t, r.Run(t.Context()))
+	assert.Equal(t, status.PhaseTask, r.phaseHolder.Get())
+}
+
 func TestRunner_RunFull_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")

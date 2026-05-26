@@ -168,6 +168,10 @@ func New(cfg Config, log Logger, holder *status.PhaseHolder) *Runner {
 
 // NewWithExecutors creates a new Runner with custom executors (for testing).
 func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.PhaseHolder) *Runner {
+	if holder == nil {
+		holder = &status.PhaseHolder{}
+	}
+
 	// determine iteration delay from config or default
 	iterDelay := DefaultIterationDelay
 	if cfg.IterationDelayMs > 0 {

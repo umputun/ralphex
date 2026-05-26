@@ -1,6 +1,10 @@
 package processor
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/umputun/ralphex/pkg/config"
+)
 
 type promptBuilder struct {
 	cfg                    Config
@@ -16,7 +20,15 @@ type promptBuilderOpts struct {
 }
 
 func newPromptBuilder(opts promptBuilderOpts) *promptBuilder {
-	return &promptBuilder{cfg: opts.cfg, log: opts.log, locator: opts.locator}
+	cfg := opts.cfg
+	if cfg.AppConfig == nil {
+		cfg.AppConfig = &config.Config{}
+	}
+	locator := opts.locator
+	if locator == nil {
+		locator = newPlanLocator(cfg)
+	}
+	return &promptBuilder{cfg: cfg, log: opts.log, locator: locator}
 }
 
 func (b *promptBuilder) TaskPrompt() string {
