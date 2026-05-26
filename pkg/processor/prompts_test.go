@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,10 +13,26 @@ import (
 	"github.com/umputun/ralphex/pkg/config"
 )
 
+var promptBuilderCache sync.Map
+
+func newPromptBuilderForTest(r *Runner) *promptBuilder {
+	if cached, ok := promptBuilderCache.Load(r); ok {
+		return cached.(*promptBuilder)
+	}
+	log := r.log
+	if log == nil {
+		log = newMockLogger()
+	}
+	locator := newPlanLocator(r.cfg)
+	builder := newPromptBuilder(promptBuilderOpts{cfg: r.cfg, log: log, locator: locator})
+	promptBuilderCache.Store(r, builder)
+	return builder
+}
+
 func TestRunner_replacePromptVariables_TaskPrompt(t *testing.T) {
 	appCfg := testAppConfig(t)
-	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: appCfg}, log: newMockLogger("")}
-	prompt := r.replacePromptVariables(appCfg.TaskPrompt)
+	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: appCfg}, log: newMockLogger()}
+	prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.TaskPrompt)
 
 	assert.Contains(t, prompt, "docs/plans/test.md")
 	assert.Contains(t, prompt, "progress-test.txt")
@@ -28,8 +45,8 @@ func TestRunner_replacePromptVariables_TaskPrompt(t *testing.T) {
 func TestRunner_replacePromptVariables_ReviewFirstPrompt(t *testing.T) {
 	t.Run("with plan file and progress path", func(t *testing.T) {
 		appCfg := testAppConfig(t)
-		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
-		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger()}
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.Contains(t, prompt, "progress-test.txt") // progress file should be substituted
@@ -47,8 +64,8 @@ func TestRunner_replacePromptVariables_ReviewFirstPrompt(t *testing.T) {
 
 	t.Run("without plan file uses default branch in goal", func(t *testing.T) {
 		appCfg := testAppConfig(t)
-		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", DefaultBranch: "trunk", AppConfig: appCfg}, log: newMockLogger("")}
-		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", DefaultBranch: "trunk", AppConfig: appCfg}, log: newMockLogger()}
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Contains(t, prompt, "current branch vs trunk")
 		assert.Contains(t, prompt, "progress.txt")
@@ -57,8 +74,8 @@ func TestRunner_replacePromptVariables_ReviewFirstPrompt(t *testing.T) {
 
 	t.Run("fallback to master when default branch not set", func(t *testing.T) {
 		appCfg := testAppConfig(t)
-		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", AppConfig: appCfg}, log: newMockLogger("")}
-		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", AppConfig: appCfg}, log: newMockLogger()}
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Contains(t, prompt, "current branch vs master")
 	})
@@ -67,8 +84,8 @@ func TestRunner_replacePromptVariables_ReviewFirstPrompt(t *testing.T) {
 func TestRunner_replacePromptVariables_ReviewSecondPrompt(t *testing.T) {
 	t.Run("with plan file and progress path", func(t *testing.T) {
 		appCfg := testAppConfig(t)
-		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
-		prompt := r.replacePromptVariables(appCfg.ReviewSecondPrompt)
+		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger()}
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewSecondPrompt)
 
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.Contains(t, prompt, "progress-test.txt") // progress file should be substituted
@@ -87,8 +104,8 @@ func TestRunner_replacePromptVariables_ReviewSecondPrompt(t *testing.T) {
 
 	t.Run("without plan file uses default branch in goal", func(t *testing.T) {
 		appCfg := testAppConfig(t)
-		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", DefaultBranch: "develop", AppConfig: appCfg}, log: newMockLogger("")}
-		prompt := r.replacePromptVariables(appCfg.ReviewSecondPrompt)
+		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt", DefaultBranch: "develop", AppConfig: appCfg}, log: newMockLogger()}
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewSecondPrompt)
 
 		assert.Contains(t, prompt, "current branch vs develop")
 		assert.Contains(t, prompt, "progress.txt")
@@ -99,11 +116,11 @@ func TestRunner_replacePromptVariables_NoAgentWarningsInEmbeddedPrompts(t *testi
 	// regression test for issue #98: comment lines in embedded prompts contained {{agent:name}}
 	// which triggered "agent not found" warnings after stripComments was removed in #90
 	appCfg := testAppConfig(t)
-	log := newMockLogger("")
+	log := newMockLogger()
 	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress.txt", DefaultBranch: "main", AppConfig: appCfg}, log: log}
 
-	r.replacePromptVariables(appCfg.ReviewFirstPrompt)
-	r.replacePromptVariables(appCfg.ReviewSecondPrompt)
+	newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewFirstPrompt)
+	newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewSecondPrompt)
 
 	// verify no "not found" warnings were logged
 	for _, call := range log.PrintCalls() {
@@ -114,8 +131,8 @@ func TestRunner_replacePromptVariables_NoAgentWarningsInEmbeddedPrompts(t *testi
 func TestRunner_buildCodexEvaluationPrompt(t *testing.T) {
 	findings := "Issue 1: Missing error check in foo.go:42"
 
-	r := &Runner{cfg: Config{AppConfig: testAppConfig(t)}, log: newMockLogger("")}
-	prompt := r.buildCodexEvaluationPrompt(findings)
+	r := &Runner{cfg: Config{AppConfig: testAppConfig(t)}, log: newMockLogger()}
+	prompt := newPromptBuilderForTest(r).CodexEvaluationPrompt(findings)
 
 	assert.Contains(t, prompt, findings)
 	assert.Contains(t, prompt, "<<<RALPHEX:CODEX_REVIEW_DONE>>>")
@@ -129,7 +146,7 @@ func TestRunner_replacePromptVariables_CustomTaskPrompt(t *testing.T) {
 		TaskPrompt: "Custom task prompt for {{PLAN_FILE}} with progress at {{PROGRESS_FILE}}",
 	}
 	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress-test.txt", AppConfig: appCfg}}
-	prompt := r.replacePromptVariables(appCfg.TaskPrompt)
+	prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.TaskPrompt)
 
 	assert.Equal(t, "Custom task prompt for docs/plans/test.md with progress at progress-test.txt", prompt)
 	// verify it doesn't contain default prompt content
@@ -143,21 +160,21 @@ func TestRunner_replacePromptVariables_CustomReviewFirstPrompt(t *testing.T) {
 
 	t.Run("with plan file", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
-		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Equal(t, "Custom first review for implementation of plan at docs/plans/test.md", prompt)
 	})
 
 	t.Run("without plan file uses default branch", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "", DefaultBranch: "main", AppConfig: appCfg}}
-		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Equal(t, "Custom first review for current branch vs main", prompt)
 	})
 
 	t.Run("without plan file fallback to master", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "", AppConfig: appCfg}}
-		prompt := r.replacePromptVariables(appCfg.ReviewFirstPrompt)
+		prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewFirstPrompt)
 
 		assert.Equal(t, "Custom first review for current branch vs master", prompt)
 	})
@@ -168,7 +185,7 @@ func TestRunner_replacePromptVariables_CustomReviewSecondPrompt(t *testing.T) {
 		ReviewSecondPrompt: "Custom second review for {{GOAL}}",
 	}
 	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
-	prompt := r.replacePromptVariables(appCfg.ReviewSecondPrompt)
+	prompt := newPromptBuilderForTest(r).replacePromptVariables(appCfg.ReviewSecondPrompt)
 
 	assert.Equal(t, "Custom second review for implementation of plan at docs/plans/test.md", prompt)
 }
@@ -178,7 +195,7 @@ func TestRunner_buildCodexEvaluationPrompt_CustomPrompt(t *testing.T) {
 		CodexPrompt: "Custom codex evaluation with output: {{CODEX_OUTPUT}} for {{GOAL}}",
 	}
 	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
-	prompt := r.buildCodexEvaluationPrompt("found bug in main.go")
+	prompt := newPromptBuilderForTest(r).CodexEvaluationPrompt("found bug in main.go")
 
 	assert.Equal(t, "Custom codex evaluation with output: found bug in main.go for implementation of plan at docs/plans/test.md", prompt)
 }
@@ -201,7 +218,7 @@ func TestRunner_replacePromptVariables(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &Runner{cfg: Config{PlanFile: tc.planFile, ProgressPath: tc.progressPath}}
-			result := r.replacePromptVariables(tc.input)
+			result := newPromptBuilderForTest(r).replacePromptVariables(tc.input)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
@@ -210,13 +227,13 @@ func TestRunner_replacePromptVariables(t *testing.T) {
 func TestRunner_replacePromptVariables_NoGoal(t *testing.T) {
 	t.Run("fallback to master when default branch not set", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: ""}}
-		result := r.replacePromptVariables("Goal: {{GOAL}}")
+		result := newPromptBuilderForTest(r).replacePromptVariables("Goal: {{GOAL}}")
 		assert.Equal(t, "Goal: current branch vs master", result)
 	})
 
 	t.Run("uses configured default branch", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "", DefaultBranch: "trunk"}}
-		result := r.replacePromptVariables("Goal: {{GOAL}}")
+		result := newPromptBuilderForTest(r).replacePromptVariables("Goal: {{GOAL}}")
 		assert.Equal(t, "Goal: current branch vs trunk", result)
 	})
 }
@@ -224,13 +241,13 @@ func TestRunner_replacePromptVariables_NoGoal(t *testing.T) {
 func TestRunner_replacePromptVariables_DefaultBranch(t *testing.T) {
 	t.Run("replaces DEFAULT_BRANCH variable", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replacePromptVariables("git diff {{DEFAULT_BRANCH}}...HEAD")
+		result := newPromptBuilderForTest(r).replacePromptVariables("git diff {{DEFAULT_BRANCH}}...HEAD")
 		assert.Equal(t, "git diff main...HEAD", result)
 	})
 
 	t.Run("fallback to master when not configured", func(t *testing.T) {
 		r := &Runner{cfg: Config{}}
-		result := r.replacePromptVariables("git diff {{DEFAULT_BRANCH}}...HEAD")
+		result := newPromptBuilderForTest(r).replacePromptVariables("git diff {{DEFAULT_BRANCH}}...HEAD")
 		assert.Equal(t, "git diff master...HEAD", result)
 	})
 }
@@ -238,19 +255,19 @@ func TestRunner_replacePromptVariables_DefaultBranch(t *testing.T) {
 func TestRunner_getPlanFileRef(t *testing.T) {
 	t.Run("with plan file", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md"}}
-		assert.Equal(t, "docs/plans/test.md", r.getPlanFileRef())
+		assert.Equal(t, "docs/plans/test.md", newPromptBuilderForTest(r).getPlanFileRef())
 	})
 
 	t.Run("without plan file", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: ""}}
-		assert.Equal(t, "(no plan file - reviewing current branch)", r.getPlanFileRef())
+		assert.Equal(t, "(no plan file - reviewing current branch)", newPromptBuilderForTest(r).getPlanFileRef())
 	})
 }
 
 func TestRunner_resolvePlanFilePath(t *testing.T) {
 	t.Run("empty plan file returns empty", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: ""}}
-		assert.Empty(t, r.resolvePlanFilePath())
+		assert.Empty(t, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("file exists at original location", func(t *testing.T) {
@@ -260,7 +277,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(planPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: planPath}}
-		assert.Equal(t, planPath, r.resolvePlanFilePath())
+		assert.Equal(t, planPath, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("file moved to completed directory", func(t *testing.T) {
@@ -274,12 +291,12 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(completedPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, completedPath, r.resolvePlanFilePath())
+		assert.Equal(t, completedPath, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("file not found anywhere returns original path", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "/nonexistent/path/plan.md"}}
-		assert.Equal(t, "/nonexistent/path/plan.md", r.resolvePlanFilePath())
+		assert.Equal(t, "/nonexistent/path/plan.md", newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("getPlanFileRef uses resolved path", func(t *testing.T) {
@@ -293,7 +310,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(completedPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, completedPath, r.getPlanFileRef())
+		assert.Equal(t, completedPath, newPromptBuilderForTest(r).getPlanFileRef())
 	})
 
 	t.Run("getGoal uses resolved path", func(t *testing.T) {
@@ -307,8 +324,8 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(completedPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Contains(t, r.getGoal(), completedPath)
-		assert.NotContains(t, r.getGoal(), originalPath)
+		assert.Contains(t, newPromptBuilderForTest(r).getGoal(), completedPath)
+		assert.NotContains(t, newPromptBuilderForTest(r).getGoal(), originalPath)
 	})
 
 	t.Run("dashed file moved+renamed to compact in completed", func(t *testing.T) {
@@ -322,7 +339,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(renamedPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, renamedPath, r.resolvePlanFilePath())
+		assert.Equal(t, renamedPath, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("compact file moved+renamed to dashed in completed", func(t *testing.T) {
@@ -336,7 +353,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(renamedPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, renamedPath, r.resolvePlanFilePath())
+		assert.Equal(t, renamedPath, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("non-date basename returns original path", func(t *testing.T) {
@@ -349,7 +366,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		// returns "" because basename matches neither date pattern.
 		originalPath := filepath.Join(plansDir, "feature-x.md")
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, originalPath, r.resolvePlanFilePath())
+		assert.Equal(t, originalPath, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("dashed file renamed in place to compact (same dir)", func(t *testing.T) {
@@ -362,7 +379,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(renamedPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, renamedPath, r.resolvePlanFilePath())
+		assert.Equal(t, renamedPath, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("compact file renamed in place to dashed (same dir)", func(t *testing.T) {
@@ -375,7 +392,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(renamedPath, []byte("# plan"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, renamedPath, r.resolvePlanFilePath())
+		assert.Equal(t, renamedPath, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("in-place alt wins over stale completed copy", func(t *testing.T) {
@@ -393,7 +410,7 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 		require.NoError(t, os.WriteFile(staleCompleted, []byte("# stale"), 0o600))
 
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, inPlaceAlt, r.resolvePlanFilePath())
+		assert.Equal(t, inPlaceAlt, newPlanLocator(r.cfg).Path())
 	})
 
 	t.Run("8-digit non-date prefix is treated as date", func(t *testing.T) {
@@ -407,38 +424,38 @@ func TestRunner_resolvePlanFilePath(t *testing.T) {
 
 		originalPath := filepath.Join(plansDir, "12345678-foo.md")
 		r := &Runner{cfg: Config{PlanFile: originalPath}}
-		assert.Equal(t, originalPath, r.resolvePlanFilePath())
+		assert.Equal(t, originalPath, newPlanLocator(r.cfg).Path())
 	})
 }
 
 func TestRunner_getProgressFileRef(t *testing.T) {
 	t.Run("with progress path", func(t *testing.T) {
 		r := &Runner{cfg: Config{ProgressPath: "progress-test.txt"}}
-		assert.Equal(t, "progress-test.txt", r.getProgressFileRef())
+		assert.Equal(t, "progress-test.txt", newPromptBuilderForTest(r).getProgressFileRef())
 	})
 
 	t.Run("without progress path", func(t *testing.T) {
 		r := &Runner{cfg: Config{ProgressPath: ""}}
-		assert.Equal(t, "(no progress file available)", r.getProgressFileRef())
+		assert.Equal(t, "(no progress file available)", newPromptBuilderForTest(r).getProgressFileRef())
 	})
 }
 
 func TestRunner_replacePromptVariables_Fallbacks(t *testing.T) {
 	t.Run("empty plan file uses fallback", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: "progress.txt"}}
-		result := r.replacePromptVariables("Plan: {{PLAN_FILE}}")
+		result := newPromptBuilderForTest(r).replacePromptVariables("Plan: {{PLAN_FILE}}")
 		assert.Equal(t, "Plan: (no plan file - reviewing current branch)", result)
 	})
 
 	t.Run("empty progress path uses fallback", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "test.md", ProgressPath: ""}}
-		result := r.replacePromptVariables("Progress: {{PROGRESS_FILE}}")
+		result := newPromptBuilderForTest(r).replacePromptVariables("Progress: {{PROGRESS_FILE}}")
 		assert.Equal(t, "Progress: (no progress file available)", result)
 	})
 
 	t.Run("both empty use fallbacks", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "", ProgressPath: ""}}
-		result := r.replacePromptVariables("Plan: {{PLAN_FILE}}, Progress: {{PROGRESS_FILE}}, Goal: {{GOAL}}")
+		result := newPromptBuilderForTest(r).replacePromptVariables("Plan: {{PLAN_FILE}}, Progress: {{PROGRESS_FILE}}, Goal: {{GOAL}}")
 		assert.Equal(t, "Plan: (no plan file - reviewing current branch), Progress: (no progress file available), Goal: current branch vs master", result)
 	})
 }
@@ -447,10 +464,10 @@ func TestRunner_expandAgentReferences_SingleAgent(t *testing.T) {
 	appCfg := &config.Config{
 		CustomAgents: []config.CustomAgent{{Name: "security-scanner", Prompt: "scan for security vulnerabilities"}},
 	}
-	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
 	prompt := "Check code:\n{{agent:security-scanner}}\nDone."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent with this prompt:")
 	assert.Contains(t, result, "scan for security vulnerabilities")
@@ -465,10 +482,10 @@ func TestRunner_expandAgentReferences_MultipleAgents(t *testing.T) {
 			{Name: "agent-b", Prompt: "second agent prompt"},
 		},
 	}
-	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
 	prompt := "Run {{agent:agent-a}} then {{agent:agent-b}}."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	assert.Contains(t, result, "first agent prompt")
 	assert.Contains(t, result, "second agent prompt")
@@ -480,11 +497,11 @@ func TestRunner_expandAgentReferences_MissingAgent(t *testing.T) {
 	appCfg := &config.Config{
 		CustomAgents: []config.CustomAgent{{Name: "existing", Prompt: "exists"}},
 	}
-	log := newMockLogger("")
+	log := newMockLogger()
 	r := &Runner{cfg: Config{AppConfig: appCfg}, log: log}
 
 	prompt := "Run {{agent:missing-agent}} now."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	// missing agent should remain unexpanded
 	assert.Contains(t, result, "{{agent:missing-agent}}")
@@ -500,7 +517,7 @@ func TestRunner_expandAgentReferences_MissingAgent(t *testing.T) {
 func TestRunner_expandAgentReferences_NilAppConfig(t *testing.T) {
 	r := &Runner{cfg: Config{AppConfig: nil}}
 	prompt := "Run {{agent:test}} now."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 	assert.Equal(t, prompt, result)
 }
 
@@ -509,7 +526,7 @@ func TestRunner_expandAgentReferences_EmptySlice(t *testing.T) {
 	r := &Runner{cfg: Config{AppConfig: appCfg}}
 
 	prompt := "Run {{agent:test}} now."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	// empty agents slice, prompt unchanged
 	assert.Equal(t, prompt, result)
@@ -520,7 +537,7 @@ func TestRunner_expandAgentReferences_NilAgentsSlice(t *testing.T) {
 	r := &Runner{cfg: Config{AppConfig: appCfg}}
 
 	prompt := "Run {{agent:some-agent}} now."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	// nil agents slice, prompt unchanged
 	assert.Equal(t, prompt, result)
@@ -530,10 +547,10 @@ func TestRunner_expandAgentReferences_NoReferences(t *testing.T) {
 	appCfg := &config.Config{
 		CustomAgents: []config.CustomAgent{{Name: "scanner", Prompt: "scan code"}},
 	}
-	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
 	prompt := "Plain prompt without agent references."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	assert.Equal(t, prompt, result)
 }
@@ -542,11 +559,11 @@ func TestRunner_expandAgentReferences_MixedVariables(t *testing.T) {
 	appCfg := &config.Config{
 		CustomAgents: []config.CustomAgent{{Name: "reviewer", Prompt: "review the code"}},
 	}
-	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress.txt", AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", ProgressPath: "progress.txt", AppConfig: appCfg}, log: newMockLogger()}
 
 	// test that agent refs work alongside other variables in replacePromptVariables
 	prompt := "Plan: {{PLAN_FILE}}, Goal: {{GOAL}}, Agent: {{agent:reviewer}}"
-	result := r.replacePromptVariables(prompt)
+	result := newPromptBuilderForTest(r).replacePromptVariables(prompt)
 
 	assert.Contains(t, result, "Plan: docs/plans/test.md")
 	assert.Contains(t, result, "Goal: implementation of plan at docs/plans/test.md")
@@ -558,10 +575,10 @@ func TestRunner_expandAgentReferences_DuplicateReferences(t *testing.T) {
 	appCfg := &config.Config{
 		CustomAgents: []config.CustomAgent{{Name: "scanner", Prompt: "scan for issues"}},
 	}
-	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
 	prompt := "First: {{agent:scanner}}\nSecond: {{agent:scanner}}"
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	// both references should be expanded
 	assert.NotContains(t, result, "{{agent:scanner}}")
@@ -576,10 +593,10 @@ func TestRunner_expandAgentReferences_SpecialCharactersInPrompt(t *testing.T) {
 			{Name: "regex-agent", Prompt: "check for patterns and $variables\nwith newlines\tand tabs"},
 		},
 	}
-	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
 	prompt := "Run {{agent:regex-agent}} now."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	// prompt with special characters preserves newlines and tabs
 	assert.NotContains(t, result, "{{agent:regex-agent}}")
@@ -597,10 +614,10 @@ func TestRunner_expandAgentReferences_ExpandsVariablesInContent(t *testing.T) {
 				{Name: "review", Prompt: "review changes on {{DEFAULT_BRANCH}}, plan: {{PLAN_FILE}}, goal: {{GOAL}}"},
 			},
 		}
-		r := &Runner{cfg: Config{PlanFile: "docs/plan.md", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{PlanFile: "docs/plan.md", DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger()}
 
 		prompt := "Run {{agent:review}}"
-		result := r.expandAgentReferences(prompt)
+		result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 		assert.Contains(t, result, "review changes on main")
 		assert.Contains(t, result, "plan: docs/plan.md")
@@ -616,10 +633,10 @@ func TestRunner_expandAgentReferences_ExpandsVariablesInContent(t *testing.T) {
 				{Name: "review", Prompt: "diff {{DEFAULT_BRANCH}}..HEAD"},
 			},
 		}
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
 		prompt := "Run {{agent:review}}"
-		result := r.expandAgentReferences(prompt)
+		result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 		assert.Contains(t, result, "diff master..HEAD")
 	})
@@ -631,18 +648,18 @@ func TestRunner_expandAgentReferences_CaseSensitivity(t *testing.T) {
 	}
 
 	t.Run("lowercase reference does not match uppercase agent", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 		prompt := "Run {{agent:scanner}} now."
-		result := r.expandAgentReferences(prompt)
+		result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 		assert.Contains(t, result, "{{agent:scanner}}")
 		assert.NotContains(t, result, "uppercase name")
 	})
 
 	t.Run("exact case matches", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 		prompt := "Run {{agent:Scanner}} now."
-		result := r.expandAgentReferences(prompt)
+		result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 		assert.NotContains(t, result, "{{agent:Scanner}}")
 		assert.Contains(t, result, "uppercase name")
@@ -656,9 +673,9 @@ func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
 				{Name: "docs", Prompt: "Check docs.", Options: config.Options{Model: "haiku", AgentType: "code-reviewer"}},
 			},
 		}
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
-		result := r.expandAgentReferences("Launch {{agent:docs}}")
+		result := newPromptBuilderForTest(r).expandAgentReferences("Launch {{agent:docs}}")
 		assert.Contains(t, result, "model=haiku")
 		assert.Contains(t, result, "code-reviewer")
 		assert.Contains(t, result, "Check docs.")
@@ -671,9 +688,9 @@ func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
 				{Name: "lint", Prompt: "Lint code.", Options: config.Options{Model: "sonnet"}},
 			},
 		}
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
-		result := r.expandAgentReferences("Run {{agent:lint}}")
+		result := newPromptBuilderForTest(r).expandAgentReferences("Run {{agent:lint}}")
 		assert.Contains(t, result, "model=sonnet")
 		assert.Contains(t, result, "general-purpose")
 		assert.Contains(t, result, "Lint code.")
@@ -685,9 +702,9 @@ func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
 				{Name: "review", Prompt: "Review code.", Options: config.Options{AgentType: "code-reviewer"}},
 			},
 		}
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
-		result := r.expandAgentReferences("Run {{agent:review}}")
+		result := newPromptBuilderForTest(r).expandAgentReferences("Run {{agent:review}}")
 		assert.NotContains(t, result, "model=")
 		assert.Contains(t, result, "code-reviewer")
 		assert.Contains(t, result, "Review code.")
@@ -699,9 +716,9 @@ func TestRunner_expandAgentReferences_WithModelAndAgentType(t *testing.T) {
 				{Name: "basic", Prompt: "Basic check."},
 			},
 		}
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
-		result := r.expandAgentReferences("Run {{agent:basic}}")
+		result := newPromptBuilderForTest(r).expandAgentReferences("Run {{agent:basic}}")
 		assert.NotContains(t, result, "model=")
 		assert.Contains(t, result, "general-purpose")
 		assert.Contains(t, result, "Basic check.")
@@ -714,10 +731,10 @@ func TestRunner_expandAgentReferences_PercentInPrompt(t *testing.T) {
 			{Name: "perf", Prompt: "check if CPU is below 80% and memory under 90%"},
 		},
 	}
-	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
 	prompt := "Run {{agent:perf}} now."
-	result := r.expandAgentReferences(prompt)
+	result := newPromptBuilderForTest(r).expandAgentReferences(prompt)
 
 	assert.Contains(t, result, "80%")
 	assert.Contains(t, result, "90%")
@@ -731,9 +748,9 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 			PlanDescription: "add user authentication with OAuth",
 			ProgressPath:    "progress-plan-test.txt",
 			AppConfig:       appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildPlanPrompt()
+		prompt := newPromptBuilderForTest(r).PlanPrompt()
 
 		// verify template substitution
 		assert.Contains(t, prompt, "add user authentication with OAuth")
@@ -749,9 +766,9 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 			PlanDescription: "add feature",
 			ProgressPath:    "", // empty progress path
 			AppConfig:       appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildPlanPrompt()
+		prompt := newPromptBuilderForTest(r).PlanPrompt()
 
 		assert.Contains(t, prompt, "add feature")
 		assert.Contains(t, prompt, "(no progress file available)")
@@ -764,9 +781,9 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 			PlanDescription: "test plan",
 			ProgressPath:    "progress.txt",
 			AppConfig:       appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildPlanPrompt()
+		prompt := newPromptBuilderForTest(r).PlanPrompt()
 
 		assert.Contains(t, prompt, "custom/plans/")
 		assert.NotContains(t, prompt, "{{PLANS_DIR}}")
@@ -778,9 +795,9 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 			PlanDescription: "test plan",
 			ProgressPath:    "progress.txt",
 			AppConfig:       appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildPlanPrompt()
+		prompt := newPromptBuilderForTest(r).PlanPrompt()
 
 		// verify key structural elements from make_plan.txt are present
 		assert.Contains(t, prompt, "QUESTION")
@@ -796,9 +813,9 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 			PlanDescription: "custom feature",
 			ProgressPath:    "custom-progress.txt",
 			AppConfig:       appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildPlanPrompt()
+		prompt := newPromptBuilderForTest(r).PlanPrompt()
 
 		assert.Equal(t, "Create plan for: custom feature\nLog: custom-progress.txt", prompt)
 	})
@@ -807,19 +824,19 @@ func TestRunner_buildPlanPrompt(t *testing.T) {
 func TestRunner_getDiffInstruction(t *testing.T) {
 	t.Run("first iteration uses branch diff", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.getDiffInstruction(true)
+		result := newPromptBuilderForTest(r).getDiffInstruction(true)
 		assert.Equal(t, "git diff main...HEAD", result)
 	})
 
 	t.Run("subsequent iteration uses uncommitted diff", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.getDiffInstruction(false)
+		result := newPromptBuilderForTest(r).getDiffInstruction(false)
 		assert.Equal(t, "git diff", result)
 	})
 
 	t.Run("uses default branch fallback", func(t *testing.T) {
 		r := &Runner{cfg: Config{}}
-		result := r.getDiffInstruction(true)
+		result := newPromptBuilderForTest(r).getDiffInstruction(true)
 		assert.Equal(t, "git diff master...HEAD", result)
 	})
 }
@@ -827,13 +844,13 @@ func TestRunner_getDiffInstruction(t *testing.T) {
 func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 	t.Run("replaces DIFF_INSTRUCTION for first iteration", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", true, "")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", true, "")
 		assert.Equal(t, "Run: git diff main...HEAD", result)
 	})
 
 	t.Run("replaces DIFF_INSTRUCTION for subsequent iteration", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", false, "")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration("Run: {{DIFF_INSTRUCTION}}", false, "")
 		assert.Equal(t, "Run: git diff", result)
 	})
 
@@ -844,7 +861,7 @@ func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 			DefaultBranch: "develop",
 		}}
 		prompt := "Plan: {{PLAN_FILE}}, Progress: {{PROGRESS_FILE}}, Goal: {{GOAL}}, Branch: {{DEFAULT_BRANCH}}, Diff: {{DIFF_INSTRUCTION}}"
-		result := r.replaceVariablesWithIteration(prompt, true, "")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration(prompt, true, "")
 
 		assert.Contains(t, result, "Plan: docs/plans/test.md")
 		assert.Contains(t, result, "Progress: progress.txt")
@@ -858,8 +875,8 @@ func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 		appCfg := &config.Config{
 			CustomAgents: []config.CustomAgent{{Name: "test-agent", Prompt: "test prompt"}},
 		}
-		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
-		result := r.replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}, Agent: {{agent:test-agent}}", true, "")
+		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}, Agent: {{agent:test-agent}}", true, "")
 
 		assert.Contains(t, result, "Diff: git diff main...HEAD")
 		assert.Contains(t, result, "test prompt")
@@ -868,7 +885,7 @@ func TestRunner_replaceVariablesWithIteration(t *testing.T) {
 
 	t.Run("handles prompt without DIFF_INSTRUCTION", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Plan: {{PLAN_FILE}}", true, "")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration("Plan: {{PLAN_FILE}}", true, "")
 		assert.Contains(t, result, "(no plan file - reviewing current branch)")
 	})
 }
@@ -880,9 +897,9 @@ func TestRunner_buildCustomReviewPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/test.md",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCustomReviewPrompt(true, "")
+		prompt := newPromptBuilderForTest(r).CustomReviewPrompt(true, "")
 
 		assert.Contains(t, prompt, "git diff main...HEAD")
 		assert.Contains(t, prompt, "docs/plans/test.md")
@@ -897,9 +914,9 @@ func TestRunner_buildCustomReviewPrompt(t *testing.T) {
 		r := &Runner{cfg: Config{
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCustomReviewPrompt(false, "")
+		prompt := newPromptBuilderForTest(r).CustomReviewPrompt(false, "")
 
 		assert.Contains(t, prompt, "git diff")
 		assert.NotContains(t, prompt, "main...HEAD")
@@ -910,9 +927,9 @@ func TestRunner_buildCustomReviewPrompt(t *testing.T) {
 		r := &Runner{cfg: Config{
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCustomReviewPrompt(false, "I fixed the null pointer issue")
+		prompt := newPromptBuilderForTest(r).CustomReviewPrompt(false, "I fixed the null pointer issue")
 
 		assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
 		assert.Contains(t, prompt, "I fixed the null pointer issue")
@@ -924,16 +941,16 @@ func TestRunner_buildCustomReviewPrompt(t *testing.T) {
 		appCfg := &config.Config{
 			CustomReviewPrompt: "Review code.\n{{PREVIOUS_REVIEW_CONTEXT}}",
 		}
-		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}, log: newMockLogger()}
 
 		t.Run("empty on first iteration", func(t *testing.T) {
-			prompt := r.buildCustomReviewPrompt(true, "")
+			prompt := newPromptBuilderForTest(r).CustomReviewPrompt(true, "")
 			assert.Equal(t, "Review code.\n", prompt)
 			assert.NotContains(t, prompt, "PREVIOUS REVIEW CONTEXT")
 		})
 
 		t.Run("populated on subsequent iteration", func(t *testing.T) {
-			prompt := r.buildCustomReviewPrompt(false, "addressed the race condition")
+			prompt := newPromptBuilderForTest(r).CustomReviewPrompt(false, "addressed the race condition")
 			assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
 			assert.Contains(t, prompt, "addressed the race condition")
 			assert.NotContains(t, prompt, "{{PREVIOUS_REVIEW_CONTEXT}}")
@@ -948,9 +965,9 @@ func TestRunner_buildCustomReviewPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/feature.md",
 			DefaultBranch: "develop",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCustomReviewPrompt(true, "")
+		prompt := newPromptBuilderForTest(r).CustomReviewPrompt(true, "")
 
 		assert.Contains(t, prompt, "implementation of plan at docs/plans/feature.md")
 		assert.Contains(t, prompt, "git diff develop...HEAD")
@@ -965,10 +982,10 @@ func TestRunner_buildCustomEvaluationPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/test.md",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
 		customOutput := "Found issue in foo.go:10 - potential null pointer"
-		prompt := r.buildCustomEvaluationPrompt(customOutput)
+		prompt := newPromptBuilderForTest(r).CustomEvaluationPrompt(customOutput)
 
 		assert.Contains(t, prompt, customOutput)
 		assert.NotContains(t, prompt, "{{CUSTOM_OUTPUT}}")
@@ -980,9 +997,9 @@ func TestRunner_buildCustomEvaluationPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/feature.md",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCustomEvaluationPrompt("test output")
+		prompt := newPromptBuilderForTest(r).CustomEvaluationPrompt("test output")
 
 		assert.Contains(t, prompt, "docs/plans/feature.md")
 		assert.NotContains(t, prompt, "{{PLAN_FILE}}")
@@ -996,9 +1013,9 @@ func TestRunner_buildCustomEvaluationPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/test.md",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCustomEvaluationPrompt("security issue found")
+		prompt := newPromptBuilderForTest(r).CustomEvaluationPrompt("security issue found")
 
 		assert.Equal(t, "Evaluate output: security issue found. Goal: implementation of plan at docs/plans/test.md", prompt)
 	})
@@ -1008,12 +1025,12 @@ func TestRunner_buildPreviousContext(t *testing.T) {
 	r := &Runner{cfg: Config{}}
 
 	t.Run("empty on first iteration (no response)", func(t *testing.T) {
-		result := r.buildPreviousContext("")
+		result := newPromptBuilderForTest(r).buildPreviousContext("")
 		assert.Empty(t, result)
 	})
 
 	t.Run("populated with response on subsequent iterations", func(t *testing.T) {
-		result := r.buildPreviousContext("I fixed the null pointer issue")
+		result := newPromptBuilderForTest(r).buildPreviousContext("I fixed the null pointer issue")
 		assert.Contains(t, result, "PREVIOUS REVIEW CONTEXT")
 		assert.Contains(t, result, "I fixed the null pointer issue")
 		assert.Contains(t, result, "Re-evaluate considering Claude's arguments")
@@ -1023,14 +1040,14 @@ func TestRunner_buildPreviousContext(t *testing.T) {
 func TestRunner_replaceVariablesWithIteration_PreviousReviewContext(t *testing.T) {
 	t.Run("empty when no claude response", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Review:\n{{PREVIOUS_REVIEW_CONTEXT}}", true, "")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration("Review:\n{{PREVIOUS_REVIEW_CONTEXT}}", true, "")
 		assert.Equal(t, "Review:\n", result)
 		assert.NotContains(t, result, "PREVIOUS REVIEW CONTEXT")
 	})
 
 	t.Run("populated when claude response present", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "main"}}
-		result := r.replaceVariablesWithIteration("Review:\n{{PREVIOUS_REVIEW_CONTEXT}}", false, "fixed the bug")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration("Review:\n{{PREVIOUS_REVIEW_CONTEXT}}", false, "fixed the bug")
 		assert.Contains(t, result, "PREVIOUS REVIEW CONTEXT")
 		assert.Contains(t, result, "fixed the bug")
 		assert.NotContains(t, result, "{{PREVIOUS_REVIEW_CONTEXT}}")
@@ -1039,7 +1056,7 @@ func TestRunner_replaceVariablesWithIteration_PreviousReviewContext(t *testing.T
 	t.Run("works with all variables together", func(t *testing.T) {
 		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", DefaultBranch: "main", ProgressPath: "progress.txt"}}
 		prompt := "Plan: {{PLAN_FILE}}, Diff: {{DIFF_INSTRUCTION}}\n{{PREVIOUS_REVIEW_CONTEXT}}"
-		result := r.replaceVariablesWithIteration(prompt, false, "previous response")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration(prompt, false, "previous response")
 
 		assert.Contains(t, result, "Plan: docs/plans/test.md")
 		assert.Contains(t, result, "Diff: git diff")
@@ -1053,7 +1070,7 @@ func TestRunner_replaceVariablesWithIteration_PreviousReviewContext(t *testing.T
 			CustomAgents: []config.CustomAgent{{Name: "quality", Prompt: "check quality"}},
 		}}}
 		prompt := "Review:\n{{PREVIOUS_REVIEW_CONTEXT}}"
-		result := r.replaceVariablesWithIteration(prompt, false, "use {{agent:quality}} for analysis")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration(prompt, false, "use {{agent:quality}} for analysis")
 
 		// agent ref in prompt template should be expanded (none here), but agent ref
 		// in claude response must stay as literal text - prevents prompt injection
@@ -1070,9 +1087,9 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 			ProgressPath:  "progress.txt",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCodexPrompt(true, "")
+		prompt := newPromptBuilderForTest(r).CodexReviewPrompt(true, "")
 
 		assert.Contains(t, prompt, "docs/plans/test.md")
 		assert.Contains(t, prompt, "progress.txt")
@@ -1092,9 +1109,9 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 			ProgressPath:  "progress.txt",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCodexPrompt(false, "I fixed the null pointer issue")
+		prompt := newPromptBuilderForTest(r).CodexReviewPrompt(false, "I fixed the null pointer issue")
 
 		assert.Contains(t, prompt, "git diff")
 		assert.NotContains(t, prompt, "main...HEAD")
@@ -1108,9 +1125,9 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 		r := &Runner{cfg: Config{
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCodexPrompt(true, "")
+		prompt := newPromptBuilderForTest(r).CodexReviewPrompt(true, "")
 
 		assert.NotContains(t, prompt, "PREVIOUS REVIEW CONTEXT")
 		assert.Contains(t, prompt, "Plan: (no plan file - reviewing current branch)")
@@ -1122,9 +1139,9 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/feature.md",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCodexPrompt(true, "")
+		prompt := newPromptBuilderForTest(r).CodexReviewPrompt(true, "")
 
 		assert.Contains(t, prompt, "implementation of plan at docs/plans/feature.md")
 		assert.NotContains(t, prompt, "{{GOAL}}")
@@ -1136,11 +1153,11 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/test.md",
 			DefaultBranch: "main",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
 		// simulate claude response containing agent template variable (potential prompt injection)
 		response := "I used {{agent:quality}} to check and {{agent:testing}} found issues"
-		prompt := r.buildCodexPrompt(false, response)
+		prompt := newPromptBuilderForTest(r).CodexReviewPrompt(false, response)
 
 		// agent refs must remain as literal text, not expanded into Task tool instructions
 		assert.Contains(t, prompt, "{{agent:quality}}")
@@ -1156,15 +1173,15 @@ func TestRunner_buildCodexPrompt(t *testing.T) {
 			PlanFile:      "docs/plans/feature.md",
 			DefaultBranch: "develop",
 			AppConfig:     appCfg,
-		}, log: newMockLogger("")}
+		}, log: newMockLogger()}
 
-		prompt := r.buildCodexPrompt(true, "")
+		prompt := newPromptBuilderForTest(r).CodexReviewPrompt(true, "")
 		assert.Contains(t, prompt, "implementation of plan at docs/plans/feature.md")
 		assert.Contains(t, prompt, "git diff develop...HEAD")
 		assert.Contains(t, prompt, "Branch: develop")
 		assert.NotContains(t, prompt, "{{")
 
-		prompt = r.buildCodexPrompt(false, "fixed the bug")
+		prompt = newPromptBuilderForTest(r).CodexReviewPrompt(false, "fixed the bug")
 		assert.Contains(t, prompt, "PREVIOUS REVIEW CONTEXT")
 		assert.Contains(t, prompt, "fixed the bug")
 		assert.Contains(t, prompt, "git diff")
@@ -1177,7 +1194,7 @@ func TestRunner_appendCommitTrailerInstruction(t *testing.T) {
 		appCfg := &config.Config{CommitTrailer: "Co-authored-by: ralphex <noreply@ralphex.com>"}
 		r := &Runner{cfg: Config{AppConfig: appCfg}}
 
-		result := r.appendCommitTrailerInstruction("do the task")
+		result := newPromptBuilderForTest(r).appendCommitTrailerInstruction("do the task")
 
 		assert.Contains(t, result, "do the task")
 		assert.Contains(t, result, "When making git commits, add the following trailer")
@@ -1188,7 +1205,7 @@ func TestRunner_appendCommitTrailerInstruction(t *testing.T) {
 		appCfg := &config.Config{CommitTrailer: ""}
 		r := &Runner{cfg: Config{AppConfig: appCfg}}
 
-		result := r.appendCommitTrailerInstruction("do the task")
+		result := newPromptBuilderForTest(r).appendCommitTrailerInstruction("do the task")
 
 		assert.Equal(t, "do the task", result)
 	})
@@ -1196,7 +1213,7 @@ func TestRunner_appendCommitTrailerInstruction(t *testing.T) {
 	t.Run("no change when AppConfig is nil", func(t *testing.T) {
 		r := &Runner{cfg: Config{AppConfig: nil}}
 
-		result := r.appendCommitTrailerInstruction("do the task")
+		result := newPromptBuilderForTest(r).appendCommitTrailerInstruction("do the task")
 
 		assert.Equal(t, "do the task", result)
 	})
@@ -1207,7 +1224,7 @@ func TestRunner_replaceBaseVariables_CommitTrailer(t *testing.T) {
 		appCfg := &config.Config{CommitTrailer: "Signed-off-by: bot <bot@example.com>"}
 		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", DefaultBranch: "main", AppConfig: appCfg}}
 
-		result := r.replaceBaseVariables("Plan: {{PLAN_FILE}}, Branch: {{DEFAULT_BRANCH}}")
+		result := newPromptBuilderForTest(r).replaceBaseVariables("Plan: {{PLAN_FILE}}, Branch: {{DEFAULT_BRANCH}}")
 
 		assert.Contains(t, result, "Plan: docs/plans/test.md")
 		assert.Contains(t, result, "Branch: main")
@@ -1218,7 +1235,7 @@ func TestRunner_replaceBaseVariables_CommitTrailer(t *testing.T) {
 		appCfg := &config.Config{CommitTrailer: ""}
 		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", DefaultBranch: "main", AppConfig: appCfg}}
 
-		result := r.replaceBaseVariables("Plan: {{PLAN_FILE}}")
+		result := newPromptBuilderForTest(r).replaceBaseVariables("Plan: {{PLAN_FILE}}")
 
 		assert.Equal(t, "Plan: docs/plans/test.md", result)
 		assert.NotContains(t, result, "trailer")
@@ -1228,7 +1245,7 @@ func TestRunner_replaceBaseVariables_CommitTrailer(t *testing.T) {
 		appCfg := &config.Config{CommitTrailer: "Co-authored-by: test <test@test.com>"}
 		r := &Runner{cfg: Config{PlanFile: "docs/plans/test.md", AppConfig: appCfg}}
 
-		result := r.replacePromptVariables("Task: {{GOAL}}")
+		result := newPromptBuilderForTest(r).replacePromptVariables("Task: {{GOAL}}")
 
 		assert.Contains(t, result, "implementation of plan at docs/plans/test.md")
 		assert.Contains(t, result, "Co-authored-by: test <test@test.com>")
@@ -1238,7 +1255,7 @@ func TestRunner_replaceBaseVariables_CommitTrailer(t *testing.T) {
 		appCfg := &config.Config{CommitTrailer: "Co-authored-by: test <test@test.com>"}
 		r := &Runner{cfg: Config{DefaultBranch: "main", AppConfig: appCfg}}
 
-		result := r.replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}", true, "")
+		result := newPromptBuilderForTest(r).replaceVariablesWithIteration("Diff: {{DIFF_INSTRUCTION}}", true, "")
 
 		assert.Contains(t, result, "git diff main...HEAD")
 		assert.Contains(t, result, "Co-authored-by: test <test@test.com>")
@@ -1250,9 +1267,9 @@ func TestRunner_formatAgentExpansion_ClaudeShape(t *testing.T) {
 		CustomAgents: []config.CustomAgent{{Name: "scanner", Prompt: "scan code"}},
 	}
 	// no agentSyntax set: defaults to claude shape (ExecutorClaude is "")
-	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
+	r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
 
-	result := r.expandAgentReferences("Run {{agent:scanner}} now.")
+	result := newPromptBuilderForTest(r).expandAgentReferences("Run {{agent:scanner}} now.")
 
 	assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent with this prompt:")
 	assert.Contains(t, result, "scan code")
@@ -1264,16 +1281,16 @@ func TestRunner_formatAgentExpansion_ClaudeShape(t *testing.T) {
 
 func TestRunner_reviewContextInstruction(t *testing.T) {
 	t.Run("uses default branch fallback", func(t *testing.T) {
-		r := &Runner{cfg: Config{}, log: newMockLogger("")}
-		got := r.reviewContextInstruction()
+		r := &Runner{cfg: Config{}, log: newMockLogger()}
+		got := newPromptBuilderForTest(r).reviewContextInstruction()
 		assert.Contains(t, got, "git diff master...HEAD")
 		assert.Contains(t, got, "git diff --stat master...HEAD")
 		assert.Contains(t, got, "read the changed source files")
 	})
 
 	t.Run("respects configured default branch", func(t *testing.T) {
-		r := &Runner{cfg: Config{DefaultBranch: "develop"}, log: newMockLogger("")}
-		got := r.reviewContextInstruction()
+		r := &Runner{cfg: Config{DefaultBranch: "develop"}, log: newMockLogger()}
+		got := newPromptBuilderForTest(r).reviewContextInstruction()
 		assert.Contains(t, got, "git diff develop...HEAD")
 		assert.NotContains(t, got, "master")
 	})
@@ -1286,10 +1303,10 @@ func TestRunner_formatAgentExpansion_CodexShape(t *testing.T) {
 	}
 	r := &Runner{
 		cfg: Config{AppConfig: appCfg},
-		log: newMockLogger(""),
+		log: newMockLogger(),
 	}
 
-	result := r.expandAgentReferences("Run {{agent:scanner}} now.")
+	result := newPromptBuilderForTest(r).expandAgentReferences("Run {{agent:scanner}} now.")
 
 	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
 	assert.Contains(t, result, "scan code')", "agent body is the tail of the task argument")
@@ -1306,8 +1323,8 @@ func TestRunner_prependCodexReviewGuidance(t *testing.T) {
 	body := "Review the changes."
 
 	t.Run("codex executor prepends guidance", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: config.ExecutorCodex}}, log: newMockLogger("")}
-		result := r.prependCodexReviewGuidance(body)
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: config.ExecutorCodex}}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).prependCodexReviewGuidance(body)
 
 		assert.True(t, strings.HasPrefix(result, "=== Codex orchestration directives ==="), "guidance block must be at the top")
 		assert.Contains(t, result, "Do NOT set fork_context", "spawn_agent guidance present")
@@ -1317,15 +1334,15 @@ func TestRunner_prependCodexReviewGuidance(t *testing.T) {
 	})
 
 	t.Run("claude executor returns prompt unchanged", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: "claude"}}, log: newMockLogger("")}
-		result := r.prependCodexReviewGuidance(body)
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: "claude"}}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).prependCodexReviewGuidance(body)
 
 		assert.Equal(t, body, result, "non-codex executor must not see codex-specific directives")
 	})
 
 	t.Run("empty executor (default claude) returns prompt unchanged", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: &config.Config{}}, log: newMockLogger("")}
-		result := r.prependCodexReviewGuidance(body)
+		r := &Runner{cfg: Config{AppConfig: &config.Config{}}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).prependCodexReviewGuidance(body)
 
 		assert.Equal(t, body, result, "unset executor must not see codex-specific directives")
 	})
@@ -1335,8 +1352,8 @@ func TestRunner_prependCodexTaskGuidance(t *testing.T) {
 	body := "Execute the next task."
 
 	t.Run("codex executor prepends guidance", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: config.ExecutorCodex}}, log: newMockLogger("")}
-		result := r.prependCodexTaskGuidance(body)
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: config.ExecutorCodex}}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).prependCodexTaskGuidance(body)
 
 		assert.True(t, strings.HasPrefix(result, "=== Codex task-execution directives ==="), "guidance block must be at the top")
 		assert.Contains(t, result, "do NOT follow that skill", "skill-precedence directive present")
@@ -1346,15 +1363,15 @@ func TestRunner_prependCodexTaskGuidance(t *testing.T) {
 	})
 
 	t.Run("claude executor returns prompt unchanged", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: "claude"}}, log: newMockLogger("")}
-		result := r.prependCodexTaskGuidance(body)
+		r := &Runner{cfg: Config{AppConfig: &config.Config{Executor: "claude"}}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).prependCodexTaskGuidance(body)
 
 		assert.Equal(t, body, result, "non-codex executor must not see codex-specific directives")
 	})
 
 	t.Run("empty executor (default claude) returns prompt unchanged", func(t *testing.T) {
-		r := &Runner{cfg: Config{AppConfig: &config.Config{}}, log: newMockLogger("")}
-		result := r.prependCodexTaskGuidance(body)
+		r := &Runner{cfg: Config{AppConfig: &config.Config{}}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).prependCodexTaskGuidance(body)
 
 		assert.Equal(t, body, result, "unset executor must not see codex-specific directives")
 	})
@@ -1378,8 +1395,8 @@ func TestRunner_formatAgentExpansion_AllFiveDefaultAgents(t *testing.T) {
 
 	for _, name := range names {
 		t.Run("claude_"+name, func(t *testing.T) {
-			r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
-			result := r.expandAgentReferences("{{agent:" + name + "}}")
+			r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
+			result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:" + name + "}}")
 
 			assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent with this prompt:")
 			assert.NotContains(t, result, "spawn_agent")
@@ -1393,9 +1410,9 @@ func TestRunner_formatAgentExpansion_AllFiveDefaultAgents(t *testing.T) {
 			codexCfg.Executor = config.ExecutorCodex
 			r := &Runner{
 				cfg: Config{AppConfig: &codexCfg},
-				log: newMockLogger(""),
+				log: newMockLogger(),
 			}
-			result := r.expandAgentReferences("{{agent:" + name + "}}")
+			result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:" + name + "}}")
 
 			assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
 			assert.NotContains(t, result, "Use the Task tool")
@@ -1425,13 +1442,13 @@ func TestRunner_formatAgentExpansion_CodexIgnoresFrontmatterOverrides(t *testing
 	}
 	r := &Runner{
 		cfg: Config{AppConfig: appCfg},
-		log: newMockLogger(""),
+		log: newMockLogger(),
 	}
 
-	mockLog := newMockLogger("")
+	mockLog := newMockLogger()
 	r.log = mockLog
 
-	result := r.expandAgentReferences("{{agent:reviewer}}")
+	result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:reviewer}}")
 
 	assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
 	assert.Contains(t, result, "do a review')", "agent body is the tail of the task argument")
@@ -1450,7 +1467,7 @@ func TestRunner_formatAgentExpansion_CodexIgnoresFrontmatterOverrides(t *testing
 
 	// second expansion of the same agent must NOT fire a second warning (dedup by agent name)
 	callsBefore := len(mockLog.PrintCalls())
-	r.expandAgentReferences("{{agent:reviewer}}")
+	newPromptBuilderForTest(r).expandAgentReferences("{{agent:reviewer}}")
 	newCalls := mockLog.PrintCalls()[callsBefore:]
 	for _, call := range newCalls {
 		assert.NotContains(t, call.Format, "codex mode ignores frontmatter",
@@ -1467,13 +1484,13 @@ func TestRunner_expandAgentReferences_NoCodexWarnWhenFrontmatterEmpty(t *testing
 			Prompt: "do a review",
 		}},
 	}
-	mockLog := newMockLogger("")
+	mockLog := newMockLogger()
 	r := &Runner{
 		cfg: Config{AppConfig: appCfg},
 		log: mockLog,
 	}
 
-	r.expandAgentReferences("{{agent:reviewer}}")
+	newPromptBuilderForTest(r).expandAgentReferences("{{agent:reviewer}}")
 
 	for _, call := range mockLog.PrintCalls() {
 		assert.NotContains(t, call.Format, "codex mode ignores frontmatter",
@@ -1488,8 +1505,8 @@ func TestRunner_formatAgentExpansion_PicksShapeFromExecutor(t *testing.T) {
 		appCfg := testAppConfig(t)
 		appCfg.Executor = config.ExecutorClaude
 		appCfg.CustomAgents = []config.CustomAgent{{Name: "scanner", Prompt: "scan"}}
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
-		result := r.expandAgentReferences("{{agent:scanner}}")
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:scanner}}")
 		assert.Contains(t, result, "Use the Task tool")
 		assert.NotContains(t, result, "spawn_agent")
 	})
@@ -1498,16 +1515,16 @@ func TestRunner_formatAgentExpansion_PicksShapeFromExecutor(t *testing.T) {
 		appCfg := testAppConfig(t)
 		appCfg.Executor = config.ExecutorCodex
 		appCfg.CustomAgents = []config.CustomAgent{{Name: "scanner", Prompt: "scan"}}
-		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger("")}
-		result := r.expandAgentReferences("{{agent:scanner}}")
+		r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
+		result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:scanner}}")
 		assert.Contains(t, result, "spawn_agent")
 		assert.NotContains(t, result, "Use the Task tool")
 	})
 
 	t.Run("nil AppConfig defaults to claude shape (no expansion since no agents)", func(t *testing.T) {
-		r := &Runner{cfg: Config{}, log: newMockLogger("")}
+		r := &Runner{cfg: Config{}, log: newMockLogger()}
 		// without AppConfig, expandAgentReferences returns the prompt unchanged
-		result := r.expandAgentReferences("{{agent:scanner}}")
+		result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:scanner}}")
 		assert.Equal(t, "{{agent:scanner}}", result)
 	})
 }
@@ -1536,9 +1553,9 @@ func TestRunner_formatAgentExpansionCodex_EscapesSingleQuotedLiteral(t *testing.
 					Executor:     config.ExecutorCodex,
 					CustomAgents: []config.CustomAgent{{Name: "x", Prompt: tc.input}},
 				}},
-				log: newMockLogger(""),
+				log: newMockLogger(),
 			}
-			result := r.expandAgentReferences("{{agent:x}}")
+			result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:x}}")
 
 			// the escaped form must appear inside the spawn_agent(...) wrapper
 			assert.Contains(t, result, tc.expected, "escaped body must appear in spawn_agent output")
@@ -1572,7 +1589,7 @@ func TestEscapeCodexSingleQuoted(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {
-			assert.Equal(t, tc.want, r.escapeCodexSingleQuoted(tc.in))
+			assert.Equal(t, tc.want, newPromptBuilderForTest(r).escapeCodexSingleQuoted(tc.in))
 		})
 	}
 }
@@ -1590,9 +1607,9 @@ func TestRunner_formatAgentExpansionCodex_MultiLineAgentBodyStaysSingleLine(t *t
 			Executor:     config.ExecutorCodex,
 			CustomAgents: []config.CustomAgent{{Name: "ml", Prompt: multiLineBody}},
 		}},
-		log: newMockLogger(""),
+		log: newMockLogger(),
 	}
-	result := r.expandAgentReferences("{{agent:ml}}")
+	result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:ml}}")
 
 	// extract just the spawn_agent(...) call by isolating the line that starts the wrapper
 	// the result includes a trailing "Report findings only..." block on subsequent lines.

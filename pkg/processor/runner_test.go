@@ -1,10 +1,8 @@
-package processor_test
+package processor
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,18 +14,10 @@ import (
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/executor"
-	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/processor/mocks"
+	"github.com/umputun/ralphex/pkg/processor/phase"
 	"github.com/umputun/ralphex/pkg/status"
 )
-
-// testAppConfig loads config with embedded defaults for testing.
-func testAppConfig(t *testing.T) *config.Config {
-	t.Helper()
-	cfg, err := config.Load(t.TempDir())
-	require.NoError(t, err)
-	return cfg
-}
 
 // newMockExecutor creates a mock executor with predefined results.
 func newMockExecutor(results []executor.Result) *mocks.ExecutorMock {
@@ -45,7 +35,7 @@ func newMockExecutor(results []executor.Result) *mocks.ExecutorMock {
 }
 
 // newMockLogger creates a mock logger with no-op implementations.
-func newMockLogger(path string) *mocks.LoggerMock {
+func newRunnerMockLogger(path string) *mocks.LoggerMock {
 	return &mocks.LoggerMock{
 		PrintFunc:          func(_ string, _ ...any) {},
 		PrintRawFunc:       func(_ string, _ ...any) {},
@@ -58,12 +48,95 @@ func newMockLogger(path string) *mocks.LoggerMock {
 	}
 }
 
+type testTaskPhase struct {
+	runFunc                  func(ctx context.Context) error
+	validatePlanHasTasksFunc func() error
+}
+
+func (p testTaskPhase) Run(ctx context.Context) error {
+	if p.runFunc == nil {
+		return nil
+	}
+	return p.runFunc(ctx)
+}
+
+func (p testTaskPhase) ValidatePlanHasTasks() error {
+	if p.validatePlanHasTasksFunc == nil {
+		return nil
+	}
+	return p.validatePlanHasTasksFunc()
+}
+
+type testReviewPhase struct {
+	firstFunc func(ctx context.Context) error
+	loopFunc  func(ctx context.Context, prefix string) error
+}
+
+func (p testReviewPhase) First(ctx context.Context) error {
+	if p.firstFunc == nil {
+		return nil
+	}
+	return p.firstFunc(ctx)
+}
+
+func (p testReviewPhase) Loop(ctx context.Context, prefix string) error {
+	if p.loopFunc == nil {
+		return nil
+	}
+	return p.loopFunc(ctx, prefix)
+}
+
+type testExternalReviewPhase struct {
+	toolValue   string
+	hadFindings bool
+	runErr      error
+	runFunc     func(ctx context.Context) error
+}
+
+func (p testExternalReviewPhase) Tool() string {
+	if p.toolValue == "" {
+		return "codex"
+	}
+	return p.toolValue
+}
+
+func (p testExternalReviewPhase) Run(ctx context.Context) (phase.ExternalReviewOutcome, error) {
+	if p.runFunc != nil {
+		if err := p.runFunc(ctx); err != nil {
+			return phase.ExternalReviewOutcome{}, err
+		}
+	}
+	return phase.ExternalReviewOutcome{HadFindings: p.hadFindings}, p.runErr
+}
+
+type testFinalizePhase struct {
+	runFunc func(ctx context.Context) error
+}
+
+func (p testFinalizePhase) Run(ctx context.Context) error {
+	if p.runFunc == nil {
+		return nil
+	}
+	return p.runFunc(ctx)
+}
+
+type testPlanCreationPhase struct {
+	runFunc func(ctx context.Context) error
+}
+
+func (p testPlanCreationPhase) Run(ctx context.Context) error {
+	if p.runFunc == nil {
+		return nil
+	}
+	return p.runFunc(ctx)
+}
+
 func TestRunner_Run_UnknownMode(t *testing.T) {
-	log := newMockLogger("")
+	log := newRunnerMockLogger("")
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	r := processor.NewWithExecutors(processor.Config{Mode: "invalid"}, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(Config{Mode: "invalid"}, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -71,11 +144,11 @@ func TestRunner_Run_UnknownMode(t *testing.T) {
 }
 
 func TestRunner_RunFull_NoPlanFile(t *testing.T) {
-	log := newMockLogger("")
+	log := newRunnerMockLogger("")
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	r := processor.NewWithExecutors(processor.Config{Mode: processor.ModeFull}, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(Config{Mode: ModeFull}, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -88,7 +161,7 @@ func TestRunner_RunFull_Success(t *testing.T) {
 	// all tasks complete - no [ ] checkboxes
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "task done", Signal: status.Completed},    // task phase completes
 		{Output: "review done", Signal: status.ReviewDone}, // first review
@@ -102,11 +175,11 @@ func TestRunner_RunFull_Success(t *testing.T) {
 		{Output: "no issues found"},       // codex iteration 2 — clean
 	})
 
-	cfg := processor.Config{
-		Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 50,
+	cfg := Config{
+		Mode: ModeFull, PlanFile: planFile, MaxIterations: 50,
 		IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -118,7 +191,7 @@ func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "task done", Signal: status.Completed},
 		{Output: "review done", Signal: status.ReviewDone}, // first review
@@ -129,8 +202,8 @@ func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 		{Output: ""}, // codex finds nothing
 	})
 
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeFull, PlanFile: planFile, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -139,13 +212,13 @@ func TestRunner_RunFull_NoCodexFindings(t *testing.T) {
 func TestRunner_RunFull_CodexExecutor_SkipsExternalReview(t *testing.T) {
 	// when --codex is in effect, cfg.AppConfig.Executor == ExecutorCodex and
 	// cfg.AppConfig.ExternalReviewTool is forced to "none" by the CLI layer.
-	// runFull must route through the existing tool=="none" skip in runCodexLoop
+	// runFull must route through the external phase tool=="none" skip
 	// so the external executor is never invoked.
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	task := newMockExecutor([]executor.Result{
 		{Output: "task done", Signal: status.Completed},    // task phase
 		{Output: "review done", Signal: status.ReviewDone}, // first review
@@ -157,14 +230,14 @@ func TestRunner_RunFull_CodexExecutor_SkipsExternalReview(t *testing.T) {
 	appCfg.Executor = config.ExecutorCodex
 	appCfg.ExternalReviewTool = "none"
 
-	cfg := processor.Config{
-		Mode:          processor.ModeFull,
+	cfg := Config{
+		Mode:          ModeFull,
 		PlanFile:      planFile,
 		MaxIterations: 50,
 		CodexEnabled:  true, // would normally enable external review, but ExternalReviewTool="none" wins
 		AppConfig:     appCfg,
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: task, External: external}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: task, External: external}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -173,7 +246,7 @@ func TestRunner_RunFull_CodexExecutor_SkipsExternalReview(t *testing.T) {
 }
 
 func TestRunner_RunReviewOnly_Success(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
@@ -186,8 +259,8 @@ func TestRunner_RunReviewOnly_Success(t *testing.T) {
 		{Output: "no issues found"}, // codex iteration 2
 	})
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -195,7 +268,7 @@ func TestRunner_RunReviewOnly_Success(t *testing.T) {
 }
 
 func TestRunner_RunCodexOnly_Success(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
 		{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
@@ -206,8 +279,8 @@ func TestRunner_RunCodexOnly_Success(t *testing.T) {
 		{Output: "no issues found"}, // codex iteration 2
 	})
 
-	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -215,22 +288,22 @@ func TestRunner_RunCodexOnly_Success(t *testing.T) {
 }
 
 func TestRunner_RunCodexOnly_NoFindings(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	// codex returns empty → no findings → post-codex review skipped
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor([]executor.Result{
 		{Output: ""}, // no findings
 	})
 
-	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 }
 
 func TestRunner_MaxExternalIterations_ExplicitLimit(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	// codex loop: 2 iterations (each = codex + claude eval), then post-codex review
 	claude := newMockExecutor([]executor.Result{
 		{Output: "still issues"},                           // codex eval iter 1 (no CodexDone)
@@ -242,11 +315,11 @@ func TestRunner_MaxExternalIterations_ExplicitLimit(t *testing.T) {
 		{Output: "found issue 2"},
 	})
 
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
+	cfg := Config{
+		Mode: ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
 		MaxExternalIterations: 2, CodexEnabled: true, AppConfig: testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -254,7 +327,7 @@ func TestRunner_MaxExternalIterations_ExplicitLimit(t *testing.T) {
 }
 
 func TestRunner_MaxExternalIterations_DerivedFormula(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	// with MaxIterations=15 and MaxExternalIterations=0 (auto): derived = max(3, 15/5) = 3
 	claude := newMockExecutor([]executor.Result{
 		{Output: "still issues"},                           // codex eval iter 1
@@ -268,11 +341,11 @@ func TestRunner_MaxExternalIterations_DerivedFormula(t *testing.T) {
 		{Output: "found issue 3"},
 	})
 
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 15, IterationDelayMs: 1,
+	cfg := Config{
+		Mode: ModeCodexOnly, MaxIterations: 15, IterationDelayMs: 1,
 		MaxExternalIterations: 0, CodexEnabled: true, AppConfig: testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -280,13 +353,13 @@ func TestRunner_MaxExternalIterations_DerivedFormula(t *testing.T) {
 }
 
 func TestRunner_CodexDisabled_SkipsCodexPhase(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	// codex disabled → no findings → post-codex review skipped
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -299,14 +372,14 @@ func TestRunner_RunTasksOnly_Success(t *testing.T) {
 	// all tasks complete - no [ ] checkboxes
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "task done", Signal: status.Completed}, // task phase completes
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 50, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeTasksOnly, PlanFile: planFile, MaxIterations: 50, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -315,11 +388,11 @@ func TestRunner_RunTasksOnly_Success(t *testing.T) {
 }
 
 func TestRunner_RunTasksOnly_NoPlanFile(t *testing.T) {
-	log := newMockLogger("")
+	log := newRunnerMockLogger("")
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	r := processor.NewWithExecutors(processor.Config{Mode: processor.ModeTasksOnly}, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(Config{Mode: ModeTasksOnly}, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -331,15 +404,15 @@ func TestRunner_RunTasksOnly_TaskPhaseError(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "error", Signal: status.Failed}, // first try
 		{Output: "error", Signal: status.Failed}, // retry
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -351,20 +424,20 @@ func TestRunner_RunTasksOnly_NoReviews(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "task done", Signal: status.Completed},
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{
-		Mode:          processor.ModeTasksOnly,
+	cfg := Config{
+		Mode:          ModeTasksOnly,
 		PlanFile:      planFile,
 		MaxIterations: 50,
 		CodexEnabled:  true, // enabled but should not run in tasks-only mode
 		AppConfig:     testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -373,84 +446,8 @@ func TestRunner_RunTasksOnly_NoReviews(t *testing.T) {
 	assert.Empty(t, codex.RunCalls(), "codex should not run in tasks-only mode")
 }
 
-func TestRunner_TaskPhase_FailedSignal(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
-
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: status.Failed}, // first try
-		{Output: "error", Signal: status.Failed}, // retry
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "FAILED signal")
-}
-
-func TestRunner_TaskPhase_MaxIterations(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
-
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "working..."},
-		{Output: "still working..."},
-		{Output: "more work..."},
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 3, IterationDelayMs: 1, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "max iterations")
-}
-
-func TestRunner_TaskPhase_ContextCanceled(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // cancel immediately
-
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(ctx)
-
-	require.Error(t, err)
-	assert.ErrorIs(t, err, context.Canceled)
-}
-
-func TestRunner_ClaudeReview_FailedSignal(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: status.Failed},
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "FAILED signal")
-}
-
 func TestRunner_CodexPhase_Error(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
@@ -459,8 +456,8 @@ func TestRunner_CodexPhase_Error(t *testing.T) {
 		{Error: errors.New("codex error")},
 	})
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -473,192 +470,18 @@ func TestRunner_ClaudeExecution_Error(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Error: errors.New("claude error")},
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "claude execution")
-}
-
-func TestRunner_ConfigValues(t *testing.T) {
-	tests := []struct {
-		name               string
-		iterationDelayMs   int
-		taskRetryCount     int
-		expectedDelay      time.Duration
-		expectedRetryCount int
-	}{
-		{
-			name:               "default values",
-			iterationDelayMs:   0,
-			taskRetryCount:     0,
-			expectedDelay:      processor.DefaultIterationDelay,
-			expectedRetryCount: 1,
-		},
-		{
-			name:               "custom delay",
-			iterationDelayMs:   500,
-			taskRetryCount:     0,
-			expectedDelay:      500 * time.Millisecond,
-			expectedRetryCount: 1,
-		},
-		{
-			name:               "custom retry count",
-			iterationDelayMs:   0,
-			taskRetryCount:     3,
-			expectedDelay:      processor.DefaultIterationDelay,
-			expectedRetryCount: 3,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			log := newMockLogger("")
-			claude := newMockExecutor(nil)
-			codex := newMockExecutor(nil)
-
-			cfg := processor.Config{
-				IterationDelayMs: tc.iterationDelayMs,
-				TaskRetryCount:   tc.taskRetryCount,
-			}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-			testCfg := r.TestConfig()
-			assert.Equal(t, tc.expectedDelay, testCfg.IterationDelay)
-			assert.Equal(t, tc.expectedRetryCount, testCfg.TaskRetryCount)
-		})
-	}
-}
-
-func TestRunner_HasUncompletedTasks(t *testing.T) {
-	tests := []struct {
-		name     string
-		content  string
-		expected bool
-	}{
-		{
-			name:     "all tasks completed",
-			content:  "# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n- [x] done",
-			expected: false,
-		},
-		{
-			name:     "has uncompleted task",
-			content:  "# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n- [ ] todo",
-			expected: true,
-		},
-		{
-			name:     "no tasks",
-			content:  "# Plan\nJust some text",
-			expected: false,
-		},
-		{
-			name:     "uncompleted in task section",
-			content:  "# Plan\n### Task 1: first\n- [x] done\n- [ ] subtask",
-			expected: true,
-		},
-		{
-			name:     "uncompleted with extra space after dash (aligns with plan parser)",
-			content:  "# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n-  [ ] todo",
-			expected: true,
-		},
-		{
-			name:     "task sections all done, Success criteria has uncompleted (verification-only)",
-			content:  "# Plan\n## Success criteria\n- [ ] Manual: run e2e test\n### Task 1: first\n- [x] done",
-			expected: false,
-		},
-		{
-			name:     "task sections all done, Success criteria after tasks has uncompleted",
-			content:  "# Plan\n### Task 1: first\n- [x] done\n## Success criteria\n- [ ] Manual: run e2e test",
-			expected: false,
-		},
-		{
-			name:     "malformed plan with no task headers has uncompleted",
-			content:  "# Plan\n- [x] done\n- [ ] todo",
-			expected: true,
-		},
-		{
-			name:     "actionable done, only description checkbox unchecked (text contains [ ])",
-			content:  "# Plan\n### Task 1: format\n- [x] Faulti format\n- [ ] use this format for [ ] unchecked items",
-			expected: false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			planFile := filepath.Join(tmpDir, "plan.md")
-			require.NoError(t, os.WriteFile(planFile, []byte(tc.content), 0o600))
-
-			log := newMockLogger("")
-			claude := newMockExecutor(nil)
-			codex := newMockExecutor(nil)
-
-			cfg := processor.Config{PlanFile: planFile}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-			assert.Equal(t, tc.expected, r.TestHasUncompletedTasks())
-		})
-	}
-}
-
-func TestRunner_ValidatePlanHasTasks(t *testing.T) {
-	tests := []struct {
-		name      string
-		content   string
-		wantError bool
-	}{
-		{name: "valid plan with task section", content: "# Plan\n### Task 1: first\n- [ ] todo", wantError: false},
-		{name: "valid plan with iteration section", content: "# Plan\n### Iteration 1: first\n- [ ] todo", wantError: false},
-		{name: "valid plan with all done checkboxes", content: "# Plan\n### Task 1: first\n- [x] done", wantError: false},
-		{name: "valid plan with task section and no checkboxes", content: "# Plan\n### Task 1: first\nsome text", wantError: false},
-		{name: "spec doc without task sections", content: "# Overview\n## Goals\n- describe architecture\n- document interfaces", wantError: true},
-		{name: "plan with only unchecked checkboxes outside task sections", content: "# Plan\n## Overview\n- [ ] not a task", wantError: true},
-		{name: "empty file", content: "", wantError: true},
-		{name: "only title", content: "# Plan", wantError: true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			planFile := filepath.Join(tmpDir, "plan.md")
-			require.NoError(t, os.WriteFile(planFile, []byte(tc.content), 0o600))
-
-			log := newMockLogger("")
-			claude := newMockExecutor(nil)
-			codex := newMockExecutor(nil)
-
-			cfg := processor.Config{PlanFile: planFile}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-			err := r.TestValidatePlanHasTasks()
-			if tc.wantError {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "no executable task sections")
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestRunner_ValidatePlanHasTasks_MissingFile(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{PlanFile: "/nonexistent/plan.md"}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	err := r.TestValidatePlanHasTasks()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse plan for validation")
 }
 
 func TestRunner_RunFull_NoTaskSections(t *testing.T) {
@@ -666,12 +489,12 @@ func TestRunner_RunFull_NoTaskSections(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Overview\n## Goals\n- describe architecture"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -685,63 +508,17 @@ func TestRunner_RunTasksOnly_NoTaskSections(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Overview\n## Goals\n- describe architecture"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no executable task sections")
 	assert.Empty(t, claude.RunCalls(), "claude must not be invoked when plan has no task sections")
-}
-
-func TestRunner_HasUncompletedTasks_CompletedDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	plansDir := filepath.Join(tmpDir, "docs", "plans")
-	completedDir := filepath.Join(plansDir, "completed")
-	require.NoError(t, os.MkdirAll(completedDir, 0o700))
-
-	// file is in completed/, but config references original path
-	originalPath := filepath.Join(plansDir, "plan.md")
-	completedPath := filepath.Join(completedDir, "plan.md")
-	require.NoError(t, os.WriteFile(completedPath, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
-
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{PlanFile: originalPath}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	assert.True(t, r.TestHasUncompletedTasks())
-}
-
-func TestRunner_HasUncompletedTasks_MissingFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	plansDir := filepath.Join(tmpDir, "docs", "plans")
-	require.NoError(t, os.MkdirAll(plansDir, 0o700))
-
-	// file is referenced but does not exist anywhere — neither at original path,
-	// nor in completed/, nor under the alternate date format probe.
-	// this simulates the loop-spin failure mode where an LLM-renamed plan
-	// becomes unresolvable; the runtime must treat it as complete, not stuck.
-	missingPath := filepath.Join(plansDir, "2026-05-12-vanished.md")
-
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{PlanFile: missingPath}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	assert.False(t, r.TestHasUncompletedTasks(), "missing plan file must return false so SignalCompleted is honored")
-
-	for _, call := range log.PrintCalls() {
-		assert.NotContains(t, call.Format, "[WARN]", "missing-file branch must not emit [WARN] (file is gone, signal already implies completion)")
-	}
 }
 
 func TestRunner_BuildCodexPrompt_CompletedDir(t *testing.T) {
@@ -755,373 +532,19 @@ func TestRunner_BuildCodexPrompt_CompletedDir(t *testing.T) {
 	completedPath := filepath.Join(completedDir, "plan.md")
 	require.NoError(t, os.WriteFile(completedPath, []byte("# Plan"), 0o600))
 
-	log := newMockLogger("")
+	log := newRunnerMockLogger("")
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{PlanFile: originalPath, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{PlanFile: originalPath, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 
-	prompt := r.TestBuildCodexPrompt(true, "")
+	locator := newPlanLocator(r.cfg)
+	prompts := newPromptBuilder(promptBuilderOpts{cfg: r.cfg, log: r.log, locator: locator})
+	prompt := prompts.CodexReviewPrompt(true, "")
 
 	assert.Contains(t, prompt, completedPath)
 	assert.NotContains(t, prompt, originalPath)
-}
-
-func TestRunner_TaskRetryCount_UsedCorrectly(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
-
-	log := newMockLogger("progress.txt")
-
-	// test with TaskRetryCount=2 - should retry twice before failing
-	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: status.Failed}, // first try
-		{Output: "error", Signal: status.Failed}, // retry 1
-		{Output: "error", Signal: status.Failed}, // retry 2
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{
-		Mode:           processor.ModeFull,
-		PlanFile:       planFile,
-		MaxIterations:  10,
-		TaskRetryCount: 2,
-		// use 1ms delay for faster tests
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "FAILED signal")
-	// should have tried 3 times: initial + 2 retries
-	assert.Len(t, claude.RunCalls(), 3)
-}
-
-// newMockInputCollector creates a mock input collector with predefined answers.
-func newMockInputCollector(answers []string) *mocks.InputCollectorMock {
-	idx := 0
-	return &mocks.InputCollectorMock{
-		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) {
-			if idx >= len(answers) {
-				return "", errors.New("no more mock answers")
-			}
-			answer := answers[idx]
-			idx++
-			return answer, nil
-		},
-	}
-}
-
-func TestRunner_RunPlan_Success(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "plan created", Signal: status.PlanReady},
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "add health check endpoint",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 1)
-}
-
-func TestRunner_RunPlan_WithQuestion(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	questionSignal := `Let me ask a question.
-
-<<<RALPHEX:QUESTION>>>
-{"question": "Which cache backend?", "options": ["Redis", "In-memory", "File-based"]}
-<<<RALPHEX:END>>>`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: questionSignal},                           // first iteration - asks question
-		{Output: "plan created", Signal: status.PlanReady}, // second iteration - completes
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector([]string{"Redis"})
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "add caching layer",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 2)
-	assert.Len(t, inputCollector.AskQuestionCalls(), 1)
-	assert.Equal(t, "Which cache backend?", inputCollector.AskQuestionCalls()[0].Question)
-	assert.Equal(t, []string{"Redis", "In-memory", "File-based"}, inputCollector.AskQuestionCalls()[0].Options)
-}
-
-func TestRunner_RunPlan_NoPlanDescription(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	cfg := processor.Config{Mode: processor.ModePlan, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "plan description required")
-}
-
-func TestRunner_RunPlan_NoInputCollector(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{Mode: processor.ModePlan, PlanDescription: "test", AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	// don't set input collector
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "input collector required")
-}
-
-func TestRunner_RunPlan_FailedSignal(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "error", Signal: status.Failed},
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "FAILED signal")
-}
-
-func TestRunner_RunPlan_MaxIterations(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "exploring..."},
-		{Output: "still exploring..."},
-		{Output: "more exploring..."},
-		{Output: "continuing..."},
-		{Output: "still going..."},
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	// maxPlanIterations = max(5, 10/5) = 5
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    10,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "max plan iterations")
-}
-
-func TestRunner_RunPlan_ContextCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // cancel immediately
-
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(ctx)
-
-	require.Error(t, err)
-	assert.ErrorIs(t, err, context.Canceled)
-}
-
-func TestRunner_RunPlan_ClaudeError(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Error: errors.New("claude error")},
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "claude execution")
-}
-
-func TestRunner_RunPlan_InputCollectorError(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	questionSignal := `<<<RALPHEX:QUESTION>>>
-{"question": "Which backend?", "options": ["A", "B"]}
-<<<RALPHEX:END>>>`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: questionSignal},
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := &mocks.InputCollectorMock{
-		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) {
-			return "", errors.New("input error")
-		},
-	}
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "collect answer")
-}
-
-func TestRunner_New_CodexNotInstalled_AutoDisables(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	appCfg := testAppConfig(t)
-	appCfg.CodexCommand = "/nonexistent/path/to/codex" // command that doesn't exist
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  true,
-		AppConfig:     appCfg,
-	}
-
-	// use processor.New (not NewWithExecutors) to trigger LookPath check
-	r := processor.New(cfg, log, &status.PhaseHolder{})
-
-	// verify warning was logged with error details
-	var foundWarning bool
-	for _, call := range log.PrintCalls() {
-		// format includes %v for error, so check format string
-		if strings.Contains(call.Format, "codex not found") && strings.Contains(call.Format, "%v") {
-			foundWarning = true
-			break
-		}
-	}
-	assert.True(t, foundWarning, "should log warning about codex not found with error details")
-
-	// verify runner was created (auto-disable happens at construction time)
-	assert.NotNil(t, r, "runner should be created even when codex not found")
-}
-
-func TestRunner_New_CodexNotInstalled_CustomReviewStillWorks(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	appCfg := testAppConfig(t)
-	appCfg.CodexCommand = "/nonexistent/path/to/codex" // command that doesn't exist
-	appCfg.ExternalReviewTool = "custom"               // using custom, not codex
-	appCfg.CustomReviewScript = "/path/to/script.sh"
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  true,
-		AppConfig:     appCfg,
-	}
-
-	// use processor.New (not NewWithExecutors) to trigger LookPath check
-	r := processor.New(cfg, log, &status.PhaseHolder{})
-
-	// verify NO warning was logged (custom reviews don't need codex binary)
-	var foundWarning bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "codex not found") {
-			foundWarning = true
-			break
-		}
-	}
-	assert.False(t, foundWarning, "should NOT log warning about codex when using custom external review")
-
-	// verify runner was created
-	assert.NotNil(t, r, "runner should be created")
-}
-
-func TestRunner_New_CodexNotInstalled_NoneReviewStillWorks(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	appCfg := testAppConfig(t)
-	appCfg.CodexCommand = "/nonexistent/path/to/codex" // command that doesn't exist
-	appCfg.ExternalReviewTool = "none"                 // external review disabled
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  true,
-		AppConfig:     appCfg,
-	}
-
-	// use processor.New (not NewWithExecutors) to trigger LookPath check
-	r := processor.New(cfg, log, &status.PhaseHolder{})
-
-	// verify NO warning was logged (no external review means no codex needed)
-	var foundWarning bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "codex not found") {
-			foundWarning = true
-			break
-		}
-	}
-	assert.False(t, foundWarning, "should NOT log warning about codex when external review is disabled")
-
-	// verify runner was created
-	assert.NotNil(t, r, "runner should be created")
 }
 
 func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
@@ -1129,14 +552,14 @@ func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "You've hit your limit", Error: &executor.PatternMatchError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}},
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -1160,20 +583,20 @@ func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
 }
 
 func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
-	// verifies that LimitPatternError is handled gracefully via handlePatternMatchError
+	// verifies that LimitPatternError is handled gracefully by executionPolicy
 	// when waitOnLimit == 0, same as PatternMatchError (logs error + help, returns error)
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "You've hit your limit", Error: &executor.LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}},
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{Mode: processor.ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	cfg := Config{Mode: ModeFull, PlanFile: planFile, MaxIterations: 10, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
@@ -1182,7 +605,7 @@ func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
 	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
 	assert.Equal(t, "claude /usage", limitErr.HelpCmd)
 
-	// verify logging via handlePatternMatchError
+	// verify executionPolicy logging
 	var foundErrorLog, foundHelpLog bool
 	for _, call := range log.PrintCalls() {
 		if strings.Contains(call.Format, "error: detected") && strings.Contains(call.Format, "%s output") {
@@ -1196,358 +619,12 @@ func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
 	assert.True(t, foundHelpLog, "should log help command")
 }
 
-func TestRunner_ErrorPatternMatch_CodexInReviewPhase(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "Rate limit exceeded", Error: &executor.PatternMatchError{Pattern: "rate limit", HelpCmd: "codex /status"}},
-	})
-
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	var patternErr *executor.PatternMatchError
-	require.ErrorAs(t, err, &patternErr)
-	assert.Equal(t, "rate limit", patternErr.Pattern)
-	assert.Equal(t, "codex /status", patternErr.HelpCmd)
-
-	// verify logging mentions codex
-	var foundErrorLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "error: detected") && strings.Contains(call.Format, "%s output") {
-			foundErrorLog = true
-		}
-	}
-	assert.True(t, foundErrorLog, "should log error message with codex")
-}
-
-func TestRunner_ErrorPatternMatch_ClaudeInReviewLoop(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone},                                                              // first review
-		{Output: "rate limited", Error: &executor.PatternMatchError{Pattern: "rate limited", HelpCmd: "claude /usage"}}, // review loop hits rate limit
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	var patternErr *executor.PatternMatchError
-	require.ErrorAs(t, err, &patternErr)
-	assert.Equal(t, "rate limited", patternErr.Pattern)
-	assert.Equal(t, "claude /usage", patternErr.HelpCmd)
-}
-
-func TestRunner_ErrorPatternMatch_ClaudeInPlanCreation(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "hit limit", Error: &executor.PatternMatchError{Pattern: "hit limit", HelpCmd: "claude /usage"}},
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	var patternErr *executor.PatternMatchError
-	require.ErrorAs(t, err, &patternErr)
-}
-
-// newMockInputCollectorWithDraftReview creates a mock input collector with predefined answers and draft review responses.
-func newMockInputCollectorWithDraftReview(answers []string, draftResponses []struct {
-	action   string
-	feedback string
-	err      error
-}) *mocks.InputCollectorMock {
-	answerIdx := 0
-	draftIdx := 0
-	return &mocks.InputCollectorMock{
-		AskQuestionFunc: func(_ context.Context, _ string, _ []string) (string, error) {
-			if answerIdx >= len(answers) {
-				return "", errors.New("no more mock answers")
-			}
-			answer := answers[answerIdx]
-			answerIdx++
-			return answer, nil
-		},
-		AskDraftReviewFunc: func(_ context.Context, _ string, _ string) (string, string, error) {
-			if draftIdx >= len(draftResponses) {
-				return "", "", errors.New("no more mock draft responses")
-			}
-			resp := draftResponses[draftIdx]
-			draftIdx++
-			return resp.action, resp.feedback, resp.err
-		},
-	}
-}
-
-func TestRunner_RunPlan_PlanDraft_AcceptFlow(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	planDraftSignal := `Let me create a plan for you.
-
-<<<RALPHEX:PLAN_DRAFT>>>
-# Test Plan
-
-## Overview
-This is a test plan.
-
-## Tasks
-- [ ] Task 1
-<<<RALPHEX:END>>>`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: planDraftSignal},                          // first iteration - emits draft
-		{Output: "plan created", Signal: status.PlanReady}, // second iteration - completes
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
-		action   string
-		feedback string
-		err      error
-	}{
-		{action: "accept", feedback: "", err: nil},
-	})
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "add health endpoint",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 2)
-	assert.Len(t, inputCollector.AskDraftReviewCalls(), 1)
-	assert.Contains(t, inputCollector.AskDraftReviewCalls()[0].PlanContent, "# Test Plan")
-}
-
-func TestRunner_RunPlan_PlanDraft_ReviseFlow(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
-# Initial Plan
-## Tasks
-- [ ] Task 1
-<<<RALPHEX:END>>>`
-
-	revisedDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
-# Revised Plan
-## Tasks
-- [ ] Task 1
-- [ ] Task 2 (added per feedback)
-<<<RALPHEX:END>>>`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: planDraftSignal},                          // first iteration - initial draft
-		{Output: revisedDraftSignal},                       // second iteration - revised draft
-		{Output: "plan created", Signal: status.PlanReady}, // third iteration - completes
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
-		action   string
-		feedback string
-		err      error
-	}{
-		{action: "revise", feedback: "please add a second task", err: nil},
-		{action: "accept", feedback: "", err: nil},
-	})
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "add health endpoint",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 3)
-	assert.Len(t, inputCollector.AskDraftReviewCalls(), 2)
-
-	// verify feedback was passed to claude in second call
-	secondPrompt := claude.RunCalls()[1].Prompt
-	assert.Contains(t, secondPrompt, "please add a second task")
-	assert.Contains(t, secondPrompt, "PREVIOUS DRAFT FEEDBACK")
-}
-
-func TestRunner_RunPlan_PlanDraft_RejectFlow(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
-# Test Plan
-## Tasks
-- [ ] Task 1
-<<<RALPHEX:END>>>`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: planDraftSignal}, // first iteration - emits draft
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
-		action   string
-		feedback string
-		err      error
-	}{
-		{action: "reject", feedback: "", err: nil},
-	})
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "add health endpoint",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	require.ErrorIs(t, err, processor.ErrUserRejectedPlan)
-	assert.Len(t, claude.RunCalls(), 1)
-	assert.Len(t, inputCollector.AskDraftReviewCalls(), 1)
-}
-
-func TestRunner_RunPlan_PlanDraft_AskDraftReviewError(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
-# Test Plan
-<<<RALPHEX:END>>>`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: planDraftSignal},
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
-		action   string
-		feedback string
-		err      error
-	}{
-		{action: "", feedback: "", err: errors.New("draft review error")},
-	})
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "collect draft review")
-}
-
-func TestRunner_RunPlan_PlanDraft_MalformedSignal(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	// malformed - missing END marker
-	malformedDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
-# Test Plan
-This content has no END marker`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: malformedDraftSignal},                     // first iteration - malformed draft
-		{Output: "plan created", Signal: status.PlanReady}, // second iteration - completes anyway
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollectorWithDraftReview(nil, nil)
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "test",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	// should log warning but continue
-	var foundWarning bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "warning") && strings.Contains(call.Format, "%v") {
-			foundWarning = true
-			break
-		}
-	}
-	assert.True(t, foundWarning, "should log warning about malformed signal")
-}
-
-func TestRunner_RunPlan_PlanDraft_WithQuestionThenDraft(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-	questionSignal := `<<<RALPHEX:QUESTION>>>
-{"question": "Which framework?", "options": ["Gin", "Chi", "Echo"]}
-<<<RALPHEX:END>>>`
-
-	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
-# Plan with Gin
-## Tasks
-- [ ] Set up Gin router
-<<<RALPHEX:END>>>`
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: questionSignal},                           // first iteration - question
-		{Output: planDraftSignal},                          // second iteration - draft
-		{Output: "plan created", Signal: status.PlanReady}, // third iteration - completes
-	})
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollectorWithDraftReview([]string{"Gin"}, []struct {
-		action   string
-		feedback string
-		err      error
-	}{
-		{action: "accept", feedback: "", err: nil},
-	})
-
-	cfg := processor.Config{
-		Mode:             processor.ModePlan,
-		PlanDescription:  "add API endpoints",
-		MaxIterations:    50,
-		IterationDelayMs: 1,
-		AppConfig:        testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 3)
-	assert.Len(t, inputCollector.AskQuestionCalls(), 1)
-	assert.Len(t, inputCollector.AskDraftReviewCalls(), 1)
-}
-
 func TestRunner_CodexAndPostReview_ShortCircuitWhenCodexExecutorDisablesExternal(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	codexTask := newMockExecutor([]executor.Result{
 		{Output: "task done", Signal: status.Completed},
 		{Output: "review done", Signal: status.ReviewDone},
@@ -1557,14 +634,14 @@ func TestRunner_CodexAndPostReview_ShortCircuitWhenCodexExecutorDisablesExternal
 	appCfg := testAppConfig(t)
 	appCfg.Executor = config.ExecutorCodex
 	appCfg.ExternalReviewTool = "none"
-	cfg := processor.Config{
-		Mode:          processor.ModeFull,
+	cfg := Config{
+		Mode:          ModeFull,
 		PlanFile:      planFile,
 		MaxIterations: 50,
 		CodexEnabled:  false,
 		AppConfig:     appCfg,
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: codexTask}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: codexTask}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -1585,14 +662,14 @@ func TestRunner_CodexAndPostReview_ShortCircuitWhenCodexExecutorDisablesExternal
 }
 
 func TestRunner_CodexAndPostReview_ShortCircuitWhenClaudeModeDisablesExternal(t *testing.T) {
-	// the short-circuit at runCodexAndPostReview must fire for claude mode too when
-	// external review is disabled — otherwise dashboards briefly show PhaseCodex and a
-	// "codex external review" section header followed by contradictory log lines.
+	// the short-circuit at runExternalAndPostReview must fire for claude mode too when
+	// external review is disabled — otherwise dashboards briefly show PhaseCodex and an
+	// external review section header followed by contradictory log lines.
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "task done", Signal: status.Completed},    // task phase
 		{Output: "review done", Signal: status.ReviewDone}, // first review
@@ -1601,14 +678,14 @@ func TestRunner_CodexAndPostReview_ShortCircuitWhenClaudeModeDisablesExternal(t 
 	codex := newMockExecutor(nil)
 
 	holder := &status.PhaseHolder{}
-	cfg := processor.Config{
-		Mode:          processor.ModeFull,
+	cfg := Config{
+		Mode:          ModeFull,
 		PlanFile:      planFile,
 		MaxIterations: 50,
-		CodexEnabled:  false, // makes externalReviewTool() return "none"
+		CodexEnabled:  false, // makes the external review phase return tool "none"
 		AppConfig:     testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, holder)
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, holder)
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -1628,159 +705,8 @@ func TestRunner_CodexAndPostReview_ShortCircuitWhenClaudeModeDisablesExternal(t 
 	assert.True(t, foundDisabledMsg, "should log 'external review disabled' message")
 }
 
-func TestRunner_Finalize_RunsWhenEnabled(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: status.Completed},    // task phase
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		// codex disabled → no findings → post-codex review skipped
-		{Output: "finalize done"}, // finalize step
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{
-		Mode:            processor.ModeFull,
-		PlanFile:        planFile,
-		MaxIterations:   50,
-		CodexEnabled:    false,
-		FinalizeEnabled: true,
-		AppConfig:       testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	// verify finalize step ran (4 claude calls: task + first review + pre-codex loop + finalize)
-	assert.Len(t, claude.RunCalls(), 4)
-
-	// verify finalize section was printed
-	var foundFinalizeSection bool
-	for _, call := range log.PrintSectionCalls() {
-		if strings.Contains(call.Section.Label, "finalize") {
-			foundFinalizeSection = true
-			break
-		}
-	}
-	assert.True(t, foundFinalizeSection, "should print finalize section header")
-}
-
-func TestRunner_Finalize_SkippedWhenDisabled(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: status.Completed},    // task phase
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		// codex disabled → no findings → post-codex review skipped
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{
-		Mode:            processor.ModeFull,
-		PlanFile:        planFile,
-		MaxIterations:   50,
-		CodexEnabled:    false,
-		FinalizeEnabled: false, // disabled
-		AppConfig:       testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	// verify finalize step did NOT run (only 3 claude calls: task + first review + pre-codex loop)
-	assert.Len(t, claude.RunCalls(), 3)
-}
-
-func TestRunner_Finalize_FailureDoesNotBlockSuccess(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: status.Completed},    // task phase
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		// codex disabled → no findings → post-codex review skipped
-		{Error: errors.New("finalize error")}, // finalize fails
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{
-		Mode:            processor.ModeFull,
-		PlanFile:        planFile,
-		MaxIterations:   50,
-		CodexEnabled:    false,
-		FinalizeEnabled: true,
-		AppConfig:       testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	// run should succeed despite finalize failure
-	require.NoError(t, err)
-
-	// verify finalize error was logged
-	var foundErrorLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "finalize step failed") {
-			foundErrorLog = true
-			break
-		}
-	}
-	assert.True(t, foundErrorLog, "should log finalize failure")
-}
-
-func TestRunner_Finalize_FailedSignalDoesNotBlockSuccess(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "task done", Signal: status.Completed},    // task phase
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		// codex disabled → no findings → post-codex review skipped
-		{Output: "failed", Signal: status.Failed}, // finalize reports FAILED signal
-	})
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{
-		Mode:            processor.ModeFull,
-		PlanFile:        planFile,
-		MaxIterations:   50,
-		CodexEnabled:    false,
-		FinalizeEnabled: true,
-		AppConfig:       testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	// run should succeed despite finalize FAILED signal
-	require.NoError(t, err)
-
-	// verify finalize failure was logged
-	var foundFailureLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "finalize step reported failure") {
-			foundFailureLog = true
-			break
-		}
-	}
-	assert.True(t, foundFailureLog, "should log finalize failure signal")
-}
-
 func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		{Output: "review done", Signal: status.ReviewDone}, // first review
 		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
@@ -1789,14 +715,14 @@ func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{
-		Mode:            processor.ModeReview,
+	cfg := Config{
+		Mode:            ModeReview,
 		MaxIterations:   50,
 		CodexEnabled:    false,
 		FinalizeEnabled: true,
 		AppConfig:       testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -1805,21 +731,21 @@ func TestRunner_Finalize_RunsInReviewOnlyMode(t *testing.T) {
 }
 
 func TestRunner_Finalize_RunsInCodexOnlyMode(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 	claude := newMockExecutor([]executor.Result{
 		// codex disabled → no findings → post-codex review skipped
 		{Output: "finalize done"}, // finalize step
 	})
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{
-		Mode:            processor.ModeCodexOnly,
+	cfg := Config{
+		Mode:            ModeCodexOnly,
 		MaxIterations:   50,
 		CodexEnabled:    false,
 		FinalizeEnabled: true,
 		AppConfig:       testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
@@ -1835,7 +761,7 @@ func TestRunner_Finalize_CodexExecutor_RunsAllPhasesThroughSharedInstance(t *tes
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 
 	// one shared codex mock for task + both reviews + finalize.
 	codexExec := newMockExecutor([]executor.Result{
@@ -1848,16 +774,16 @@ func TestRunner_Finalize_CodexExecutor_RunsAllPhasesThroughSharedInstance(t *tes
 	appCfg := testAppConfig(t)
 	appCfg.Executor = config.ExecutorCodex
 	appCfg.ExternalReviewTool = "none" // codex mode disables external review
-	cfg := processor.Config{
-		Mode:                  processor.ModeFull,
+	cfg := Config{
+		Mode:                  ModeFull,
 		PlanFile:              planFile,
 		MaxIterations:         50,
 		FinalizeEnabled:       true,
 		ExternalReviewToolSet: true,
 		AppConfig:             appCfg,
 	}
-	r := processor.NewWithExecutors(cfg, log,
-		processor.Executors{Task: codexExec, Review: codexExec, External: nil},
+	r := NewWithExecutors(cfg, log,
+		Executors{Task: codexExec, Review: codexExec, External: nil},
 		&status.PhaseHolder{})
 	err := r.Run(t.Context())
 
@@ -1868,7 +794,7 @@ func TestRunner_Finalize_CodexExecutor_RunsAllPhasesThroughSharedInstance(t *tes
 func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 	tests := []struct {
 		name          string
-		mode          processor.Mode
+		mode          Mode
 		planFile      bool
 		claudeResults []executor.Result
 		codexResults  []executor.Result
@@ -1878,7 +804,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 	}{
 		{
 			name: "codex-only runs codex then review then finalize",
-			mode: processor.ModeCodexOnly,
+			mode: ModeCodexOnly,
 			claudeResults: []executor.Result{
 				{Output: "fixed issues"},                           // codex eval iter 1 — findings fixed
 				{Output: "done", Signal: status.CodexDone},         // codex eval iter 2 — no more findings
@@ -1900,7 +826,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 		},
 		{
 			name: "review-only runs first review then codex then review then finalize",
-			mode: processor.ModeReview,
+			mode: ModeReview,
 			claudeResults: []executor.Result{
 				{Output: "review done", Signal: status.ReviewDone}, // first review
 				{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
@@ -1935,7 +861,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 				phases = append(phases, newPhase)
 			})
 
-			log := newMockLogger("progress.txt")
+			log := newRunnerMockLogger("progress.txt")
 			claude := newMockExecutor(tc.claudeResults)
 			codex := newMockExecutor(tc.codexResults)
 
@@ -1946,7 +872,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 				require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
 			}
 
-			cfg := processor.Config{
+			cfg := Config{
 				Mode:             tc.mode,
 				PlanFile:         planFile,
 				MaxIterations:    50,
@@ -1955,7 +881,7 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 				FinalizeEnabled:  true,
 				AppConfig:        testAppConfig(t),
 			}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, holder)
+			r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, holder)
 			err := r.Run(t.Context())
 
 			require.NoError(t, err)
@@ -1966,9 +892,75 @@ func TestRunner_CodexAndPostReview_PipelineOrder(t *testing.T) {
 	}
 }
 
+func TestRunner_CodexAndPostReview_InjectedExternalNoFindingsSkipsPostReview(t *testing.T) {
+	log := newRunnerMockLogger("progress.txt")
+	cfg := Config{Mode: ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: newMockExecutor(nil)}, &status.PhaseHolder{})
+
+	var reviewCalled, finalizeCalled bool
+	r.phases.external = testExternalReviewPhase{toolValue: "codex"}
+	r.phases.review = testReviewPhase{loopFunc: func(context.Context, string) error {
+		reviewCalled = true
+		return nil
+	}}
+	r.phases.finalize = testFinalizePhase{runFunc: func(context.Context) error {
+		finalizeCalled = true
+		return nil
+	}}
+
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.False(t, reviewCalled)
+	assert.True(t, finalizeCalled)
+}
+
+func TestRunner_ExternalAndPostReview_UsesToolSpecificSectionLabel(t *testing.T) {
+	log := newRunnerMockLogger("progress.txt")
+	cfg := Config{Mode: ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: newMockExecutor(nil)}, &status.PhaseHolder{})
+
+	r.phases.external = testExternalReviewPhase{toolValue: "custom"}
+	r.phases.finalize = testFinalizePhase{}
+
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	sectionCalls := log.PrintSectionCalls()
+	labels := make([]string, 0, len(sectionCalls))
+	for _, call := range sectionCalls {
+		labels = append(labels, call.Section.Label)
+	}
+	assert.Contains(t, labels, "custom external review")
+}
+
+func TestRunner_CodexAndPostReview_InjectedExternalFindingsRunsPostReview(t *testing.T) {
+	log := newRunnerMockLogger("progress.txt")
+	cfg := Config{Mode: ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: newMockExecutor(nil)}, &status.PhaseHolder{})
+
+	var reviewPrefix string
+	var finalizeCalled bool
+	r.phases.external = testExternalReviewPhase{toolValue: "codex", hadFindings: true}
+	r.phases.review = testReviewPhase{loopFunc: func(_ context.Context, prefix string) error {
+		reviewPrefix = prefix
+		return nil
+	}}
+	r.phases.finalize = testFinalizePhase{runFunc: func(context.Context) error {
+		finalizeCalled = true
+		return nil
+	}}
+
+	err := r.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Contains(t, reviewPrefix, "fix: address code review findings")
+	assert.True(t, finalizeCalled)
+}
+
 func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
 	t.Run("prefix applied when external review had findings", func(t *testing.T) {
-		log := newMockLogger("progress.txt")
+		log := newRunnerMockLogger("progress.txt")
 
 		var capturedPrompts []string
 		claude := &mocks.ExecutorMock{
@@ -1991,11 +983,11 @@ func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
 			{Output: "no issues found"}, // codex iteration 2
 		})
 
-		cfg := processor.Config{
-			Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
+		cfg := Config{
+			Mode: ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
 			CodexEnabled: true, AppConfig: testAppConfig(t),
 		}
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+		r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 		err := r.Run(t.Context())
 
 		require.NoError(t, err)
@@ -2005,14 +997,14 @@ func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
 	})
 
 	t.Run("no prefix when external review disabled", func(t *testing.T) {
-		log := newMockLogger("progress.txt")
+		log := newRunnerMockLogger("progress.txt")
 
 		// codex disabled → no findings → post-codex review skipped → claude not called
 		claude := newMockExecutor(nil)
 		codex := newMockExecutor(nil)
 
-		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+		cfg := Config{Mode: ModeCodexOnly, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
+		r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 		err := r.Run(t.Context())
 
 		require.NoError(t, err)
@@ -2020,381 +1012,79 @@ func TestRunner_CodexAndPostReview_CommitPendingPrefix(t *testing.T) {
 	})
 }
 
-func TestRunner_Finalize_ContextCancellationPropagates(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop
-		// codex disabled → no findings → post-codex review skipped
-		{Error: context.Canceled}, // finalize step - context canceled
-	})
-	codex := newMockExecutor(nil)
+func TestRunner_PlanModePreservesRejectedPlanSentinel(t *testing.T) {
+	r := NewWithExecutors(
+		Config{Mode: ModePlan, AppConfig: testAppConfig(t)},
+		newRunnerMockLogger("progress.txt"),
+		Executors{},
+		&status.PhaseHolder{},
+	)
+	r.phases.planCreation = testPlanCreationPhase{runFunc: func(_ context.Context) error {
+		return ErrUserRejectedPlan
+	}}
 
-	cfg := processor.Config{
-		Mode:            processor.ModeReview,
-		MaxIterations:   50,
-		CodexEnabled:    false,
-		FinalizeEnabled: true,
-		AppConfig:       testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	// run should fail with context canceled error
-	require.Error(t, err)
-	assert.ErrorIs(t, err, context.Canceled)
-}
-
-func TestRunner_ExternalReviewTool_CodexEnabled(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone}, // codex evaluation (no findings → post-codex review skipped)
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue"},
-	})
-
-	appCfg := testAppConfig(t)
-	// explicitly set to codex (though it's the default)
-	appCfg.ExternalReviewTool = "codex"
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  true,
-		AppConfig:     appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 1, "codex should be called when external_review_tool=codex")
-}
-
-func TestRunner_ExternalReviewTool_None(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	// external review tool=none → no findings → post-codex review skipped
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.ExternalReviewTool = "none"
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  true, // enabled but tool is none
-		AppConfig:     appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Empty(t, codex.RunCalls(), "codex should not be called when external_review_tool=none")
-}
-
-func TestRunner_ExternalReviewTool_BackwardCompat_CodexDisabled(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	// codex disabled → no findings → post-codex review skipped
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	// external_review_tool is "codex" (default), but CodexEnabled is false
-	appCfg.ExternalReviewTool = "codex"
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  false, // this should override external_review_tool
-		AppConfig:     appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Empty(t, codex.RunCalls(), "codex should not be called when CodexEnabled=false (backward compat)")
-}
-
-func TestRunner_ExternalReviewTool_ExplicitSet_OverridesCodexEnabledDisabled(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone}, // codex evaluation (no findings → post-codex review skipped)
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue"},
-	})
-
-	appCfg := testAppConfig(t)
-	appCfg.ExternalReviewTool = "codex"
-
-	// codex_enabled=false combined with an explicit ExternalReviewToolSet
-	// (e.g. via --external-review-tool=codex) should run the chosen tool, not "none"
-	cfg := processor.Config{
-		Mode:                  processor.ModeCodexOnly,
-		MaxIterations:         50,
-		CodexEnabled:          false,
-		ExternalReviewToolSet: true,
-		AppConfig:             appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 1, "explicit ExternalReviewTool should win over CodexEnabled=false")
-}
-
-func TestRunner_ExternalReviewTool_Custom_Success(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone}, // custom evaluation (no findings → post-codex review skipped)
-	})
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.ExternalReviewTool = "custom"
-	appCfg.CustomReviewScript = "/path/to/script.sh"
-
-	// create a mock custom executor
-	customExec := &executor.CustomExecutor{
-		Script: appCfg.CustomReviewScript,
-		OutputHandler: func(text string) {
-			log.PrintAligned(text)
-		},
-	}
-	// mock the runner to simulate custom executor behavior
-	customResultIdx := 0
-	customResults := []executor.Result{
-		{Output: "found issue in foo.go:10"},
-	}
-
-	// override the runner for this test to use custom
-	mockCustomRunner := &mockCustomRunnerImpl{
-		results: customResults,
-		idx:     &customResultIdx,
-	}
-	customExec.SetRunner(mockCustomRunner)
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  true,
-		AppConfig:     appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex, Custom: customExec}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Empty(t, codex.RunCalls(), "codex should not be called when external_review_tool=custom")
-	assert.Len(t, claude.RunCalls(), 1, "claude should be called for evaluation only (no findings → post-codex review skipped)")
-}
-
-func TestRunner_ExternalReviewTool_Custom_NoDuplicateOutput(t *testing.T) {
-	var printAlignedCalls []string
-	log := newMockLogger("progress.txt")
-	log.PrintAlignedFunc = func(text string) { printAlignedCalls = append(printAlignedCalls, text) }
-
-	claude := newMockExecutor([]executor.Result{
-		{Output: "done", Signal: processor.SignalCodexDone}, // no findings → post-codex review skipped
-	})
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.ExternalReviewTool = "custom"
-	appCfg.CustomReviewScript = "/path/to/script.sh"
-
-	customExec := &executor.CustomExecutor{
-		Script:        appCfg.CustomReviewScript,
-		OutputHandler: func(text string) { log.PrintAligned(text) },
-	}
-	customResultIdx := 0
-	mockCustomRunner := &mockCustomRunnerImpl{
-		results: []executor.Result{{Output: "issue in foo.go:10\n"}},
-		idx:     &customResultIdx,
-	}
-	customExec.SetRunner(mockCustomRunner)
-
-	cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex, Custom: customExec}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-	require.NoError(t, err)
-
-	// count how many times the custom output line appears in PrintAligned calls
-	count := 0
-	for _, call := range printAlignedCalls {
-		if strings.Contains(call, "issue in foo.go:10") {
-			count++
-		}
-	}
-	assert.Equal(t, 1, count, "custom review output should appear exactly once (streamed), not duplicated by summary")
-}
-
-func TestRunner_ExternalReviewTool_Custom_NotConfigured(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.ExternalReviewTool = "custom"
-	// CustomReviewScript is not set
-
-	cfg := processor.Config{
-		Mode:          processor.ModeCodexOnly,
-		MaxIterations: 50,
-		CodexEnabled:  true,
-		AppConfig:     appCfg,
-	}
-	// no custom executor passed
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "custom review script not configured")
+	assert.Equal(t, ErrUserRejectedPlan, err)
 }
 
-// mockCustomRunnerImpl is a mock implementation of executor.CustomRunner for testing.
-type mockCustomRunnerImpl struct {
-	results []executor.Result
-	idx     *int
-}
-
-func (m *mockCustomRunnerImpl) Run(_ context.Context, _, _ string) (io.Reader, func() error, error) {
-	if *m.idx >= len(m.results) {
-		return nil, nil, errors.New("no more mock results")
-	}
-	result := m.results[*m.idx]
-	*m.idx++
-	return strings.NewReader(result.Output), func() error { return result.Error }, nil
-}
-
-func TestRunner_ReviewLoop_NoCommitExit(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "looked at code, nothing to fix"},         // pre-codex review loop iteration - no signal
+func TestRunner_SetInputCollector_ReachesConcretePlanPhase(t *testing.T) {
+	log := newRunnerMockLogger("progress.txt")
+	exec := newMockExecutor([]executor.Result{
+		{Output: `<<<RALPHEX:QUESTION>>>
+{"question":"Choose storage","options":["sqlite","postgres"]}
+<<<RALPHEX:END>>>`},
+		{Signal: status.PlanReady},
 	})
-	codex := newMockExecutor(nil)
-
-	// mock git checker returns same hash and diff both times (no changes made)
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
-		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
-	}
-
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 2)
-
-	// verify "no changes detected" was logged
-	var foundNoChanges bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "no changes detected") {
-			foundNoChanges = true
-			break
-		}
-	}
-	assert.True(t, foundNoChanges, "should log no changes detected")
-}
-
-func TestRunner_ReviewLoop_CommitDetected_ContinuesLoop(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "fixed issues"},                           // pre-codex review loop iteration 1 - no signal
-		{Output: "review done", Signal: status.ReviewDone}, // pre-codex review loop iteration 2 - done
-	})
-	codex := newMockExecutor(nil)
-
-	// mock git checker: hash changes between before/after calls within an iteration
-	// simulating that claude made a commit during the review
-	hashes := []string{
-		"aaaa00000000000000000000000000000000aaaa", // pre-codex loop iter 1: headBefore
-		"bbbb00000000000000000000000000000000bbbb", // pre-codex loop iter 1: headAfter (different = commit detected)
-		"bbbb00000000000000000000000000000000bbbb", // pre-codex loop iter 2: headBefore (REVIEW_DONE exits)
-	}
-	hashIdx := 0
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc: func() (string, error) {
-			require.Less(t, hashIdx, len(hashes), "unexpected extra HeadHash call #%d", hashIdx)
-			h := hashes[hashIdx]
-			hashIdx++
-			return h, nil
+	collector := &mocks.InputCollectorMock{
+		AskQuestionFunc: func(_ context.Context, question string, options []string) (string, error) {
+			assert.Equal(t, "Choose storage", question)
+			assert.Equal(t, []string{"sqlite", "postgres"}, options)
+			return "sqlite", nil
 		},
-		DiffFingerprintFunc: func() (string, error) { return "constant-diff", nil },
+		AskDraftReviewFunc: func(_ context.Context, _ string, _ string) (string, string, error) {
+			return "accept", "", nil
+		},
 	}
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: false, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
+	cfg := Config{Mode: ModePlan, PlanDescription: "create plan", MaxIterations: 5, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{Task: exec}, &status.PhaseHolder{})
+	r.SetInputCollector(collector)
+
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 3)
-	assert.Len(t, gitMock.HeadHashCalls(), 3, "expected exactly 3 HeadHash calls")
+	assert.Len(t, collector.AskQuestionCalls(), 1)
 }
 
-func TestRunner_ReviewLoop_GitCheckerNil_SkipsNoCommitCheck(t *testing.T) {
-	log := newMockLogger("progress.txt")
+func TestRunner_SetPauseHandler_ReachesConcreteTaskPhase(t *testing.T) {
+	tmpDir := t.TempDir()
+	planFile := filepath.Join(tmpDir, "plan.md")
+	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
-	// max review iterations = max(3, 30/10) = 3 per loop
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "looking at code"},                        // pre-codex review loop 1
-		{Output: "looking at code"},                        // pre-codex review loop 2
-		{Output: "looking at code"},                        // pre-codex review loop 3
+	breakCh := make(chan struct{}, 1)
+	pauseCalled := make(chan struct{}, 1)
+	exec := &mocks.ExecutorMock{RunFunc: func(ctx context.Context, _ string) executor.Result {
+		breakCh <- struct{}{}
+		<-ctx.Done()
+		return executor.Result{Error: ctx.Err()}
+	}}
+
+	cfg := Config{Mode: ModeTasksOnly, PlanFile: planFile, MaxIterations: 5, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, newRunnerMockLogger("progress.txt"), Executors{Task: exec}, &status.PhaseHolder{})
+	r.SetBreakCh(breakCh)
+	r.SetPauseHandler(func(context.Context) bool {
+		pauseCalled <- struct{}{}
+		return false
 	})
-	codex := newMockExecutor(nil)
 
-	// no git checker - nil
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, IterationDelayMs: 1, CodexEnabled: false, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
-	require.NoError(t, err)
-	// first review + pre-codex loop (3 iterations, max reached)
-	assert.Len(t, claude.RunCalls(), 4)
+	require.ErrorIs(t, err, ErrUserAborted)
+	assert.Len(t, pauseCalled, 1)
 }
 
-func TestRunner_ReviewLoop_GitCheckerError_SkipsNoCommitCheck(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// ModeReview flow: first review → pre-codex review loop → codex (disabled, no findings, post-codex skipped)
-	// max review iterations = max(3, 30/10) = 3 per loop
-	claude := newMockExecutor([]executor.Result{
-		{Output: "review done", Signal: status.ReviewDone}, // first review
-		{Output: "looking at code"},                        // pre-codex review loop 1
-		{Output: "looking at code"},                        // pre-codex review loop 2
-		{Output: "looking at code"},                        // pre-codex review loop 3
-	})
-	codex := newMockExecutor(nil)
-
-	// git checker always returns error — should degrade gracefully (run to max iterations)
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc:        func() (string, error) { return "", errors.New("git HEAD error") },
-		DiffFingerprintFunc: func() (string, error) { return "", errors.New("git diff error") },
-	}
-
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 30, IterationDelayMs: 1, CodexEnabled: false, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	// first review + pre-codex loop (3 iterations, max reached)
-	assert.Len(t, claude.RunCalls(), 4)
-}
-
-// TestRunner_SleepWithContext_CancelDuringDelay verifies that context cancellation
-// during iteration delay causes prompt exit (not blocking for the full delay).
 func TestRunner_SleepWithContext_CancelDuringDelay(t *testing.T) {
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
@@ -2404,824 +1094,34 @@ func TestRunner_SleepWithContext_CancelDuringDelay(t *testing.T) {
 	const longDelay = 5000 // 5 seconds
 
 	// executor returns no signal (no completion), so runner will loop and hit sleepWithContext
-	claude := newMockExecutor([]executor.Result{
-		{Output: "working on it"},
-	})
+	var cancel context.CancelFunc
+	claude := &mocks.ExecutorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
+		cancel()
+		return executor.Result{Output: "working on it"}
+	}}
 	codex := newMockExecutor(nil)
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 
-	cfg := processor.Config{
-		Mode:             processor.ModeFull,
+	cfg := Config{
+		Mode:             ModeFull,
 		PlanFile:         planFile,
 		MaxIterations:    50,
 		IterationDelayMs: longDelay,
 		AppConfig:        testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
 
-	// cancel context after a short delay (50ms) — well before iteration delay (5s)
-	ctx, cancel := context.WithCancel(t.Context())
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
+	ctx, cancelFunc := context.WithCancel(t.Context())
+	cancel = cancelFunc
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
 
-	start := time.Now()
-	err := r.Run(ctx)
-	elapsed := time.Since(start)
-
-	require.ErrorIs(t, err, context.Canceled)
-	// should exit well before the 5s iteration delay
-	assert.Less(t, elapsed, time.Duration(longDelay)*time.Millisecond,
-		"should exit promptly on cancellation, not wait for full iteration delay")
-}
-
-func TestRunner_NextPlanTaskPosition(t *testing.T) {
-	tests := []struct {
-		name     string
-		content  string
-		expected int
-	}{
-		{name: "first task uncompleted", content: "# Plan\n### Task 1: setup\n- [ ] do thing\n### Task 2: build\n- [ ] build it", expected: 1},
-		{name: "second task uncompleted", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [ ] build it", expected: 2},
-		{name: "all done", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [x] built", expected: 0},
-		{name: "inserted task 2.5", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: api\n- [x] done\n### Task 2.5: middleware\n- [ ] add it\n### Task 3: tests\n- [ ] test", expected: 3},
-		{name: "retry same task", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [x] first\n- [ ] second\n### Task 3: test\n- [ ] test", expected: 2},
-		{name: "header-only task skipped", content: "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: notes\n### Task 3: build\n- [ ] build it", expected: 3},
-		{name: "no tasks", content: "# Plan\nJust some text", expected: 0},
-		{name: "skips task with only description checkbox unchecked", content: "# Plan\n### Task 1: format\n- [x] done\n- [ ] use [ ] for example\n### Task 2: build\n- [ ] build it", expected: 2},
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("runner did not exit promptly on cancellation")
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			planFile := filepath.Join(tmpDir, "plan.md")
-			require.NoError(t, os.WriteFile(planFile, []byte(tc.content), 0o600))
-
-			log := newMockLogger("")
-			claude := newMockExecutor(nil)
-			codex := newMockExecutor(nil)
-
-			cfg := processor.Config{PlanFile: planFile}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-			assert.Equal(t, tc.expected, r.TestNextPlanTaskPosition())
-		})
-	}
-}
-
-func TestRunner_NextPlanTaskPosition_MissingFile(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{PlanFile: "/nonexistent/plan.md"}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	assert.Equal(t, 0, r.TestNextPlanTaskPosition(), "missing file should return 0")
-}
-
-func TestRunner_NextPlanTaskPosition_EmptyPlanFile(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{PlanFile: ""}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	assert.Equal(t, 0, r.TestNextPlanTaskPosition(), "empty plan file path should return 0")
-}
-
-func TestRunner_TaskPhase_UsesPlanTaskPosition(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	// task 1 done, task 2 uncompleted - position should be 2
-	planContent := "# Plan\n### Task 1: setup\n- [x] done\n### Task 2: build\n- [ ] build it"
-	require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0o600))
-
-	log := newMockLogger("progress.txt")
-	// first call: task runs, signals completed; but plan still has [ ] items
-	// so runner continues, and on second iteration, plan is updated (simulate by updating file)
-	callCount := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(_ context.Context, _ string) executor.Result {
-			callCount++
-			if callCount == 1 {
-				// simulate task 2 completion: update plan file and signal completed
-				updated := strings.ReplaceAll(planContent, "- [ ] build it", "- [x] build it")
-				_ = os.WriteFile(planFile, []byte(updated), 0o600)
-				return executor.Result{Output: "task done", Signal: status.Completed}
-			}
-			return executor.Result{Error: errors.New("no more mock results")}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 50, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-
-	// verify section was printed with task position 2 (not loop counter 1)
-	require.NotEmpty(t, log.PrintSectionCalls())
-	var foundTaskSection bool
-	for _, call := range log.PrintSectionCalls() {
-		if call.Section.Iteration == 2 && strings.Contains(call.Section.Label, "task iteration 2") {
-			foundTaskSection = true
-			break
-		}
-	}
-	assert.True(t, foundTaskSection, "should print section with task position 2, got sections: %v",
-		func() []string {
-			calls := log.PrintSectionCalls()
-			labels := make([]string, 0, len(calls))
-			for _, c := range calls {
-				labels = append(labels, c.Section.Label)
-			}
-			return labels
-		}())
-}
-
-func TestRunner_RunWithLimitRetry_RetryOnLimitError(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil) // not used directly
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.WaitOnLimit = 10 * time.Millisecond
-	appCfg.WaitOnLimitSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	// mock run function: returns LimitPatternError on first call, success on second
-	callCount := 0
-	mockRun := func(_ context.Context, _ string) executor.Result {
-		callCount++
-		if callCount == 1 {
-			return executor.Result{Error: &executor.LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}}
-		}
-		return executor.Result{Output: "success", Signal: status.Completed}
-	}
-
-	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
-
-	require.NoError(t, result.Error)
-	assert.Equal(t, "success", result.Output)
-	assert.Equal(t, 2, callCount, "should retry after limit error")
-
-	// verify rate limit message was logged
-	var foundLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "rate limit detected") {
-			foundLog = true
-			break
-		}
-	}
-	assert.True(t, foundLog, "should log rate limit detection message")
-}
-
-func TestRunner_RunWithLimitRetry_NoRetryWhenWaitZero(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	// waitOnLimit is zero (default) - no retry
-	cfg := processor.Config{AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	// verify wait is zero
-	assert.Zero(t, r.TestConfig().WaitOnLimit)
-
-	callCount := 0
-	mockRun := func(_ context.Context, _ string) executor.Result {
-		callCount++
-		return executor.Result{Error: &executor.LimitPatternError{Pattern: "You've hit your limit", HelpCmd: "claude /usage"}}
-	}
-
-	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
-
-	require.Error(t, result.Error)
-	var limitErr *executor.LimitPatternError
-	require.ErrorAs(t, result.Error, &limitErr)
-	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
-	assert.Equal(t, 1, callCount, "should not retry when wait is zero")
-}
-
-func TestRunner_RunWithLimitRetry_ContextCancelledDuringWait(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.WaitOnLimit = 10 * time.Second // long wait
-	appCfg.WaitOnLimitSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	callCount := 0
-	mockRun := func(_ context.Context, _ string) executor.Result {
-		callCount++
-		// cancel context right after first call to simulate interruption during wait
-		cancel()
-		return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
-	}
-
-	result := r.TestRunWithLimitRetry(ctx, mockRun, "test prompt", "claude")
-
-	require.Error(t, result.Error)
-	require.ErrorIs(t, result.Error, context.Canceled)
-	assert.Equal(t, 1, callCount, "should not retry when context canceled")
-}
-
-func TestRunner_RunWithLimitRetry_PatternMatchErrorNotRetried(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.WaitOnLimit = 10 * time.Millisecond
-	appCfg.WaitOnLimitSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	callCount := 0
-	mockRun := func(_ context.Context, _ string) executor.Result {
-		callCount++
-		return executor.Result{Error: &executor.PatternMatchError{Pattern: "API Error", HelpCmd: "claude /usage"}}
-	}
-
-	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
-
-	require.Error(t, result.Error)
-	var patternErr *executor.PatternMatchError
-	require.ErrorAs(t, result.Error, &patternErr)
-	assert.Equal(t, "API Error", patternErr.Pattern)
-	assert.Equal(t, 1, callCount, "should not retry PatternMatchError")
-}
-
-func TestRunner_RunWithLimitRetry_MultipleRetries(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.WaitOnLimit = 5 * time.Millisecond
-	appCfg.WaitOnLimitSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	callCount := 0
-	mockRun := func(_ context.Context, _ string) executor.Result {
-		callCount++
-		if callCount <= 3 {
-			return executor.Result{Error: &executor.LimitPatternError{Pattern: "rate limit", HelpCmd: "claude /usage"}}
-		}
-		return executor.Result{Output: "finally done"}
-	}
-
-	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
-
-	require.NoError(t, result.Error)
-	assert.Equal(t, "finally done", result.Output)
-	assert.Equal(t, 4, callCount, "should retry multiple times until success")
-}
-
-func TestRunner_RunWithLimitRetry_NoErrorPassesThrough(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.WaitOnLimit = time.Hour
-	appCfg.WaitOnLimitSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	callCount := 0
-	mockRun := func(_ context.Context, _ string) executor.Result {
-		callCount++
-		return executor.Result{Output: "success", Signal: status.Completed}
-	}
-
-	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
-
-	require.NoError(t, result.Error)
-	assert.Equal(t, "success", result.Output)
-	assert.Equal(t, status.Completed, result.Signal)
-	assert.Equal(t, 1, callCount, "should not retry on success")
-}
-
-func TestRunner_WaitOnLimit_PopulatedFromConfig(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.WaitOnLimit = 45 * time.Minute
-	appCfg.WaitOnLimitSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	assert.Equal(t, 45*time.Minute, r.TestConfig().WaitOnLimit)
-}
-
-func TestRunner_WaitOnLimit_ZeroWhenNoConfig(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{} // no AppConfig
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	assert.Zero(t, r.TestConfig().WaitOnLimit)
-}
-
-func TestRunner_Finalize_LimitPatternWithWaitRetries(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	callCount := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(_ context.Context, _ string) executor.Result {
-			callCount++
-			// codex disabled → no findings → post-codex review skipped → finalize is first call
-			if callCount == 1 {
-				// finalize: limit error on first attempt
-				return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
-			}
-			// finalize: success on retry
-			return executor.Result{Output: "finalize done", Signal: status.ReviewDone}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.WaitOnLimit = 10 * time.Millisecond
-	appCfg.WaitOnLimitSet = true
-
-	cfg := processor.Config{
-		Mode:            processor.ModeCodexOnly,
-		MaxIterations:   50,
-		CodexEnabled:    false, // skip codex phase
-		FinalizeEnabled: true,
-		AppConfig:       appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Equal(t, 2, callCount, "should retry finalize after limit error")
-}
-
-func TestRunner_Finalize_LimitPatternWithoutWaitLogsAndContinues(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	callCount := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(_ context.Context, _ string) executor.Result {
-			callCount++
-			// codex disabled → no findings → post-codex review skipped → finalize is first call
-			// finalize: limit error, no wait configured
-			return executor.Result{Error: &executor.LimitPatternError{Pattern: "limit hit", HelpCmd: "claude /usage"}}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	cfg := processor.Config{
-		Mode:            processor.ModeCodexOnly,
-		MaxIterations:   50,
-		CodexEnabled:    false,
-		FinalizeEnabled: true,
-		AppConfig:       testAppConfig(t), // default: WaitOnLimit = 0
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err, "finalize limit error should not block success (best-effort)")
-	assert.Equal(t, 1, callCount, "should not retry when wait is zero")
-
-	// verify limit log message (handlePatternMatchError logs "error: detected %q in %s output")
-	var foundLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "detected") {
-			foundLog = true
-			break
-		}
-	}
-	assert.True(t, foundLog, "should log limit pattern message via handlePatternMatchError")
-}
-
-func TestRunner_ExternalReviewLoop_StalemateDetection_BreaksAfterN(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// codex-only flow: external review loop → post-codex claude review loop
-	// with ReviewPatience=2, loop should break after 2 unchanged rounds
-	// external loop: codex run → claude eval (no signal, no commit) → codex run → claude eval (no signal, no commit) → stalemate break
-	claude := newMockExecutor([]executor.Result{
-		{Output: "rejected findings, no changes"},   // claude eval iteration 1 - no CodexDone signal
-		{Output: "rejected findings again"},         // claude eval iteration 2 - no CodexDone signal (stalemate break here)
-		{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue in foo.go:10"}, // codex iteration 1
-		{Output: "found issue in foo.go:10"}, // codex iteration 2
-	})
-
-	// git checker returns same hash and diff every time (no changes made by claude)
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
-		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
-	}
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
-		ReviewPatience: 2, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 2, "codex should run exactly 2 times before stalemate")
-	assert.Len(t, claude.RunCalls(), 3, "claude: 2 evals + 1 post-codex review")
-
-	// verify stalemate log message
-	var foundStalemate bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "stalemate detected") && strings.Contains(call.Format, "unchanged rounds") {
-			foundStalemate = true
-			break
-		}
-	}
-	assert.True(t, foundStalemate, "should log stalemate detection message")
-}
-
-func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnCommit(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// with ReviewPatience=2, if hash changes on round 2, counter resets and needs 2 more unchanged
-	// round 1: unchanged (counter=1), round 2: changed (counter=0), round 3: codex done
-	claude := newMockExecutor([]executor.Result{
-		{Output: "rejected findings, no changes"},          // claude eval iteration 1 (unchanged)
-		{Output: "fixed the issue, committed"},             // claude eval iteration 2 (hash changed)
-		{Output: "done", Signal: status.CodexDone},         // claude eval iteration 3 (codex done signal)
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue in foo.go:10"}, // codex iteration 1
-		{Output: "found issue in bar.go:20"}, // codex iteration 2
-		{Output: "found issue in baz.go:30"}, // codex iteration 3
-	})
-
-	// git checker: same hash for round 1 (before+after), different hash for round 2
-	hashIdx := 0
-	hashes := []string{
-		"aaaa00000000000000000000000000000000aaaa", // round 1 before
-		"aaaa00000000000000000000000000000000aaaa", // round 1 after (unchanged)
-		"aaaa00000000000000000000000000000000aaaa", // round 2 before
-		"bbbb00000000000000000000000000000000bbbb", // round 2 after (changed - reset)
-		"bbbb00000000000000000000000000000000bbbb", // round 3 before (codex done, no after call)
-	}
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc: func() (string, error) {
-			if hashIdx >= len(hashes) {
-				return "ffff00000000000000000000000000000000ffff", nil
-			}
-			h := hashes[hashIdx]
-			hashIdx++
-			return h, nil
-		},
-		DiffFingerprintFunc: func() (string, error) { return "constant-diff", nil },
-	}
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
-		ReviewPatience: 2, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (no stalemate)")
-	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
-
-	// verify no stalemate log
-	var foundStalemate bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "stalemate detected") {
-			foundStalemate = true
-			break
-		}
-	}
-	assert.False(t, foundStalemate, "should not log stalemate when counter was reset")
-}
-
-func TestRunner_ExternalReviewLoop_StalemateDetection_ResetsOnDiffChange(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// with ReviewPatience=2, if diff fingerprint changes on round 2 (working tree edits without commit),
-	// counter resets and needs 2 more unchanged rounds. HEAD stays the same throughout (no commits).
-	// round 1: unchanged (counter=1), round 2: diff changed (counter=0), round 3: codex done
-	claude := newMockExecutor([]executor.Result{
-		{Output: "rejected findings, no changes"},          // claude eval iteration 1 (no edits)
-		{Output: "fixed the issue"},                        // claude eval iteration 2 (edited files, no commit)
-		{Output: "done", Signal: status.CodexDone},         // claude eval iteration 3 (codex done signal)
-		{Output: "review done", Signal: status.ReviewDone}, // post-codex review loop
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue in foo.go:10"}, // codex iteration 1
-		{Output: "found issue in bar.go:20"}, // codex iteration 2
-		{Output: "found issue in baz.go:30"}, // codex iteration 3
-	})
-
-	// git checker: HEAD never changes (no commits), but diff fingerprint changes on round 2
-	diffIdx := 0
-	diffs := []string{
-		"diff-aaa", // round 1 before
-		"diff-aaa", // round 1 after (unchanged - stalemate round)
-		"diff-aaa", // round 2 before
-		"diff-bbb", // round 2 after (changed - claude edited files)
-		"diff-bbb", // round 3 before (codex done, no after call)
-	}
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc: func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
-		DiffFingerprintFunc: func() (string, error) {
-			if diffIdx >= len(diffs) {
-				return "diff-zzz", nil
-			}
-			d := diffs[diffIdx]
-			diffIdx++
-			return d, nil
-		},
-	}
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
-		ReviewPatience: 2, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (no stalemate, diff change reset counter)")
-	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
-
-	// verify no stalemate log
-	var foundStalemate bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "stalemate detected") {
-			foundStalemate = true
-			break
-		}
-	}
-	assert.False(t, foundStalemate, "should not log stalemate when diff fingerprint changed")
-}
-
-func TestRunner_ExternalReviewLoop_StalemateDetection_DisabledWhenZero(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// with ReviewPatience=0 (disabled), loop runs to max iterations even with unchanged HEAD
-	// max external iterations = max(3, 50/5) = 10, but we limit to 3 via MaxExternalIterations
-	claude := newMockExecutor([]executor.Result{
-		{Output: "rejected findings"},               // claude eval iteration 1
-		{Output: "rejected findings"},               // claude eval iteration 2
-		{Output: "rejected findings"},               // claude eval iteration 3
-		{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue"}, // codex iteration 1
-		{Output: "found issue"}, // codex iteration 2
-		{Output: "found issue"}, // codex iteration 3
-	})
-
-	// git checker returns same hash and diff (would trigger stalemate if enabled)
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
-		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
-	}
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
-		ReviewPatience: 0, MaxExternalIterations: 3, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 3, "codex should run all 3 iterations (stalemate disabled)")
-	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
-
-	// verify no stalemate log
-	var foundStalemate bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "stalemate detected") {
-			foundStalemate = true
-			break
-		}
-	}
-	assert.False(t, foundStalemate, "should not log stalemate when ReviewPatience=0")
-}
-
-func TestRunner_ExternalReviewLoop_StalemateDetection_NilGitChecker(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// with ReviewPatience=2 and nil git checker, stalemate detection should be skipped gracefully
-	// headHash() returns "" when git is nil, and stalemate check requires headBefore != ""
-	// max external iterations limited to 3
-	claude := newMockExecutor([]executor.Result{
-		{Output: "rejected findings"},               // claude eval iteration 1
-		{Output: "rejected findings"},               // claude eval iteration 2
-		{Output: "rejected findings"},               // claude eval iteration 3
-		{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue"}, // codex iteration 1
-		{Output: "found issue"}, // codex iteration 2
-		{Output: "found issue"}, // codex iteration 3
-	})
-
-	// no git checker set (nil)
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
-		ReviewPatience: 2, MaxExternalIterations: 3, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	// deliberately NOT calling r.SetGitChecker()
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 3, "codex should run all 3 iterations (git checker nil)")
-	assert.Len(t, claude.RunCalls(), 4, "claude: 3 evals + 1 post-codex review")
-
-	// verify no stalemate log
-	var foundStalemate bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "stalemate detected") {
-			foundStalemate = true
-			break
-		}
-	}
-	assert.False(t, foundStalemate, "should not log stalemate when git checker is nil")
-}
-
-func TestRunner_ExternalReviewLoop_BreakChannel_ExitsEarly(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// break channel receives a value during codex execution, causing context cancellation.
-	// codex-only flow: codex run (break fires) → loop exits → no findings → post-codex review skipped.
-	breakCh := make(chan struct{}, 1)
-
-	claude := newMockExecutor(nil) // not called (break before eval, no findings)
-	codex := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			breakCh <- struct{}{} // trigger break during codex execution
-			<-ctx.Done()          // wait for context cancellation
-			return executor.Result{Error: ctx.Err()}
-		},
-	}
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
-		MaxExternalIterations: 5, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetBreakCh(breakCh)
-
-	err := r.Run(t.Context())
-	require.NoError(t, err)
-
-	// codex called once (interrupted by break)
-	assert.Len(t, codex.RunCalls(), 1, "codex should run once before break interrupts it")
-
-	// claude not called — break before eval, no findings, post-codex review skipped
-	assert.Empty(t, claude.RunCalls(), "claude should not be called when break fires before any eval")
-
-	// verify break log message
-	var foundBreak bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "manual break requested") {
-			foundBreak = true
-			break
-		}
-	}
-	assert.True(t, foundBreak, "should log manual break message")
-}
-
-func TestRunner_ExternalReviewLoop_NilBreakChannel_RunsNormally(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// nil break channel: loop runs to completion based on CodexDone signal
-	claude := newMockExecutor([]executor.Result{
-		{Output: "no issues", Signal: status.CodexDone}, // claude eval (codex done, no findings → post-codex review skipped)
-	})
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue in foo.go:10"}, // codex iteration 1
-	})
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true,
-		MaxExternalIterations: 5, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	// deliberately NOT calling r.SetBreakCh() — nil channel
-
-	err := r.Run(t.Context())
-	require.NoError(t, err)
-
-	assert.Len(t, codex.RunCalls(), 1, "codex should run once")
-	assert.Len(t, claude.RunCalls(), 1, "claude: 1 eval only (no findings → post-codex review skipped)")
-
-	// verify no break log
-	var foundBreak bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "manual break") {
-			foundBreak = true
-			break
-		}
-	}
-	assert.False(t, foundBreak, "should not log manual break with nil channel")
-}
-
-func TestRunner_PostCodexReview_SkippedWhenNoFindings(t *testing.T) {
-	t.Run("no actionable findings on first iteration skips post-codex review", func(t *testing.T) {
-		log := newMockLogger("progress.txt")
-		// codex finds something, but claude eval says "no actionable findings" → CodexDone on first iter
-		claude := newMockExecutor([]executor.Result{
-			{Output: "dismissed all findings", Signal: status.CodexDone},
-		})
-		codex := newMockExecutor([]executor.Result{
-			{Output: "found potential issue in foo.go:10"},
-		})
-
-		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-		err := r.Run(t.Context())
-
-		require.NoError(t, err)
-		assert.Len(t, claude.RunCalls(), 1, "claude: 1 eval only, post-codex review skipped")
-		assert.Len(t, codex.RunCalls(), 1)
-
-		// verify skip was logged
-		var foundSkip bool
-		for _, call := range log.PrintCalls() {
-			if strings.Contains(call.Format, "skipping post-codex claude review") {
-				foundSkip = true
-				break
-			}
-		}
-		assert.True(t, foundSkip, "should log that post-codex review was skipped")
-	})
-
-	t.Run("findings on first iteration runs post-codex review", func(t *testing.T) {
-		log := newMockLogger("progress.txt")
-		// codex finds issue, claude fixes it, then next codex iteration is clean
-		claude := newMockExecutor([]executor.Result{
-			{Output: "fixed the issue"},                 // codex eval iter 1 — fixed
-			{Output: "clean", Signal: status.CodexDone}, // codex eval iter 2 — done
-			{Output: "done", Signal: status.ReviewDone}, // post-codex review loop
-		})
-		codex := newMockExecutor([]executor.Result{
-			{Output: "found issue in foo.go:10"},
-			{Output: "no issues found"},
-		})
-
-		cfg := processor.Config{
-			Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
-			CodexEnabled: true, AppConfig: testAppConfig(t),
-		}
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-		err := r.Run(t.Context())
-
-		require.NoError(t, err)
-		assert.Len(t, claude.RunCalls(), 3, "claude: 2 evals + 1 post-codex review")
-		assert.Len(t, codex.RunCalls(), 2)
-	})
-
-	t.Run("empty codex output skips post-codex review", func(t *testing.T) {
-		log := newMockLogger("progress.txt")
-		claude := newMockExecutor(nil) // not called
-		codex := newMockExecutor([]executor.Result{
-			{Output: ""}, // empty = no findings
-		})
-
-		cfg := processor.Config{Mode: processor.ModeCodexOnly, MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-		err := r.Run(t.Context())
-
-		require.NoError(t, err)
-		assert.Empty(t, claude.RunCalls(), "claude should not be called when codex returns empty")
-	})
 }
 
 func TestRunner_FullMode_ErrUserAborted_SkipsReview(t *testing.T) {
@@ -3229,22 +1129,24 @@ func TestRunner_FullMode_ErrUserAborted_SkipsReview(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 
 	claude := newMockExecutor(nil) // should not be called for review
 	codex := newMockExecutor(nil)  // should not be called
 
-	cfg := processor.Config{
-		Mode: processor.ModeFull, MaxIterations: 50, CodexEnabled: true,
+	cfg := Config{
+		Mode: ModeFull, MaxIterations: 50, CodexEnabled: true,
 		PlanFile: planFile, AppConfig: testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.TestSetTaskPhaseOverride(func(_ context.Context) error {
-		return processor.ErrUserAborted
-	})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	taskPhase := testTaskPhase{runFunc: func(_ context.Context) error {
+		return ErrUserAborted
+	}}
+	r.phases.task = taskPhase
+	r.phases.taskValidator = taskPhase
 
 	err := r.Run(t.Context())
-	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller")
+	require.ErrorIs(t, err, ErrUserAborted, "ErrUserAborted should propagate to caller")
 
 	// verify no executor was called (task phase was overridden, review phase skipped)
 	assert.Empty(t, claude.RunCalls(), "claude should not run when task phase aborts")
@@ -3266,1031 +1168,28 @@ func TestRunner_TasksOnly_ErrUserAborted_CleanExit(t *testing.T) {
 	planFile := filepath.Join(tmpDir, "plan.md")
 	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [ ] todo"), 0o600))
 
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 
 	claude := newMockExecutor(nil)
 	codex := newMockExecutor(nil)
 
-	cfg := processor.Config{
-		Mode: processor.ModeTasksOnly, MaxIterations: 50,
+	cfg := Config{
+		Mode: ModeTasksOnly, MaxIterations: 50,
 		PlanFile: planFile, AppConfig: testAppConfig(t),
 	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.TestSetTaskPhaseOverride(func(_ context.Context) error {
-		return processor.ErrUserAborted
-	})
+	r := NewWithExecutors(cfg, log, Executors{Task: claude, External: codex}, &status.PhaseHolder{})
+	taskPhase := testTaskPhase{runFunc: func(_ context.Context) error {
+		return ErrUserAborted
+	}}
+	r.phases.task = taskPhase
+	r.phases.taskValidator = taskPhase
 
 	err := r.Run(t.Context())
-	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller in tasks-only mode")
-}
-
-func TestRunner_DrainBreakCh(t *testing.T) {
-	t.Run("drains pending value", func(t *testing.T) {
-		breakCh := make(chan struct{}, 1)
-		breakCh <- struct{}{} // pre-load a pending value
-
-		cfg := processor.Config{AppConfig: testAppConfig(t)}
-		log := newMockLogger("")
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{
-			Task: newMockExecutor(nil), External: newMockExecutor(nil),
-		}, &status.PhaseHolder{})
-		r.SetBreakCh(breakCh)
-
-		r.TestDrainBreakCh()
-
-		// channel should now be empty
-		select {
-		case <-breakCh:
-			t.Fatal("channel should be empty after drain")
-		default:
-			// expected: no value remaining
-		}
-	})
-
-	t.Run("no-op on empty channel", func(t *testing.T) {
-		breakCh := make(chan struct{}, 1) // empty
-
-		cfg := processor.Config{AppConfig: testAppConfig(t)}
-		log := newMockLogger("")
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{
-			Task: newMockExecutor(nil), External: newMockExecutor(nil),
-		}, &status.PhaseHolder{})
-		r.SetBreakCh(breakCh)
-
-		r.TestDrainBreakCh() // should not block
-	})
-
-	t.Run("no-op on nil channel", func(t *testing.T) {
-		cfg := processor.Config{AppConfig: testAppConfig(t)}
-		log := newMockLogger("")
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{
-			Task: newMockExecutor(nil), External: newMockExecutor(nil),
-		}, &status.PhaseHolder{})
-		// deliberately NOT calling r.SetBreakCh() — nil channel
-
-		r.TestDrainBreakCh() // should not panic
-	})
-}
-
-func TestRunner_SessionTimeout_BlockingExecutor(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	// mock run function that blocks until context is canceled
-	mockRun := func(ctx context.Context, _ string) executor.Result {
-		<-ctx.Done()
-		return executor.Result{Error: ctx.Err()}
-	}
-
-	start := time.Now()
-	result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", "claude")
-	elapsed := time.Since(start)
-
-	// should have timed out around 50ms, not blocked indefinitely
-	assert.Less(t, elapsed, 500*time.Millisecond, "should timeout quickly, not block")
-
-	// error is cleared on session timeout so callers treat it as a non-completing iteration
-	require.NoError(t, result.Error)
-
-	// verify session timeout warning was logged
-	var foundLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "session timed out") {
-			foundLog = true
-			break
-		}
-	}
-	assert.True(t, foundLog, "should log session timeout warning")
-}
-
-func TestRunner_SessionTimeout_ZeroDoesNotAddDeadline(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	// session_timeout is zero (default) - no deadline should be applied
-	assert.Zero(t, appCfg.SessionTimeout)
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	// mock run function that checks if context has a deadline
-	var hasDeadline bool
-	mockRun := func(ctx context.Context, _ string) executor.Result {
-		_, hasDeadline = ctx.Deadline()
-		return executor.Result{Output: "success", Signal: status.Completed}
-	}
-
-	result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", "claude")
-
-	require.NoError(t, result.Error)
-	assert.Equal(t, "success", result.Output)
-	assert.False(t, hasDeadline, "context should not have deadline when session_timeout is zero")
-
-	// verify no timeout warning was logged
-	for _, call := range log.PrintCalls() {
-		assert.NotContains(t, call.Format, "session timed out", "should not log timeout warning")
-	}
-}
-
-func TestRunner_SessionTimeout_ParentCancelNotMisidentified(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 10 * time.Second // long timeout, should not fire
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	// mock run that cancels the parent context, simulating SIGINT
-	mockRun := func(runCtx context.Context, _ string) executor.Result {
-		cancel() // cancel parent
-		<-runCtx.Done()
-		return executor.Result{Error: runCtx.Err()}
-	}
-
-	result := r.TestRunWithSessionTimeout(ctx, mockRun, "test prompt", "claude")
-
-	require.Error(t, result.Error)
-
-	// verify no session timeout warning was logged (parent was canceled, not session timeout)
-	for _, call := range log.PrintCalls() {
-		assert.NotContains(t, call.Format, "session timed out",
-			"should not log session timeout when parent context was canceled")
-	}
-}
-
-func TestRunner_SessionTimeout_IntegrationWithLimitRetry(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	// mock run that blocks forever - verify runWithLimitRetry also applies timeout
-	mockRun := func(ctx context.Context, _ string) executor.Result {
-		<-ctx.Done()
-		return executor.Result{Error: ctx.Err()}
-	}
-
-	result := r.TestRunWithLimitRetry(t.Context(), mockRun, "test prompt", "claude")
-
-	// error is cleared on session timeout, so runWithLimitRetry returns no error
-	// (not a LimitPatternError, not retried)
-	require.NoError(t, result.Error)
-}
-
-func TestRunner_SessionTimeout_TaskPhaseContinues(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-
-	// first call blocks (simulates hanging session), second call succeeds
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			callNum++
-			if callNum == 1 {
-				<-ctx.Done() // block until session timeout fires
-				return executor.Result{Error: ctx.Err()}
-			}
-			return executor.Result{Output: "task done", Signal: status.Completed}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	// task phase should succeed: first iteration timed out, second completed
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 2, "claude should be called twice (timeout + success)")
-
-	// verify session timeout warning was logged
-	var foundLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "session timed out") {
-			foundLog = true
-			break
-		}
-	}
-	assert.True(t, foundLog, "should log session timeout warning")
-}
-
-func TestRunner_SessionTimeout_GatedByExecutorAndToolName(t *testing.T) {
-	// session_timeout applies to:
-	//   - claude in default executor mode (toolName=="claude")
-	//   - every executor call under --codex (task, review, finalize, evaluation)
-	// it does NOT apply to external codex/custom review in default executor mode — that path
-	// preserves existing behavior so users with --session-timeout don't
-	// have their existing external review loop subject to a new deadline.
-	tests := []struct {
-		name        string
-		executor    string
-		toolName    string
-		wantApplied bool
-	}{
-		{name: "default executor mode, claude tool", executor: config.ExecutorClaude, toolName: "claude", wantApplied: true},
-		{name: "default executor mode, codex external review", executor: config.ExecutorClaude, toolName: "codex", wantApplied: false},
-		{name: "default executor mode, custom external review", executor: config.ExecutorClaude, toolName: "custom", wantApplied: false},
-		{name: "codex mode, claude tool", executor: config.ExecutorCodex, toolName: "claude", wantApplied: true},
-		{name: "codex mode, codex tool", executor: config.ExecutorCodex, toolName: "codex", wantApplied: true},
-		{name: "codex mode, custom external review", executor: config.ExecutorCodex, toolName: "custom", wantApplied: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			log := newMockLogger("")
-			claude := newMockExecutor(nil)
-			codex := newMockExecutor(nil)
-
-			appCfg := testAppConfig(t)
-			appCfg.SessionTimeout = 50 * time.Millisecond
-			appCfg.SessionTimeoutSet = true
-			appCfg.Executor = tt.executor
-
-			cfg := processor.Config{AppConfig: appCfg}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-			var hasDeadline bool
-			mockRun := func(ctx context.Context, _ string) executor.Result {
-				_, hasDeadline = ctx.Deadline()
-				return executor.Result{Output: "done", Signal: status.ReviewDone}
-			}
-
-			result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", tt.toolName)
-
-			require.NoError(t, result.Error)
-			assert.Equal(t, "done", result.Output)
-			assert.Equal(t, tt.wantApplied, hasDeadline,
-				"deadline application for executor=%q toolName=%q", tt.executor, tt.toolName)
-		})
-	}
-}
-
-func TestRunner_ExternalReviewLoop_IdleTimeoutRetriesNextIteration(t *testing.T) {
-	// when external codex review idle-times-out (IdleTimedOut=true, Signal="") the loop must
-	// retry on the next iteration rather than treating empty/partial output as a clean review.
-	// without this guard, --idle-timeout silently bypasses external review for default-mode users.
-	tests := []struct {
-		name        string
-		firstOutput string // output the timed-out call returns (empty or partial)
-	}{
-		{name: "empty output", firstOutput: ""},
-		{name: "partial output", firstOutput: "partial findings before idle..."},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			log := newMockLogger("progress.txt")
-
-			// iteration 1: codex idle-times-out → loop must retry (no claude eval)
-			// iteration 2: codex returns clean findings → claude eval signals done
-			claude := newMockExecutor([]executor.Result{
-				{Output: "done", Signal: status.CodexDone}, // eval after iteration 2 only
-			})
-			codex := newMockExecutor([]executor.Result{
-				{Output: tt.firstOutput, IdleTimedOut: true}, // iteration 1: idle timed out
-				{Output: "found issue in foo.go:42"},         // iteration 2: real findings
-			})
-
-			cfg := processor.Config{
-				Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true,
-				MaxExternalIterations: 3, AppConfig: testAppConfig(t),
-			}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-			err := r.Run(t.Context())
-
-			require.NoError(t, err)
-			assert.Len(t, codex.RunCalls(), 2, "codex should run twice (retry after idle timeout)")
-			assert.Len(t, claude.RunCalls(), 1, "claude eval should NOT run on idle-timeout iteration; only on the successful retry")
-
-			// verify the retry log fired
-			var foundRetry bool
-			for _, call := range log.PrintCalls() {
-				if strings.Contains(call.Format, "session timed out, retrying on next iteration") {
-					foundRetry = true
-					break
-				}
-			}
-			assert.True(t, foundRetry, "should log retry message on idle timeout")
-		})
-	}
-}
-
-func TestRunner_SessionTimeout_ExternalReviewBypassPreservesIdleTimeoutDiagnostic(t *testing.T) {
-	// when default-mode external review (codex/custom) bypasses session_timeout,
-	// the IdleTimedOut diagnostic must still fire — users still need the warning
-	// when an idle timeout occurs without a completion signal so they can
-	// distinguish a hung session from "nothing to fix".
-	tests := []struct {
-		name     string
-		toolName string
-	}{
-		{name: "codex external review", toolName: "codex"},
-		{name: "custom external review", toolName: "custom"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			log := newMockLogger("")
-			claude := newMockExecutor(nil)
-			codex := newMockExecutor(nil)
-
-			// session_timeout configured but should NOT apply to external review in default executor mode.
-			appCfg := testAppConfig(t)
-			appCfg.SessionTimeout = 50 * time.Millisecond
-			appCfg.SessionTimeoutSet = true
-			appCfg.Executor = config.ExecutorClaude
-
-			cfg := processor.Config{AppConfig: appCfg}
-			r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-			var hadDeadline bool
-			mockRun := func(ctx context.Context, _ string) executor.Result {
-				_, hadDeadline = ctx.Deadline()
-				return executor.Result{Output: "partial output", IdleTimedOut: true}
-			}
-
-			result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", tt.toolName)
-
-			assert.False(t, hadDeadline, "external review in default executor mode must not have a session deadline")
-			assert.True(t, result.IdleTimedOut, "IdleTimedOut should be preserved")
-
-			// verify the diagnostic warning was emitted
-			var foundIdleMsg bool
-			for _, call := range log.PrintCalls() {
-				if strings.Contains(call.Format, "idle timed out") {
-					foundIdleMsg = true
-					break
-				}
-			}
-			assert.True(t, foundIdleMsg, "idle timeout warning should be logged in external review bypass path")
-		})
-	}
-}
-
-func TestRunner_SessionTimeout_FirstReviewWarningStillLogged(t *testing.T) {
-	// when the one-shot first review pass times out under default-claude mode,
-	// runReview must log the session timeout warning AND continue (no error).
-	// preserves master behavior — claude users with --session-timeout don't see
-	// new run failures. Under --codex the timeout is fatal (covered separately).
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-
-	// first call blocks (review timeout), subsequent calls return ReviewDone so the
-	// run finishes normally after the warning is emitted.
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			callNum++
-			if callNum == 1 {
-				<-ctx.Done()
-				return executor.Result{Error: ctx.Err()}
-			}
-			return executor.Result{Output: "review done", Signal: status.ReviewDone}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err, "claude-default mode treats first-review timeout as a soft warning")
-
-	// verify session timeout warning was logged
-	var foundLog bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "session timed out") {
-			foundLog = true
-			break
-		}
-	}
-	assert.True(t, foundLog, "should log session timeout warning")
-}
-
-func TestRunner_SessionTimeout_ReviewLoopContinuesAfterTimeout(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-
-	// call 1: first review succeeds normally (enters runReviewLoop)
-	// call 2: blocks/times out inside the review loop (should continue, not exit)
-	// call 3+: ReviewDone (loop and post-codex loop exit normally)
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			callNum++
-			if callNum == 2 {
-				<-ctx.Done() // block until session timeout fires inside review loop
-				return executor.Result{Error: ctx.Err()}
-			}
-			return executor.Result{Output: "review done", Signal: status.ReviewDone}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-
-	// call 2 timed out inside the loop, call 3 should have been made (loop continued)
-	assert.GreaterOrEqual(t, len(claude.RunCalls()), 3,
-		"claude should be called at least 3 times: first review + timeout in loop + retry in loop")
-
-	// verify "retrying review iteration" was logged (the new behavior)
-	var foundRetry bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "retrying review iteration") {
-			foundRetry = true
-			break
-		}
-	}
-	assert.True(t, foundRetry, "should log retry message after session timeout in review loop")
-}
-
-func TestRunner_SessionTimeout_FirstReviewSurfacesAsError(t *testing.T) {
-	// under --codex the comprehensive first review pass (runReview) must NOT silently
-	// advance when the session times out. Without the codex-gated lastSessionTimedOut
-	// check the missing REVIEW_DONE falls through to a soft warning and the run
-	// continues into the critical/major loop with no findings to act on — especially
-	// load-bearing under --codex where the later external review phase is auto-skipped.
-	// claude-default mode keeps the soft-warning behavior (see
-	// TestRunner_SessionTimeout_FirstReviewWarningStillLogged) so master users with
-	// --session-timeout don't see new run failures.
-	log := newMockLogger("progress.txt")
-
-	// first call (first review pass): block until session timeout fires
-	executorMock := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			<-ctx.Done()
-			return executor.Result{Output: "partial output", Error: ctx.Err()}
-		},
-	}
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-	// --codex mode wires the same codex executor into Task and Review and treats
-	// session timeout in the first review as a fatal error.
-	appCfg.Executor = config.ExecutorCodex
-
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: executorMock, Review: executorMock}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.Error(t, err, "first review session timeout under --codex must surface as an error, not silently advance")
-	assert.Contains(t, err.Error(), "first review pass timed out")
-}
-
-func TestRunner_SessionTimeout_ClearsSignalOnTimeout(t *testing.T) {
-	log := newMockLogger("")
-	claude := newMockExecutor(nil)
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-
-	// mock run that emits a signal then blocks until timeout
-	mockRun := func(ctx context.Context, _ string) executor.Result {
-		<-ctx.Done()
-		// simulate: signal was detected in stream before timeout killed the process
-		return executor.Result{Output: "partial output", Signal: status.Completed, Error: ctx.Err()}
-	}
-
-	result := r.TestRunWithSessionTimeout(t.Context(), mockRun, "test prompt", "claude")
-
-	require.NoError(t, result.Error, "error should be cleared on timeout")
-	assert.Empty(t, result.Signal, "signal should be cleared on timeout to prevent false completion")
-}
-
-func TestRunner_SessionTimeout_ExternalReviewLoopSkipsStalemateOnTimeout(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// scenario: external review loop with ReviewPatience=2 and session timeout.
-	// claude eval times out on iterations 1 and 2 — these should NOT count as unchanged rounds,
-	// so stalemate should NOT fire. iteration 3 succeeds with CodexDone.
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			callNum++
-			switch callNum {
-			case 1, 2: // claude eval iterations 1,2 — block until session timeout
-				<-ctx.Done()
-				return executor.Result{Output: "partial output", Error: ctx.Err()}
-			case 3: // claude eval iteration 3 — codex done (no findings → post-codex review skipped)
-				return executor.Result{Output: "no issues found", Signal: status.CodexDone}
-			default:
-				return executor.Result{Error: errors.New("unexpected call")}
-			}
-		},
-	}
-	codex := newMockExecutor([]executor.Result{
-		{Output: "found issue in foo.go:10"}, // codex iteration 1
-		{Output: "found issue in bar.go:20"}, // codex iteration 2
-		{Output: "no issues found"},          // codex iteration 3
-	})
-
-	// git checker returns same hash every time (no changes); without the timeout guard,
-	// this would trigger stalemate after 2 unchanged rounds
-	gitMock := &mocks.GitCheckerMock{
-		HeadHashFunc:        func() (string, error) { return "abc123def456abc123def456abc123def456abcd", nil },
-		DiffFingerprintFunc: func() (string, error) { return "unchanged-diff", nil },
-	}
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
-		CodexEnabled: true, ReviewPatience: 2, AppConfig: appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetGitChecker(gitMock)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 3, "codex should run 3 times (timeouts should not trigger stalemate)")
-
-	// verify timeout retry was logged (not stalemate)
-	var foundTimeout, foundStalemate bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "claude eval session timed out") {
-			foundTimeout = true
-		}
-		if strings.Contains(call.Format, "stalemate detected") {
-			foundStalemate = true
-		}
-	}
-	assert.True(t, foundTimeout, "should log timeout retry message")
-	assert.False(t, foundStalemate, "should NOT log stalemate — timed-out rounds don't count as unchanged")
-}
-
-func TestRunner_SessionTimeout_PlanCreationSkipsOutputParsingOnTimeout(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-
-	// scenario: plan creation where iteration 1 times out after emitting a QUESTION marker.
-	// the question should NOT be presented to the user because the session was killed.
-	// iteration 2 succeeds with PLAN_READY.
-	questionSignal := "<<<RALPHEX:QUESTION>>>\n" +
-		`{"question": "Which backend?", "options": ["Redis", "Memcached"]}` + "\n<<<RALPHEX:END>>>"
-
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			callNum++
-			switch callNum {
-			case 1: // iteration 1: emit question marker then block until timeout
-				<-ctx.Done()
-				return executor.Result{Output: questionSignal, Error: ctx.Err()}
-			default: // iteration 2: complete successfully
-				return executor.Result{Output: "plan created", Signal: status.PlanReady}
-			}
-		},
-	}
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollector(nil)
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{
-		Mode: processor.ModePlan, PlanDescription: "add caching", MaxIterations: 50,
-		IterationDelayMs: 1, AppConfig: appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 2, "claude should be called twice (timeout + success)")
-	assert.Empty(t, inputCollector.AskQuestionCalls(), "question should NOT be presented after timeout")
-
-	// verify timeout retry was logged
-	var foundTimeout bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "plan creation session timed out") {
-			foundTimeout = true
-		}
-	}
-	assert.True(t, foundTimeout, "should log plan creation timeout retry message")
-}
-
-func TestRunner_SessionTimeout_ExternalReviewKeepsBranchDiffAfterTimeout(t *testing.T) {
-	log := newMockLogger("progress.txt")
-
-	// scenario: external review loop where claude eval times out on iteration 1.
-	// the next codex iteration should still use branch-wide diff (git diff main...HEAD),
-	// not working-tree diff (git diff), because no successful eval completed yet.
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			callNum++
-			switch callNum {
-			case 1: // claude eval iteration 1 — block until session timeout
-				<-ctx.Done()
-				return executor.Result{Output: "partial", Error: ctx.Err()}
-			case 2: // claude eval iteration 2 — codex done (no findings → post-codex review skipped)
-				return executor.Result{Output: "no issues found", Signal: status.CodexDone}
-			default:
-				return executor.Result{Error: errors.New("unexpected call")}
-			}
-		},
-	}
-
-	codexCallNum := 0
-	codex := &mocks.ExecutorMock{
-		RunFunc: func(_ context.Context, prompt string) executor.Result {
-			codexCallNum++
-			return executor.Result{Output: fmt.Sprintf("finding %d", codexCallNum)}
-		},
-	}
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{
-		Mode: processor.ModeCodexOnly, MaxIterations: 50, IterationDelayMs: 1,
-		CodexEnabled: true, AppConfig: appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, codex.RunCalls(), 2, "codex should run twice")
-
-	// both codex calls should use branch-wide diff because the first claude eval timed out
-	// and no successful eval has completed yet on iteration 2
-	for i, call := range codex.RunCalls() {
-		assert.Contains(t, call.Prompt, "git diff", "codex call %d should contain diff instruction", i+1)
-		assert.NotContains(t, call.Prompt, "PREVIOUS REVIEW CONTEXT",
-			"codex call %d should not have previous context (first timed out, second is first success)", i+1)
-	}
-	// iteration 1 should have branch-wide diff
-	assert.Contains(t, codex.RunCalls()[0].Prompt, "...HEAD", "first codex call should use branch-wide diff")
-	// iteration 2 should still have branch-wide diff (timeout didn't count as successful eval)
-	assert.Contains(t, codex.RunCalls()[1].Prompt, "...HEAD", "second codex call should still use branch-wide diff after timeout")
-}
-
-func TestRunner_SessionTimeout_PlanCreationPreservesRevisionFeedback(t *testing.T) {
-	log := newMockLogger("progress-plan.txt")
-
-	// scenario: user requests revisions, but the revision attempt times out.
-	// the next iteration should still include the revision feedback.
-	planDraftSignal := "<<<RALPHEX:PLAN_DRAFT>>>\n# Test Plan\n## Tasks\n- [ ] Task 1\n<<<RALPHEX:END>>>"
-
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			callNum++
-			switch callNum {
-			case 1: // iteration 1: emit draft for review
-				return executor.Result{Output: planDraftSignal}
-			case 2: // iteration 2: revision attempt times out
-				<-ctx.Done()
-				return executor.Result{Output: "partial revision", Error: ctx.Err()}
-			case 3: // iteration 3: retry with preserved feedback, completes
-				return executor.Result{Output: "plan created", Signal: status.PlanReady}
-			default:
-				return executor.Result{Output: "done", Signal: status.PlanReady}
-			}
-		},
-	}
-	codex := newMockExecutor(nil)
-	inputCollector := newMockInputCollectorWithDraftReview(nil, []struct {
-		action   string
-		feedback string
-		err      error
-	}{
-		{action: "revise", feedback: "please add error handling task", err: nil},
-	})
-
-	appCfg := testAppConfig(t)
-	appCfg.SessionTimeout = 50 * time.Millisecond
-	appCfg.SessionTimeoutSet = true
-
-	cfg := processor.Config{
-		Mode: processor.ModePlan, PlanDescription: "add caching", MaxIterations: 50,
-		IterationDelayMs: 1, AppConfig: appCfg,
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetInputCollector(inputCollector)
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-	assert.Len(t, claude.RunCalls(), 3, "claude should be called 3 times (draft + timeout + success)")
-
-	// verify feedback was preserved after timeout: iteration 3 prompt should contain revision feedback
-	thirdPrompt := claude.RunCalls()[2].Prompt
-	assert.Contains(t, thirdPrompt, "please add error handling task",
-		"revision feedback should be preserved after timeout")
-	assert.Contains(t, thirdPrompt, "PREVIOUS DRAFT FEEDBACK",
-		"feedback header should be present after timeout")
-
-	// verify iteration 2 (timed out) also had the feedback
-	secondPrompt := claude.RunCalls()[1].Prompt
-	assert.Contains(t, secondPrompt, "please add error handling task",
-		"revision feedback should be in the timed-out attempt too")
-}
-
-func TestRunner_TaskPhase_BreakWithPauseResume(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	// plan with completed checkboxes so hasUncompletedTasks returns false on SignalCompleted
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [x] something"), 0o600))
-
-	breakCh := make(chan struct{}, 1)
-	pauseCalls := 0
-
-	// first call: break fires during execution → pause handler returns true (resume)
-	// second call: completes normally
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			if pauseCalls == 0 {
-				breakCh <- struct{}{} // trigger break during first iteration
-				<-ctx.Done()
-				return executor.Result{Error: ctx.Err()}
-			}
-			return executor.Result{Output: "done", Signal: status.Completed}
-		},
-	}
-	codex := newMockExecutor(nil)
-	log := newMockLogger("progress.txt")
-
-	cfg := processor.Config{
-		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
-		IterationDelayMs: 1, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetBreakCh(breakCh)
-	r.SetPauseHandler(func(_ context.Context) bool {
-		pauseCalls++
-		return true // resume
-	})
-
-	err := r.Run(t.Context())
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, pauseCalls, "pause handler should be called once")
-	assert.Len(t, claude.RunCalls(), 2, "claude should run twice: interrupted + resumed")
-
-	// verify break log message
-	var foundBreak bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "session interrupted") {
-			foundBreak = true
-			break
-		}
-	}
-	assert.True(t, foundBreak, "should log break message")
-}
-
-func TestRunner_TaskPhase_BreakWithPauseAbort(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [ ] something"), 0o600))
-
-	breakCh := make(chan struct{}, 1)
-
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			breakCh <- struct{}{} // trigger break
-			<-ctx.Done()
-			return executor.Result{Error: ctx.Err()}
-		},
-	}
-	codex := newMockExecutor(nil)
-	log := newMockLogger("progress.txt")
-
-	cfg := processor.Config{
-		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
-		IterationDelayMs: 1, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetBreakCh(breakCh)
-	r.SetPauseHandler(func(_ context.Context) bool {
-		return false // abort
-	})
-
-	err := r.Run(t.Context())
-	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller")
-	assert.Len(t, claude.RunCalls(), 1, "claude should run once before abort")
-}
-
-func TestRunner_TaskPhase_BreakWithNilHandler(t *testing.T) {
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [ ] something"), 0o600))
-
-	breakCh := make(chan struct{}, 1)
-
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			breakCh <- struct{}{} // trigger break
-			<-ctx.Done()
-			return executor.Result{Error: ctx.Err()}
-		},
-	}
-	codex := newMockExecutor(nil)
-	log := newMockLogger("progress.txt")
-
-	cfg := processor.Config{
-		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
-		IterationDelayMs: 1, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetBreakCh(breakCh)
-	// deliberately NOT setting pause handler — nil handler = abort
-
-	err := r.Run(t.Context())
-	require.ErrorIs(t, err, processor.ErrUserAborted, "ErrUserAborted should propagate to caller")
-	assert.Len(t, claude.RunCalls(), 1, "claude should run once before abort")
-}
-
-func TestRunner_TaskPhase_StickySignalDrainAfterPause(t *testing.T) {
-	// verify that a SIGQUIT arriving during the pause prompt does not immediately
-	// cancel the next resumed iteration (sticky signal is drained before breakContext)
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1:\n- [x] something"), 0o600))
-
-	breakCh := make(chan struct{}, 1)
-	pauseCalls := 0
-
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(ctx context.Context, _ string) executor.Result {
-			if pauseCalls == 0 {
-				breakCh <- struct{}{} // trigger initial break
-				<-ctx.Done()
-				return executor.Result{Error: ctx.Err()}
-			}
-			// second call should complete normally without being canceled by sticky signal
-			select {
-			case <-ctx.Done():
-				return executor.Result{Error: errors.New("unexpected cancellation from sticky signal")}
-			case <-time.After(50 * time.Millisecond):
-				return executor.Result{Output: "done", Signal: status.Completed}
-			}
-		},
-	}
-	codex := newMockExecutor(nil)
-	log := newMockLogger("progress.txt")
-
-	cfg := processor.Config{
-		Mode: processor.ModeTasksOnly, PlanFile: planFile, MaxIterations: 10,
-		IterationDelayMs: 1, AppConfig: testAppConfig(t),
-	}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	r.SetBreakCh(breakCh)
-	r.SetPauseHandler(func(_ context.Context) bool {
-		pauseCalls++
-		// simulate a SIGQUIT arriving during the pause prompt
-		breakCh <- struct{}{}
-		return true // resume
-	})
-
-	err := r.Run(t.Context())
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, pauseCalls, "pause handler should be called once")
-	assert.Len(t, claude.RunCalls(), 2, "claude should run twice: interrupted + resumed")
-
-	// verify second call was not canceled by sticky signal
-	secondResult := claude.RunCalls()[1]
-	assert.NotNil(t, secondResult, "second claude call should exist")
-}
-
-func TestRunner_IdleTimeout_ReviewLoopContinuesAfterTimeout(t *testing.T) {
-	// when idle timeout fires without a signal, the review loop should retry (not exit with "no changes detected")
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-
-	// call 1: first review succeeds normally (enters runReviewLoop)
-	// call 2: returns with IdleTimedOut=true, no signal (simulates idle timeout)
-	// call 3+: ReviewDone (loop exits normally)
-	callNum := 0
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(_ context.Context, _ string) executor.Result {
-			callNum++
-			if callNum == 2 {
-				return executor.Result{Output: "partial output", IdleTimedOut: true}
-			}
-			return executor.Result{Output: "review done", Signal: status.ReviewDone}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-
-	// call 2 was idle-timed-out, call 3 should have been made (loop continued, not exited)
-	assert.GreaterOrEqual(t, len(claude.RunCalls()), 3,
-		"claude should be called at least 3 times: first review + idle timeout in loop + retry")
-
-	// verify idle timeout warning was logged
-	var foundIdleMsg bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "idle timed out") {
-			foundIdleMsg = true
-			break
-		}
-	}
-	assert.True(t, foundIdleMsg, "should log idle timeout message")
-}
-
-func TestRunner_IdleTimeout_ReviewLoopExitsWhenSignalPresent(t *testing.T) {
-	// when idle timeout fires but REVIEW_DONE signal was already emitted, review should exit normally
-	tmpDir := t.TempDir()
-	planFile := filepath.Join(tmpDir, "plan.md")
-	require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n### Task 1: first\n- [x] done"), 0o600))
-
-	log := newMockLogger("progress.txt")
-
-	// all calls return IdleTimedOut=true with REVIEW_DONE signal
-	claude := &mocks.ExecutorMock{
-		RunFunc: func(_ context.Context, _ string) executor.Result {
-			return executor.Result{Output: "review done", Signal: status.ReviewDone, IdleTimedOut: true}
-		},
-	}
-	codex := newMockExecutor(nil)
-
-	appCfg := testAppConfig(t)
-	cfg := processor.Config{Mode: processor.ModeReview, PlanFile: planFile, MaxIterations: 50, AppConfig: appCfg}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: claude, External: codex}, &status.PhaseHolder{})
-	err := r.Run(t.Context())
-
-	require.NoError(t, err)
-
-	// with signal present, the loop should exit normally; idle timeout with signal
-	// should NOT cause unnecessary retries
-	var foundIdleMsg bool
-	for _, call := range log.PrintCalls() {
-		if strings.Contains(call.Format, "idle timed out") {
-			foundIdleMsg = true
-			break
-		}
-	}
-	assert.False(t, foundIdleMsg, "should NOT log idle timeout when signal is present")
+	require.ErrorIs(t, err, ErrUserAborted, "ErrUserAborted should propagate to caller in tasks-only mode")
 }
 
 func TestRunner_ReviewClaude_UsedForReviewPhases(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 
 	// task executor should NOT be called in review-only mode
 	taskClaude := newMockExecutor(nil)
@@ -4308,8 +1207,8 @@ func TestRunner_ReviewClaude_UsedForReviewPhases(t *testing.T) {
 		{Output: "no issues found"}, // codex iteration 2 — clean
 	})
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{
+	cfg := Config{Mode: ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{
 		Task: taskClaude, Review: reviewClaude, External: codex,
 	}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
@@ -4320,7 +1219,7 @@ func TestRunner_ReviewClaude_UsedForReviewPhases(t *testing.T) {
 }
 
 func TestRunner_ReviewClaude_NilFallsBackToTaskExecutor(t *testing.T) {
-	log := newMockLogger("progress.txt")
+	log := newRunnerMockLogger("progress.txt")
 
 	// when Review is nil, all review calls should go to Task executor
 	claude := newMockExecutor([]executor.Result{
@@ -4335,462 +1234,14 @@ func TestRunner_ReviewClaude_NilFallsBackToTaskExecutor(t *testing.T) {
 		{Output: "no issues found"}, // codex iteration 2 — clean
 	})
 
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
-	r := processor.NewWithExecutors(cfg, log, processor.Executors{
+	cfg := Config{Mode: ModeReview, MaxIterations: 50, IterationDelayMs: 1, CodexEnabled: true, AppConfig: testAppConfig(t)}
+	r := NewWithExecutors(cfg, log, Executors{
 		Task: claude, Review: nil, External: codex,
 	}, &status.PhaseHolder{})
 	err := r.Run(t.Context())
 
 	require.NoError(t, err)
 	assert.Len(t, claude.RunCalls(), 5, "task executor should handle all review phases when ReviewClaude is nil")
-}
-
-func TestParseModelEffort(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		model  string
-		effort string
-	}{
-		{name: "empty", input: "", model: "", effort: ""},
-		{name: "model only", input: "opus", model: "opus", effort: ""},
-		{name: "model and effort", input: "opus:high", model: "opus", effort: "high"},
-		{name: "effort only", input: ":high", model: "", effort: "high"},
-		{name: "trailing colon", input: "opus:", model: "opus", effort: ""},
-		{name: "full model id with effort", input: "claude-sonnet-4-6:medium", model: "claude-sonnet-4-6", effort: "medium"},
-		{name: "multiple colons — split on first", input: "opus:high:extra", model: "opus", effort: "high:extra"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			model, effort := processor.ParseModelEffort(tc.input)
-			assert.Equal(t, tc.model, model)
-			assert.Equal(t, tc.effort, effort)
-		})
-	}
-}
-
-func TestResolveCodexModelEffort(t *testing.T) {
-	tests := []struct {
-		name       string
-		spec       string
-		defModel   string
-		defEffort  string
-		wantModel  string
-		wantEffort string
-		wantMax    bool
-	}{
-		{name: "empty spec keeps defaults", spec: "", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.5", wantEffort: "xhigh"},
-		{name: "model only", spec: "gpt-5.6", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "xhigh"},
-		{name: "model and effort", spec: "gpt-5.6:high", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "high"},
-		{name: "effort only keeps default model", spec: ":low", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.5", wantEffort: "low"},
-		{name: "trailing colon keeps default effort", spec: "gpt-5.6:", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "xhigh"},
-		{name: "max effort dropped, default kept", spec: "gpt-5.6:max", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.6", wantEffort: "xhigh", wantMax: true},
-		{name: "max effort case-insensitive", spec: ":MAX", defModel: "gpt-5.5", defEffort: "xhigh", wantModel: "gpt-5.5", wantEffort: "xhigh", wantMax: true},
-		{name: "empty spec with empty defaults stays empty", spec: "", defModel: "", defEffort: "", wantModel: "", wantEffort: ""},
-		{name: "model-only spec with empty default effort", spec: "gpt-5.6", defModel: "", defEffort: "", wantModel: "gpt-5.6", wantEffort: ""},
-		{name: "effort-only spec with empty default model", spec: ":low", defModel: "", defEffort: "", wantModel: "", wantEffort: "low"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			model, effort, maxDropped := processor.ResolveCodexModelEffort(tc.spec, tc.defModel, tc.defEffort)
-			assert.Equal(t, tc.wantModel, model)
-			assert.Equal(t, tc.wantEffort, effort)
-			assert.Equal(t, tc.wantMax, maxDropped)
-		})
-	}
-}
-
-func TestRunner_New_ModelEffortWiring(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	holder := &status.PhaseHolder{}
-
-	tests := []struct {
-		name         string
-		taskModel    string
-		reviewModel  string
-		wantTask     [2]string // {model, effort}
-		wantReview   [2]string
-		sameExecutor bool // true when review falls back to task executor
-	}{
-		{name: "empty specs", taskModel: "", reviewModel: "", wantTask: [2]string{"", ""}, wantReview: [2]string{"", ""}, sameExecutor: true},
-		{name: "task model only, review empty", taskModel: "opus", reviewModel: "", wantTask: [2]string{"opus", ""}, wantReview: [2]string{"opus", ""}, sameExecutor: true},
-		{name: "task model with effort, review empty", taskModel: "opus:high", reviewModel: "", wantTask: [2]string{"opus", "high"}, wantReview: [2]string{"opus", "high"}, sameExecutor: true},
-		{name: "effort only, review empty", taskModel: ":medium", reviewModel: "", wantTask: [2]string{"", "medium"}, wantReview: [2]string{"", "medium"}, sameExecutor: true},
-		{name: "trailing colon equivalent to plain model", taskModel: "opus", reviewModel: "opus:", wantTask: [2]string{"opus", ""}, wantReview: [2]string{"opus", ""}, sameExecutor: true},
-		{name: "same model different effort — separate executor", taskModel: "opus", reviewModel: "opus:high", wantTask: [2]string{"opus", ""}, wantReview: [2]string{"opus", "high"}, sameExecutor: false},
-		{name: "different model and effort — separate executor", taskModel: "opus:high", reviewModel: "sonnet:medium", wantTask: [2]string{"opus", "high"}, wantReview: [2]string{"sonnet", "medium"}, sameExecutor: false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := processor.Config{
-				Mode:          processor.ModeReview,
-				MaxIterations: 50,
-				CodexEnabled:  false,
-				TaskModel:     tc.taskModel,
-				ReviewModel:   tc.reviewModel,
-				AppConfig:     testAppConfig(t),
-			}
-			r := processor.New(cfg, log, holder)
-
-			taskExec, ok := r.TestTaskExecutor().(*executor.ClaudeExecutor)
-			require.True(t, ok, "task executor should be *executor.ClaudeExecutor")
-			assert.Equal(t, tc.wantTask[0], taskExec.Model, "task model")
-			assert.Equal(t, tc.wantTask[1], taskExec.Effort, "task effort")
-
-			reviewExec, ok := r.TestReviewExecutor().(*executor.ClaudeExecutor)
-			require.True(t, ok, "review executor should be *executor.ClaudeExecutor")
-			assert.Equal(t, tc.wantReview[0], reviewExec.Model, "review model")
-			assert.Equal(t, tc.wantReview[1], reviewExec.Effort, "review effort")
-
-			if tc.sameExecutor {
-				assert.Same(t, taskExec, reviewExec, "review executor should be the same instance as task executor when specs equivalent")
-			} else {
-				assert.NotSame(t, taskExec, reviewExec, "review executor should be a distinct instance when specs differ")
-			}
-		})
-	}
-}
-
-func TestRunner_New_CodexModelEffortWiring(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	holder := &status.PhaseHolder{}
-
-	tests := []struct {
-		name         string
-		taskModel    string
-		reviewModel  string
-		wantTask     [2]string // {model, effort}
-		wantReview   [2]string
-		sameExecutor bool
-	}{
-		{name: "empty specs use codex config defaults", taskModel: "", reviewModel: "", wantTask: [2]string{"gpt-5.5", "xhigh"}, wantReview: [2]string{"gpt-5.5", "xhigh"}, sameExecutor: true},
-		{name: "task model only", taskModel: "gpt-5.6", reviewModel: "", wantTask: [2]string{"gpt-5.6", "xhigh"}, wantReview: [2]string{"gpt-5.6", "xhigh"}, sameExecutor: true},
-		{name: "task model with effort", taskModel: "gpt-5.6:high", reviewModel: "", wantTask: [2]string{"gpt-5.6", "high"}, wantReview: [2]string{"gpt-5.6", "high"}, sameExecutor: true},
-		{name: "effort only keeps default model", taskModel: ":low", reviewModel: "", wantTask: [2]string{"gpt-5.5", "low"}, wantReview: [2]string{"gpt-5.5", "low"}, sameExecutor: true},
-		{name: "review model differs in effort — separate executor", taskModel: "gpt-5.6", reviewModel: "gpt-5.6:low", wantTask: [2]string{"gpt-5.6", "xhigh"}, wantReview: [2]string{"gpt-5.6", "low"}, sameExecutor: false},
-		{name: "review model differs in model — separate executor", taskModel: "gpt-5.6:high", reviewModel: "gpt-5.5:low", wantTask: [2]string{"gpt-5.6", "high"}, wantReview: [2]string{"gpt-5.5", "low"}, sameExecutor: false},
-		{name: "review model only leaves task at default", taskModel: "", reviewModel: "gpt-5.6:low", wantTask: [2]string{"gpt-5.5", "xhigh"}, wantReview: [2]string{"gpt-5.6", "low"}, sameExecutor: false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			appCfg := testAppConfig(t)
-			appCfg.Executor = config.ExecutorCodex
-			appCfg.CodexModel = "gpt-5.5"
-			appCfg.CodexReasoningEffort = "xhigh"
-			cfg := processor.Config{
-				Mode:          processor.ModeReview,
-				MaxIterations: 50,
-				TaskModel:     tc.taskModel,
-				ReviewModel:   tc.reviewModel,
-				AppConfig:     appCfg,
-			}
-			r := processor.New(cfg, log, holder)
-
-			taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
-			require.True(t, ok, "task executor should be *executor.CodexExecutor")
-			assert.Equal(t, tc.wantTask[0], taskExec.Model, "task model")
-			assert.Equal(t, tc.wantTask[1], taskExec.ReasoningEffort, "task effort")
-
-			reviewExec, ok := r.TestReviewExecutor().(*executor.CodexExecutor)
-			require.True(t, ok, "review executor should be *executor.CodexExecutor")
-			assert.Equal(t, tc.wantReview[0], reviewExec.Model, "review model")
-			assert.Equal(t, tc.wantReview[1], reviewExec.ReasoningEffort, "review effort")
-
-			if tc.sameExecutor {
-				assert.Same(t, taskExec, reviewExec, "review executor should be the same instance when specs equivalent")
-			} else {
-				assert.NotSame(t, taskExec, reviewExec, "review executor should be a distinct instance when specs differ")
-			}
-		})
-	}
-}
-
-func TestRunner_New_ExecutorRouting(t *testing.T) {
-	log := newMockLogger("progress.txt")
-	holder := &status.PhaseHolder{}
-
-	t.Run("default executor: claude for task/review, codex for external", func(t *testing.T) {
-		appCfg := testAppConfig(t)
-		appCfg.Executor = config.ExecutorClaude
-		cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-		r := processor.New(cfg, log, holder)
-
-		_, ok := r.TestTaskExecutor().(*executor.ClaudeExecutor)
-		assert.True(t, ok, "task executor should be *executor.ClaudeExecutor when Executor is default")
-
-		_, ok = r.TestReviewExecutor().(*executor.ClaudeExecutor)
-		assert.True(t, ok, "review executor should be *executor.ClaudeExecutor when Executor is default")
-
-		externalExec, ok := r.TestExternalExecutor().(*executor.CodexExecutor)
-		assert.True(t, ok, "external executor should be *executor.CodexExecutor by default")
-		assert.Equal(t, "read-only", externalExec.Sandbox, "external codex review keeps the read-only default")
-	})
-
-	t.Run("Executor=codex: codex for task/review, nil for external", func(t *testing.T) {
-		appCfg := testAppConfig(t)
-		appCfg.Executor = config.ExecutorCodex
-		cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-		r := processor.New(cfg, log, holder)
-
-		taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
-		assert.True(t, ok, "task executor should be *executor.CodexExecutor when Executor=codex")
-		assert.Equal(t, "danger-full-access", taskExec.Sandbox, "first-class codex task execution must allow git metadata writes by default")
-
-		reviewExec, ok := r.TestReviewExecutor().(*executor.CodexExecutor)
-		assert.True(t, ok, "review executor should be codex when Executor=codex")
-		assert.Equal(t, "danger-full-access", reviewExec.Sandbox, "first-class codex review fixes must allow git metadata writes by default")
-
-		assert.Nil(t, r.TestExternalExecutor(), "external executor should be nil when Executor=codex")
-	})
-
-	t.Run("Executor=codex respects explicit sandbox config", func(t *testing.T) {
-		appCfg := testAppConfig(t)
-		appCfg.Executor = config.ExecutorCodex
-		appCfg.CodexSandbox = "workspace-write"
-		appCfg.CodexSandboxSet = true
-		cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-		r := processor.New(cfg, log, holder)
-
-		taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
-		require.True(t, ok, "task executor should be *executor.CodexExecutor when Executor=codex")
-		assert.Equal(t, "workspace-write", taskExec.Sandbox)
-
-		reviewExec, ok := r.TestReviewExecutor().(*executor.CodexExecutor)
-		require.True(t, ok, "review executor should be *executor.CodexExecutor when Executor=codex")
-		assert.Equal(t, "workspace-write", reviewExec.Sandbox)
-	})
-
-	t.Run("zero-value Executors literal constructs usable runner", func(t *testing.T) {
-		cfg := processor.Config{Mode: processor.ModeReview, AppConfig: testAppConfig(t)}
-		// pass a zero-value Executors struct; should not panic
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{}, holder)
-		require.NotNil(t, r)
-		assert.Nil(t, r.TestTaskExecutor(), "task executor is nil on zero-value Executors")
-		assert.Nil(t, r.TestReviewExecutor(), "review falls back to task (also nil)")
-		assert.Nil(t, r.TestExternalExecutor(), "external is nil")
-	})
-
-	t.Run("Review nil falls back to Task", func(t *testing.T) {
-		task := newMockExecutor(nil)
-		cfg := processor.Config{Mode: processor.ModeReview, AppConfig: testAppConfig(t)}
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: task, Review: nil}, holder)
-		assert.Same(t, task, r.TestReviewExecutor(), "review should be the task executor when Review is nil")
-	})
-
-	t.Run("explicit Review wins over Task", func(t *testing.T) {
-		task := newMockExecutor(nil)
-		review := newMockExecutor(nil)
-		cfg := processor.Config{Mode: processor.ModeReview, AppConfig: testAppConfig(t)}
-		r := processor.NewWithExecutors(cfg, log, processor.Executors{Task: task, Review: review}, holder)
-		assert.Same(t, review, r.TestReviewExecutor(), "review should be the explicit instance, not the task one")
-		assert.Same(t, task, r.TestTaskExecutor(), "task should remain the task instance")
-	})
-}
-
-// newCapturingLogger returns a logger mock that captures every Print invocation
-// into the returned slice pointer. used by tests asserting hint emission.
-func newCapturingLogger(captured *[]string) *mocks.LoggerMock {
-	return &mocks.LoggerMock{
-		PrintFunc: func(format string, args ...any) {
-			*captured = append(*captured, fmt.Sprintf(format, args...))
-		},
-		PrintRawFunc:       func(_ string, _ ...any) {},
-		PrintSectionFunc:   func(_ status.Section) {},
-		PrintAlignedFunc:   func(_ string) {},
-		LogQuestionFunc:    func(_ string, _ []string) {},
-		LogAnswerFunc:      func(_ string) {},
-		LogDraftReviewFunc: func(_, _ string) {},
-		PathFunc:           func() string { return "" },
-	}
-}
-
-// setIsolatedHome points the home-directory env vars at an empty temp dir and
-// resets the hint sync.Once so each subtest can exercise the first-emit path
-// without leaking state. covers both Unix (HOME) and Windows (USERPROFILE /
-// HOMEDRIVE+HOMEPATH) since os.UserHomeDir() reads different vars per platform —
-// the test-safety rule forbids touching the real ~/.config/ralphex/.
-func setIsolatedHome(t *testing.T) string {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("HOMEDRIVE", "")
-	t.Setenv("HOMEPATH", "")
-	processor.ResetClaudeMdHintOnceForTest()
-	return home
-}
-
-func TestRunner_New_PassClaudeMd_PropagatesToCodexExecutor(t *testing.T) {
-	setIsolatedHome(t)
-	log := newMockLogger("")
-	holder := &status.PhaseHolder{}
-
-	appCfg := testAppConfig(t)
-	appCfg.Executor = config.ExecutorCodex
-	appCfg.PassClaudeMd = true
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-
-	r := processor.New(cfg, log, holder)
-	codexExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
-	require.True(t, ok, "task executor should be *executor.CodexExecutor when Executor=codex")
-	assert.True(t, codexExec.PassClaudeMd, "PassClaudeMd should propagate from cfg.AppConfig to CodexExecutor")
-}
-
-func TestRunner_New_PassClaudeMdFalse_DoesNotSetField(t *testing.T) {
-	setIsolatedHome(t)
-	log := newMockLogger("")
-	holder := &status.PhaseHolder{}
-
-	appCfg := testAppConfig(t)
-	appCfg.Executor = config.ExecutorCodex
-	appCfg.PassClaudeMd = false
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-
-	r := processor.New(cfg, log, holder)
-	codexExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
-	require.True(t, ok, "task executor should be *executor.CodexExecutor when Executor=codex")
-	assert.False(t, codexExec.PassClaudeMd, "PassClaudeMd should be false when cfg disabled")
-}
-
-func TestRunner_New_CodexExecutor_TaskAndReviewShareInstance(t *testing.T) {
-	// under --codex, task and review use the SAME codex executor instance with
-	// MultiAgent=true. enabling multi_agent for every phase means any prompt
-	// (task, review, finalize) can use {{agent:...}} expansions if customized,
-	// without paying for two separate codex configurations.
-	setIsolatedHome(t)
-	log := newMockLogger("")
-	holder := &status.PhaseHolder{}
-
-	appCfg := testAppConfig(t)
-	appCfg.Executor = config.ExecutorCodex
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-
-	r := processor.New(cfg, log, holder)
-
-	taskExec, ok := r.TestTaskExecutor().(*executor.CodexExecutor)
-	require.True(t, ok, "task executor should be *executor.CodexExecutor when Executor=codex")
-	reviewExec, ok := r.TestReviewExecutor().(*executor.CodexExecutor)
-	require.True(t, ok, "review executor should be *executor.CodexExecutor when Executor=codex")
-
-	assert.Same(t, taskExec, reviewExec, "task and review must be the same shared codex instance")
-	assert.True(t, taskExec.MultiAgent, "codex executor must have MultiAgent=true so any phase can spawn sub-agents")
-}
-
-func TestRunner_ClaudeMdSetupHint_EmitsOnce(t *testing.T) {
-	home := setIsolatedHome(t)
-
-	// arrange: ~/.claude/CLAUDE.md exists, ~/.codex/AGENTS.md does not
-	claudeDir := filepath.Join(home, ".claude")
-	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("user CLAUDE.md\n"), 0o600))
-
-	var captured []string
-	log := newCapturingLogger(&captured)
-
-	// emit twice; only the first call should record output
-	processor.EmitClaudeMdSetupHintForTest(log)
-	processor.EmitClaudeMdSetupHintForTest(log)
-
-	require.Len(t, captured, 1, "hint should emit exactly once")
-	assert.Contains(t, captured[0], "~/.claude/CLAUDE.md exists but ~/.codex/AGENTS.md does not")
-	assert.Contains(t, captured[0], "ln -s ~/.claude/CLAUDE.md ~/.codex/AGENTS.md")
-}
-
-func TestRunner_ClaudeMdSetupHint_SkippedWhenCodexAgentsMdExists(t *testing.T) {
-	home := setIsolatedHome(t)
-
-	claudeDir := filepath.Join(home, ".claude")
-	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("user CLAUDE.md\n"), 0o600))
-
-	codexDir := filepath.Join(home, ".codex")
-	require.NoError(t, os.MkdirAll(codexDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "AGENTS.md"), []byte("user AGENTS.md\n"), 0o600))
-
-	var captured []string
-	log := newCapturingLogger(&captured)
-	processor.EmitClaudeMdSetupHintForTest(log)
-
-	assert.Empty(t, captured, "hint must not emit when ~/.codex/AGENTS.md already exists")
-}
-
-func TestRunner_ClaudeMdSetupHint_SkippedWhenClaudeMdMissing(t *testing.T) {
-	setIsolatedHome(t)
-
-	var captured []string
-	log := newCapturingLogger(&captured)
-	processor.EmitClaudeMdSetupHintForTest(log)
-
-	assert.Empty(t, captured, "hint must not emit when ~/.claude/CLAUDE.md does not exist")
-}
-
-func TestRunner_ClaudeMdSetupHint_NotFiredWhenExecutorIsNotCodex(t *testing.T) {
-	home := setIsolatedHome(t)
-
-	claudeDir := filepath.Join(home, ".claude")
-	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("user CLAUDE.md\n"), 0o600))
-
-	var captured []string
-	log := newCapturingLogger(&captured)
-	holder := &status.PhaseHolder{}
-
-	// claude executor with PassClaudeMd=true should NOT fire hint (gated by Executor=codex)
-	appCfg := testAppConfig(t)
-	appCfg.Executor = config.ExecutorClaude
-	appCfg.PassClaudeMd = true
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-
-	_ = processor.New(cfg, log, holder)
-	assert.Empty(t, captured, "hint must not fire when Executor is not codex")
-}
-
-func TestRunner_ClaudeMdSetupHint_NotFiredWhenPassClaudeMdFalse(t *testing.T) {
-	home := setIsolatedHome(t)
-
-	claudeDir := filepath.Join(home, ".claude")
-	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("user CLAUDE.md\n"), 0o600))
-
-	var captured []string
-	log := newCapturingLogger(&captured)
-	holder := &status.PhaseHolder{}
-
-	appCfg := testAppConfig(t)
-	appCfg.Executor = config.ExecutorCodex
-	appCfg.PassClaudeMd = false
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-
-	_ = processor.New(cfg, log, holder)
-	assert.Empty(t, captured, "hint must not fire when PassClaudeMd is false")
-}
-
-func TestRunner_ClaudeMdSetupHint_FiredOnceAcrossMultipleRunnerConstructions(t *testing.T) {
-	home := setIsolatedHome(t)
-
-	claudeDir := filepath.Join(home, ".claude")
-	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("user CLAUDE.md\n"), 0o600))
-
-	var captured []string
-	log := newCapturingLogger(&captured)
-	holder := &status.PhaseHolder{}
-
-	appCfg := testAppConfig(t)
-	appCfg.Executor = config.ExecutorCodex
-	appCfg.PassClaudeMd = true
-	cfg := processor.Config{Mode: processor.ModeReview, MaxIterations: 50, CodexEnabled: false, AppConfig: appCfg}
-
-	// build two runners back to back; hint should emit on the first only
-	_ = processor.New(cfg, log, holder)
-	_ = processor.New(cfg, log, holder)
-
-	require.Len(t, captured, 1, "hint must emit once per process across multiple runner constructions")
-	assert.Contains(t, captured[0], "ln -s ~/.claude/CLAUDE.md ~/.codex/AGENTS.md")
 }
 
 func TestRunner_ReviewPromptIsSharedAcrossExecutors(t *testing.T) {
@@ -4812,7 +1263,7 @@ func TestRunner_ReviewPromptIsSharedAcrossExecutors(t *testing.T) {
 			appCfg.ReviewFirstPrompt = "FIRST_REVIEW_PROMPT"
 			appCfg.ReviewSecondPrompt = "SECOND_REVIEW_PROMPT"
 
-			log := newMockLogger("progress.txt")
+			log := newRunnerMockLogger("progress.txt")
 			task := newMockExecutor([]executor.Result{
 				{Output: "review done", Signal: status.ReviewDone}, // first review
 				{Output: "review done", Signal: status.ReviewDone}, // pre-external review loop
@@ -4822,12 +1273,12 @@ func TestRunner_ReviewPromptIsSharedAcrossExecutors(t *testing.T) {
 				{Output: ""}, // empty output → external loop exits without claude eval (claude mode only)
 			})
 
-			cfg := processor.Config{
-				Mode: processor.ModeReview, MaxIterations: 50, IterationDelayMs: 1,
+			cfg := Config{
+				Mode: ModeReview, MaxIterations: 50, IterationDelayMs: 1,
 				CodexEnabled: tc.executor == config.ExecutorClaude, AppConfig: appCfg,
 			}
-			r := processor.NewWithExecutors(cfg, log,
-				processor.Executors{Task: task, External: external},
+			r := NewWithExecutors(cfg, log,
+				Executors{Task: task, External: external},
 				&status.PhaseHolder{})
 			require.NoError(t, r.Run(t.Context()))
 
@@ -4837,4 +1288,36 @@ func TestRunner_ReviewPromptIsSharedAcrossExecutors(t *testing.T) {
 			assert.Contains(t, calls[1].Prompt, "SECOND_REVIEW_PROMPT", "second review must use shared prompt")
 		})
 	}
+}
+
+// testAppConfig loads config with embedded defaults for testing.
+func testAppConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cfg, err := config.Load(t.TempDir())
+	require.NoError(t, err)
+	return cfg
+}
+
+// newMockLogger creates a moq-generated logger mock with no-op implementations.
+func newMockLogger() *mocks.LoggerMock {
+	return &mocks.LoggerMock{
+		PrintFunc:          func(_ string, _ ...any) {},
+		PrintRawFunc:       func(_ string, _ ...any) {},
+		PrintSectionFunc:   func(_ status.Section) {},
+		PrintAlignedFunc:   func(_ string) {},
+		LogQuestionFunc:    func(_ string, _ []string) {},
+		LogAnswerFunc:      func(_ string) {},
+		LogDraftReviewFunc: func(_, _ string) {},
+		PathFunc:           func() string { return "" },
+	}
+}
+
+func assertLogContains(t *testing.T, log *mocks.LoggerMock, text string) {
+	t.Helper()
+	for _, call := range log.PrintCalls() {
+		if strings.Contains(call.Format, text) {
+			return
+		}
+	}
+	t.Fatalf("expected log containing %q, got %#v", text, log.PrintCalls())
 }
