@@ -288,10 +288,14 @@ func (p *ExternalReviewPhase) snapshotBeforeEval() gitSnapshot {
 }
 
 func (p *ExternalReviewPhase) runClaudeEvaluation(loopCtx, parent context.Context, tool, output string) (ExecutionResult, error) {
-	p.phaseHolder.Set(status.PhaseClaudeEval)
+	if p.phaseHolder != nil {
+		p.phaseHolder.Set(status.PhaseClaudeEval)
+	}
 	p.log.PrintSection(status.NewClaudeEvalSection())
 	result := p.policy.Run(loopCtx, p.review.Run, p.evalPrompt(tool, output), "claude")
-	p.phaseHolder.Set(status.PhaseCodex)
+	if p.phaseHolder != nil {
+		p.phaseHolder.Set(status.PhaseCodex)
+	}
 
 	if result.Result.Error == nil {
 		return result, nil

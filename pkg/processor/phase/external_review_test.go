@@ -78,6 +78,20 @@ func TestExternalReviewPhaseRunCodexNoFindings(t *testing.T) {
 	assert.Len(t, review.RunCalls(), 1)
 }
 
+func TestExternalReviewPhaseRunCodexNilPhaseHolder(t *testing.T) {
+	review := newTaskPhaseMockExecutor([]executor.Result{{Output: "done", Signal: status.CodexDone}})
+	external := newTaskPhaseMockExecutor([]executor.Result{{Output: "found issue"}})
+	phase, _ := externalReviewPhaseFromRunner(t, externalReviewPhaseTestOpts{
+		cfg: Config{MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}, review: review, external: external,
+	})
+	phase.phaseHolder = nil
+
+	outcome, err := phase.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.False(t, outcome.HadFindings)
+}
+
 func TestExternalReviewPhaseRunCodexFindings(t *testing.T) {
 	review := newTaskPhaseMockExecutor([]executor.Result{{Output: "fixed"}, {Output: "done", Signal: status.CodexDone}})
 	external := newTaskPhaseMockExecutor([]executor.Result{{Output: "found issue"}, {Output: "clean"}})
