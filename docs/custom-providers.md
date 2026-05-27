@@ -286,6 +286,63 @@ fixed the bug
 {"type":"content_block_delta","delta":{"type":"text_delta","text":"fixed the bug\n"}}
 ```
 
+## Antigravity (agy) CLI wrapper (included example)
+
+The repository includes a wrapper at `scripts/agy-as-claude/agy-as-claude.sh` that translates the `agy` (Antigravity) CLI plain-text output to Claude stream-json format.
+
+### Compatibility
+
+Tested with `agy` 1.0.2. The wrapper depends on three `agy` flags being available:
+- `--dangerously-skip-permissions` — auto-approve tool/command permissions for unattended runs
+- `--print-timeout` — print mode timeout (raises the agy default of `5m`)
+- `-p` / `--print` / `--prompt` — non-interactive single-prompt mode
+
+If your `agy` build is missing or renames any of these flags, the wrapper will not work as a Claude replacement.
+
+The `agy` CLI in this version does **not** expose a `--model` flag, so model selection is not surfaced via an `AGY_MODEL` env var. Configure the model through `agy`'s own configuration if it supports doing so.
+
+### Setup
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /path/to/scripts/agy-as-claude/agy-as-claude.sh
+```
+
+### Unattended execution
+
+The wrapper invokes `agy` with `--dangerously-skip-permissions` to auto-approve tool and command permissions, ensuring the task and review phases can run autonomously without prompts.
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGY_PRINT_TIMEOUT` | `2h` | Print mode timeout passed to `agy`. The `agy` CLI defaults to `5m` which is shorter than typical ralphex task/review sessions. Override if you need a different limit. |
+
+### Environment isolation
+
+To prevent deadlocks when running `agy` as a sub-process within an active Antigravity agent process, the wrapper **unsets every `ANTIGRAVITY_*` environment variable before calling `agy`** (prefix-wide cleanup via `unset ${!ANTIGRAVITY_@}`, not a fixed list). This is intentional — it survives Antigravity adding new `ANTIGRAVITY_*` variables in future versions without requiring wrapper updates. Variables currently known to cause nested-agent issues include:
+- `ANTIGRAVITY_AGENT`
+- `ANTIGRAVITY_TRAJECTORY_ID`
+- `ANTIGRAVITY_LS_ADDRESS`
+- `ANTIGRAVITY_CSRF_TOKEN`
+- `ANTIGRAVITY_PROJECT_ID`
+
+If you set custom `ANTIGRAVITY_*` variables to influence `agy` behavior and need them inside the wrapper, the prefix-wide cleanup will strip them too — set them inside the wrapper instead, after the unset, or pass them via flags.
+
+### How it works
+
+Since `agy` outputs plain text when run non-interactively, the script wraps each line in a `content_block_delta` JSON event.
+
+```bash
+# agy emits text like:
+fixed the bug
+
+# wrapper translates to:
+{"type":"content_block_delta","delta":{"type":"text_delta","text":"fixed the bug\n"}}
+```
+
+For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text), the wrapper prepends sequential instructions to run the review flow sequentially rather than attempting parallel execution.
+
 ## Writing your own wrapper
 
 A wrapper script must:
