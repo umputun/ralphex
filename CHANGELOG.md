@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.2 - 2026-05-25
+
+### Improved
+
+- Retry claude 5xx API errors via limit patterns 810840f
+- Dedup CLAUDE.md against llms.txt to clear size threshold b858c05
+- Trim CLAUDE.md verbosity a4853c7
+
+### Fixed
+
+- Detect Claude session-limit message #362 @umputun
+
 ## v1.3.1 - 2026-05-22
 
 ### New Features

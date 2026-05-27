@@ -77,6 +77,49 @@ ralphex docs/plans/my-feature.md
 
 ralphex will create a branch, execute tasks, commit results, run multi-phase reviews, and move the plan to `completed/` when done.
 
+> [!WARNING]
+> **Anthropic Agent SDK billing change on June 15, 2026**
+>
+> Anthropic is moving `claude -p` / `claude --print`, Claude Agent SDK, and Claude Code GitHub Actions usage to a separate monthly Agent SDK credit pool for Claude subscription users. The default Claude mode in ralphex uses `claude --print` internally, so unattended ralphex runs are part of that pool. See Anthropic's [Agent SDK credit article](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) for the current billing rules.
+>
+> Practical options:
+>
+> 1. Do nothing. Light use may fit inside the included monthly credit. This should also be transparent for users who already run Claude Code through API-key billing, Bedrock, Vertex, Foundry, or another non-subscription provider path.
+> 2. Use a skill-based flow in an interactive Claude Code session. The author's [`umputun/cc-thingz`](https://github.com/umputun/cc-thingz) plugin collection includes the `planning` family (`/planning:make` and `/planning:exec`). That keeps work inside the normal interactive Claude Code flow instead of `claude --print`.
+> 3. Switch the ralphex executor to codex. First-class [`--codex`](#codex-executor-mode) support routes plan creation, task execution, both review phases, and finalize through the codex CLI and skips the external codex review phase.
+> 4. Use a `claude -p` compatible wrapper that drives an interactive Claude Code session and emits Claude-compatible `stream-json`. Examples that match ralphex's invocation shape include [`umputun/fya`](https://github.com/umputun/fya), [`melonamin/agentrun`](https://github.com/melonamin/agentrun), [`Equality-Machine/claude-p`](https://github.com/Equality-Machine/claude-p), and [`kcosr/claude-pty-wrapper`](https://github.com/kcosr/claude-pty-wrapper). These wrappers are unofficial and may break if Anthropic changes or blocks this pattern.
+
+<details markdown>
+<summary>Wrapper configuration examples</summary>
+
+Install `fya` with Homebrew:
+
+```bash
+brew install umputun/apps/fya
+command -v fya
+```
+
+Use the absolute path printed by `command -v fya` in ralphex config. On Apple Silicon Homebrew this is normally `/opt/homebrew/bin/fya`:
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /opt/homebrew/bin/fya
+claude_args = --dangerously-skip-permissions --output-format stream-json --verbose
+```
+
+On Intel Homebrew the path is normally `/usr/local/bin/fya`. If `command -v fya` prints another path, use that exact path instead.
+
+For `agentrun`, use its tmux-backed path if the goal is avoiding direct `claude --print`:
+
+```ini
+claude_command = /absolute/path/to/agentrun
+claude_args = --persist-session --no-session-persistence --dangerously-skip-permissions --output-format stream-json --verbose
+```
+
+These tools depend on interactive Claude Code behavior and local transcript files staying usable. Anthropic may detect or block wrapper-style automation later, so test the exact tool before relying on it.
+
+</details>
+
 ## How It Works
 
 ralphex executes plans in four phases with automated code reviews, plus an optional finalize step.
@@ -211,11 +254,14 @@ ralphex --external-only docs/plans/feature.md
 
 ### Codex Executor Mode
 
-The `--codex` flag routes task execution, both review phases, and the optional finalize step through the codex CLI instead of Claude Code. The external review phase is automatically skipped because codex-reviewing-codex is a same-model self-review with weak signal; the cross-model independence between Claude and codex was the original reason that phase existed.
+The `--codex` flag routes interactive plan creation (`--plan`), task execution, both review phases, and the optional finalize step through the codex CLI instead of Claude Code. The external review phase is automatically skipped because codex-reviewing-codex is a same-model self-review with weak signal; the cross-model independence between Claude and codex was the original reason that phase existed.
 
 **Why this exists:** in June 2026 Anthropic split the Claude Max subscription from the Claude Agent SDK, putting unattended ralphex runs on a separate $200 credit pool rather than the Max plan. Users with an OpenAI/codex plan can switch the entire ralphex pipeline to codex with one flag and stay on their existing OpenAI subscription instead.
 
 ```bash
+# create a plan through codex
+ralphex --codex --plan "add user authentication"
+
 # run the full pipeline (task, first review, second review, finalize) through codex
 ralphex --codex docs/plans/feature.md
 
@@ -223,7 +269,7 @@ ralphex --codex docs/plans/feature.md
 ralphex --codex --pass-claude-md docs/plans/feature.md
 ```
 
-**How it differs from `codex-as-claude.sh`:** the `--codex` flag is the native codex path. It calls the codex CLI directly and configures multi-agent reviews through additive `-c` flag overrides on the codex command line. Review prompts are shared with claude — the `{{agent:<name>}}` expansion produces `spawn_agent` calls for codex and Task-tool calls for claude at runtime. The `scripts/codex-as-claude/codex-as-claude.sh` wrapper still exists for backwards compatibility — it translates codex JSONL output into Claude stream-json events, which adds overhead and keeps Claude-flavored prompt vocabulary in front of a codex model.
+**How it differs from `codex-as-claude.sh`:** the `--codex` flag is the native codex path. It calls the codex CLI directly and configures multi-agent reviews through additive `-c` flag overrides on the codex command line. Review prompts are shared with claude. The `{{agent:<name>}}` expansion produces `spawn_agent` calls for codex and Task-tool calls for claude at runtime. The `scripts/codex-as-claude/codex-as-claude.sh` wrapper still exists for backwards compatibility. It translates codex JSONL output into Claude stream-json events, which adds overhead and keeps Claude-flavored prompt vocabulary in front of a codex model.
 
 **Project CLAUDE.md passthrough (`--pass-claude-md`):** adds `-c project_doc_fallback_filenames=["CLAUDE.md"]` to the codex invocation so codex's native AGENTS.md walk picks up the project-level `./CLAUDE.md` file. This works for project-level CLAUDE.md only. For user-level `~/.claude/CLAUDE.md`, ralphex never modifies the user's `~/.codex/` directory. If `~/.claude/CLAUDE.md` exists and `~/.codex/AGENTS.md` does not, ralphex prints a one-time hint suggesting `ln -s ~/.claude/CLAUDE.md ~/.codex/AGENTS.md` and continues; the user opts in by running the command themselves.
 
@@ -238,9 +284,9 @@ When `executor = codex` is set in config and the user has also set `external_rev
 
 **Mutual exclusion:** the codex executor (whether enabled via `--codex` or `executor = codex` in config) cannot be combined with `--external-only` (alias `-e`), `--codex-only` (alias `-c`), or `--external-review-tool=<X>` where `<X>` is not `none`. `--pass-claude-md` requires the codex executor (CLI `--codex` or config `executor = codex`). Each combination fails with a clear error message at startup.
 
-**Requirements:** `--codex` requires the codex CLI version 0.130.0 or newer. The mode relies on `[features] multi_agent`, `[agents.<name>]` agent registration, and (with `--pass-claude-md`) `project_doc_fallback_filenames`, all supported in 0.130.0. Older codex versions silently ignore unknown `-c` overrides, so a misconfigured run will not error visibly — it will simply behave as if the overrides were absent. There is no runtime version check; verify your codex version with `codex --version` if behavior is unexpected.
+**Requirements:** `--codex` requires the codex CLI version 0.130.0 or newer. The mode relies on `[features] multi_agent`, `[agents.<name>]` agent registration, and (with `--pass-claude-md`) `project_doc_fallback_filenames`, all supported in 0.130.0. Older codex versions silently ignore unknown `-c` overrides, so a misconfigured run will not error visibly. It will simply behave as if the overrides were absent. There is no runtime version check; verify your codex version with `codex --version` if behavior is unexpected.
 
-**Model selection under `--codex`:** under `--codex` the `--task-model` / `--review-model` flags (and their config equivalents `task_model` / `review_model`) select the model and effort per phase. `--task-model` sets the task phase; `--review-model` sets the review phase and falls back to `--task-model` when unset. Codex builds a separate review executor when the resolved review model/effort differs from task, so tasks and reviews can run on different codex models. Each `model[:effort]` spec is resolved against `codex_model` / `codex_reasoning_effort` (default `gpt-5.5` / `xhigh`): an unset spec inherits those defaults, and each populated half overrides its default (`--task-model=:high` changes effort only). The `max` effort level is claude-only — a spec requesting it under `--codex` is warned about and ignored. So codex model selection is: `--task-model` / `--review-model` (CLI or config), then `codex_model` / `codex_reasoning_effort` in ralphex config, applied as `-c` overrides to the codex CLI; set either codex value to empty (e.g. `codex_model =`) in your user config to inherit that field from `~/.codex/config.toml` instead. Commenting the line out keeps the embedded default. The startup banner under `--codex` shows the resolved task model/effort, plus a separate `review model` / `review reasoning effort` line when the review phase resolves differently.
+**Model selection under `--codex`:** under `--codex` the `--plan-model` / `--task-model` / `--review-model` flags (and their config equivalents `plan_model` / `task_model` / `review_model`) select the model and effort per phase. `--plan-model` sets plan creation and falls back to `--task-model` when unset. `--task-model` sets the task phase. `--review-model` sets the review phase and falls back to `--task-model` when unset. Codex builds a separate review executor when the resolved review model/effort differs from task, so tasks and reviews can run on different codex models. Each `model[:effort]` spec is resolved against `codex_model` / `codex_reasoning_effort` (default `gpt-5.5` / `xhigh`): an unset spec inherits those defaults, and each populated half overrides its default (`--task-model=:high` changes effort only). The `max` effort level is claude-only. A spec requesting it under `--codex` is warned about and ignored. So codex model selection is: `--plan-model` / `--task-model` / `--review-model` (CLI or config), then `codex_model` / `codex_reasoning_effort` in ralphex config, applied as `-c` overrides to the codex CLI; set either codex value to empty (e.g. `codex_model =`) in your user config to inherit that field from `~/.codex/config.toml` instead. Commenting the line out keeps the embedded default. The startup banner under `--codex` shows the resolved plan/task model/effort for the current mode, plus a separate `review model` / `review reasoning effort` line when the review phase resolves differently.
 
 ### Worktree Isolation
 
@@ -607,11 +653,14 @@ ralphex --review-patience=3 docs/plans/feature.md
 # wait and retry on rate limit (instead of exiting)
 ralphex --wait=1h docs/plans/feature.md
 
-# use different models for tasks vs reviews (e.g., opus for tasks, sonnet for reviews)
-ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
+# use a stronger model for plan creation
+ralphex --plan-model=opus:high --plan="add caching"
+
+# use different models for tasks and reviews
+ralphex --task-model=opus --review-model=sonnet:low docs/plans/feature.md
 
 # use provider overrides for one run without editing config
-ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
+ralphex --claude-command=/path/to/codex-as-claude.sh --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
 
 # set per-session timeout to kill hanging sessions (external review in Claude mode excluded)
 ralphex --session-timeout=30m docs/plans/feature.md
@@ -639,11 +688,12 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `-r, --review` | Skip task execution, run full review pipeline | false |
 | `-e, --external-only` | Skip tasks and first review, run only external review loop | false |
 | `-c, --codex-only` | Alias for `--external-only` (deprecated) | false |
-| `--codex` | Use codex CLI as the executor for task, review, and finalize phases. Skips the external review phase (codex-reviewing-codex is a same-model self-review with weak signal). Requires codex CLI ≥ 0.130.0 | false |
+| `--codex` | Use codex CLI as the executor for plan creation, task, review, and finalize phases. Skips the external review phase (codex-reviewing-codex is a same-model self-review with weak signal). Requires codex CLI ≥ 0.130.0 | false |
 | `--pass-claude-md` | Pass project `CLAUDE.md` to codex via `-c project_doc_fallback_filenames=["CLAUDE.md"]`. User-level `~/.claude/CLAUDE.md` is NOT auto-passed (a one-time setup hint is shown). Requires the codex executor (`--codex` or `executor = codex`) | false |
 | `-t, --tasks-only` | Run only task phase, skip all reviews | false |
 | `-b, --base-ref` | Override default branch for review diffs (branch name or commit hash) | auto-detect |
 | `--skip-finalize` | Skip finalize step even if enabled in config | false |
+| `--plan-model` | Model for plan creation as `model[:effort]` (falls back to `--task-model`). Same syntax and wrapper behavior as `--task-model`. Under `--codex`, selects the codex plan-creation model/effort | empty |
 | `--task-model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort values: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags. Under `--codex`, selects the codex task-phase model/effort instead (see *Model selection under `--codex`*) | empty |
 | `--review-model` | Model for review phases as `model[:effort]` (falls back to `--task-model`). Same syntax and wrapper behavior as `--task-model`. Under `--codex`, selects the codex review-phase model/effort | empty |
 | `--claude-command` | Override the Claude-compatible command for this run | config/default |
@@ -883,8 +933,9 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 |--------|-------------|---------|
 | `claude_command` | Claude CLI command | `claude` |
 | `claude_args` | Claude CLI arguments | `--dangerously-skip-permissions --output-format stream-json --verbose` |
-| `executor` | Executor for task, review, and finalize phases. `""` (default) uses Claude Code; `codex` routes the full pipeline through the codex CLI and skips the external review phase. CLI flag `--codex` takes precedence | empty |
+| `executor` | Executor for plan creation, task, review, and finalize phases. `""` (default) uses Claude Code; `codex` routes the full pipeline through the codex CLI and skips the external review phase. CLI flag `--codex` takes precedence | empty |
 | `pass_claude_md` | When `executor = codex`, pass project `CLAUDE.md` to codex as `AGENTS.md` via `-c project_doc_fallback_filenames=["CLAUDE.md"]`. CLI flag `--pass-claude-md` takes precedence | `false` |
+| `plan_model` | Model for plan creation as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Falls back to `task_model` if empty. Same syntax and wrapper behavior as `task_model`. Under `--codex`, selects the codex plan-creation model/effort instead (see *Model selection under `--codex`*) | empty |
 | `task_model` | Model for task execution as `model[:effort]` (e.g., `opus`, `opus:high`, `:medium`). Effort: `low`, `medium`, `high`, `xhigh`, `max`. Appended as `--model <m>` and/or `--effort <e>` to `claude_command`; custom wrappers may ignore or implement the flags. Under `--codex`, selects the codex task-phase model/effort instead (see *Model selection under `--codex`*) | empty |
 | `review_model` | Model for review phases as `model[:effort]`. Falls back to `task_model` if empty. Same syntax and wrapper behavior as `task_model`. Under `--codex`, selects the codex review-phase model/effort | empty |
 | `codex_enabled` | Enable codex review phase | `true` |
@@ -916,9 +967,9 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 | `color_signal` | Completion/failure signals color (hex) | `#ff6464` |
 | `color_timestamp` | Timestamp prefix color (hex) | `#8a8a8a` |
 | `color_info` | Informational messages color (hex) | `#b4b4b4` |
-| `claude_error_patterns` | Patterns to detect in claude output (comma-separated) | `You've hit your limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit` |
+| `claude_error_patterns` | Patterns to detect in claude output (comma-separated) | `You've hit your limit,You've hit your session limit,API Error:,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit` |
 | `codex_error_patterns` | Patterns to detect in codex output (comma-separated) | `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` |
-| `claude_limit_patterns` | Limit patterns for claude triggering wait+retry (comma-separated) | `You've hit your limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit` |
+| `claude_limit_patterns` | Limit patterns for claude triggering wait+retry (comma-separated) | `You've hit your limit,You've hit your session limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,API Error: 529,API Error: 502,API Error: 503,API Error: 504` |
 | `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` |
 | `wait_on_limit` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `session_timeout` | Per-session timeout for task/review executor (e.g., `30m`, `1h`). Applies to Claude calls in default executor mode and every executor call under `executor = codex`; external codex/custom review in Claude mode is not affected | disabled |
@@ -1040,7 +1091,6 @@ To use the included Copilot wrapper:
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
-claude_args =
 ```
 
 Authenticate with `copilot login` or set one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`. Set `COPILOT_MODEL` to choose the model.
@@ -1052,16 +1102,15 @@ To use the included codex wrapper:
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
-claude_args =
 ```
 
 Or choose it for one invocation:
 
 ```bash
-ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh --claude-args= docs/plans/feature.md
+ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh docs/plans/feature.md
 ```
 
-Setting `claude_args` to empty in config is optional. Note that default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`) may still be passed due to config fallback behavior. Use the CLI form `--claude-args=` when you need to explicitly clear configured/default args for a single run. Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all.
+Wrapper scripts should ignore unknown flags gracefully — the included script does this via its `*) shift ;;` catch-all. If a wrapper cannot tolerate the default Claude flags (`--dangerously-skip-permissions`, `--output-format stream-json`, `--verbose`), use `--claude-args=` to explicitly clear configured/default args for that single run.
 
 The included Codex and Copilot wrappers require `jq` on `PATH` for JSON translation.
 
@@ -1228,7 +1277,6 @@ Yes. Use one of the included wrapper scripts that translate provider output to C
 
 ```ini
 claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
-claude_args =
 ```
 
 For Copilot, authenticate with `copilot login` or one of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`, and set `COPILOT_MODEL` if you want to override the default model.
@@ -1239,7 +1287,6 @@ Codex works the same way through its wrapper:
 
 ```ini
 claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
-claude_args =
 ```
 
 Set `CODEX_MODEL` env var to choose the model. See [Using Alternative Providers](#using-alternative-providers-for-claude-phases) and [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for the included Copilot example and for writing wrappers for other tools.

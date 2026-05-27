@@ -70,9 +70,9 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, "docs/plans", values.PlansDir)
 	assert.Equal(t, "git", values.VcsCommand)
 	assert.Empty(t, values.CommitTrailer)
-	assert.Equal(t, []string{"You've hit your limit", "API Error:", "cannot be launched inside another Claude Code session", "Not logged in", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit"}, values.ClaudeErrorPatterns)
+	assert.Equal(t, []string{"You've hit your limit", "You've hit your session limit", "API Error:", "cannot be launched inside another Claude Code session", "Not logged in", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit"}, values.ClaudeErrorPatterns)
 	assert.Equal(t, []string{"Rate limit exceeded", "rate limit reached", "429 Too Many Requests", "quota exceeded", "insufficient_quota", "You've hit your usage limit"}, values.CodexErrorPatterns)
-	assert.Equal(t, []string{"You've hit your limit", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit", "API Error: 529", "API Error: 502", "API Error: 503", "API Error: 504"}, values.ClaudeLimitPatterns)
+	assert.Equal(t, []string{"You've hit your limit", "You've hit your session limit", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit", "API Error: 529", "API Error: 502", "API Error: 503", "API Error: 504"}, values.ClaudeLimitPatterns)
 	assert.Equal(t, []string{"Rate limit exceeded", "rate limit reached", "429 Too Many Requests", "quota exceeded", "insufficient_quota", "You've hit your usage limit"}, values.CodexLimitPatterns)
 	assert.Zero(t, values.WaitOnLimit)
 	assert.False(t, values.WaitOnLimitSet)
@@ -2500,6 +2500,26 @@ func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {
 	assert.Equal(t, []string{"local pattern"}, values.ClaudeLimitPatterns)
 }
 
+func TestValuesLoader_Load_PlanModel(t *testing.T) {
+	t.Run("parse valid value", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "config")
+		require.NoError(t, os.WriteFile(cfgPath, []byte(`plan_model = opus:high`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", cfgPath)
+		require.NoError(t, err)
+		assert.Equal(t, "opus:high", values.PlanModel)
+	})
+
+	t.Run("not set defaults to empty", func(t *testing.T) {
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load("", "")
+		require.NoError(t, err)
+		assert.Empty(t, values.PlanModel)
+	})
+}
+
 func TestValuesLoader_Load_TaskModel(t *testing.T) {
 	t.Run("parse valid value", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -2548,6 +2568,35 @@ func TestValuesLoader_Load_ReviewModel(t *testing.T) {
 		values, err := loader.Load("", "")
 		require.NoError(t, err)
 		assert.Empty(t, values.ReviewModel)
+	})
+}
+
+func TestValues_mergeFrom_PlanModel(t *testing.T) {
+	t.Run("non-empty overrides", func(t *testing.T) {
+		dst := Values{PlanModel: ""}
+		src := Values{PlanModel: "opus"}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "opus", dst.PlanModel)
+	})
+
+	t.Run("empty preserves existing", func(t *testing.T) {
+		dst := Values{PlanModel: "opus"}
+		src := Values{PlanModel: ""}
+		dst.mergeFrom(&src)
+		assert.Equal(t, "opus", dst.PlanModel)
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		globalCfg := filepath.Join(tmpDir, "global")
+		localCfg := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.WriteFile(globalCfg, []byte(`plan_model = opus`), 0o600))
+		require.NoError(t, os.WriteFile(localCfg, []byte(`plan_model = haiku`), 0o600))
+
+		loader := newValuesLoader(defaultsFS)
+		values, err := loader.Load(localCfg, globalCfg)
+		require.NoError(t, err)
+		assert.Equal(t, "haiku", values.PlanModel)
 	})
 }
 

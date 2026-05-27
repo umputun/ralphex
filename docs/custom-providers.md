@@ -76,11 +76,11 @@ ralphex prompts instruct the agent to emit signals like `<<<RALPHEX:COMPLETED>>>
 <claude_command> <claude_args...> [--model <model>] [--effort <level>] --print
 ```
 
-`--model` and `--effort` are injected when `task_model`/`review_model` config provides them (via `model[:effort]` syntax). Either, both, or neither may be present. Any matching flag already in `claude_args` is stripped before injection to avoid duplicates. Wrappers that don't implement these flags will ignore them via the catch-all `*) shift ;;` pattern.
+`--model` and `--effort` are injected when the current phase's `plan_model`/`task_model`/`review_model` config provides them (via `model[:effort]` syntax). Either, both, or neither may be present. Any matching flag already in `claude_args` is stripped before injection to avoid duplicates. Wrappers that don't implement these flags will ignore them via the catch-all `*) shift ;;` pattern.
 
 The prompt is passed via stdin (not as a CLI argument). This avoids the cmd.exe 8191-character command-line limit on Windows, where large prompts (e.g., after variable expansion) can exceed the limit.
 
-When `claude_args` has a value (default: `--dangerously-skip-permissions --output-format stream-json --verbose`), those flags are split and passed as arguments. Note that setting `claude_args =` (empty) in the config file may not clear the default due to config fallback behavior — the embedded default value is preserved when the user-specified value is empty. Use `--claude-args=` on the command line when you need to explicitly clear configured/default arguments for a single run.
+When `claude_args` has a value (default: `--dangerously-skip-permissions --output-format stream-json --verbose`), those flags are split and passed as arguments. Wrapper scripts should normally ignore unknown Claude flags. If a wrapper cannot tolerate configured/default arguments, use `--claude-args=` on the command line to explicitly clear them for a single run.
 
 **Wrapper scripts should accept the prompt via stdin** and also accept `-p <prompt>` for backward compatibility. Use `[[ ! -t 0 ]]` to detect non-interactive stdin before reading. **Wrapper scripts should also ignore unknown flags gracefully** — use a catch-all `*) shift ;;` in the argument parser.
 
@@ -89,7 +89,7 @@ When `claude_args` has a value (default: `--dangerously-skip-permissions --outpu
 Use CLI flags when you want to test or switch providers without editing `~/.config/ralphex/config` or `.ralphex/config`. These flags override config for the current invocation only:
 
 ```bash
-ralphex --claude-command=/path/to/wrapper.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
+ralphex --claude-command=/path/to/wrapper.sh --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
 ```
 
 `--external-review-tool` accepts `codex`, `custom`, or `none`. When `custom` is selected, `--custom-review-script` points at the script that receives the external review prompt file path.
@@ -105,13 +105,12 @@ The wrapper translates codex JSONL events to Claude stream-json format.
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/codex-as-claude/codex-as-claude.sh
-claude_args =
 ```
 
 For a one-off run without editing config:
 
 ```bash
-ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh --claude-args= docs/plans/feature.md
+ralphex --claude-command=/path/to/scripts/codex-as-claude/codex-as-claude.sh docs/plans/feature.md
 ```
 
 ### Environment variables
@@ -160,13 +159,12 @@ Unlike the Gemini wrapper, Copilot already has a native non-interactive JSONL mo
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/copilot-as-claude/copilot-as-claude.sh
-claude_args =
 ```
 
 For a one-off run without editing config:
 
 ```bash
-ralphex --claude-command=/path/to/scripts/copilot-as-claude/copilot-as-claude.sh --claude-args= docs/plans/feature.md
+ralphex --claude-command=/path/to/scripts/copilot-as-claude/copilot-as-claude.sh docs/plans/feature.md
 ```
 
 ### Authentication
@@ -225,7 +223,6 @@ The repository includes a wrapper at `scripts/opencode/opencode-as-claude.sh` th
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/opencode/opencode-as-claude.sh
-claude_args =
 ```
 
 ### Environment variables
@@ -269,7 +266,6 @@ The repository includes a wrapper at `scripts/gemini-as-claude/gemini-as-claude.
 ```ini
 # in ~/.config/ralphex/config or .ralphex/config
 claude_command = /path/to/scripts/gemini-as-claude/gemini-as-claude.sh
-claude_args =
 ```
 
 ### Environment variables

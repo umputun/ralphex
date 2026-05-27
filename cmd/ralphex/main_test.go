@@ -1270,6 +1270,52 @@ func TestCodexModelBanner(t *testing.T) {
 	})
 }
 
+func TestCodexPlanBanner(t *testing.T) {
+	t.Run("plan_model_sets_plan_executor", func(t *testing.T) {
+		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh", PlanModel: "gpt-5.6:high", TaskModel: "gpt-5.5:low"}
+		got := codexPlanBanner(parseTestOpts(t, "--codex"), cfg)
+
+		assert.Equal(t, "gpt-5.6", got.taskModel)
+		assert.Equal(t, "high", got.taskEffort)
+		assert.Equal(t, got.taskModel, got.reviewModel)
+		assert.Equal(t, got.taskEffort, got.reviewEffort)
+		assert.False(t, got.maxDropped)
+	})
+
+	t.Run("plan_model_falls_back_to_task_model", func(t *testing.T) {
+		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh", TaskModel: "gpt-5.6:low"}
+		got := codexPlanBanner(parseTestOpts(t, "--codex"), cfg)
+
+		assert.Equal(t, "gpt-5.6", got.taskModel)
+		assert.Equal(t, "low", got.taskEffort)
+	})
+
+	t.Run("plan_model_falls_back_to_cli_task_model", func(t *testing.T) {
+		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		got := codexPlanBanner(parseTestOpts(t, "--codex", "--task-model", "gpt-5.7:high"), cfg)
+
+		assert.Equal(t, "gpt-5.7", got.taskModel)
+		assert.Equal(t, "high", got.taskEffort)
+	})
+
+	t.Run("cli_plan_model_overrides_config_and_task_model", func(t *testing.T) {
+		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh", PlanModel: "gpt-5.6:high", TaskModel: "gpt-5.5:low"}
+		got := codexPlanBanner(parseTestOpts(t, "--codex", "--plan-model", "gpt-5.7:medium"), cfg)
+
+		assert.Equal(t, "gpt-5.7", got.taskModel)
+		assert.Equal(t, "medium", got.taskEffort)
+	})
+
+	t.Run("max_effort_sets_max_dropped", func(t *testing.T) {
+		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
+		got := codexPlanBanner(parseTestOpts(t, "--codex", "--plan-model", "gpt-5.6:max"), cfg)
+
+		assert.Equal(t, "gpt-5.6", got.taskModel)
+		assert.Equal(t, "xhigh", got.taskEffort)
+		assert.True(t, got.maxDropped)
+	})
+}
+
 func TestPrintStartupInfo(t *testing.T) {
 	colors := testColors()
 

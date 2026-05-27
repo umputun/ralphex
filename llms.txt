@@ -40,7 +40,10 @@ ralphex --codex docs/plans/feature.md
 # codex executor mode with project CLAUDE.md passthrough (codex reads CLAUDE.md as AGENTS.md)
 ralphex --codex --pass-claude-md docs/plans/feature.md
 
-# codex executor mode with per-phase model/effort (resolved against codex_model/codex_reasoning_effort)
+# codex plan creation with a specific plan model/effort
+ralphex --codex --plan-model=gpt-5.5:xhigh --plan="add user authentication"
+
+# codex executor mode with task/review model/effort (resolved against codex_model/codex_reasoning_effort)
 ralphex --codex --task-model=gpt-5.5:high --review-model=gpt-5.5:low docs/plans/feature.md
 
 # limit external review iterations (0 = auto, derived from max-iterations)
@@ -52,11 +55,14 @@ ralphex --review-patience=3 docs/plans/feature.md
 # wait and retry on rate limit (instead of exiting)
 ralphex --wait=1h docs/plans/feature.md
 
-# use different models for tasks vs reviews (e.g., opus for tasks, sonnet for reviews)
-ralphex --task-model=opus --review-model=sonnet docs/plans/feature.md
+# use a stronger model for plan creation
+ralphex --plan-model=opus:high --plan="add caching"
+
+# use different models for tasks and reviews
+ralphex --task-model=opus --review-model=sonnet:low docs/plans/feature.md
 
 # override Claude-compatible provider and external review tool for one run
-ralphex --claude-command=/path/to/codex-as-claude.sh --claude-args= --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
+ralphex --claude-command=/path/to/codex-as-claude.sh --external-review-tool=custom --custom-review-script=/path/to/review.sh docs/plans/feature.md
 
 # set per-session timeout to kill hanging sessions (external review in Claude mode excluded)
 ralphex --session-timeout=30m docs/plans/feature.md
@@ -134,21 +140,22 @@ Configuration directory: `~/.config/ralphex/` (override with `--config-dir` or `
 
 **Stalemate detection:** `review_patience` config option (or `--review-patience` CLI flag) terminates the external review loop early when Claude produces no commits for N consecutive rounds. Set to 0 (default) to disable. Useful when the external tool and Claude can't agree on findings.
 
-**Per-phase model configuration:** `task_model` config option (or `--task-model` CLI flag) sets the model for task execution using `model[:effort]` syntax. Examples: `opus` (model only), `opus:high` (both), `:medium` (effort only). Effort levels: `low`, `medium`, `high`, `xhigh`, `max`. `review_model` (or `--review-model`) sets the model/effort for review phases; falls back to `task_model` if empty. Parts are appended to the configured `claude_command` as `--model <m>` and/or `--effort <e>`. Custom wrappers may ignore the flags (default behavior via `*) shift ;;`) or map them to their own selection. Empty by default (uses Claude CLI's defaults).
+**Per-phase model configuration:** `plan_model`, `task_model`, and `review_model` config options (or `--plan-model`, `--task-model`, `--review-model` CLI flags) set phase model/effort using `model[:effort]` syntax. Examples: `opus` (model only), `opus:high` (both), `:medium` (effort only). Effort levels: `low`, `medium`, `high`, `xhigh`, `max`. `plan_model` sets plan creation and falls back to `task_model` if empty. `task_model` sets task execution. `review_model` sets review phases and falls back to `task_model` if empty. Parts are appended to the configured `claude_command` as `--model <m>` and/or `--effort <e>`. Custom wrappers may ignore the flags (default behavior via `*) shift ;;`) or map them to their own selection. Empty by default (uses Claude CLI's defaults).
 
-Under the codex executor (`--codex` or `executor = codex`), `task_model`/`review_model` (CLI flag or config) select the model/effort per phase, resolved against `codex_model`/`codex_reasoning_effort` as the codex defaults. `--task-model` sets the task phase; `--review-model` sets the review phase and falls back to `--task-model` when unset. Codex builds a separate review executor when the review model/effort differs from task, so tasks and reviews can run on different codex models. An unset spec inherits the codex defaults, and each populated half of a `model[:effort]` spec overrides its default (`--task-model=:high` changes effort only). The `max` effort level does not exist in codex — passing it under `--codex` prints a warning and is ignored.
+Under the codex executor (`--codex` or `executor = codex`), `plan_model`/`task_model`/`review_model` (CLI flag or config) select the model/effort per phase, resolved against `codex_model`/`codex_reasoning_effort` as the codex defaults. `--plan-model` sets plan creation and falls back to `--task-model` when unset. `--task-model` sets the task phase. `--review-model` sets the review phase and falls back to `--task-model` when unset. Codex builds a separate review executor when the review model/effort differs from task, so tasks and reviews can run on different codex models. An unset spec inherits the codex defaults, and each populated half of a `model[:effort]` spec overrides its default (`--task-model=:high` changes effort only). The `max` effort level does not exist in codex — passing it under `--codex` prints a warning and is ignored.
 
 ```ini
 # in ~/.config/ralphex/config
-task_model = opus:high
-review_model = sonnet:medium
+plan_model = opus:high
+task_model = sonnet:medium
+review_model = sonnet:low
 ```
 
 **Manual break (Ctrl+\):** Press Ctrl+\ (SIGQUIT) to intervene during execution. In the task phase, it pauses execution and prompts "press Enter to continue, Ctrl+C to abort" — on Enter the same task re-runs with a fresh session that re-reads the plan file, so you can edit the plan mid-run. In the external review phase, it terminates the loop immediately. Not available on Windows.
 
 **Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing. For a one-off run, use `--external-review-tool=custom --custom-review-script=/path/to/script.sh`.
 
-**Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. A codex wrapper is included at `scripts/codex-as-claude/codex-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config, or use `--claude-command=/path/to/wrapper --claude-args=` for one run. The empty CLI value intentionally clears configured/default args for that invocation. Wrappers should ignore unknown flags gracefully. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
+**Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. A codex wrapper is included at `scripts/codex-as-claude/codex-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config, or use `--claude-command=/path/to/wrapper` for one run. Wrappers should ignore unknown flags gracefully. Use `--claude-args=` only when a wrapper cannot tolerate configured/default Claude flags and they must be cleared for a single run. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
 
 **Codex executor mode (`--codex`):** native codex alternative for running the full pipeline on codex. `--codex` routes task execution, both review phases, and finalize through the codex CLI; the external review phase is automatically skipped (codex-reviewing-codex is a same-model self-review with weak signal). Motivated by Anthropic's June 15, 2026 billing split between the Claude Max subscription and the Claude Agent SDK credit pool — users with an OpenAI plan can stay on their existing subscription.
 
@@ -180,7 +187,7 @@ Requirements: codex CLI ≥ 0.130.0. Older versions silently ignore unknown `-c`
 
 **Idle timeout:** `--idle-timeout` flag (or `idle_timeout` config option) kills executor sessions when no output is received for a specified duration. Unlike session timeout (fixed wall-clock limit), idle timeout resets on each output line and only fires when the session goes silent. Useful for detecting hung sessions that completed work but didn't exit. Applies to the claude executor in default mode and to every executor call under `--codex` (task/review/finalize); external codex review in default-claude mode is NOT affected — that path keeps master semantics so users with `idle_timeout` set for claude don't see new early-terminations on the external review phase. Custom external review is also not affected. Disabled by default.
 
-**Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit,API Error: 529` (claude, with transient 5xx), `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` (codex). The codex defaults are tightened so that review findings that *talk about* rate limiting in a codebase do not trip a false positive. Users who customized `codex_limit_patterns` or `codex_error_patterns` to an earlier default (e.g. `Rate limit,quota exceeded` or `Rate limit,quota exceeded,You've hit your usage limit`) keep their customization on update — comment the line out to inherit the new embedded default. Pattern matching scans both stdout and stderr (live, untruncated) so detection survives the 5-line / 256-rune error-context tail.
+**Rate limit retry:** `--wait` flag (or `wait_on_limit` config option) enables automatic retry when rate limits are detected. Limit patterns (`claude_limit_patterns`, `codex_limit_patterns`) are checked before error patterns — when a limit pattern matches and wait is configured, ralphex waits the specified duration and retries. Without `--wait`, limit matches fall through to error pattern behavior (exit). Default limit patterns: `You've hit your limit,You've hit your session limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,API Error: 529,API Error: 502,API Error: 503,API Error: 504` (claude), `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` (codex). The codex defaults are tightened so that review findings that *talk about* rate limiting in a codebase do not trip a false positive. Users who customized `codex_limit_patterns` or `codex_error_patterns` to an earlier default (e.g. `Rate limit,quota exceeded` or `Rate limit,quota exceeded,You've hit your usage limit`) keep their customization on update — comment the line out to inherit the new embedded default. Pattern matching scans both stdout and stderr (live, untruncated) so detection survives the 5-line / 256-rune error-context tail.
 
 **Plan move behavior:** `move_plan_on_completion` config option controls whether completed plans move to `docs/plans/completed/` on success. Default `true` (existing behavior). Set to `false` for workflows that manage plan file lifecycle externally, such as spec-driven tooling with separate archive steps.
 
