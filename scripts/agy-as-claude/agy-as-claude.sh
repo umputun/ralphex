@@ -13,6 +13,14 @@
 #   AGY_PRINT_TIMEOUT    - print mode timeout passed to agy (default 2h). The agy CLI
 #                          defaults to 5m which is too short for ralphex task/review phases.
 #
+# tested with: agy 1.0.2. The wrapper requires the agy flags --dangerously-skip-permissions,
+# --print-timeout, and -p. Model selection is not exposed (agy 1.0.2 has no --model flag).
+#
+# env isolation: the wrapper unsets every ANTIGRAVITY_* variable (prefix-wide, via
+# `unset ${!ANTIGRAVITY_@}`) before invoking agy to prevent recursion/deadlocks when
+# running inside an active Antigravity agent process. This is intentional and survives
+# Antigravity adding new ANTIGRAVITY_* vars without wrapper updates.
+#
 
 set -euo pipefail
 

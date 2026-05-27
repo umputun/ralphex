@@ -290,6 +290,17 @@ fixed the bug
 
 The repository includes a wrapper at `scripts/agy-as-claude/agy-as-claude.sh` that translates the `agy` (Antigravity) CLI plain-text output to Claude stream-json format.
 
+### Compatibility
+
+Tested with `agy` 1.0.2. The wrapper depends on three `agy` flags being available:
+- `--dangerously-skip-permissions` — auto-approve tool/command permissions for unattended runs
+- `--print-timeout` — print mode timeout (raises the agy default of `5m`)
+- `-p` / `--print` / `--prompt` — non-interactive single-prompt mode
+
+If your `agy` build is missing or renames any of these flags, the wrapper will not work as a Claude replacement.
+
+The `agy` CLI in this version does **not** expose a `--model` flag, so model selection is not surfaced via an `AGY_MODEL` env var. Configure the model through `agy`'s own configuration if it supports doing so.
+
 ### Setup
 
 ```ini
@@ -309,12 +320,14 @@ The wrapper invokes `agy` with `--dangerously-skip-permissions` to auto-approve 
 
 ### Environment isolation
 
-To prevent deadlocks when running `agy` as a sub-process within an active Antigravity agent process, the wrapper automatically unsets the following environment variables before calling `agy`:
+To prevent deadlocks when running `agy` as a sub-process within an active Antigravity agent process, the wrapper **unsets every `ANTIGRAVITY_*` environment variable before calling `agy`** (prefix-wide cleanup via `unset ${!ANTIGRAVITY_@}`, not a fixed list). This is intentional — it survives Antigravity adding new `ANTIGRAVITY_*` variables in future versions without requiring wrapper updates. Variables currently known to cause nested-agent issues include:
 - `ANTIGRAVITY_AGENT`
 - `ANTIGRAVITY_TRAJECTORY_ID`
 - `ANTIGRAVITY_LS_ADDRESS`
 - `ANTIGRAVITY_CSRF_TOKEN`
 - `ANTIGRAVITY_PROJECT_ID`
+
+If you set custom `ANTIGRAVITY_*` variables to influence `agy` behavior and need them inside the wrapper, the prefix-wide cleanup will strip them too — set them inside the wrapper instead, after the unset, or pass them via flags.
 
 ### How it works
 

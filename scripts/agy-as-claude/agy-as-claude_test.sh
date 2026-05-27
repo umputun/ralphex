@@ -426,13 +426,15 @@ exit 0
 ENV_MOCK_EOF
 chmod +x "$TMPDIR_TEST/agy"
 
-# Run wrapper setting ANTIGRAVITY_* variables in the parent environment
+# Run wrapper setting ANTIGRAVITY_* variables in the parent environment.
+# Include a synthetic future var to verify prefix-wide cleanup (not a fixed allowlist).
 rm -f "$TMPDIR_TEST/captured_env"
 ANTIGRAVITY_AGENT=1 \
 ANTIGRAVITY_TRAJECTORY_ID="test-traj" \
 ANTIGRAVITY_LS_ADDRESS="localhost:1234" \
 ANTIGRAVITY_CSRF_TOKEN="test-csrf" \
 ANTIGRAVITY_PROJECT_ID="test-proj" \
+ANTIGRAVITY_FUTURE_VAR="synthetic" \
 PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
     bash "$WRAPPER" -p "test prompt" < /dev/null >/dev/null 2>&1
 
@@ -529,6 +531,28 @@ if [[ -f "$TMPDIR_TEST/captured_args" ]]; then
         pass "--print-timeout flag passed to agy"
     else
         fail "--print-timeout flag not passed to agy" "args: $captured"
+    fi
+
+    # test: --dangerously-skip-permissions is the first flag passed to agy
+    first_arg=$(sed -n '1p' "$TMPDIR_TEST/captured_args")
+    if [[ "$first_arg" == "--dangerously-skip-permissions" ]]; then
+        pass "--dangerously-skip-permissions is the first flag passed to agy"
+    else
+        fail "--dangerously-skip-permissions not first flag passed to agy" "got first arg: '$first_arg'"
+    fi
+
+    # test: -p flag is passed to agy with the prompt right after
+    p_line=$(grep -n '^-p$' "$TMPDIR_TEST/captured_args" | head -1 | cut -d: -f1)
+    if [[ -n "$p_line" ]]; then
+        # the next line should be the prompt text
+        next_line=$(sed -n "$((p_line + 1))p" "$TMPDIR_TEST/captured_args")
+        if [[ "$next_line" == "test prompt" ]]; then
+            pass "-p flag passed to agy with prompt as next arg"
+        else
+            fail "-p flag not followed by prompt" "got next arg: '$next_line'"
+        fi
+    else
+        fail "-p flag not passed to agy" "args: $captured"
     fi
 else
     fail "could not capture args sent to agy"

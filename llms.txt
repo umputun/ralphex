@@ -118,6 +118,7 @@ ralphex --preserve-anthropic-api-key docs/plans/feature.md
 - `fzf` - for plan selection (optional)
 - `codex` - for external review (optional)
 - `gemini` - alternative provider for Claude phases (optional, via `scripts/gemini-as-claude/`)
+- `agy` - Antigravity CLI, alternative provider for Claude phases (optional, via `scripts/agy-as-claude/`)
 
 ## Customization
 
@@ -155,7 +156,7 @@ review_model = sonnet:low
 
 **Custom external review:** Set `external_review_tool = custom` and `custom_review_script = /path/to/script.sh` to use your own AI tool instead of codex. Script receives prompt file path as single argument, outputs findings to stdout. ralphex passes the output to Claude for evaluation and fixing. For a one-off run, use `--external-review-tool=custom --custom-review-script=/path/to/script.sh`.
 
-**Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. A codex wrapper is included at `scripts/codex-as-claude/codex-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config, or use `--claude-command=/path/to/wrapper` for one run. Wrappers should ignore unknown flags gracefully. Use `--claude-args=` only when a wrapper cannot tolerate configured/default Claude flags and they must be cleared for a single run. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
+**Alternative providers for Claude phases:** `claude_command` and `claude_args` config options allow replacing Claude Code with any CLI that produces compatible stream-json output. Included wrappers: `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/copilot-as-claude/copilot-as-claude.sh`, `scripts/gemini-as-claude/gemini-as-claude.sh`, `scripts/agy-as-claude/agy-as-claude.sh`, `scripts/opencode/opencode-as-claude.sh`. Set `claude_command = /path/to/wrapper` in config, or use `--claude-command=/path/to/wrapper` for one run. Wrappers should ignore unknown flags gracefully. Use `--claude-args=` only when a wrapper cannot tolerate configured/default Claude flags and they must be cleared for a single run. See `docs/custom-providers.md` for details on writing wrappers for other tools (Gemini CLI, local LLMs, etc.).
 
 **Codex executor mode (`--codex`):** native codex alternative for running the full pipeline on codex. `--codex` routes task execution, both review phases, and finalize through the codex CLI; the external review phase is automatically skipped (codex-reviewing-codex is a same-model self-review with weak signal). Motivated by Anthropic's June 15, 2026 billing split between the Claude Max subscription and the Claude Agent SDK credit pool — users with an OpenAI plan can stay on their existing subscription.
 
