@@ -4,7 +4,7 @@ description: Create structured implementation plan in docs/plans/
 
 # Implementation Plan Creation
 
-Create an implementation plan in `docs/plans/YYYY-MM-DD-<task-name>.md` with interactive context gathering.
+Create an implementation plan in `docs/plans/YYYYMMDD-<task-name>.md` with interactive context gathering.
 
 ## Prerequisites: Verify CLI Installation
 
@@ -124,7 +124,7 @@ Use AskUserQuestion tool to let user select preferred approach before creating t
 
 ## Step 2: Create Plan File
 
-Check `docs/plans/` for existing files, then create `docs/plans/YYYY-MM-DD-<task-name>.md`:
+Check `docs/plans/` for existing files, then create `docs/plans/YYYYMMDD-<task-name>.md`:
 
 ### Plan Structure
 
@@ -255,7 +255,7 @@ Example (NOTICE: tests are separate checklist items):
 
 After creating the file, tell user:
 
-"Created plan: `docs/plans/YYYY-MM-DD-<task-name>.md`
+"Created plan: `docs/plans/YYYYMMDD-<task-name>.md`
 
 Ready to start implementation?"
 
