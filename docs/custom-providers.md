@@ -230,6 +230,9 @@ claude_command = /path/to/scripts/opencode/opencode-as-claude.sh
 | Variable | Default | Description |
 |---|---|---|
 | `OPENCODE_MODEL` | (opencode default) | Model in provider/model format, e.g. `github-copilot/claude-opus-4.6` |
+| `OPENCODE_VARIANT` | (opencode default) | Model variant/reasoning effort, e.g. `high`, `medium`, or `low` |
+| `OPENCODE_EFFORT` | (opencode default) | Alias for `OPENCODE_VARIANT` when `OPENCODE_VARIANT` is unset |
+| `OPENCODE_REASONING` | (opencode default) | Alias for `OPENCODE_VARIANT` when both `OPENCODE_VARIANT` and `OPENCODE_EFFORT` are unset |
 | `OPENCODE_VERBOSE` | `0` | Set to `1` to include step start events in output |
 | `OPENCODE_CONFIG_CONTENT` | `{"permission":{"*":"allow"}}` | JSON config merged with auto-allow permissions via `jq` deep merge |
 

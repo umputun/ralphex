@@ -196,6 +196,24 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# test: missing CLI flag values are rejected
+# ---------------------------------------------------------------------------
+echo "test: missing CLI flag values are rejected"
+output=$(run_script --model --effort high "$prompt_file" 2>&1) && status=0 || status=$?
+if [[ $status -ne 0 ]] && echo "$output" | grep -q -- "--model requires a non-empty value"; then
+    pass "missing --model value is rejected"
+else
+    fail "missing --model value should fail" "status: $status output: $output"
+fi
+
+output=$(run_script --variant= "$prompt_file" 2>&1) && status=0 || status=$?
+if [[ $status -ne 0 ]] && echo "$output" | grep -q -- "--variant requires a non-empty value"; then
+    pass "empty --variant value is rejected"
+else
+    fail "empty --variant value should fail" "status: $status output: $output"
+fi
+
+# ---------------------------------------------------------------------------
 # test: merge with existing OPENCODE_CONFIG_CONTENT
 # ---------------------------------------------------------------------------
 echo "test: merge with existing OPENCODE_CONFIG_CONTENT"
