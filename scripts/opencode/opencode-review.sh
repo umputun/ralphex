@@ -16,6 +16,18 @@ OPENCODE_REVIEW_VARIANT="${OPENCODE_REVIEW_VARIANT:-${OPENCODE_REVIEW_EFFORT:-${
 
 set -euo pipefail
 
+require_flag_value() {
+    local flag="$1"
+    local value="${2:-}"
+
+    if [[ -z "$value" || "$value" == -* ]]; then
+        echo "error: $flag requires a non-empty value" >&2
+        exit 1
+    fi
+
+    printf '%s\n' "$value"
+}
+
 # verify opencode is available
 command -v opencode >/dev/null 2>&1 || { echo "error: opencode is required but not found" >&2; exit 1; }
 
@@ -27,12 +39,12 @@ command -v jq >/dev/null 2>&1 || { echo "error: jq is required but not found" >&
 prompt_file=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --model) OPENCODE_REVIEW_MODEL="${2:-}"; shift; shift 2>/dev/null || true ;;
-        --model=*) OPENCODE_REVIEW_MODEL="${1#--model=}"; shift ;;
-        --effort) OPENCODE_REVIEW_VARIANT="${2:-}"; shift; shift 2>/dev/null || true ;;
-        --effort=*) OPENCODE_REVIEW_VARIANT="${1#--effort=}"; shift ;;
-        --variant) OPENCODE_REVIEW_VARIANT="${2:-}"; shift; shift 2>/dev/null || true ;;
-        --variant=*) OPENCODE_REVIEW_VARIANT="${1#--variant=}"; shift ;;
+        --model) OPENCODE_REVIEW_MODEL=$(require_flag_value "$1" "${2:-}"); shift 2 ;;
+        --model=*) OPENCODE_REVIEW_MODEL=$(require_flag_value "--model" "${1#--model=}"); shift ;;
+        --effort) OPENCODE_REVIEW_VARIANT=$(require_flag_value "$1" "${2:-}"); shift 2 ;;
+        --effort=*) OPENCODE_REVIEW_VARIANT=$(require_flag_value "--effort" "${1#--effort=}"); shift ;;
+        --variant) OPENCODE_REVIEW_VARIANT=$(require_flag_value "$1" "${2:-}"); shift 2 ;;
+        --variant=*) OPENCODE_REVIEW_VARIANT=$(require_flag_value "--variant" "${1#--variant=}"); shift ;;
         *) prompt_file="$1"; shift ;;
     esac
 done

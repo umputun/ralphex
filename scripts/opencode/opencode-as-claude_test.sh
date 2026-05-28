@@ -542,6 +542,27 @@ if [[ -f "$TMPDIR_TEST/opencode_args" ]]; then
     fi
 fi
 
+# verify missing CLI flag values are rejected instead of consuming the next flag
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" --model --effort high -p "test prompt" 2>&1) && status=0 || status=$?
+
+if [[ $status -ne 0 ]] && echo "$output" | grep -q -- "--model requires a non-empty value"; then
+    pass "missing --model value is rejected"
+else
+    fail "missing --model value should fail" "status: $status output: $output"
+fi
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" --effort= -p "test prompt" 2>&1) && status=0 || status=$?
+
+if [[ $status -ne 0 ]] && echo "$output" | grep -q -- "--effort requires a non-empty value"; then
+    pass "empty --effort value is rejected"
+else
+    fail "empty --effort value should fail" "status: $status output: $output"
+fi
+
 # verify --model is NOT passed when OPENCODE_MODEL is empty
 rm -f "$TMPDIR_TEST/opencode_args"
 # restore the standard mock

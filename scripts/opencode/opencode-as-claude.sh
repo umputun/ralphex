@@ -29,6 +29,18 @@ OPENCODE_MODEL="${OPENCODE_MODEL:-}"
 OPENCODE_VARIANT="${OPENCODE_VARIANT:-${OPENCODE_EFFORT:-${OPENCODE_REASONING:-}}}"
 OPENCODE_VERBOSE="${OPENCODE_VERBOSE:-0}"
 
+require_flag_value() {
+    local flag="$1"
+    local value="${2:-}"
+
+    if [[ -z "$value" || "$value" == -* ]]; then
+        echo "error: $flag requires a non-empty value" >&2
+        exit 1
+    fi
+
+    printf '%s\n' "$value"
+}
+
 # ralphex passes prompt via stdin (primary path, avoids Windows 8191-char cmd limit).
 # also accept -p flag for backward compatibility with direct invocations.
 # support ralphex-injected --model/--effort and map effort to opencode's --variant.
@@ -37,12 +49,12 @@ prompt=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -p) prompt="${2:-}"; shift; shift 2>/dev/null || true ;;
-        --model) OPENCODE_MODEL="${2:-}"; shift; shift 2>/dev/null || true ;;
-        --model=*) OPENCODE_MODEL="${1#--model=}"; shift ;;
-        --effort) OPENCODE_VARIANT="${2:-}"; shift; shift 2>/dev/null || true ;;
-        --effort=*) OPENCODE_VARIANT="${1#--effort=}"; shift ;;
-        --variant) OPENCODE_VARIANT="${2:-}"; shift; shift 2>/dev/null || true ;;
-        --variant=*) OPENCODE_VARIANT="${1#--variant=}"; shift ;;
+        --model) OPENCODE_MODEL=$(require_flag_value "$1" "${2:-}"); shift 2 ;;
+        --model=*) OPENCODE_MODEL=$(require_flag_value "--model" "${1#--model=}"); shift ;;
+        --effort) OPENCODE_VARIANT=$(require_flag_value "$1" "${2:-}"); shift 2 ;;
+        --effort=*) OPENCODE_VARIANT=$(require_flag_value "--effort" "${1#--effort=}"); shift ;;
+        --variant) OPENCODE_VARIANT=$(require_flag_value "$1" "${2:-}"); shift 2 ;;
+        --variant=*) OPENCODE_VARIANT=$(require_flag_value "--variant" "${1#--variant=}"); shift ;;
         *)  shift ;; # ignore unknown flags
     esac
 done
