@@ -11,6 +11,9 @@
 #
 # environment variables:
 #   OPENCODE_MODEL       - model in provider/model format, e.g. openai/gpt-4o (default: opencode default)
+#   OPENCODE_VARIANT     - model variant/reasoning effort, e.g. high, medium, low (default: opencode default)
+#   OPENCODE_EFFORT      - alias for OPENCODE_VARIANT when OPENCODE_VARIANT is unset
+#   OPENCODE_REASONING   - alias for OPENCODE_VARIANT when OPENCODE_VARIANT and OPENCODE_EFFORT are unset
 #   OPENCODE_VERBOSE     - set to 1 to include tool execution events in output (default: 0)
 
 set -euo pipefail
@@ -21,13 +24,25 @@ command -v jq >/dev/null 2>&1 || { echo "error: jq is required but not found" >&
 # verify opencode is available
 command -v opencode >/dev/null 2>&1 || { echo "error: opencode is required but not found" >&2; exit 1; }
 
+# configurable via environment. CLI flags below override these defaults.
+OPENCODE_MODEL="${OPENCODE_MODEL:-}"
+OPENCODE_VARIANT="${OPENCODE_VARIANT:-${OPENCODE_EFFORT:-${OPENCODE_REASONING:-}}}"
+OPENCODE_VERBOSE="${OPENCODE_VERBOSE:-0}"
+
 # ralphex passes prompt via stdin (primary path, avoids Windows 8191-char cmd limit).
 # also accept -p flag for backward compatibility with direct invocations.
+# support ralphex-injected --model/--effort and map effort to opencode's --variant.
 # all other flags are ignored gracefully (--dangerously-skip-permissions, etc.)
 prompt=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -p) prompt="${2:-}"; shift; shift 2>/dev/null || true ;;
+        --model) OPENCODE_MODEL="${2:-}"; shift; shift 2>/dev/null || true ;;
+        --model=*) OPENCODE_MODEL="${1#--model=}"; shift ;;
+        --effort) OPENCODE_VARIANT="${2:-}"; shift; shift 2>/dev/null || true ;;
+        --effort=*) OPENCODE_VARIANT="${1#--effort=}"; shift ;;
+        --variant) OPENCODE_VARIANT="${2:-}"; shift; shift 2>/dev/null || true ;;
+        --variant=*) OPENCODE_VARIANT="${1#--variant=}"; shift ;;
         *)  shift ;; # ignore unknown flags
     esac
 done
@@ -44,10 +59,6 @@ if [[ -z "$prompt" ]]; then
     echo "error: no prompt provided (expected -p flag or stdin)" >&2
     exit 1
 fi
-
-# configurable via environment
-OPENCODE_MODEL="${OPENCODE_MODEL:-}"
-OPENCODE_VERBOSE="${OPENCODE_VERBOSE:-0}"
 
 # enable auto-allow permissions for autonomous execution (equivalent to claude's
 # --dangerously-skip-permissions). uses OPENCODE_CONFIG_CONTENT which deep-merges
@@ -84,6 +95,7 @@ fi
 # build opencode arguments
 opencode_args=(run --format json)
 [[ -n "$OPENCODE_MODEL" ]] && opencode_args+=(--model "$OPENCODE_MODEL")
+[[ -n "$OPENCODE_VARIANT" ]] && opencode_args+=(--variant "$OPENCODE_VARIANT")
 opencode_args+=("$prompt")
 
 # temporary files for stderr capture and stdout piping.

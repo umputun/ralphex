@@ -111,16 +111,16 @@ output=$(OPENCODE_REVIEW_MODEL="test-model" OPENCODE_REVIEW_REASONING="" run_scr
 config=$(echo "$output" | grep "^CONFIG:" | sed 's/^CONFIG://')
 args=$(echo "$output" | grep "^ARGS:" | sed 's/^ARGS://')
 
-if echo "$config" | jq -e '.agent.coder.model == "test-model"' >/dev/null 2>&1; then
-    pass "config has model"
+if echo "$config" | jq -e '.agent' >/dev/null 2>&1; then
+    fail "config should not have agent block" "got: $config"
 else
-    fail "config missing model" "got: $config"
+    pass "config has no agent block"
 fi
 
-if echo "$config" | jq -e '.agent.coder.reasoningEffort' >/dev/null 2>&1; then
-    fail "config should not have reasoningEffort" "got: $config"
+if echo "$args" | grep -q "\-\-variant"; then
+    fail "should not pass --variant flag" "got: $args"
 else
-    pass "config has no reasoningEffort"
+    pass "no --variant flag"
 fi
 
 if echo "$args" | grep -q "\-\-model test-model"; then
@@ -137,22 +137,22 @@ output=$(OPENCODE_REVIEW_MODEL="" OPENCODE_REVIEW_REASONING="high" run_script "$
 config=$(echo "$output" | grep "^CONFIG:" | sed 's/^CONFIG://')
 args=$(echo "$output" | grep "^ARGS:" | sed 's/^ARGS://')
 
-if echo "$config" | jq -e '.agent.coder.reasoningEffort == "high"' >/dev/null 2>&1; then
-    pass "config has reasoningEffort"
+if echo "$config" | jq -e '.agent' >/dev/null 2>&1; then
+    fail "config should not have agent block" "got: $config"
 else
-    fail "config missing reasoningEffort" "got: $config"
-fi
-
-if echo "$config" | jq -e '.agent.coder.model' >/dev/null 2>&1; then
-    fail "config should not have model" "got: $config"
-else
-    pass "config has no model"
+    pass "config has no agent block"
 fi
 
 if echo "$args" | grep -q "\-\-model"; then
     fail "should not pass --model flag" "got: $args"
 else
     pass "no --model flag"
+fi
+
+if echo "$args" | grep -q "\-\-variant high"; then
+    pass "--variant flag passed"
+else
+    fail "expected --variant high in args" "got: $args"
 fi
 
 # ---------------------------------------------------------------------------
@@ -163,22 +163,36 @@ output=$(OPENCODE_REVIEW_MODEL="my-model" OPENCODE_REVIEW_REASONING="medium" run
 config=$(echo "$output" | grep "^CONFIG:" | sed 's/^CONFIG://')
 args=$(echo "$output" | grep "^ARGS:" | sed 's/^ARGS://')
 
-if echo "$config" | jq -e '.agent.coder.model == "my-model"' >/dev/null 2>&1; then
-    pass "config has model"
+if echo "$config" | jq -e '.agent' >/dev/null 2>&1; then
+    fail "config should not have agent block" "got: $config"
 else
-    fail "config missing model" "got: $config"
-fi
-
-if echo "$config" | jq -e '.agent.coder.reasoningEffort == "medium"' >/dev/null 2>&1; then
-    pass "config has reasoningEffort"
-else
-    fail "config missing reasoningEffort" "got: $config"
+    pass "config has no agent block"
 fi
 
 if echo "$args" | grep -q "\-\-model my-model"; then
     pass "--model flag passed"
 else
     fail "expected --model my-model in args" "got: $args"
+fi
+
+if echo "$args" | grep -q "\-\-variant medium"; then
+    pass "--variant flag passed"
+else
+    fail "expected --variant medium in args" "got: $args"
+fi
+
+# ---------------------------------------------------------------------------
+# test: CLI --model/--effort override env vars
+# ---------------------------------------------------------------------------
+echo "test: CLI --model/--effort override env vars"
+output=$(OPENCODE_REVIEW_MODEL="env-model" OPENCODE_REVIEW_VARIANT="env-variant" \
+    run_script --model cli-model --effort high "$prompt_file")
+args=$(echo "$output" | grep "^ARGS:" | sed 's/^ARGS://')
+
+if echo "$args" | grep -q "\-\-model cli-model" && echo "$args" | grep -q "\-\-variant high"; then
+    pass "CLI --model/--effort override env defaults"
+else
+    fail "CLI --model/--effort not passed correctly" "got: $args"
 fi
 
 # ---------------------------------------------------------------------------
@@ -189,6 +203,7 @@ output=$(OPENCODE_CONFIG_CONTENT='{"theme":"dark","custom":true}' \
     OPENCODE_REVIEW_MODEL="merge-model" OPENCODE_REVIEW_REASONING="" \
     run_script "$prompt_file")
 config=$(echo "$output" | grep "^CONFIG:" | sed 's/^CONFIG://')
+args=$(echo "$output" | grep "^ARGS:" | sed 's/^ARGS://')
 
 if echo "$config" | jq -e '.theme == "dark"' >/dev/null 2>&1; then
     pass "preserves existing theme field"
@@ -208,10 +223,10 @@ else
     fail "missing permissions after merge" "got: $config"
 fi
 
-if echo "$config" | jq -e '.agent.coder.model == "merge-model"' >/dev/null 2>&1; then
-    pass "merged model"
+if echo "$args" | grep -q "\-\-model merge-model"; then
+    pass "merged model passed as CLI flag"
 else
-    fail "missing model after merge" "got: $config"
+    fail "missing model CLI flag after merge" "got: $args"
 fi
 
 # ---------------------------------------------------------------------------

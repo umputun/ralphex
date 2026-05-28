@@ -454,9 +454,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# test: OPENCODE_MODEL env var (R5)
+# test: OPENCODE_MODEL and OPENCODE_VARIANT env vars (R5)
 # ---------------------------------------------------------------------------
-echo "test: OPENCODE_MODEL"
+echo "test: OPENCODE_MODEL and OPENCODE_VARIANT"
 
 # create a mock opencode that records its arguments
 cat > "$TMPDIR_TEST/opencode" << 'MODEL_MOCK_EOF'
@@ -471,6 +471,7 @@ chmod +x "$TMPDIR_TEST/opencode"
 
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
     OPENCODE_MODEL="openai/gpt-4o" \
+    OPENCODE_VARIANT="high" \
     PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
     bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
 
@@ -481,8 +482,64 @@ if [[ -f "$TMPDIR_TEST/opencode_args" ]]; then
     else
         fail "OPENCODE_MODEL not passed correctly" "args: $recorded_args"
     fi
+    if echo "$recorded_args" | grep -q -- "--variant high"; then
+        pass "OPENCODE_VARIANT passed as --variant flag"
+    else
+        fail "OPENCODE_VARIANT not passed correctly" "args: $recorded_args"
+    fi
 else
     fail "could not capture opencode arguments"
+fi
+
+# verify OPENCODE_EFFORT alias works when OPENCODE_VARIANT is unset
+rm -f "$TMPDIR_TEST/opencode_args"
+MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    OPENCODE_MODEL="" \
+    OPENCODE_EFFORT="medium" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
+
+if [[ -f "$TMPDIR_TEST/opencode_args" ]]; then
+    recorded_args=$(cat "$TMPDIR_TEST/opencode_args")
+    if echo "$recorded_args" | grep -q -- "--variant medium"; then
+        pass "OPENCODE_EFFORT passed as --variant flag"
+    else
+        fail "OPENCODE_EFFORT not passed correctly" "args: $recorded_args"
+    fi
+fi
+
+# verify OPENCODE_REASONING alias works when OPENCODE_VARIANT and OPENCODE_EFFORT are unset
+rm -f "$TMPDIR_TEST/opencode_args"
+MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    OPENCODE_MODEL="" \
+    OPENCODE_REASONING="low" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
+
+if [[ -f "$TMPDIR_TEST/opencode_args" ]]; then
+    recorded_args=$(cat "$TMPDIR_TEST/opencode_args")
+    if echo "$recorded_args" | grep -q -- "--variant low"; then
+        pass "OPENCODE_REASONING passed as --variant flag"
+    else
+        fail "OPENCODE_REASONING not passed correctly" "args: $recorded_args"
+    fi
+fi
+
+# verify CLI --model/--effort override env vars
+rm -f "$TMPDIR_TEST/opencode_args"
+MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
+    OPENCODE_MODEL="env-model" \
+    OPENCODE_VARIANT="env-variant" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" --model cli-model --effort low -p "test prompt" >/dev/null 2>&1
+
+if [[ -f "$TMPDIR_TEST/opencode_args" ]]; then
+    recorded_args=$(cat "$TMPDIR_TEST/opencode_args")
+    if echo "$recorded_args" | grep -q -- "--model cli-model" && echo "$recorded_args" | grep -q -- "--variant low"; then
+        pass "CLI --model/--effort override env defaults"
+    else
+        fail "CLI --model/--effort not passed correctly" "args: $recorded_args"
+    fi
 fi
 
 # verify --model is NOT passed when OPENCODE_MODEL is empty
@@ -502,6 +559,7 @@ chmod +x "$TMPDIR_TEST/opencode"
 
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.jsonl" \
     OPENCODE_MODEL="" \
+    OPENCODE_VARIANT="" \
     PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
     bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
 
@@ -511,6 +569,11 @@ if [[ -f "$TMPDIR_TEST/opencode_args" ]]; then
         fail "--model passed when OPENCODE_MODEL is empty" "args: $recorded_args"
     else
         pass "--model omitted when OPENCODE_MODEL is empty"
+    fi
+    if echo "$recorded_args" | grep -q -- "--variant"; then
+        fail "--variant passed when OPENCODE_VARIANT is empty" "args: $recorded_args"
+    else
+        pass "--variant omitted when OPENCODE_VARIANT is empty"
     fi
 fi
 
