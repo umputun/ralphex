@@ -47,7 +47,7 @@ func TestEvent_JSON(t *testing.T) {
 	t.Run("output event serializes correctly", func(t *testing.T) {
 		e := NewOutputEvent(status.PhaseTask, "test output")
 
-		data, err := e.JSON()
+		data, err := json.Marshal(e)
 		require.NoError(t, err)
 
 		var decoded Event
@@ -62,7 +62,7 @@ func TestEvent_JSON(t *testing.T) {
 	t.Run("section event includes section field", func(t *testing.T) {
 		e := NewSectionEvent(status.PhaseReview, "Test Section")
 
-		data, err := e.JSON()
+		data, err := json.Marshal(e)
 		require.NoError(t, err)
 
 		var decoded map[string]any
@@ -75,7 +75,7 @@ func TestEvent_JSON(t *testing.T) {
 	t.Run("signal event includes signal field", func(t *testing.T) {
 		e := NewSignalEvent(status.PhaseTask, "DONE")
 
-		data, err := e.JSON()
+		data, err := json.Marshal(e)
 		require.NoError(t, err)
 
 		var decoded map[string]any
@@ -88,7 +88,7 @@ func TestEvent_JSON(t *testing.T) {
 	t.Run("omits empty fields", func(t *testing.T) {
 		e := NewOutputEvent(status.PhaseTask, "simple output")
 
-		data, err := e.JSON()
+		data, err := json.Marshal(e)
 		require.NoError(t, err)
 
 		var decoded map[string]any
@@ -152,7 +152,7 @@ func TestEvent_JSON_TaskAndIterationFields(t *testing.T) {
 	t.Run("task event includes task_num", func(t *testing.T) {
 		e := NewTaskStartEvent(status.PhaseTask, 7, "task iteration 7")
 
-		data, err := e.JSON()
+		data, err := json.Marshal(e)
 		require.NoError(t, err)
 
 		var decoded map[string]any
@@ -165,7 +165,7 @@ func TestEvent_JSON_TaskAndIterationFields(t *testing.T) {
 	t.Run("iteration event includes iteration_num", func(t *testing.T) {
 		e := NewIterationStartEvent(status.PhaseCodex, 3, "codex iteration 3")
 
-		data, err := e.JSON()
+		data, err := json.Marshal(e)
 		require.NoError(t, err)
 
 		var decoded map[string]any
@@ -178,7 +178,7 @@ func TestEvent_JSON_TaskAndIterationFields(t *testing.T) {
 	t.Run("omits zero task_num and iteration_num", func(t *testing.T) {
 		e := NewOutputEvent(status.PhaseTask, "simple output")
 
-		data, err := e.JSON()
+		data, err := json.Marshal(e)
 		require.NoError(t, err)
 
 		var decoded map[string]any

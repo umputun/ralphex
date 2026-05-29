@@ -78,19 +78,6 @@ func TestSession_LastModified(t *testing.T) {
 	assert.Equal(t, now, s.GetLastModified())
 }
 
-func TestSession_Tailer(t *testing.T) {
-	s := NewSession("test", "/tmp/test.txt")
-
-	assert.Nil(t, s.GetTailer())
-
-	tailer := &Tailer{}
-	s.SetTailer(tailer)
-	assert.Equal(t, tailer, s.GetTailer())
-
-	s.SetTailer(nil)
-	assert.Nil(t, s.GetTailer())
-}
-
 func TestSession_Close(t *testing.T) {
 	s := NewSession("test", "/tmp/test.txt")
 	defer s.Close()

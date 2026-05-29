@@ -423,20 +423,11 @@ func (t *Tailer) parseLine(line string) *Event {
 			Timestamp: time.Now(),
 		}
 	case ParsedLineTimestamp:
-		return &Event{
-			Type:      parsed.EventType,
-			Phase:     t.phase,
-			Text:      parsed.Text,
-			Timestamp: parsed.Timestamp,
-			Signal:    parsed.Signal,
-		}
+		event := eventFromParsed(parsed, t.phase)
+		return &event
 	case ParsedLinePlain:
-		return &Event{
-			Type:      EventTypeOutput,
-			Phase:     t.phase,
-			Text:      parsed.Text,
-			Timestamp: time.Now(),
-		}
+		event := eventFromParsed(parsed, t.phase)
+		return &event
 	default:
 		return nil
 	}
@@ -465,13 +456,7 @@ func (t *Tailer) parseLineDeferred(line string) []Event {
 		if t.pendingSection != "" {
 			events = append(events, t.emitPendingSection(parsed.Timestamp)...)
 		}
-		events = append(events, Event{
-			Type:      parsed.EventType,
-			Phase:     t.phase,
-			Text:      parsed.Text,
-			Timestamp: parsed.Timestamp,
-			Signal:    parsed.Signal,
-		})
+		events = append(events, eventFromParsed(parsed, t.phase))
 		return events
 	case ParsedLinePlain:
 		var events []Event
@@ -479,12 +464,8 @@ func (t *Tailer) parseLineDeferred(line string) []Event {
 		if t.pendingSection != "" {
 			events = append(events, t.emitPendingSection(now)...)
 		}
-		events = append(events, Event{
-			Type:      EventTypeOutput,
-			Phase:     t.phase,
-			Text:      parsed.Text,
-			Timestamp: now,
-		})
+		parsed.Timestamp = now
+		events = append(events, eventFromParsed(parsed, t.phase))
 		return events
 	default:
 		return nil
@@ -502,14 +483,18 @@ func (t *Tailer) emitPendingSection(ts time.Time) []Event {
 	t.pendingSection = ""
 	t.pendingPhase = ""
 
-	var events []Event
-	if matches := taskIterationRegex.FindStringSubmatch(sectionName); matches != nil {
+	return buildPendingSectionEvents(sectionName, phase, ts)
+}
+
+func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time) []Event {
+	events := make([]Event, 0, 2)
+	if matches := taskIterationRegex.FindStringSubmatch(name); matches != nil {
 		if taskNum, err := strconv.Atoi(matches[1]); err == nil {
 			events = append(events, Event{
 				Type:      EventTypeTaskStart,
 				Phase:     phase,
 				TaskNum:   taskNum,
-				Text:      sectionName,
+				Text:      name,
 				Timestamp: ts,
 			})
 		}
@@ -518,12 +503,38 @@ func (t *Tailer) emitPendingSection(ts time.Time) []Event {
 	events = append(events, Event{
 		Type:      EventTypeSection,
 		Phase:     phase,
-		Section:   sectionName,
-		Text:      sectionName,
+		Section:   name,
+		Text:      name,
 		Timestamp: ts,
 	})
 
 	return events
+}
+
+func eventFromParsed(parsed ParsedLine, phase status.Phase) Event {
+	switch parsed.Type {
+	case ParsedLineTimestamp:
+		return Event{
+			Type:      parsed.EventType,
+			Phase:     phase,
+			Text:      parsed.Text,
+			Timestamp: parsed.Timestamp,
+			Signal:    parsed.Signal,
+		}
+	case ParsedLinePlain:
+		ts := parsed.Timestamp
+		if ts.IsZero() {
+			ts = time.Now()
+		}
+		return Event{
+			Type:      EventTypeOutput,
+			Phase:     phase,
+			Text:      parsed.Text,
+			Timestamp: ts,
+		}
+	default:
+		panic(fmt.Sprintf("eventFromParsed called with unsupported parsed line type %v", parsed.Type))
+	}
 }
 
 // detectEventType determines the event type from line content.
@@ -572,13 +583,13 @@ func normalizePlainSignal(text string) string {
 	}
 	switch trimmed {
 	case "ALL_TASKS_DONE", "COMPLETED":
-		return "COMPLETED"
+		return signalCompleted
 	case "TASK_FAILED", "ALL_TASKS_FAILED", "FAILED":
-		return "FAILED"
+		return signalFailed
 	case "REVIEW_DONE":
-		return "REVIEW_DONE"
+		return signalReviewDone
 	case "CODEX_REVIEW_DONE":
-		return "CODEX_REVIEW_DONE"
+		return signalCodexReviewDone
 	default:
 		return ""
 	}
@@ -588,13 +599,13 @@ func normalizePlainSignal(text string) string {
 func normalizeTokenSignal(rawSignal string) string {
 	switch rawSignal {
 	case "ALL_TASKS_DONE":
-		return "COMPLETED"
+		return signalCompleted
 	case "TASK_FAILED", "ALL_TASKS_FAILED":
-		return "FAILED"
+		return signalFailed
 	case "REVIEW_DONE":
-		return "REVIEW_DONE"
+		return signalReviewDone
 	case "CODEX_REVIEW_DONE":
-		return "CODEX_REVIEW_DONE"
+		return signalCodexReviewDone
 	default:
 		return rawSignal
 	}

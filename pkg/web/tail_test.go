@@ -503,6 +503,15 @@ func TestTailer_ParseLineDeferred(t *testing.T) {
 		assert.Equal(t, "task iteration 2", tailer.pendingSection)
 	})
 
+	t.Run("eventFromParsed rejects non-event line types", func(t *testing.T) {
+		assert.Panics(t, func() {
+			_ = eventFromParsed(ParsedLine{Type: ParsedLineSkip}, status.PhaseTask)
+		})
+		assert.Panics(t, func() {
+			_ = eventFromParsed(ParsedLine{Type: ParsedLineSection}, status.PhaseTask)
+		})
+	})
+
 	t.Run("skips header lines", func(t *testing.T) {
 		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
 		tailer.inHeader = true

@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -124,7 +123,7 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 	}
 
 	if pendingSection != "" {
-		m.emitPendingSection(session, pendingSection, phase, time.Now())
+		m.publishEvents(session, buildPendingSectionEvents(pendingSection, phase, time.Now()))
 	}
 
 	session.setLastOffset(bytesRead)
@@ -142,7 +141,7 @@ func (m *SessionManager) processProgressLine(session *Session, parsed ParsedLine
 		return phase, pendingSection
 	case ParsedLineSection:
 		if pendingSection != "" {
-			m.emitPendingSection(session, pendingSection, phase, time.Now())
+			m.publishEvents(session, buildPendingSectionEvents(pendingSection, phase, time.Now()))
 		}
 		phase = parsed.Phase
 		// defer emitting section until we see a timestamped event
@@ -150,63 +149,31 @@ func (m *SessionManager) processProgressLine(session *Session, parsed ParsedLine
 	case ParsedLineTimestamp:
 		// emit pending section with this event's timestamp (for accurate durations)
 		if pendingSection != "" {
-			m.emitPendingSection(session, pendingSection, phase, parsed.Timestamp)
+			m.publishEvents(session, buildPendingSectionEvents(pendingSection, phase, parsed.Timestamp))
 			pendingSection = ""
 		}
-		event := Event{
-			Type:      parsed.EventType,
-			Phase:     phase,
-			Text:      parsed.Text,
-			Timestamp: parsed.Timestamp,
-			Signal:    parsed.Signal,
-		}
+		event := eventFromParsed(parsed, phase)
 		if event.Type == EventTypeOutput {
 			if stats, ok := parseDiffStats(event.Text); ok {
 				session.SetDiffStats(stats)
 			}
 		}
-		_ = session.Publish(event)
+		m.publishEvent(session, event)
 	case ParsedLinePlain:
-		_ = session.Publish(Event{
-			Type:      EventTypeOutput,
-			Phase:     phase,
-			Text:      parsed.Text,
-			Timestamp: time.Now(),
-		})
+		m.publishEvent(session, eventFromParsed(parsed, phase))
 	}
 	return phase, pendingSection
 }
 
-// emitPendingSection publishes section and task_start events for a pending section.
-// task_start is emitted before section for task iteration sections.
-func (m *SessionManager) emitPendingSection(session *Session, sectionName string, phase status.Phase, ts time.Time) {
-	// emit task_start event for task iteration sections
-	if matches := taskIterationRegex.FindStringSubmatch(sectionName); matches != nil {
-		taskNum, err := strconv.Atoi(matches[1])
-		if err != nil {
-			// log parse error but continue - section will still be emitted
-			log.Printf("[WARN] failed to parse task number from section %q: %v", sectionName, err)
-		} else {
-			if err := session.Publish(Event{
-				Type:      EventTypeTaskStart,
-				Phase:     phase,
-				TaskNum:   taskNum,
-				Text:      sectionName,
-				Timestamp: ts,
-			}); err != nil {
-				log.Printf("[WARN] failed to publish task_start event: %v", err)
-			}
-		}
+func (m *SessionManager) publishEvents(session *Session, events []Event) {
+	for _, event := range events {
+		m.publishEvent(session, event)
 	}
+}
 
-	if err := session.Publish(Event{
-		Type:      EventTypeSection,
-		Phase:     phase,
-		Section:   sectionName,
-		Text:      sectionName,
-		Timestamp: ts,
-	}); err != nil {
-		log.Printf("[WARN] failed to publish section event: %v", err)
+func (m *SessionManager) publishEvent(session *Session, event Event) {
+	if err := session.Publish(event); err != nil {
+		log.Printf("[WARN] failed to publish %s event: %v", event.Type, err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,6 +170,46 @@ Started: 2026-01-22 10:00:00
 
 		// should not panic
 		m.loadProgressFileIntoSession(path, session)
+	})
+
+	t.Run("emits plain line before pending section", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-plain-after-section.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- Review ---
+plain review output
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-plain-after-section", path)
+		defer session.Close()
+
+		require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "seed")))
+		rawEvents, cleanup := subscribeSSEEvents(t, session)
+		defer cleanup()
+		_ = drainChannel(rawEvents, 50*time.Millisecond)
+
+		m.loadProgressFileIntoSession(path, session)
+
+		got := drainChannel(rawEvents, 50*time.Millisecond)
+		require.Len(t, got, 2)
+
+		var first, second Event
+		require.NoError(t, json.Unmarshal([]byte(got[0]), &first))
+		require.NoError(t, json.Unmarshal([]byte(got[1]), &second))
+		assert.Equal(t, EventTypeOutput, first.Type)
+		assert.Equal(t, "plain review output", first.Text)
+		assert.Equal(t, EventTypeSection, second.Type)
+		assert.Equal(t, "Review", second.Section)
 	})
 
 	t.Run("captures diffstats from output line", func(t *testing.T) {
