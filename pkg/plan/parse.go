@@ -160,7 +160,6 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 		return false, fmt.Errorf("read plan file: %w", err)
 	}
 	var ft fenceTracker
-	task := Task{}
 	for line := range strings.SplitSeq(string(content), "\n") {
 		if ft.skip(line) {
 			continue
@@ -169,12 +168,15 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 		if len(matches) < 3 {
 			continue
 		}
-		task.Checkboxes = append(task.Checkboxes, Checkbox{
+		cb := Checkbox{
 			Text:    strings.TrimSpace(matches[2]),
 			Checked: matches[1] == "x" || matches[1] == "X",
-		})
+		}
+		if !cb.Checked && cb.IsActionable() {
+			return true, nil
+		}
 	}
-	return task.HasUncompletedActionableWork(), nil
+	return false, nil
 }
 
 // fenceTracker tracks markdown fenced code block state across a line-by-line scan.
