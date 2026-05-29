@@ -53,14 +53,14 @@ func (cfg Config) buildClaudeExecutors(log Logger) (*executor.ClaudeExecutor, Ex
 	}
 	cfg.applyClaudeAppConfig(claudeExec)
 
-	taskModel, taskEffort := ParseModelEffort(cfg.TaskModel)
+	taskModel, taskEffort := parseModelEffort(cfg.TaskModel)
 	claudeExec.Model, claudeExec.Effort = taskModel, taskEffort
 
 	reviewSpec := cfg.ReviewModel
 	if reviewSpec == "" {
 		reviewSpec = cfg.TaskModel
 	}
-	reviewModel, reviewEffort := ParseModelEffort(reviewSpec)
+	reviewModel, reviewEffort := parseModelEffort(reviewSpec)
 	if reviewModel == taskModel && reviewEffort == taskEffort {
 		return claudeExec, nil
 	}
@@ -232,13 +232,11 @@ func (*executorFactory) needsCodexBinary(appConfig *config.Config) bool {
 	}
 }
 
-// ParseModelEffort splits a "model[:effort]" spec into separate parts.
-// Used by New to parse phase model config values into the ClaudeExecutor.Model
-// and ClaudeExecutor.Effort fields.
-// Empty input returns ("", ""). Missing colon returns (s, "").
-// A leading colon (":high") returns ("", "high"); a trailing colon ("opus:") returns ("opus", "").
-// Only the first colon is treated as the separator; anything after is passed through as effort.
-func ParseModelEffort(s string) (model, effort string) {
+// parseModelEffort splits a "model[:effort]" spec into separate parts.
+// empty input returns ("", ""). missing colon returns (s, "").
+// a leading colon (":high") returns ("", "high"); a trailing colon ("opus:") returns ("opus", "").
+// only the first colon is treated as the separator; anything after is passed through as effort.
+func parseModelEffort(s string) (model, effort string) {
 	model, effort, _ = strings.Cut(s, ":")
 	return model, effort
 }
@@ -253,7 +251,7 @@ func ResolveCodexModelEffort(spec, defModel, defEffort string) (model, effort st
 	if spec == "" {
 		return model, effort, false
 	}
-	m, e := ParseModelEffort(spec)
+	m, e := parseModelEffort(spec)
 	if m != "" {
 		model = m
 	}

@@ -598,7 +598,7 @@ func TestRunner_ErrorPatternMatch_ClaudeInTaskPhase(t *testing.T) {
 }
 
 func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
-	// verifies that LimitPatternError is handled gracefully by executionPolicy
+	// verifies that LimitPatternError is handled gracefully by retryPolicy
 	// when waitOnLimit == 0, same as PatternMatchError (logs error + help, returns error)
 	tmpDir := t.TempDir()
 	planFile := filepath.Join(tmpDir, "plan.md")
@@ -620,7 +620,7 @@ func TestRunner_LimitPatternMatch_ClaudeInTaskPhase_NoWait(t *testing.T) {
 	assert.Equal(t, "You've hit your limit", limitErr.Pattern)
 	assert.Equal(t, "claude /usage", limitErr.HelpCmd)
 
-	// verify executionPolicy logging
+	// verify retryPolicy logging
 	var foundErrorLog, foundHelpLog bool
 	for _, call := range log.PrintCalls() {
 		if strings.Contains(call.Format, "error: detected") && strings.Contains(call.Format, "%s output") {

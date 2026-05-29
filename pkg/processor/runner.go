@@ -40,7 +40,7 @@ type Config struct {
 	NoColor               bool           // disable color output
 	IterationDelayMs      int            // delay between iterations in milliseconds
 	TaskRetryCount        int            // number of times to retry failed tasks
-	TaskModel             string         // model[:effort] spec for task execution; parsed via ParseModelEffort (empty = CLI defaults)
+	TaskModel             string         // model[:effort] spec for task execution; parsed by executor setup (empty = CLI defaults)
 	ReviewModel           string         // model[:effort] spec for review phases; empty falls back to TaskModel
 	CodexEnabled          bool           // whether codex review is enabled
 	ExternalReviewToolSet bool           // when true, AppConfig.ExternalReviewTool is an explicit choice that overrides codex_enabled=false back-compat
@@ -200,7 +200,7 @@ func NewWithExecutors(cfg Config, log Logger, execs Executors, holder *status.Ph
 	}
 
 	locator := newPlanLocator(cfg)
-	policy := newExecutionPolicy(executionPolicyOpts{cfg: cfg, log: log, waitOnLimit: waitOnLimit})
+	policy := newRetryPolicy(retryPolicyOpts{cfg: cfg, log: log, waitOnLimit: waitOnLimit})
 	prompts := newPromptBuilder(promptBuilderOpts{cfg: cfg, log: log, locator: locator})
 	phaseCfg := toPhaseConfig(cfg)
 	deps := &phase.Deps{}
