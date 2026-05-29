@@ -47,7 +47,7 @@ func (p *FinalizePhase) Run(ctx context.Context) error {
 	}
 	p.log.PrintSection(status.NewGenericSection("finalize step"))
 
-	execName := p.executorName()
+	execName := p.cfg.executorName()
 	execResult := p.policy.Run(ctx, p.exec.Run, p.prompts.FinalizePrompt(), execName)
 	result := execResult.Result
 
@@ -69,11 +69,4 @@ func (p *FinalizePhase) Run(ctx context.Context) error {
 
 	p.log.Print("finalize step completed")
 	return nil
-}
-
-func (p *FinalizePhase) executorName() string {
-	if p.cfg.isCodexExecutor() {
-		return "codex"
-	}
-	return "claude"
 }

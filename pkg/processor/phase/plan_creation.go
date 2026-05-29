@@ -103,14 +103,11 @@ func (p *PlanCreationPhase) runIteration(ctx context.Context, lastRevisionFeedba
 		prompt = fmt.Sprintf("%s\n\n---\nPREVIOUS DRAFT FEEDBACK:\nUser requested revisions with this feedback:\n%s\n\nPlease revise the plan accordingly and present a new PLAN_DRAFT.", prompt, lastRevisionFeedback)
 	}
 
-	execName := p.executorName()
+	execName := p.cfg.executorName()
 	execResult := p.policy.Run(ctx, p.exec.Run, prompt, execName)
 	result := execResult.Result
-	if result.Error != nil {
-		if err := p.policy.HandlePatternMatchError(result.Error, execName); err != nil {
-			return planIterationOutcome{}, fmt.Errorf("%s pattern handling: %w", execName, err)
-		}
-		return planIterationOutcome{}, fmt.Errorf("%s execution: %w", execName, result.Error)
+	if err := wrapExecutorError(p.policy, result.Error, execName); err != nil {
+		return planIterationOutcome{}, err
 	}
 
 	if result.Signal == SignalFailed {
@@ -197,11 +194,4 @@ func (p *PlanCreationPhase) handleQuestion(ctx context.Context, output string) (
 
 	p.log.LogAnswer(answer)
 	return true, nil
-}
-
-func (p *PlanCreationPhase) executorName() string {
-	if p.cfg.isCodexExecutor() {
-		return "codex"
-	}
-	return "claude"
 }

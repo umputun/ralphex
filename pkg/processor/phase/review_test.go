@@ -68,6 +68,28 @@ func TestReviewPhase_Loop_PatternMatchError(t *testing.T) {
 	assertLogContains(t, log, "detected")
 }
 
+func TestWrapExecutorError(t *testing.T) {
+	t.Run("nil error returns nil", func(t *testing.T) {
+		assert.NoError(t, wrapExecutorError(newScriptedTestPolicy(newMockLogger("")), nil, "claude"))
+	})
+
+	t.Run("pattern match wraps as pattern handling", func(t *testing.T) {
+		policy := newScriptedTestPolicy(newMockLogger(""))
+		patternErr := &executor.PatternMatchError{Pattern: "rate limit", HelpCmd: "usage"}
+		err := wrapExecutorError(policy, patternErr, "codex")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "codex pattern handling:")
+		assert.Contains(t, err.Error(), "rate limit")
+	})
+
+	t.Run("plain error wraps as execution", func(t *testing.T) {
+		err := wrapExecutorError(newScriptedTestPolicy(newMockLogger("")), errors.New("boom"), "claude")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "claude execution:")
+		assert.Contains(t, err.Error(), "boom")
+	})
+}
+
 func TestReviewPhase_Loop_NoCommitExit(t *testing.T) {
 	exec := newTaskPhaseMockExecutor([]executor.Result{{Output: "looked at code, nothing to fix"}})
 	phase, log := reviewPhaseFromRunner(t, reviewPhaseTestOpts{cfg: Config{MaxIterations: 50}, exec: exec})
