@@ -271,18 +271,30 @@ const timestampFormat = "06-01-02 15:04:05"
 // isProgressCompleted relies on this exact value to detect completed files.
 var separatorLine = strings.Repeat("-", 60)
 
-// writeTimestamped writes a message to both file and stdout with timestamp and optional prefix.
-// Holds l.writeMu across the file + stdout pair so concurrent producers cannot
-// split the two sinks (e.g., file gets producer A then B while stdout gets B then A).
-func (l *Logger) writeTimestamped(prefix string, clr *color.Color, msg string) {
-	timestamp := time.Now().Format(timestampFormat)
-	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
-	coloredMsg := clr.Sprintf("%s%s", prefix, msg)
+type timestampPrefix struct {
+	raw     string
+	colored string
+}
 
+func (l *Logger) timestampPrefix() timestampPrefix {
+	timestamp := time.Now().Format(timestampFormat)
+	return timestampPrefix{
+		raw:     timestamp,
+		colored: l.colors.Timestamp().Sprintf("[%s]", timestamp),
+	}
+}
+
+func (l *Logger) writeOutput(fileFormat string, fileArgs []any, stdoutPayload string) {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	l.writeFileLocked("[%s] %s%s\n", timestamp, prefix, msg)
-	l.writeStdoutLocked("%s %s\n", tsStr, coloredMsg)
+	l.writeFileLocked(fileFormat, fileArgs...)
+	l.writeStdoutLocked("%s", stdoutPayload)
+}
+
+func (l *Logger) writeTimestamped(prefix string, clr *color.Color, msg string) {
+	ts := l.timestampPrefix()
+	coloredMsg := clr.Sprintf("%s%s", prefix, msg)
+	l.writeOutput("[%s] %s%s\n", []any{ts.raw, prefix, msg}, fmt.Sprintf("%s %s\n", ts.colored, coloredMsg))
 }
 
 // Print writes a timestamped message to both file and stdout.
@@ -294,10 +306,7 @@ func (l *Logger) Print(format string, args ...any) {
 // Holds l.writeMu across the file + stdout pair, see writeTimestamped.
 func (l *Logger) PrintRaw(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.writeMu.Lock()
-	defer l.writeMu.Unlock()
-	l.writeFileLocked("%s", msg)
-	l.writeStdoutLocked("%s", msg)
+	l.writeOutput("%s", []any{msg}, msg)
 }
 
 // PrintSection writes a section header without timestamp in yellow.
@@ -306,10 +315,7 @@ func (l *Logger) PrintRaw(format string, args ...any) {
 func (l *Logger) PrintSection(section status.Section) {
 	header := fmt.Sprintf("\n--- %s ---\n", section.Label)
 	coloredHeader := l.colors.Warn().Sprint(header)
-	l.writeMu.Lock()
-	defer l.writeMu.Unlock()
-	l.writeFileLocked("%s", header)
-	l.writeStdoutLocked("%s", coloredHeader)
+	l.writeOutput("%s", []any{header}, coloredHeader)
 }
 
 // getTerminalWidth returns terminal width, using COLUMNS env var or syscall.
@@ -435,9 +441,7 @@ func (l *Logger) PrintAligned(text string) {
 
 		displayLine := line
 
-		// timestamp each line
-		timestamp := time.Now().Format(timestampFormat)
-		tsPrefix := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+		ts := l.timestampPrefix()
 
 		// use red for signal lines
 		lineColor := phaseColor
@@ -448,13 +452,7 @@ func (l *Logger) PrintAligned(text string) {
 			lineColor = l.colors.Signal()
 		}
 
-		// hold writeMu across the file + stdout pair so concurrent producers
-		// cannot split a single line's two sinks (file gets producer A while
-		// stdout shows producer B, or vice versa).
-		l.writeMu.Lock()
-		l.writeFileLocked("[%s] %s\n", timestamp, line)
-		l.writeStdoutLocked("%s %s\n", tsPrefix, lineColor.Sprint(displayLine))
-		l.writeMu.Unlock()
+		l.writeOutput("[%s] %s\n", []any{ts.raw, line}, fmt.Sprintf("%s %s\n", ts.colored, lineColor.Sprint(displayLine)))
 	}
 }
 
@@ -523,18 +521,17 @@ func (l *Logger) Warn(format string, args ...any) {
 // Holds l.writeMu across the full 4-write sequence so another producer cannot
 // split the QUESTION line from its companion OPTIONS line on either sink.
 func (l *Logger) LogQuestion(question string, options []string) {
-	timestamp := time.Now().Format(timestampFormat)
-	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	ts := l.timestampPrefix()
 	questionStr := l.colors.Info().Sprintf("QUESTION: %s", question)
 	optionsStr := l.colors.Info().Sprintf("OPTIONS: %s", strings.Join(options, ", "))
 	optionsJoined := strings.Join(options, ", ")
 
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	l.writeFileLocked("[%s] QUESTION: %s\n", timestamp, question)
-	l.writeFileLocked("[%s] OPTIONS: %s\n", timestamp, optionsJoined)
-	l.writeStdoutLocked("%s %s\n", tsStr, questionStr)
-	l.writeStdoutLocked("%s %s\n", tsStr, optionsStr)
+	l.writeFileLocked("[%s] QUESTION: %s\n", ts.raw, question)
+	l.writeFileLocked("[%s] OPTIONS: %s\n", ts.raw, optionsJoined)
+	l.writeStdoutLocked("%s %s\n", ts.colored, questionStr)
+	l.writeStdoutLocked("%s %s\n", ts.colored, optionsStr)
 }
 
 // LogAnswer logs the user's answer for plan creation mode.
@@ -549,19 +546,18 @@ func (l *Logger) LogAnswer(answer string) {
 // Holds l.writeMu across the full 2- or 4-write sequence so the DRAFT REVIEW
 // and FEEDBACK lines stay grouped on both sinks under concurrent producers.
 func (l *Logger) LogDraftReview(action, feedback string) {
-	timestamp := time.Now().Format(timestampFormat)
-	tsStr := l.colors.Timestamp().Sprintf("[%s]", timestamp)
+	ts := l.timestampPrefix()
 	actionStr := l.colors.Info().Sprintf("DRAFT REVIEW: %s", action)
 
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	l.writeFileLocked("[%s] DRAFT REVIEW: %s\n", timestamp, action)
-	l.writeStdoutLocked("%s %s\n", tsStr, actionStr)
+	l.writeFileLocked("[%s] DRAFT REVIEW: %s\n", ts.raw, action)
+	l.writeStdoutLocked("%s %s\n", ts.colored, actionStr)
 
 	if feedback != "" {
 		feedbackStr := l.colors.Info().Sprintf("FEEDBACK: %s", feedback)
-		l.writeFileLocked("[%s] FEEDBACK: %s\n", timestamp, feedback)
-		l.writeStdoutLocked("%s %s\n", tsStr, feedbackStr)
+		l.writeFileLocked("[%s] FEEDBACK: %s\n", ts.raw, feedback)
+		l.writeStdoutLocked("%s %s\n", ts.colored, feedbackStr)
 	}
 }
 
@@ -574,11 +570,11 @@ func (l *Logger) LogDiffStats(files, additions, deletions int) {
 	if l.file == nil || files <= 0 {
 		return
 	}
-	timestamp := time.Now().Format(timestampFormat)
+	ts := l.timestampPrefix()
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	l.writeFileLocked("[%s] DIFFSTATS: files=%d additions=%d deletions=%d\n",
-		timestamp, files, additions, deletions)
+		ts.raw, files, additions, deletions)
 }
 
 // Elapsed returns formatted elapsed time since start.
@@ -710,14 +706,7 @@ const progressDir = ".ralphex/progress"
 
 // filenameWithStem returns the progress file path for a known stem and mode.
 func filenameWithStem(stem, mode string) string {
-	switch mode {
-	case "codex-only":
-		return filepath.Join(progressDir, fmt.Sprintf("progress-%s-codex.txt", stem))
-	case "review":
-		return filepath.Join(progressDir, fmt.Sprintf("progress-%s-review.txt", stem))
-	default:
-		return filepath.Join(progressDir, fmt.Sprintf("progress-%s.txt", stem))
-	}
+	return filepath.Join(progressDir, fmt.Sprintf("progress-%s%s.txt", stem, modeSuffix(mode)))
 }
 
 // progressFilename returns progress file path based on plan and mode.
@@ -739,13 +728,24 @@ func progressFilename(planFile, planDescription, mode, branchOverride string) st
 
 	switch mode {
 	case "codex-only":
-		return filepath.Join(progressDir, "progress-codex.txt")
+		return filepath.Join(progressDir, "progress"+modeSuffix(mode)+".txt")
 	case "review":
-		return filepath.Join(progressDir, "progress-review.txt")
+		return filepath.Join(progressDir, "progress"+modeSuffix(mode)+".txt")
 	case "plan":
 		return filepath.Join(progressDir, "progress-plan.txt")
 	default:
 		return filepath.Join(progressDir, "progress.txt")
+	}
+}
+
+func modeSuffix(mode string) string {
+	switch mode {
+	case "codex-only":
+		return "-codex"
+	case "review":
+		return "-review"
+	default:
+		return ""
 	}
 }
 
