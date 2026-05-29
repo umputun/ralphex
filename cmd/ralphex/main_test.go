@@ -1165,6 +1165,31 @@ func TestCodexFlag_ApplyCLIOverrides(t *testing.T) {
 	})
 }
 
+func TestResolveModelSpecs(t *testing.T) {
+	t.Run("resolve_spec_prefers_cli", func(t *testing.T) {
+		assert.Equal(t, "cli-model:high", resolveSpec("cli-model:high", "cfg-model:low"))
+		assert.Equal(t, "cfg-model:low", resolveSpec("", "cfg-model:low"))
+	})
+
+	t.Run("plan_spec_precedence", func(t *testing.T) {
+		cfg := &config.Config{PlanModel: "cfg-plan:medium", TaskModel: "cfg-task:low"}
+
+		assert.Equal(t, "cli-plan:high", resolvePlanSpec(opts{PlanModel: "cli-plan:high", TaskModel: "cli-task:xhigh"}, cfg))
+		assert.Equal(t, "cfg-plan:medium", resolvePlanSpec(opts{TaskModel: "cli-task:xhigh"}, cfg))
+		assert.Equal(t, "cli-task:xhigh", resolvePlanSpec(opts{TaskModel: "cli-task:xhigh"}, &config.Config{TaskModel: "cfg-task:low"}))
+		assert.Equal(t, "cfg-task:low", resolvePlanSpec(opts{}, &config.Config{TaskModel: "cfg-task:low"}))
+	})
+
+	t.Run("review_spec_precedence", func(t *testing.T) {
+		cfg := &config.Config{ReviewModel: "cfg-review:medium", TaskModel: "cfg-task:low"}
+
+		assert.Equal(t, "cli-review:high", resolveReviewSpec(opts{ReviewModel: "cli-review:high", TaskModel: "cli-task:xhigh"}, cfg))
+		assert.Equal(t, "cfg-review:medium", resolveReviewSpec(opts{TaskModel: "cli-task:xhigh"}, cfg))
+		assert.Equal(t, "cli-task:xhigh", resolveReviewSpec(opts{TaskModel: "cli-task:xhigh"}, &config.Config{TaskModel: "cfg-task:low"}))
+		assert.Equal(t, "cfg-task:low", resolveReviewSpec(opts{}, &config.Config{TaskModel: "cfg-task:low"}))
+	})
+}
+
 func TestCodexModelBanner(t *testing.T) {
 	t.Run("task_model_sets_task_and_review", func(t *testing.T) {
 		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}
