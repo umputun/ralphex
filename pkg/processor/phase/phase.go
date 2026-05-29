@@ -3,6 +3,7 @@ package phase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/config"
@@ -34,6 +35,25 @@ type Config struct {
 
 func (c Config) isCodexExecutor() bool {
 	return c.AppConfig != nil && c.AppConfig.Executor == config.ExecutorCodex
+}
+
+func (c Config) executorName() string {
+	if c.isCodexExecutor() {
+		return "codex"
+	}
+	return "claude"
+}
+
+// wrapExecutorError wraps a phase executor error, routing through pattern-match handling first.
+// shared by task, review, and plan-creation phases (distinct from external_review's break-aware variant).
+func wrapExecutorError(policy Policy, err error, execName string) error {
+	if err == nil {
+		return nil
+	}
+	if patternErr := policy.HandlePatternMatchError(err, execName); patternErr != nil {
+		return fmt.Errorf("%s pattern handling: %w", execName, patternErr)
+	}
+	return fmt.Errorf("%s execution: %w", execName, err)
 }
 
 // Executor runs a phase prompt and returns the executor result.

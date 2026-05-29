@@ -193,15 +193,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := p.JSON()
-	if err != nil {
-		log.Printf("[WARN] failed to encode plan: %v", err)
-		http.Error(w, "unable to encode plan", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(data)
+	s.writePlanJSON(w, p)
 }
 
 // handleSessionPlan handles plan requests for a specific session in multi-session mode.
@@ -234,6 +226,10 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 		return
 	}
 
+	s.writePlanJSON(w, p)
+}
+
+func (s *Server) writePlanJSON(w http.ResponseWriter, p *plan.Plan) {
 	data, err := p.JSON()
 	if err != nil {
 		log.Printf("[WARN] failed to encode plan: %v", err)

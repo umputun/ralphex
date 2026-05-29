@@ -19,7 +19,7 @@ func TestExecutionPolicy_RunReturnsPerCallTimeoutState(t *testing.T) {
 	appCfg := testAppConfig(t)
 	appCfg.SessionTimeout = 20 * time.Millisecond
 	appCfg.SessionTimeoutSet = true
-	policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
+	policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
 
 	blockingRun := func(ctx context.Context, _ string) executor.Result {
 		<-ctx.Done()
@@ -41,7 +41,7 @@ func TestExecutionPolicy_RunReturnsPerCallTimeoutState(t *testing.T) {
 
 func TestExecutionPolicy_RunRetriesLimitErrors(t *testing.T) {
 	log := newMockLogger()
-	policy := newExecutionPolicy(executionPolicyOpts{log: log, waitOnLimit: time.Millisecond})
+	policy := newRetryPolicy(retryPolicyOpts{log: log, waitOnLimit: time.Millisecond})
 
 	calls := 0
 	run := func(_ context.Context, _ string) executor.Result {
@@ -68,7 +68,7 @@ func TestExecutionPolicy_RunRetriesLimitErrors(t *testing.T) {
 
 func TestExecutionPolicy_RunWithLimitRetryRetryOnLimitError(t *testing.T) {
 	log := newMockLogger()
-	policy := newExecutionPolicy(executionPolicyOpts{log: log, waitOnLimit: 10 * time.Millisecond})
+	policy := newRetryPolicy(retryPolicyOpts{log: log, waitOnLimit: 10 * time.Millisecond})
 
 	callCount := 0
 	run := func(_ context.Context, _ string) executor.Result {
@@ -88,7 +88,7 @@ func TestExecutionPolicy_RunWithLimitRetryRetryOnLimitError(t *testing.T) {
 }
 
 func TestExecutionPolicy_RunWithLimitRetryNoRetryWhenWaitZero(t *testing.T) {
-	policy := newExecutionPolicy(executionPolicyOpts{log: newMockLogger()})
+	policy := newRetryPolicy(retryPolicyOpts{log: newMockLogger()})
 
 	callCount := 0
 	run := func(_ context.Context, _ string) executor.Result {
@@ -106,7 +106,7 @@ func TestExecutionPolicy_RunWithLimitRetryNoRetryWhenWaitZero(t *testing.T) {
 }
 
 func TestExecutionPolicy_RunWithLimitRetryContextCancelledDuringWait(t *testing.T) {
-	policy := newExecutionPolicy(executionPolicyOpts{log: newMockLogger(), waitOnLimit: 10 * time.Second})
+	policy := newRetryPolicy(retryPolicyOpts{log: newMockLogger(), waitOnLimit: 10 * time.Second})
 	ctx, cancel := context.WithCancel(t.Context())
 
 	callCount := 0
@@ -124,7 +124,7 @@ func TestExecutionPolicy_RunWithLimitRetryContextCancelledDuringWait(t *testing.
 }
 
 func TestExecutionPolicy_RunWithLimitRetryPatternMatchErrorNotRetried(t *testing.T) {
-	policy := newExecutionPolicy(executionPolicyOpts{log: newMockLogger(), waitOnLimit: 10 * time.Millisecond})
+	policy := newRetryPolicy(retryPolicyOpts{log: newMockLogger(), waitOnLimit: 10 * time.Millisecond})
 
 	callCount := 0
 	run := func(_ context.Context, _ string) executor.Result {
@@ -142,7 +142,7 @@ func TestExecutionPolicy_RunWithLimitRetryPatternMatchErrorNotRetried(t *testing
 }
 
 func TestExecutionPolicy_RunWithLimitRetryMultipleRetries(t *testing.T) {
-	policy := newExecutionPolicy(executionPolicyOpts{log: newMockLogger(), waitOnLimit: time.Millisecond})
+	policy := newRetryPolicy(retryPolicyOpts{log: newMockLogger(), waitOnLimit: time.Millisecond})
 
 	callCount := 0
 	run := func(_ context.Context, _ string) executor.Result {
@@ -161,7 +161,7 @@ func TestExecutionPolicy_RunWithLimitRetryMultipleRetries(t *testing.T) {
 }
 
 func TestExecutionPolicy_RunWithLimitRetryNoErrorPassesThrough(t *testing.T) {
-	policy := newExecutionPolicy(executionPolicyOpts{log: newMockLogger(), waitOnLimit: time.Hour})
+	policy := newRetryPolicy(retryPolicyOpts{log: newMockLogger(), waitOnLimit: time.Hour})
 
 	callCount := 0
 	run := func(_ context.Context, _ string) executor.Result {
@@ -182,7 +182,7 @@ func TestExecutionPolicy_SessionTimeoutBlockingExecutor(t *testing.T) {
 	appCfg := testAppConfig(t)
 	appCfg.SessionTimeout = 50 * time.Millisecond
 	appCfg.SessionTimeoutSet = true
-	policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
+	policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
 
 	run := func(ctx context.Context, _ string) executor.Result {
 		<-ctx.Done()
@@ -202,7 +202,7 @@ func TestExecutionPolicy_SessionTimeoutBlockingExecutor(t *testing.T) {
 func TestExecutionPolicy_SessionTimeoutZeroDoesNotAddDeadline(t *testing.T) {
 	log := newMockLogger()
 	appCfg := testAppConfig(t)
-	policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
+	policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
 
 	var hasDeadline bool
 	run := func(ctx context.Context, _ string) executor.Result {
@@ -225,7 +225,7 @@ func TestExecutionPolicy_SessionTimeoutParentCancelNotMisidentified(t *testing.T
 	appCfg := testAppConfig(t)
 	appCfg.SessionTimeout = 10 * time.Second
 	appCfg.SessionTimeoutSet = true
-	policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
+	policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
 	ctx, cancel := context.WithCancel(t.Context())
 
 	run := func(runCtx context.Context, _ string) executor.Result {
@@ -247,7 +247,7 @@ func TestExecutionPolicy_SessionTimeoutIntegrationWithLimitRetry(t *testing.T) {
 	appCfg := testAppConfig(t)
 	appCfg.SessionTimeout = 50 * time.Millisecond
 	appCfg.SessionTimeoutSet = true
-	policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: newMockLogger()})
+	policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: newMockLogger()})
 
 	run := func(ctx context.Context, _ string) executor.Result {
 		<-ctx.Done()
@@ -281,7 +281,7 @@ func TestExecutionPolicy_SessionTimeoutGatedByExecutorAndToolName(t *testing.T) 
 			appCfg.SessionTimeout = 50 * time.Millisecond
 			appCfg.SessionTimeoutSet = true
 			appCfg.Executor = tt.executor
-			policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: newMockLogger()})
+			policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: newMockLogger()})
 
 			var hasDeadline bool
 			run := func(ctx context.Context, _ string) executor.Result {
@@ -314,7 +314,7 @@ func TestExecutionPolicy_ExternalReviewBypassPreservesIdleTimeoutDiagnostic(t *t
 			appCfg.SessionTimeout = 50 * time.Millisecond
 			appCfg.SessionTimeoutSet = true
 			appCfg.Executor = config.ExecutorClaude
-			policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
+			policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: log})
 
 			var hadDeadline bool
 			run := func(ctx context.Context, _ string) executor.Result {
@@ -335,7 +335,7 @@ func TestExecutionPolicy_SessionTimeoutClearsSignalOnTimeout(t *testing.T) {
 	appCfg := testAppConfig(t)
 	appCfg.SessionTimeout = 50 * time.Millisecond
 	appCfg.SessionTimeoutSet = true
-	policy := newExecutionPolicy(executionPolicyOpts{cfg: Config{AppConfig: appCfg}, log: newMockLogger()})
+	policy := newRetryPolicy(retryPolicyOpts{cfg: Config{AppConfig: appCfg}, log: newMockLogger()})
 
 	run := func(ctx context.Context, _ string) executor.Result {
 		<-ctx.Done()

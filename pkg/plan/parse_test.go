@@ -605,6 +605,31 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, has, "real unchecked checkbox after a CRLF-terminated fence must be detected")
 	})
+
+	t.Run("agrees with checkbox actionability on edge cases", func(t *testing.T) {
+		tests := []struct {
+			name string
+			line string
+			cb   plan.Checkbox
+		}{
+			{name: "actionable unchecked", line: "- [ ] real work", cb: plan.Checkbox{Text: "real work"}},
+			{name: "format unchecked", line: "- [ ] use [ ] in examples", cb: plan.Checkbox{Text: "use [ ] in examples"}},
+			{name: "format checked marker unchecked", line: "- [ ] use [x] in examples", cb: plan.Checkbox{Text: "use [x] in examples"}},
+			{name: "actionable checked", line: "- [x] real work", cb: plan.Checkbox{Text: "real work", Checked: true}},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				tmpDir := t.TempDir()
+				path := filepath.Join(tmpDir, "plan.md")
+				require.NoError(t, os.WriteFile(path, []byte("# Plan\n"+tt.line), 0o600))
+
+				has, err := plan.FileHasUncompletedCheckbox(path)
+				require.NoError(t, err)
+				assert.Equal(t, !tt.cb.Checked && tt.cb.IsActionable(), has)
+			})
+		}
+	})
 }
 
 func TestPlan_JSON(t *testing.T) {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1449,5 +1450,84 @@ func TestConfig_CodexExecutorSandbox(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, tc.cfg.CodexExecutorSandbox())
 		})
+	}
+}
+
+func TestConfig_JSONShape(t *testing.T) {
+	// guards against json: tag drift on Config. the Go field-equality round-trip tests
+	// do not catch tag changes, but the marshaled shape is a real dashboard/API surface
+	// consumed by pkg/web.
+	c := Config{
+		ClaudeCommand:           "claude",
+		ClaudeArgs:              "--foo",
+		PlanModel:               "opus:high",
+		TaskModel:               "sonnet:medium",
+		ReviewModel:             "sonnet:low",
+		CodexEnabled:            true,
+		CodexCommand:            "codex",
+		CodexModel:              "gpt-5.5",
+		CodexReasoningEffort:    "xhigh",
+		CodexTimeoutMs:          1000,
+		CodexSandbox:            "read-only",
+		ExternalReviewTool:      "codex",
+		CustomReviewScript:      "/tmp/review.sh",
+		IterationDelayMs:        500,
+		TaskRetryCount:          2,
+		MaxIterations:           50,
+		MaxExternalIterations:   5,
+		ReviewPatience:          3,
+		FinalizeEnabled:         true,
+		PreserveAnthropicAPIKey: true,
+		Executor:                ExecutorCodex,
+		PassClaudeMd:            true,
+		MovePlanOnCompletion:    true,
+		WorktreeEnabled:         true,
+		PlansDir:                "docs/plans",
+		WatchDirs:               []string{"a", "b"},
+		DefaultBranch:           "main",
+		VcsCommand:              "git",
+		CommitTrailer:           "Co-authored-by: x <x@y>",
+		ClaudeErrorPatterns:     []string{"e1"},
+		CodexErrorPatterns:      []string{"e2"},
+		ClaudeLimitPatterns:     []string{"l1"},
+		CodexLimitPatterns:      []string{"l2"},
+		WaitOnLimit:             time.Hour,
+		SessionTimeout:          30 * time.Minute,
+		IdleTimeout:             5 * time.Minute,
+	}
+
+	data, err := json.Marshal(c)
+	require.NoError(t, err)
+
+	var got map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	wantKeys := []string{
+		"claude_command", "claude_args", "plan_model", "task_model", "review_model",
+		"codex_enabled", "codex_command", "codex_model", "codex_reasoning_effort",
+		"codex_timeout_ms", "codex_sandbox", "external_review_tool", "custom_review_script",
+		"iteration_delay_ms", "task_retry_count", "max_iterations", "max_external_iterations",
+		"review_patience", "finalize_enabled", "preserve_anthropic_api_key", "executor",
+		"pass_claude_md", "move_plan_on_completion", "worktree_enabled", "plans_dir",
+		"watch_dirs", "default_branch", "vcs_command", "commit_trailer",
+		"claude_error_patterns", "codex_error_patterns", "claude_limit_patterns",
+		"codex_limit_patterns", "wait_on_limit", "session_timeout", "idle_timeout",
+	}
+
+	gotKeys := make([]string, 0, len(got))
+	for k := range got {
+		gotKeys = append(gotKeys, k)
+	}
+	assert.ElementsMatch(t, wantKeys, gotKeys, "marshaled Config key set drifted")
+
+	assert.JSONEq(t, `["e1"]`, string(got["claude_error_patterns"]))
+	assert.JSONEq(t, `["e2"]`, string(got["codex_error_patterns"]))
+	assert.JSONEq(t, `["l1"]`, string(got["claude_limit_patterns"]))
+	assert.JSONEq(t, `["l2"]`, string(got["codex_limit_patterns"]))
+
+	// the *Set sentinels and the loaded-from-files fields carry json:"-" and must be absent
+	for _, absent := range []string{"claude_args_set", "wait_on_limit_set", "notify_params", "colors", "task_prompt"} {
+		_, present := got[absent]
+		assert.False(t, present, "unexpected json key %q present", absent)
 	}
 }

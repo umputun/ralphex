@@ -17,10 +17,13 @@ import (
 type Values struct {
 	ClaudeCommand              string
 	ClaudeArgs                 string
-	PlanModel                  string   // model for plan creation (falls back to TaskModel if empty)
-	TaskModel                  string   // model for task execution (e.g., "opus", "sonnet", "haiku")
-	ReviewModel                string   // model for review phases (falls back to TaskModel if empty)
-	ClaudeErrorPatterns        []string // patterns to detect in claude output (e.g., rate limit messages)
+	PlanModel                  string // model for plan creation (falls back to TaskModel if empty)
+	TaskModel                  string // model for task execution (e.g., "opus", "sonnet", "haiku")
+	ReviewModel                string // model for review phases (falls back to TaskModel if empty)
+	ClaudeErrorPatterns        []string
+	CodexErrorPatterns         []string
+	ClaudeLimitPatterns        []string
+	CodexLimitPatterns         []string
 	CodexEnabled               bool
 	CodexEnabledSet            bool // tracks if codex_enabled was explicitly set
 	CodexCommand               string
@@ -31,10 +34,7 @@ type Values struct {
 	CodexTimeoutMs             int
 	CodexTimeoutMsSet          bool // tracks if codex_timeout_ms was explicitly set
 	CodexSandbox               string
-	CodexSandboxSet            bool     // tracks if codex_sandbox was explicitly set outside embedded defaults
-	CodexErrorPatterns         []string // patterns to detect in codex output (e.g., rate limit messages)
-	ClaudeLimitPatterns        []string // patterns to detect rate limits in claude output (for wait+retry)
-	CodexLimitPatterns         []string // patterns to detect rate limits in codex output (for wait+retry)
+	CodexSandboxSet            bool // tracks if codex_sandbox was explicitly set outside embedded defaults
 	WaitOnLimit                time.Duration
 	WaitOnLimitSet             bool // tracks if wait_on_limit was explicitly set
 	SessionTimeout             time.Duration
@@ -404,84 +404,51 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	values.CodexLimitPatterns = vl.parseCommaSeparated(section, "codex_limit_patterns")
 
 	// wait_on_limit duration
-	if err := vl.parseWaitOnLimit(section, &values); err != nil {
+	if d, ok, err := vl.parseDurationKey(section, "wait_on_limit"); err != nil {
 		return Values{}, err
+	} else if ok {
+		values.WaitOnLimit = d
+		values.WaitOnLimitSet = true
 	}
 
 	// session_timeout duration
-	if err := vl.parseSessionTimeout(section, &values); err != nil {
+	if d, ok, err := vl.parseDurationKey(section, "session_timeout"); err != nil {
 		return Values{}, err
+	} else if ok {
+		values.SessionTimeout = d
+		values.SessionTimeoutSet = true
 	}
 
 	// idle_timeout duration
-	if err := vl.parseIdleTimeout(section, &values); err != nil {
+	if d, ok, err := vl.parseDurationKey(section, "idle_timeout"); err != nil {
 		return Values{}, err
+	} else if ok {
+		values.IdleTimeout = d
+		values.IdleTimeoutSet = true
 	}
 
 	return values, nil
 }
 
-// parseWaitOnLimit parses wait_on_limit duration from an INI section.
-func (vl *valuesLoader) parseWaitOnLimit(section *ini.Section, values *Values) error {
-	if !section.HasKey("wait_on_limit") {
-		return nil
+// parseDurationKey parses a non-negative duration from the named INI key.
+// ok is false (with nil error) when the key is absent or empty, so the caller
+// leaves both the value and its *Set sentinel untouched.
+func (vl *valuesLoader) parseDurationKey(section *ini.Section, key string) (time.Duration, bool, error) {
+	if !section.HasKey(key) {
+		return 0, false, nil
 	}
-	val := strings.TrimSpace(section.Key("wait_on_limit").String())
+	val := strings.TrimSpace(section.Key(key).String())
 	if val == "" {
-		return nil
+		return 0, false, nil
 	}
 	d, parseErr := time.ParseDuration(val)
 	if parseErr != nil {
-		return fmt.Errorf("invalid wait_on_limit: %w", parseErr)
+		return 0, false, fmt.Errorf("invalid %s: %w", key, parseErr)
 	}
 	if d < 0 {
-		return fmt.Errorf("invalid wait_on_limit: must be non-negative, got %s", val)
+		return 0, false, fmt.Errorf("invalid %s: must be non-negative, got %s", key, val)
 	}
-	values.WaitOnLimit = d
-	values.WaitOnLimitSet = true
-	return nil
-}
-
-// parseSessionTimeout parses session_timeout duration from an INI section.
-func (vl *valuesLoader) parseSessionTimeout(section *ini.Section, values *Values) error {
-	if !section.HasKey("session_timeout") {
-		return nil
-	}
-	val := strings.TrimSpace(section.Key("session_timeout").String())
-	if val == "" {
-		return nil
-	}
-	d, parseErr := time.ParseDuration(val)
-	if parseErr != nil {
-		return fmt.Errorf("invalid session_timeout: %w", parseErr)
-	}
-	if d < 0 {
-		return fmt.Errorf("invalid session_timeout: must be non-negative, got %s", val)
-	}
-	values.SessionTimeout = d
-	values.SessionTimeoutSet = true
-	return nil
-}
-
-// parseIdleTimeout parses idle_timeout duration from an INI section.
-func (vl *valuesLoader) parseIdleTimeout(section *ini.Section, values *Values) error {
-	if !section.HasKey("idle_timeout") {
-		return nil
-	}
-	val := strings.TrimSpace(section.Key("idle_timeout").String())
-	if val == "" {
-		return nil
-	}
-	d, parseErr := time.ParseDuration(val)
-	if parseErr != nil {
-		return fmt.Errorf("invalid idle_timeout: %w", parseErr)
-	}
-	if d < 0 {
-		return fmt.Errorf("invalid idle_timeout: must be non-negative, got %s", val)
-	}
-	values.IdleTimeout = d
-	values.IdleTimeoutSet = true
-	return nil
+	return d, true, nil
 }
 
 // mergeFrom merges non-empty values from src into dst.

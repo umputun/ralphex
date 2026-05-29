@@ -159,22 +159,22 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read plan file: %w", err)
 	}
-	// scan lines for uncompleted checkboxes; only count actionable ones (text without [ ] or [x]).
-	// skip lines inside fenced code blocks so example checkboxes in templates are ignored.
 	var ft fenceTracker
 	for line := range strings.SplitSeq(string(content), "\n") {
 		if ft.skip(line) {
 			continue
 		}
 		matches := checkboxPattern.FindStringSubmatch(line)
-		if len(matches) < 3 || matches[1] == "x" || matches[1] == "X" {
+		if len(matches) < 3 {
 			continue
 		}
-		text := strings.TrimSpace(matches[2])
-		if formatInText.MatchString(text) {
-			continue // format description, not actionable
+		cb := Checkbox{
+			Text:    strings.TrimSpace(matches[2]),
+			Checked: matches[1] == "x" || matches[1] == "X",
 		}
-		return true, nil
+		if !cb.Checked && cb.IsActionable() {
+			return true, nil
+		}
 	}
 	return false, nil
 }

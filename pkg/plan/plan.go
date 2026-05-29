@@ -88,7 +88,7 @@ func (s *Selector) selectWithFzf(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("cannot access plans directory %s: %w", s.PlansDir, err)
 	}
 
-	// find plan files (excluding completed/)
+	// glob only direct plan files; completed/ is not matched recursively.
 	plans, err := filepath.Glob(filepath.Join(s.PlansDir, "*.md"))
 	if err != nil || len(plans) == 0 {
 		return "", fmt.Errorf("%w: %s", ErrNoPlansFound, s.PlansDir)
@@ -125,7 +125,7 @@ func (s *Selector) selectWithFzf(ctx context.Context) (string, error) {
 // FindRecent finds the most recently modified plan file in the plans directory
 // that was modified after the given start time.
 func (s *Selector) FindRecent(startTime time.Time) string {
-	// find all .md files in plansDir (excluding completed/ subdirectory)
+	// glob only direct plan files; completed/ is not matched recursively.
 	pattern := filepath.Join(s.PlansDir, "*.md")
 	plans, err := filepath.Glob(pattern)
 	if err != nil || len(plans) == 0 {

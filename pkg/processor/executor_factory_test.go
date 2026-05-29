@@ -149,7 +149,7 @@ func TestRunner_New_CodexNotInstalled_NoneReviewStillWorks(t *testing.T) {
 	assert.NotNil(t, r, "runner should be created")
 }
 
-func TestParseModelEffort(t *testing.T) {
+func TestParseModelSpec(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  string
@@ -167,7 +167,7 @@ func TestParseModelEffort(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			model, effort := ParseModelEffort(tc.input)
+			model, effort := parseModelEffort(tc.input)
 			assert.Equal(t, tc.model, model)
 			assert.Equal(t, tc.effort, effort)
 		})

@@ -10,23 +10,23 @@ import (
 	"github.com/umputun/ralphex/pkg/processor/phase"
 )
 
-type executionPolicy struct {
+type retryPolicy struct {
 	cfg         Config
 	log         Logger
 	waitOnLimit time.Duration
 }
 
-type executionPolicyOpts struct {
+type retryPolicyOpts struct {
 	cfg         Config
 	log         Logger
 	waitOnLimit time.Duration
 }
 
-func newExecutionPolicy(opts executionPolicyOpts) *executionPolicy {
-	return &executionPolicy{cfg: opts.cfg, log: opts.log, waitOnLimit: opts.waitOnLimit}
+func newRetryPolicy(opts retryPolicyOpts) *retryPolicy {
+	return &retryPolicy{cfg: opts.cfg, log: opts.log, waitOnLimit: opts.waitOnLimit}
 }
 
-func (p *executionPolicy) Run(ctx context.Context, run func(context.Context, string) executor.Result,
+func (p *retryPolicy) Run(ctx context.Context, run func(context.Context, string) executor.Result,
 	prompt string, toolName string) phase.ExecutionResult {
 	for {
 		result := p.runWithSessionTimeout(ctx, run, prompt, toolName)
@@ -52,7 +52,7 @@ func (p *executionPolicy) Run(ctx context.Context, run func(context.Context, str
 	}
 }
 
-func (p *executionPolicy) HandlePatternMatchError(err error, tool string) error {
+func (p *retryPolicy) HandlePatternMatchError(err error, tool string) error {
 	var patternErr *executor.PatternMatchError
 	if errors.As(err, &patternErr) {
 		p.log.Print("error: detected %q in %s output", patternErr.Pattern, tool)
@@ -68,7 +68,7 @@ func (p *executionPolicy) HandlePatternMatchError(err error, tool string) error 
 	return nil
 }
 
-func (p *executionPolicy) Sleep(ctx context.Context, d time.Duration) error {
+func (p *retryPolicy) Sleep(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
@@ -79,7 +79,7 @@ func (p *executionPolicy) Sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func (p *executionPolicy) runWithSessionTimeout(ctx context.Context, run func(context.Context, string) executor.Result,
+func (p *retryPolicy) runWithSessionTimeout(ctx context.Context, run func(context.Context, string) executor.Result,
 	prompt string, toolName string) phase.ExecutionResult {
 	sessionTimeout := p.sessionTimeout()
 	codexMode := p.cfg.isCodexExecutor()
@@ -106,7 +106,7 @@ func (p *executionPolicy) runWithSessionTimeout(ctx context.Context, run func(co
 	return phase.ExecutionResult{Result: result, TimedOut: p.handleIdleTimeout(result, toolName)}
 }
 
-func (p *executionPolicy) handleIdleTimeout(result executor.Result, toolName string) bool {
+func (p *retryPolicy) handleIdleTimeout(result executor.Result, toolName string) bool {
 	if result.IdleTimedOut && result.Signal == "" {
 		p.log.Print("warning: %s session idle timed out, no output activity detected", toolName)
 		return true
@@ -114,7 +114,7 @@ func (p *executionPolicy) handleIdleTimeout(result executor.Result, toolName str
 	return false
 }
 
-func (p *executionPolicy) sessionTimeout() time.Duration {
+func (p *retryPolicy) sessionTimeout() time.Duration {
 	if p.cfg.AppConfig == nil {
 		return 0
 	}

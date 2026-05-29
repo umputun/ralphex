@@ -157,6 +157,7 @@ loop:
 
 		switch result.action {
 		case externalReviewContinue:
+			// fall through to the sleep before the next iteration below
 		case externalReviewStop:
 			return outcome, nil
 		case externalReviewBreakLoop:
@@ -215,6 +216,8 @@ func (p *ExternalReviewPhase) runIteration(ctx context.Context, opts externalRev
 		if err := p.handleExecutorError(ctx, opts.parent, opts.tool, reviewResult.Error); err != nil {
 			return externalReviewIterationResult{}, err
 		}
+		// handleExecutorError always returns non-nil for a non-nil error, so this
+		// fall-through is intentionally unreachable; kept defensive against future changes.
 	}
 
 	if reviewExecResult.TimedOut {

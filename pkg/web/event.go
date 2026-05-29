@@ -25,6 +25,13 @@ const (
 	EventTypeIterationStart EventType = "iteration_start" // review/codex iteration started
 )
 
+const (
+	signalCompleted       = "COMPLETED"
+	signalFailed          = "FAILED"
+	signalReviewDone      = "REVIEW_DONE"
+	signalCodexReviewDone = "CODEX_REVIEW_DONE"
+)
+
 // Event represents a single event to be streamed to web clients.
 type Event struct {
 	Type         EventType    `json:"type"`
@@ -112,13 +119,6 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("marshal event: %w", err)
 	}
 	return data, nil
-}
-
-// JSON returns the event as JSON bytes for SSE streaming.
-//
-// Deprecated: use json.Marshal(event) instead.
-func (e Event) JSON() ([]byte, error) {
-	return e.MarshalJSON()
 }
 
 // ToSSEMessage converts the event to a go-sse Message for streaming.

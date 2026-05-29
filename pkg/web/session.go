@@ -209,13 +209,6 @@ func (s *Session) GetTailer() *Tailer {
 	return s.tailer
 }
 
-// SetTailer updates the session's tailer thread-safely.
-func (s *Session) SetTailer(tailer *Tailer) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.tailer = tailer
-}
-
 // SetLastModified updates the last modified time thread-safely.
 func (s *Session) SetLastModified(t time.Time) {
 	s.mu.Lock()

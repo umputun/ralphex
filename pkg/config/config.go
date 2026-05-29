@@ -38,22 +38,11 @@ const (
 )
 
 // Config holds all configuration settings for ralphex.
-// Fields ending in *Set track whether that field was explicitly set in config.
+// Fields ending in *Set mostly track whether that field was explicitly set in config.
 // This allows distinguishing explicit false/0 from "not set", enabling proper
 // merge behavior where local config can override global config with zero values.
-//
-// *Set fields:
-//   - ClaudeArgsSet: tracks if claude_args was explicitly overridden at runtime
-//   - CodexEnabledSet: tracks if codex_enabled was explicitly set
-//   - CodexTimeoutMsSet: tracks if codex_timeout_ms was explicitly set
-//   - CodexSandboxSet: tracks if codex_sandbox was explicitly set outside embedded defaults
-//   - IterationDelayMsSet: tracks if iteration_delay_ms was explicitly set
-//   - TaskRetryCountSet: tracks if task_retry_count was explicitly set
-//   - FinalizeEnabledSet: tracks if finalize_enabled was explicitly set
-//   - WorktreeEnabledSet: tracks if use_worktree was explicitly set
-//   - MaxIterationsSet: tracks if max_iterations was explicitly set
-//   - WaitOnLimitSet: tracks if wait_on_limit was explicitly set
-//   - SessionTimeoutSet: tracks if session_timeout was explicitly set
+// Runtime-only exceptions, such as ClaudeArgsSet, are documented inline.
+// The inline field comments are the source of truth for which *Set sentinels exist.
 type Config struct {
 	ClaudeCommand string `json:"claude_command"`
 	ClaudeArgs    string `json:"claude_args"`
@@ -104,15 +93,13 @@ type Config struct {
 	VcsCommand    string   `json:"vcs_command"`    // custom VCS command (default: "git")
 	CommitTrailer string   `json:"commit_trailer"` // trailer line to append to all commits
 
-	// error patterns to detect in executor output (e.g., rate limit messages)
-	ClaudeErrorPatterns []string `json:"claude_error_patterns"`
-	CodexErrorPatterns  []string `json:"codex_error_patterns"`
+	ClaudeErrorPatterns []string `json:"claude_error_patterns"` // patterns to detect in claude output (e.g., rate limit messages)
+	CodexErrorPatterns  []string `json:"codex_error_patterns"`  // patterns to detect in codex output (e.g., rate limit messages)
+	ClaudeLimitPatterns []string `json:"claude_limit_patterns"` // patterns to detect rate limits in claude output (for wait+retry)
+	CodexLimitPatterns  []string `json:"codex_limit_patterns"`  // patterns to detect rate limits in codex output (for wait+retry)
 
-	// limit patterns for wait+retry behavior (overlap with error patterns is intentional)
-	ClaudeLimitPatterns []string      `json:"claude_limit_patterns"`
-	CodexLimitPatterns  []string      `json:"codex_limit_patterns"`
-	WaitOnLimit         time.Duration `json:"wait_on_limit"`
-	WaitOnLimitSet      bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
+	WaitOnLimit    time.Duration `json:"wait_on_limit"`
+	WaitOnLimitSet bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
 
 	// session timeout for configured executor sessions (external review in Claude mode is excluded)
 	SessionTimeout    time.Duration `json:"session_timeout"`

@@ -72,7 +72,7 @@ func (p *TaskPhase) Run(ctx context.Context) error {
 
 		loopCtx, loopCancel := p.breaks.context(ctx)
 
-		execName := p.executorName()
+		execName := p.cfg.executorName()
 		execResult := p.policy.Run(loopCtx, p.exec.Run, prompt, execName)
 		result := execResult.Result
 
@@ -91,11 +91,8 @@ func (p *TaskPhase) Run(ctx context.Context) error {
 			continue
 		}
 
-		if result.Error != nil {
-			if err := p.policy.HandlePatternMatchError(result.Error, execName); err != nil {
-				return fmt.Errorf("%s pattern handling: %w", execName, err)
-			}
-			return fmt.Errorf("%s execution: %w", execName, result.Error)
+		if err := wrapExecutorError(p.policy, result.Error, execName); err != nil {
+			return err
 		}
 
 		if execResult.TimedOut {
@@ -190,11 +187,4 @@ func (p *TaskPhase) NextPlanTaskPosition() int {
 		}
 	}
 	return 0
-}
-
-func (p *TaskPhase) executorName() string {
-	if p.cfg.isCodexExecutor() {
-		return "codex"
-	}
-	return "claude"
 }

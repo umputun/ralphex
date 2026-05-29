@@ -228,7 +228,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Precedence: CLI flags > local config > global config > embedded defaults
 - Custom prompts: `~/.config/ralphex/prompts/*.txt` or `.ralphex/prompts/*.txt`
 - Custom agents: `~/.config/ralphex/agents/*.txt` or `.ralphex/agents/*.txt`
-- `plan_model` / `task_model` / `review_model` config options: `model[:effort]` for plan creation / task / review phases; `plan_model` and `review_model` fall back to `task_model`. CLI flags `--plan-model`/`--task-model`/`--review-model` take precedence. Parsed by `ParseModelEffort` (pkg/processor/executor_factory.go). See the Key Patterns bullet for claude- vs codex-executor behavior. Disabled by default (empty = Claude CLI defaults)
+- `plan_model` / `task_model` / `review_model` config options: `model[:effort]` for plan creation / task / review phases; `plan_model` and `review_model` fall back to `task_model`. CLI flags `--plan-model`/`--task-model`/`--review-model` take precedence. Parsed by executor setup (pkg/processor/executor_factory.go). See the Key Patterns bullet for claude- vs codex-executor behavior. Disabled by default (empty = Claude CLI defaults)
 - `default_branch` config option: override auto-detected default branch for review diffs
 - `max_iterations` config option: override CLI default (50) for maximum task iterations per plan (CLI flag `--max-iterations` takes precedence)
 - `vcs_command` config option: override the VCS binary used by the git backend (default: `"git"`). Set to a translation script path (e.g., `scripts/hg2git/hg2git.sh`) to use ralphex with Mercurial repos. See `docs/hg-support.md`
@@ -236,7 +236,7 @@ GOOS=windows GOARCH=amd64 go build ./...
 - Notification config: `notify_channels`, `notify_on_error`, `notify_on_complete`, `notify_timeout_ms`, plus channel-specific `notify_*` fields (see `docs/notifications.md`)
 - `review_patience` config option: terminate external review after N consecutive unchanged rounds (0 = disabled). CLI flag `--review-patience` takes precedence
 - `wait_on_limit` config option: duration to wait before retrying on rate limit (e.g., "1h", "30m"). CLI flag `--wait` takes precedence. Disabled by default
-- `session_timeout` config option: per-session timeout (e.g., "30m"). Applies to claude in default mode and to every executor call under `--codex` (task/review/finalize/eval); external codex/custom review in Claude mode is not affected. Kills hanging sessions, continues to next iteration. Applied in `executionPolicy.runWithSessionTimeout` via `context.WithTimeout`, gated on `Executor==ExecutorCodex || toolName=="claude"`. CLI flag `--session-timeout` takes precedence. Disabled by default
+- `session_timeout` config option: per-session timeout (e.g., "30m"). Applies to claude in default mode and to every executor call under `--codex` (task/review/finalize/eval); external codex/custom review in Claude mode is not affected. Kills hanging sessions, continues to next iteration. Applied in `retryPolicy.runWithSessionTimeout` via `context.WithTimeout`, gated on `Executor==ExecutorCodex || toolName=="claude"`. CLI flag `--session-timeout` takes precedence. Disabled by default
 - `idle_timeout` config option: kills claude/codex executor sessions when no output for a given duration (e.g., "5m"). Resets on each output line; only fires when the session goes silent. Implemented in `ClaudeExecutor.Run()`/`CodexExecutor.Run()` via `time.AfterFunc`. Wired by `buildCodexExecutor` for first-class `--codex`; NOT by `buildExternalCodexExecutor`, so external codex review in default-claude mode has no idle timeout. Custom external review unaffected. CLI flag `--idle-timeout` takes precedence. Disabled by default
 - `move_plan_on_completion` config option: controls whether completed plans move to `docs/plans/completed/` on success. Default `true`. Disable for workflows that manage plan lifecycle externally (spec-driven tooling with separate archive steps)
 - `preserve_anthropic_api_key` config option / `--preserve-anthropic-api-key` CLI flag: when true, `ANTHROPIC_API_KEY` is passed through to the child claude process (needed for API-key auth rather than OAuth/keychain). Default `false` strips the key. The merge sentinel `PreserveAnthropicAPIKeySet` lives only on `Values` (load-bearing for local-overrides-global merge); `Config` carries the resolved bool. Plumbed: `Config.PreserveAnthropicAPIKey` → `pkg/processor/executor_factory.go` → `ClaudeExecutor.PreserveAPIKey` → `execClaudeRunner.preserveAPIKey` → `claudeChildEnv()` (`pkg/executor/executor.go`). When enabled, the startup banner emits `auth: ANTHROPIC_API_KEY passthrough enabled`. `CLAUDECODE` is always stripped regardless (prevents nested-session errors)
@@ -293,7 +293,7 @@ Implementation:
 - `LimitPatternError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
 - `matchPattern()` helper for case-insensitive matching (used by both error and limit pattern checks)
 - Patterns passed via `ClaudeExecutor.ErrorPatterns`/`LimitPatterns` and `CodexExecutor.ErrorPatterns`/`LimitPatterns`
-- `executionPolicy.Run()` in `pkg/processor/execution_policy.go` wraps executor calls with retry logic
+- `retryPolicy.Run()` in `pkg/processor/execution_policy.go` wraps executor calls with retry logic
 
 ### Agent System
 

@@ -157,13 +157,13 @@ func formatText(format string, args ...any) string {
 func extractTerminalSignal(text string) string {
 	switch {
 	case strings.Contains(text, status.Completed):
-		return "COMPLETED"
+		return signalCompleted
 	case strings.Contains(text, status.Failed):
-		return "FAILED"
+		return signalFailed
 	case strings.Contains(text, status.ReviewDone):
-		return "REVIEW_DONE"
+		return signalReviewDone
 	case strings.Contains(text, status.CodexDone):
-		return "CODEX_REVIEW_DONE"
+		return signalCodexReviewDone
 	default:
 		return ""
 	}
