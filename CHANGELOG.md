@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.4.0 - 2026-05-31
+
+### New Features
+
+- Add Antigravity (agy) CLI wrapper as custom provider #369 @korjavin
+- Add plan model setting #363 @umputun
+
+### Improved
+
+- Refactor processor runner into phase engines #364 @umputun
+- Cut code smells and duplication across packages #373 @umputun
+- Standardize date format on YYYYMMDD- in prompts and skill #371 @umputun
+- Document codex plan creation 07a4cc75
+- Clarify Claude wrapper compatibility a3c9157f
+- Use GitHub warning alert d9e47442
+- Document Claude Agent SDK billing options 3f8b89fa
+- Bump golang.org/x/sys from 0.44.0 to 0.45.0 #360 @dependabot
+
+### Fixed
+
+- Pass model and effort flags #372 @mschedrin
+- Validate model flag values #372 @mschedrin
+
 ## v1.3.2 - 2026-05-25
 
 ### Improved
