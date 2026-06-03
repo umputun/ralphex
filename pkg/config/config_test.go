@@ -1491,6 +1491,7 @@ func TestConfig_JSONShape(t *testing.T) {
 		CodexErrorPatterns:      []string{"e2"},
 		ClaudeLimitPatterns:     []string{"l1"},
 		CodexLimitPatterns:      []string{"l2"},
+		ClaudeRetryPatterns:     []string{"r1"},
 		WaitOnLimit:             time.Hour,
 		SessionTimeout:          30 * time.Minute,
 		IdleTimeout:             5 * time.Minute,
@@ -1511,7 +1512,7 @@ func TestConfig_JSONShape(t *testing.T) {
 		"pass_claude_md", "move_plan_on_completion", "worktree_enabled", "plans_dir",
 		"watch_dirs", "default_branch", "vcs_command", "commit_trailer",
 		"claude_error_patterns", "codex_error_patterns", "claude_limit_patterns",
-		"codex_limit_patterns", "wait_on_limit", "session_timeout", "idle_timeout",
+		"codex_limit_patterns", "claude_retry_patterns", "wait_on_limit", "session_timeout", "idle_timeout",
 	}
 
 	gotKeys := make([]string, 0, len(got))
@@ -1524,6 +1525,7 @@ func TestConfig_JSONShape(t *testing.T) {
 	assert.JSONEq(t, `["e2"]`, string(got["codex_error_patterns"]))
 	assert.JSONEq(t, `["l1"]`, string(got["claude_limit_patterns"]))
 	assert.JSONEq(t, `["l2"]`, string(got["codex_limit_patterns"]))
+	assert.JSONEq(t, `["r1"]`, string(got["claude_retry_patterns"]))
 
 	// the *Set sentinels and the loaded-from-files fields carry json:"-" and must be absent
 	for _, absent := range []string{"claude_args_set", "wait_on_limit_set", "notify_params", "colors", "task_prompt"} {

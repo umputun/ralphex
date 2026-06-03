@@ -24,6 +24,7 @@ type Values struct {
 	CodexErrorPatterns         []string
 	ClaudeLimitPatterns        []string
 	CodexLimitPatterns         []string
+	ClaudeRetryPatterns        []string
 	CodexEnabled               bool
 	CodexEnabledSet            bool // tracks if codex_enabled was explicitly set
 	CodexCommand               string
@@ -399,9 +400,10 @@ func (vl *valuesLoader) parseValuesFromBytes(data []byte) (Values, error) {
 	values.ClaudeErrorPatterns = vl.parseCommaSeparated(section, "claude_error_patterns")
 	values.CodexErrorPatterns = vl.parseCommaSeparated(section, "codex_error_patterns")
 
-	// limit patterns (comma-separated, same format as error patterns)
+	// limit and transient retry patterns (comma-separated, same format as error patterns)
 	values.ClaudeLimitPatterns = vl.parseCommaSeparated(section, "claude_limit_patterns")
 	values.CodexLimitPatterns = vl.parseCommaSeparated(section, "codex_limit_patterns")
+	values.ClaudeRetryPatterns = vl.parseCommaSeparated(section, "claude_retry_patterns")
 
 	// wait_on_limit duration
 	if d, ok, err := vl.parseDurationKey(section, "wait_on_limit"); err != nil {
@@ -587,6 +589,9 @@ func (dst *Values) mergeExtraFrom(src *Values) {
 	}
 	if len(src.CodexLimitPatterns) > 0 {
 		dst.CodexLimitPatterns = src.CodexLimitPatterns
+	}
+	if len(src.ClaudeRetryPatterns) > 0 {
+		dst.ClaudeRetryPatterns = src.ClaudeRetryPatterns
 	}
 	if src.WaitOnLimitSet {
 		dst.WaitOnLimit = src.WaitOnLimit
