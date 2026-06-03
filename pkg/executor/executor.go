@@ -329,7 +329,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	// set IdleTimedOut so the runner can distinguish idle timeout from normal completion
 	// and avoid false "no changes detected" exits in review loops.
 	if e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil {
-		if patternErr := e.patternError(result.RecentText); patternErr != nil {
+		if patternErr := e.patternError(result.RecentText, result.Signal); patternErr != nil {
 			return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: patternErr}
 		}
 		result.Error = nil
@@ -352,16 +352,22 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		}
 	}
 
-	if patternErr := e.patternError(result.RecentText); patternErr != nil {
+	if patternErr := e.patternError(result.RecentText, result.Signal); patternErr != nil {
 		return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: patternErr}
 	}
 
 	return result
 }
 
-func (e *ClaudeExecutor) patternError(recentText string) error {
-	if pattern := matchPattern(recentText, e.RetryPatterns); pattern != "" {
-		return &RetryPatternError{Pattern: pattern}
+func (e *ClaudeExecutor) patternError(recentText, signal string) error {
+	// a non-empty signal means claude reported a structured outcome (completion, review-done,
+	// etc). a stray retry marker in the output must not discard that by forcing a session
+	// re-run, so retry detection is skipped when a signal is present. limit and error patterns
+	// still fire — they surface loudly instead of silently re-running, so they cannot drop work.
+	if signal == "" {
+		if pattern := matchPattern(recentText, e.RetryPatterns); pattern != "" {
+			return &RetryPatternError{Pattern: pattern}
+		}
 	}
 	if pattern := matchPattern(recentText, e.LimitPatterns); pattern != "" {
 		return &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"}

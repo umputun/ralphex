@@ -284,6 +284,7 @@ Configurable patterns detect rate limit and quota errors in claude/codex output:
 Transient retry patterns for wrapper-level stalls:
 - `claude_retry_patterns`: comma-separated transient Claude/fya markers retried like executor timeouts. Default: `FYA_TRANSIENT_TIMEOUT`
 - Retry patterns are checked before limit and error patterns. They do not use `wait_on_limit`; the phase receives timeout-style metadata and applies its existing bounded retry behavior
+- Retry detection is suppressed when `result.Signal` is non-empty: a completed run that emitted a structured signal (e.g. `ALL_TASKS_DONE`) must not be discarded and re-run just because the output text mentions a retry marker. `patternError(recentText, signal)` (`pkg/executor/executor.go`) gates only the retry tier on the signal; limit and error patterns still fire regardless (they surface loudly rather than silently re-running)
 
 Limit patterns for wait+retry behavior:
 - `claude_limit_patterns` / `codex_limit_patterns`: comma-separated limit patterns (default strings in `llms.txt` and the embedded config)

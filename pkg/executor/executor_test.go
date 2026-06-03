@@ -927,6 +927,24 @@ func TestClaudeExecutor_Run_RetryPatternTakesPriorityOverLimitAndError(t *testin
 	assert.Equal(t, "FYA_TRANSIENT_TIMEOUT", retryErr.Pattern)
 }
 
+func TestClaudeExecutor_Run_RetryPatternSkippedWhenSignalPresent(t *testing.T) {
+	// a stray retry marker must not discard a completed run: when claude emits a completion
+	// signal, retry detection is skipped so the signal survives instead of forcing a re-run.
+	jsonStream := `{"type":"content_block_delta","delta":{"type":"text_delta",` +
+		`"text":"done FYA_TRANSIENT_TIMEOUT <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			return strings.NewReader(jsonStream), func() error { return nil }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, RetryPatterns: []string{"FYA_TRANSIENT_TIMEOUT"}}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	require.NoError(t, result.Error, "retry pattern must not fire when a completion signal is present")
+	assert.Equal(t, status.Completed, result.Signal, "completion signal must survive")
+}
+
 func TestClaudeExecutor_Run_IdleTimeoutDetectsRetryPattern(t *testing.T) {
 	// when idle timeout fires after a transient retry marker, the retry pattern should be detected
 	// instead of silently returning an idle timeout, so the phase retries the session.
