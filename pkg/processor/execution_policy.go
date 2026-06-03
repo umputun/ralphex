@@ -36,7 +36,7 @@ func (p *retryPolicy) Run(ctx context.Context, run func(context.Context, string)
 
 		var retryErr *executor.RetryPatternError
 		if errors.As(result.Result.Error, &retryErr) {
-			p.log.Print("transient %s error detected: %q, retrying session...", toolName, retryErr.Pattern)
+			p.log.Print("transient %s error detected: %q, treating as session timeout", toolName, retryErr.Pattern)
 			result.Result.Error = nil
 			result.Result.Signal = ""
 			return phase.ExecutionResult{Result: result.Result, TimedOut: true}
