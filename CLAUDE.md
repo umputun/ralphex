@@ -295,9 +295,9 @@ Limit patterns for wait+retry behavior:
 Implementation:
 - `PatternMatchError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
 - `LimitPatternError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
-- `RetryPatternError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
+- `RetryPatternError` type in `pkg/executor/executor.go` with a `Pattern` field
 - `matchPattern()` helper for case-insensitive matching (used by error, limit, and retry pattern checks)
-- Patterns passed via `ClaudeExecutor.ErrorPatterns`/`LimitPatterns` and `CodexExecutor.ErrorPatterns`/`LimitPatterns`
+- Patterns passed via `ClaudeExecutor.ErrorPatterns`/`LimitPatterns`/`RetryPatterns` and `CodexExecutor.ErrorPatterns`/`LimitPatterns` (codex has no retry patterns)
 - `retryPolicy.Run()` in `pkg/processor/execution_policy.go` wraps executor calls with retry logic
 
 ### Agent System

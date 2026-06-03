@@ -92,11 +92,13 @@ func TestExecutionPolicy_RunMapsRetryPatternToTimedOut(t *testing.T) {
 	policy := newRetryPolicy(retryPolicyOpts{log: log})
 
 	result := policy.Run(t.Context(), func(_ context.Context, _ string) executor.Result {
-		return executor.Result{Error: &executor.RetryPatternError{Pattern: "FYA_TRANSIENT_TIMEOUT", HelpCmd: "claude /usage"}}
+		// stale signal must be cleared so downstream phases see a timeout, not completion
+		return executor.Result{Signal: "COMPLETED", Error: &executor.RetryPatternError{Pattern: "FYA_TRANSIENT_TIMEOUT"}}
 	}, "test prompt", "claude")
 
 	require.NoError(t, result.Result.Error)
 	assert.True(t, result.TimedOut)
+	assert.Empty(t, result.Result.Signal, "signal must be cleared on retry-pattern mapping")
 	assertLogContains(t, log, "transient %s error detected")
 }
 

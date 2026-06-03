@@ -53,7 +53,6 @@ func (e *LimitPatternError) Error() string {
 // The processor maps it to existing timeout-style phase retries instead of rate-limit waiting.
 type RetryPatternError struct {
 	Pattern string // the pattern that matched
-	HelpCmd string // command to run for more information
 }
 
 func (e *RetryPatternError) Error() string {
@@ -362,7 +361,7 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 
 func (e *ClaudeExecutor) patternError(recentText string) error {
 	if pattern := matchPattern(recentText, e.RetryPatterns); pattern != "" {
-		return &RetryPatternError{Pattern: pattern, HelpCmd: "claude /usage"}
+		return &RetryPatternError{Pattern: pattern}
 	}
 	if pattern := matchPattern(recentText, e.LimitPatterns); pattern != "" {
 		return &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"}

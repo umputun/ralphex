@@ -2489,11 +2489,21 @@ func TestValues_mergeFrom_LimitPatterns(t *testing.T) {
 }
 
 func TestValues_mergeFrom_RetryPatterns(t *testing.T) {
-	dst := Values{ClaudeRetryPatterns: []string{"dst pattern"}}
-	src := Values{ClaudeRetryPatterns: []string{"src pattern 1", "src pattern 2"}}
-	dst.mergeFrom(&src)
+	t.Run("merge retry patterns when src has values", func(t *testing.T) {
+		dst := Values{ClaudeRetryPatterns: []string{"dst pattern"}}
+		src := Values{ClaudeRetryPatterns: []string{"src pattern 1", "src pattern 2"}}
+		dst.mergeFrom(&src)
 
-	assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.ClaudeRetryPatterns)
+		assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.ClaudeRetryPatterns)
+	})
+
+	t.Run("preserve dst when src is empty", func(t *testing.T) {
+		dst := Values{ClaudeRetryPatterns: []string{"dst pattern"}}
+		src := Values{ClaudeRetryPatterns: nil}
+		dst.mergeFrom(&src)
+
+		assert.Equal(t, []string{"dst pattern"}, dst.ClaudeRetryPatterns)
+	})
 }
 
 func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {
