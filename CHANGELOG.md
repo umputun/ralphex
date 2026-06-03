@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.0 - 2026-06-03
+
+### New Features
+
+- Add claude_retry_patterns for transient wrapper timeouts #374 @umputun
+
 ## v1.4.0 - 2026-05-31
 
 ### New Features
