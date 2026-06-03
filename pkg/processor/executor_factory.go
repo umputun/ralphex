@@ -86,6 +86,7 @@ func (cfg Config) applyClaudeAppConfig(e *executor.ClaudeExecutor) {
 	e.ArgsSet = cfg.AppConfig.ClaudeArgsSet
 	e.ErrorPatterns = cfg.AppConfig.ClaudeErrorPatterns
 	e.LimitPatterns = cfg.AppConfig.ClaudeLimitPatterns
+	e.RetryPatterns = cfg.AppConfig.ClaudeRetryPatterns
 	e.IdleTimeout = cfg.AppConfig.IdleTimeout
 	e.PreserveAPIKey = cfg.AppConfig.PreserveAnthropicAPIKey
 }

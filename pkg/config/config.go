@@ -97,6 +97,7 @@ type Config struct {
 	CodexErrorPatterns  []string `json:"codex_error_patterns"`  // patterns to detect in codex output (e.g., rate limit messages)
 	ClaudeLimitPatterns []string `json:"claude_limit_patterns"` // patterns to detect rate limits in claude output (for wait+retry)
 	CodexLimitPatterns  []string `json:"codex_limit_patterns"`  // patterns to detect rate limits in codex output (for wait+retry)
+	ClaudeRetryPatterns []string `json:"claude_retry_patterns"` // transient claude/fya errors to retry like timeouts
 
 	WaitOnLimit    time.Duration `json:"wait_on_limit"`
 	WaitOnLimitSet bool          `json:"-"` // tracks if wait_on_limit was explicitly set in config
@@ -328,6 +329,7 @@ func loadConfigFromDirs(globalDir, localDir string) (*Config, error) {
 		CodexErrorPatterns:      values.CodexErrorPatterns,
 		ClaudeLimitPatterns:     values.ClaudeLimitPatterns,
 		CodexLimitPatterns:      values.CodexLimitPatterns,
+		ClaudeRetryPatterns:     values.ClaudeRetryPatterns,
 		WaitOnLimit:             values.WaitOnLimit,
 		WaitOnLimitSet:          values.WaitOnLimitSet,
 		SessionTimeout:          values.SessionTimeout,

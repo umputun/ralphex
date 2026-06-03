@@ -87,6 +87,19 @@ func TestExecutionPolicy_RunWithLimitRetryRetryOnLimitError(t *testing.T) {
 	assertLogContains(t, log, "rate limit detected")
 }
 
+func TestExecutionPolicy_RunMapsRetryPatternToTimedOut(t *testing.T) {
+	log := newMockLogger()
+	policy := newRetryPolicy(retryPolicyOpts{log: log})
+
+	result := policy.Run(t.Context(), func(_ context.Context, _ string) executor.Result {
+		return executor.Result{Error: &executor.RetryPatternError{Pattern: "FYA_TRANSIENT_TIMEOUT", HelpCmd: "claude /usage"}}
+	}, "test prompt", "claude")
+
+	require.NoError(t, result.Result.Error)
+	assert.True(t, result.TimedOut)
+	assertLogContains(t, log, "transient %s error detected")
+}
+
 func TestExecutionPolicy_RunWithLimitRetryNoRetryWhenWaitZero(t *testing.T) {
 	policy := newRetryPolicy(retryPolicyOpts{log: newMockLogger()})
 

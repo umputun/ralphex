@@ -259,6 +259,15 @@ claude_error_patterns = You've hit your limit,You've hit your session limit,API 
 codex_error_patterns = Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit
 
 # ------------------------------------------------------------------------------
+# transient retry pattern detection
+# ------------------------------------------------------------------------------
+
+# claude_retry_patterns: transient claude/fya output markers to retry like timeouts
+# comma-separated list of substrings (case-insensitive matching)
+# default: FYA_TRANSIENT_TIMEOUT
+claude_retry_patterns = FYA_TRANSIENT_TIMEOUT
+
+# ------------------------------------------------------------------------------
 # rate limit wait and retry
 # ------------------------------------------------------------------------------
 

@@ -281,17 +281,22 @@ Configurable patterns detect rate limit and quota errors in claude/codex output:
 - For custom executors: stderr is merged into stdout by the executor itself (`cmd.Stderr = cmd.Stdout`), so the same pattern check covers both streams. Patterns checked only when process exits non-zero and context is not canceled
 - On match, ralphex exits gracefully with pattern info and help command suggestion
 
+Transient retry patterns for wrapper-level stalls:
+- `claude_retry_patterns`: comma-separated transient Claude/fya markers retried like executor timeouts. Default: `FYA_TRANSIENT_TIMEOUT`
+- Retry patterns are checked before limit and error patterns. They do not use `wait_on_limit`; the phase receives timeout-style metadata and applies its existing bounded retry behavior
+
 Limit patterns for wait+retry behavior:
 - `claude_limit_patterns` / `codex_limit_patterns`: comma-separated limit patterns (default strings in `llms.txt` and the embedded config)
 - `wait_on_limit`: duration string (e.g., "1h", "30m"), disabled by default
 - `--wait` CLI flag overrides `wait_on_limit` config
-- Priority: limit patterns checked first; if match AND wait > 0, wait and retry; if match AND wait == 0, fall through to error pattern behavior
+- Priority: retry patterns checked first, then limit patterns; if a limit pattern matches AND wait > 0, wait and retry; if match AND wait == 0, fall through to error pattern behavior
 - Limit patterns intentionally overlap with error patterns — `wait_on_limit` acts as the toggle
 
 Implementation:
 - `PatternMatchError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
 - `LimitPatternError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
-- `matchPattern()` helper for case-insensitive matching (used by both error and limit pattern checks)
+- `RetryPatternError` type in `pkg/executor/executor.go` with `Pattern` and `HelpCmd` fields
+- `matchPattern()` helper for case-insensitive matching (used by error, limit, and retry pattern checks)
 - Patterns passed via `ClaudeExecutor.ErrorPatterns`/`LimitPatterns` and `CodexExecutor.ErrorPatterns`/`LimitPatterns`
 - `retryPolicy.Run()` in `pkg/processor/execution_policy.go` wraps executor calls with retry logic
 

@@ -49,6 +49,17 @@ func (e *LimitPatternError) Error() string {
 	return fmt.Sprintf("detected limit pattern: %q", e.Pattern)
 }
 
+// RetryPatternError is returned when a configured transient retry pattern is detected in output.
+// The processor maps it to existing timeout-style phase retries instead of rate-limit waiting.
+type RetryPatternError struct {
+	Pattern string // the pattern that matched
+	HelpCmd string // command to run for more information
+}
+
+func (e *RetryPatternError) Error() string {
+	return fmt.Sprintf("detected retry pattern: %q", e.Pattern)
+}
+
 // CommandRunner abstracts command execution for testing.
 // Returns an io.Reader for streaming output and a wait function for completion.
 type CommandRunner interface {
@@ -240,6 +251,7 @@ type ClaudeExecutor struct {
 	Debug          bool              // enable debug output
 	ErrorPatterns  []string          // patterns to detect in output (e.g., rate limit messages)
 	LimitPatterns  []string          // patterns to detect rate limits (checked before error patterns)
+	RetryPatterns  []string          // patterns to detect transient errors that should retry like timeouts
 	IdleTimeout    time.Duration     // kill session after this duration of no output, zero = disabled
 	PreserveAPIKey bool              // when true, ANTHROPIC_API_KEY is passed through to the child; default false strips it
 	cmdRunner      CommandRunner     // for testing, nil uses default
@@ -318,22 +330,8 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	// set IdleTimedOut so the runner can distinguish idle timeout from normal completion
 	// and avoid false "no changes detected" exits in review loops.
 	if e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil {
-		// check limit patterns first — idle timeout may have fired after a rate-limit message,
-		// and the caller needs LimitPatternError to trigger wait-and-retry logic.
-		if pattern := matchPattern(result.RecentText, e.LimitPatterns); pattern != "" {
-			return Result{
-				Output: result.Output, RecentText: result.RecentText,
-				Signal: result.Signal,
-				Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"},
-			}
-		}
-		// check for error patterns in output
-		if pattern := matchPattern(result.RecentText, e.ErrorPatterns); pattern != "" {
-			return Result{
-				Output: result.Output, RecentText: result.RecentText,
-				Signal: result.Signal,
-				Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"},
-			}
+		if patternErr := e.patternError(result.RecentText); patternErr != nil {
+			return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: patternErr}
 		}
 		result.Error = nil
 		result.IdleTimedOut = true
@@ -355,25 +353,24 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 		}
 	}
 
-	// check limit patterns first (higher priority)
-	if pattern := matchPattern(result.RecentText, e.LimitPatterns); pattern != "" {
-		return Result{
-			Output: result.Output, RecentText: result.RecentText,
-			Signal: result.Signal,
-			Error:  &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"},
-		}
-	}
-
-	// check for error patterns in output
-	if pattern := matchPattern(result.RecentText, e.ErrorPatterns); pattern != "" {
-		return Result{
-			Output: result.Output, RecentText: result.RecentText,
-			Signal: result.Signal,
-			Error:  &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"},
-		}
+	if patternErr := e.patternError(result.RecentText); patternErr != nil {
+		return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: patternErr}
 	}
 
 	return result
+}
+
+func (e *ClaudeExecutor) patternError(recentText string) error {
+	if pattern := matchPattern(recentText, e.RetryPatterns); pattern != "" {
+		return &RetryPatternError{Pattern: pattern, HelpCmd: "claude /usage"}
+	}
+	if pattern := matchPattern(recentText, e.LimitPatterns); pattern != "" {
+		return &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"}
+	}
+	if pattern := matchPattern(recentText, e.ErrorPatterns); pattern != "" {
+		return &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"}
+	}
+	return nil
 }
 
 // parseStream reads and parses the JSON stream from claude CLI.

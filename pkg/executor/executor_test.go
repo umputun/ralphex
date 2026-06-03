@@ -881,6 +881,29 @@ func TestLimitPatternError_Error(t *testing.T) {
 	assert.Equal(t, `detected limit pattern: "You've hit your limit"`, err.Error())
 }
 
+func TestRetryPatternError_Error(t *testing.T) {
+	err := &RetryPatternError{Pattern: "FYA_TRANSIENT_TIMEOUT", HelpCmd: "claude /usage"}
+	assert.Equal(t, `detected retry pattern: "FYA_TRANSIENT_TIMEOUT"`, err.Error())
+}
+
+func TestClaudeExecutor_Run_DetectsRetryPatternFromNonJSONLine(t *testing.T) {
+	mock := &mocks.CommandRunnerMock{
+		RunFunc: func(_ context.Context, _ string, _ ...string) (io.Reader, func() error, error) {
+			out := "2026/06/02 13:18:04.138 [ERROR] run turn: turn canceled: " +
+				"context deadline exceeded: FYA_TRANSIENT_TIMEOUT: claude turn did not complete before fya turn timeout\\n"
+			return strings.NewReader(out), func() error { return errors.New("exit status 1") }, nil
+		},
+	}
+	e := &ClaudeExecutor{cmdRunner: mock, RetryPatterns: []string{"FYA_TRANSIENT_TIMEOUT"}}
+
+	result := e.Run(context.Background(), "test prompt")
+
+	var retryErr *RetryPatternError
+	require.ErrorAs(t, result.Error, &retryErr)
+	assert.Equal(t, "FYA_TRANSIENT_TIMEOUT", retryErr.Pattern)
+	assert.Contains(t, result.Output, "FYA_TRANSIENT_TIMEOUT")
+}
+
 func TestClaudeExecutor_Run_IdleTimeoutFires(t *testing.T) {
 	// idle timeout fires when no output comes after the first line
 	pr, pw := io.Pipe()

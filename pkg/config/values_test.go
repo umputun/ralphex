@@ -74,6 +74,7 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, []string{"Rate limit exceeded", "rate limit reached", "429 Too Many Requests", "quota exceeded", "insufficient_quota", "You've hit your usage limit"}, values.CodexErrorPatterns)
 	assert.Equal(t, []string{"You've hit your limit", "You've hit your session limit", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit", "API Error: 529", "API Error: 502", "API Error: 503", "API Error: 504"}, values.ClaudeLimitPatterns)
 	assert.Equal(t, []string{"Rate limit exceeded", "rate limit reached", "429 Too Many Requests", "quota exceeded", "insufficient_quota", "You've hit your usage limit"}, values.CodexLimitPatterns)
+	assert.Equal(t, []string{"FYA_TRANSIENT_TIMEOUT"}, values.ClaudeRetryPatterns)
 	assert.Zero(t, values.WaitOnLimit)
 	assert.False(t, values.WaitOnLimitSet)
 }
@@ -2124,6 +2125,14 @@ func TestValuesLoader_parseValuesFromBytes_LimitPatterns(t *testing.T) {
 	}
 }
 
+func TestValuesLoader_parseValuesFromBytes_RetryPatterns(t *testing.T) {
+	vl := &valuesLoader{embedFS: defaultsFS}
+
+	values, err := vl.parseValuesFromBytes([]byte("claude_retry_patterns = FYA_TRANSIENT_TIMEOUT, other marker"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"FYA_TRANSIENT_TIMEOUT", "other marker"}, values.ClaudeRetryPatterns)
+}
+
 func TestValuesLoader_parseValuesFromBytes_WaitOnLimit(t *testing.T) {
 	vl := &valuesLoader{embedFS: defaultsFS}
 
@@ -2477,6 +2486,14 @@ func TestValues_mergeFrom_LimitPatterns(t *testing.T) {
 		assert.Equal(t, []string{"dst pattern"}, dst.ClaudeLimitPatterns)
 		assert.Equal(t, []string{"dst codex"}, dst.CodexLimitPatterns)
 	})
+}
+
+func TestValues_mergeFrom_RetryPatterns(t *testing.T) {
+	dst := Values{ClaudeRetryPatterns: []string{"dst pattern"}}
+	src := Values{ClaudeRetryPatterns: []string{"src pattern 1", "src pattern 2"}}
+	dst.mergeFrom(&src)
+
+	assert.Equal(t, []string{"src pattern 1", "src pattern 2"}, dst.ClaudeRetryPatterns)
 }
 
 func TestValuesLoader_Load_LimitPatternsOverride(t *testing.T) {

@@ -34,6 +34,14 @@ func (p *retryPolicy) Run(ctx context.Context, run func(context.Context, string)
 			return result
 		}
 
+		var retryErr *executor.RetryPatternError
+		if errors.As(result.Result.Error, &retryErr) {
+			p.log.Print("transient %s error detected: %q, retrying session...", toolName, retryErr.Pattern)
+			result.Result.Error = nil
+			result.Result.Signal = ""
+			return phase.ExecutionResult{Result: result.Result, TimedOut: true}
+		}
+
 		var limitErr *executor.LimitPatternError
 		if !errors.As(result.Result.Error, &limitErr) {
 			return result
@@ -53,6 +61,12 @@ func (p *retryPolicy) Run(ctx context.Context, run func(context.Context, string)
 }
 
 func (p *retryPolicy) HandlePatternMatchError(err error, tool string) error {
+	var retryErr *executor.RetryPatternError
+	if errors.As(err, &retryErr) {
+		p.log.Print("error: detected transient retry marker %q in %s output", retryErr.Pattern, tool)
+		p.log.Print("run '%s' for more information", retryErr.HelpCmd)
+		return err
+	}
 	var patternErr *executor.PatternMatchError
 	if errors.As(err, &patternErr) {
 		p.log.Print("error: detected %q in %s output", patternErr.Pattern, tool)
