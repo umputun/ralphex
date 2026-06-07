@@ -11,6 +11,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="$SCRIPT_DIR/pi-as-claude.sh"
 TMPDIR_TEST=$(mktemp -d)
+# exported so the wrapper and the mock pi subprocess inherit it without a
+# redundant inline env assignment at every call site (avoids SC2097/SC2098)
+export TMPDIR_TEST
 trap 'rm -rf "$TMPDIR_TEST"' EXIT
 
 passed=0
@@ -69,7 +72,7 @@ EOF
 run_wrapper() {
     # helper: run wrapper with mock pi on PATH; args forwarded to wrapper
     MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
-        PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+        PATH="$TMPDIR_TEST:$PATH" \
         bash "$WRAPPER" "$@"
 }
 
@@ -126,7 +129,7 @@ echo "test: PI_MODEL env"
 rm -f "$TMPDIR_TEST/pi_args"
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
     PI_MODEL="google/gemini-x" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
 
 recorded=$(cat "$TMPDIR_TEST/pi_args")
@@ -140,7 +143,7 @@ fi
 rm -f "$TMPDIR_TEST/pi_args"
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
     PI_MODEL="google/gemini-x" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" --model "anthropic/claude-x" -p "test prompt" >/dev/null 2>&1
 
 recorded=$(cat "$TMPDIR_TEST/pi_args")
@@ -168,7 +171,7 @@ echo "test: PI_PROVIDER env"
 rm -f "$TMPDIR_TEST/pi_args"
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
     PI_PROVIDER="anthropic" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
 
 recorded=$(cat "$TMPDIR_TEST/pi_args")
@@ -242,7 +245,7 @@ echo "test: PI_THINKING env"
 rm -f "$TMPDIR_TEST/pi_args"
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
     PI_THINKING="medium" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
 
 recorded=$(cat "$TMPDIR_TEST/pi_args")
@@ -256,7 +259,7 @@ fi
 rm -f "$TMPDIR_TEST/pi_args"
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
     PI_THINKING="medium" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" --effort high -p "test prompt" >/dev/null 2>&1
 
 recorded=$(cat "$TMPDIR_TEST/pi_args")
@@ -294,7 +297,7 @@ fi
 echo "test: prompt via stdin"
 
 output=$(echo "prompt from stdin" | MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" --dangerously-skip-permissions --output-format stream-json 2>/dev/null)
 
 if echo "$output" | grep -q '"content_block_delta"'; then
@@ -383,7 +386,7 @@ cat > "$TMPDIR_TEST/text_events.jsonl" << 'EOF'
 EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/text_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 text_line=$(echo "$output" | grep '"content_block_delta"' | head -1)
@@ -420,7 +423,7 @@ cat > "$TMPDIR_TEST/agentend_events.jsonl" << 'EOF'
 {"type":"agent_end"}
 EOF
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/agentend_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 agentend_results=$(echo "$output" | grep -c '"result"')
 if [[ "$agentend_results" -eq 2 ]]; then
@@ -434,7 +437,7 @@ cat > "$TMPDIR_TEST/noterminal_results.jsonl" << 'EOF'
 {"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"text only"}}
 EOF
 output_noterm=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/noterminal_results.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 noterm_results=$(echo "$output_noterm" | grep -c '"result"')
 if [[ "$noterm_results" -eq 1 ]]; then
@@ -458,7 +461,7 @@ EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/tool_events.jsonl" \
     PI_VERBOSE=0 \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 if echo "$output" | grep -q "agent text"; then
@@ -480,7 +483,7 @@ echo "test: tool events included (PI_VERBOSE=1)"
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/tool_events.jsonl" \
     PI_VERBOSE=1 \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 if echo "$output" | grep -q "tool_execution_start" && echo "$output" | grep -q "bash"; then
@@ -496,7 +499,7 @@ echo "test: invalid PI_VERBOSE falls back to 0"
 
 MOCK_STDOUT_FILE="$TMPDIR_TEST/tool_events.jsonl" \
     PI_VERBOSE=banana \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>"$TMPDIR_TEST/verbose_err" >"$TMPDIR_TEST/verbose_out"
 if grep -qi "PI_VERBOSE must be 0 or 1" "$TMPDIR_TEST/verbose_err"; then
     pass "invalid PI_VERBOSE prints warning"
@@ -521,7 +524,7 @@ not json at all
 EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/garbage_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 if echo "$output" | grep -q "after garbage"; then
@@ -540,7 +543,7 @@ cat > "$TMPDIR_TEST/noturn_events.jsonl" << 'EOF'
 EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/noturn_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 last_line=$(echo "$output" | tail -1)
@@ -557,7 +560,7 @@ echo "test: review-prompt adapter injection"
 
 rm -f "$TMPDIR_TEST/pi_prompt"
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "please review <<<RALPHEX:REVIEW_DONE>>>" >/dev/null 2>&1
 
 sent_prompt=$(cat "$TMPDIR_TEST/pi_prompt")
@@ -595,7 +598,7 @@ cat > "$TMPDIR_TEST/signal_events.jsonl" << 'EOF'
 EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/signal_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 if echo "$output" | grep -q "<<<RALPHEX:ALL_TASKS_DONE>>>"; then
@@ -622,7 +625,7 @@ cat > "$TMPDIR_TEST/split_signal_events.jsonl" << 'EOF'
 EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/split_signal_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 # the complete signal must appear within a single emitted content_block_delta line,
@@ -647,7 +650,7 @@ cat > "$TMPDIR_TEST/token_events.jsonl" << 'EOF'
 EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/token_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 if echo "$output" | grep '"content_block_delta"' \
@@ -667,7 +670,7 @@ cat > "$TMPDIR_TEST/multiline_events.jsonl" << 'EOF'
 EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/multiline_events.jsonl" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 line_one=$(echo "$output" | grep '"content_block_delta"' \
@@ -691,7 +694,7 @@ EOF
 
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
     MOCK_STDERR_FILE="$TMPDIR_TEST/stderr_text.txt" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
 stderr_delta=$(echo "$output" | grep "hit your limit")
@@ -708,7 +711,7 @@ echo "test: exit code preservation"
 
 set +e
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
 ok_exit=$?
 set -e
@@ -721,7 +724,7 @@ fi
 set +e
 MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
     MOCK_EXIT_CODE=7 \
-    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
 fail_exit=$?
 set -e
