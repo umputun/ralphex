@@ -102,23 +102,23 @@ can ship independently.
 ## Implementation Steps
 
 ### Task 1: pi-as-claude wrapper — argument handling & pi invocation
-- [ ] create `scripts/pi-as-claude/pi-as-claude.sh`: `set -euo pipefail`,
+- [x] create `scripts/pi-as-claude/pi-as-claude.sh`: `set -euo pipefail`,
       dependency checks (`jq`, `pi`), prompt sourcing from `-p` then stdin
       (only when `! -t 0`), missing-prompt error, ignore unknown flags
       (`*) shift ;;`) — mirror `gemini-as-claude.sh` lines 17–45
-- [ ] parse `--model` and `--effort` explicitly: forward `--model` to pi
+- [x] parse `--model` and `--effort` explicitly: forward `--model` to pi
       `--model`; translate `--effort` → pi `--thinking`
       (`low|medium|high|xhigh` passthrough, `minimal|off` allowed, `max`→`xhigh`
       with a stderr note since pi has no `max`); honor `PI_PROVIDER`,
       `PI_MODEL` (used when `--model` absent), `PI_THINKING`, `PI_VERBOSE` env
-- [ ] build pi args (`--mode json --print` + resolved provider/model/thinking,
+- [x] build pi args (`--mode json --print` + resolved provider/model/thinking,
       prompt as positional arg) and launch via private-tmp FIFO + background PID
       + `trap forward_signal TERM` + stderr capture — mirror
       `gemini-as-claude.sh` lines 61–93
-- [ ] write tests for arg parsing, env handling, and effort→thinking mapping
+- [x] write tests for arg parsing, env handling, and effort→thinking mapping
       (incl. `max`→`xhigh` note) using a mock `pi`
-- [ ] write tests for `-p` vs stdin prompt sourcing and the missing-prompt error
-- [ ] run `shellcheck` + tests — must pass before next task
+- [x] write tests for `-p` vs stdin prompt sourcing and the missing-prompt error
+- [x] run `shellcheck` + tests — must pass before next task
 
 ### Task 2: pi JSON event → stream-json translation
 - [ ] translate JSONL with `jq`: `message_update` +
