@@ -176,20 +176,20 @@ can ship independently.
 - [x] run tests — must pass before next task
 
 ### Task 5: Adapt ralphex-plan & ralphex-adopt skills for pi
-- [ ] port `ralphex-plan` SKILL.md: replace the `Task`/`Explore` subagent step
+- [x] port `ralphex-plan` SKILL.md: replace the `Task`/`Explore` subagent step
       with pi inline exploration; `AskUserQuestion` one-at-a-time prompts →
       inline questions the model asks the user; keep all plan-format rules
       (Task-keyword constraint, checkboxes only in Task sections, per-task tests)
-- [ ] port `ralphex-adopt` SKILL.md: replace `AskUserQuestion`; replace the
+- [x] port `ralphex-adopt` SKILL.md: replace `AskUserQuestion`; replace the
       `~/.claude/plugins/.../launch-revdiff.sh` path with pi's revdiff path if
       available else the in-chat review fallback; preserve all source-format
       conversion rules and the English `Task` keyword requirement
-- [ ] ensure argument handling matches pi skills (args appended as user input),
+- [x] ensure argument handling matches pi skills (args appended as user input),
       adjusting any `$ARGUMENTS` references in the prose
-- [ ] write/extend validator tests for these two files: valid frontmatter + no
+- [x] write/extend validator tests for these two files: valid frontmatter + no
       Claude-only tokens (`AskUserQuestion`, `TaskOutput`, `subagent_type`,
       `run_in_background`, `~/.claude/`)
-- [ ] run tests — must pass before next task
+- [x] run tests — must pass before next task
 
 ### Task 6: Adapt ralphex & ralphex-update skills for pi
 - [ ] port `ralphex` (launcher) SKILL.md: replace `Bash` `run_in_background` +
