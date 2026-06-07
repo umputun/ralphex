@@ -124,31 +124,47 @@ trap forward_signal TERM
 pi "${pi_args[@]}" 2>"$stderr_file" > "$stdout_pipe" &
 pi_pid=$!
 
-# read pi's JSONL event stream line by line and translate to claude stream-json.
+# translate pi's JSONL event stream into claude stream-json.
 # only assistant text is emitted by default — tool executions, the session header,
 # and other lifecycle events are noise and are skipped (include tool lines with
 # PI_VERBOSE=1).
 #
+# pi emits assistant text as token-level `text_delta` deltas (e.g. "The", " quick",
+# " brown"), so the stream must be re-assembled into whole lines before emission.
+# emitting one content_block_delta per token would (a) garble the progress log with a
+# newline after every token and (b) split ralphex `<<<RALPHEX:...>>>` signals across
+# blocks, where the executor's per-block detectSignal could never match them. we buffer
+# deltas and flush only complete lines, so a signal lands intact in a single block.
+#
 # event mapping:
-#   message_update + assistantMessageEvent.type=="text_delta" -> content_block_delta
+#   message_update + assistantMessageEvent.type=="text_delta" -> buffered, complete
+#                                                                lines -> content_block_delta
 #   tool_execution_start/update/end                           -> skipped (or PI_VERBOSE=1)
 #   session header, queue_update, compaction_*, auto_retry_*  -> skipped
-#   turn_end / agent_end                                      -> result (end of turn)
-while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "$line" ]] && continue
-    printf '%s\n' "$line" | jq -c --argjson verbose "$PI_VERBOSE" '
-        if .type == "message_update" and .assistantMessageEvent.type == "text_delta" then
-            {type: "content_block_delta", delta: {type: "text_delta",
-                text: ((.assistantMessageEvent.delta // "") + "\n")}}
-        elif ((.type // "") | startswith("tool_execution_")) and $verbose == 1 then
-            {type: "content_block_delta", delta: {type: "text_delta",
-                text: ("[tool] " + .type + " " + (.toolName // "") + "\n")}}
-        elif .type == "turn_end" or .type == "agent_end" then
-            {type: "result", result: ""}
-        else empty
-        end
-    ' 2>/dev/null || true
-done < "$stdout_pipe"
+#   turn_end / agent_end                                      -> flush buffer, then result
+#
+# the whole stream is fed to one jq process (foreach over `inputs`); `fromjson?` skips
+# malformed lines, and a trailing `__eof__` sentinel flushes any unterminated final line.
+jq -Rcn --unbuffered --argjson verbose "$PI_VERBOSE" '
+    def emit($t): {type: "content_block_delta", delta: {type: "text_delta", text: $t}};
+    def flush:    if .buf != "" then [emit(.buf + "\n")] else [] end;
+    foreach ((inputs | fromjson?), {type: "__eof__"}) as $e (
+        {buf: "", out: []};
+        if $e.type == "message_update" and $e.assistantMessageEvent.type == "text_delta" then
+            ((.buf + ($e.assistantMessageEvent.delta // "")) | split("\n")) as $parts
+            | {buf: $parts[-1], out: ($parts[0:-1] | map(emit(. + "\n")))}
+        elif (($e.type // "") | startswith("tool_execution_")) and $verbose == 1 then
+            {buf: "", out: (flush + [emit("[tool] " + $e.type + " " + ($e.toolName // "") + "\n")])}
+        elif $e.type == "turn_end" or $e.type == "agent_end" then
+            {buf: "", out: (flush + [{type: "result", result: ""}])}
+        elif $e.type == "__eof__" then
+            {buf: "", out: flush}
+        else
+            {buf: .buf, out: []}
+        end;
+        .out[]
+    )
+' < "$stdout_pipe" 2>/dev/null || true
 
 # wait for pi to finish and capture its exit code
 pi_exit=0

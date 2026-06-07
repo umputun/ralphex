@@ -224,6 +224,16 @@ else
     fail "max effort note missing" "stderr: $err_out"
 fi
 
+# an unrecognized effort value passes through verbatim (pi validates it).
+rm -f "$TMPDIR_TEST/pi_args"
+run_wrapper --effort weird-level -p "test prompt" >/dev/null 2>&1
+recorded=$(cat "$TMPDIR_TEST/pi_args")
+if echo "$recorded" | grep -q -- "--thinking weird-level"; then
+    pass "unrecognized effort value passed through to --thinking"
+else
+    fail "unrecognized effort value not passed through" "args: $recorded"
+fi
+
 # ---------------------------------------------------------------------------
 # test: PI_THINKING env used when --effort flag absent
 # ---------------------------------------------------------------------------
@@ -395,11 +405,14 @@ fi
 # ---------------------------------------------------------------------------
 echo "test: terminal result event"
 
-last_line=$(echo "$output" | grep '"result"' | tail -1)
-if echo "$last_line" | jq -e '.type == "result"' >/dev/null 2>&1; then
-    pass "turn_end produces a result event"
+# the wrapper always emits a fallback result, so a single result event would pass even
+# if turn_end/agent_end translation were broken. assert the COUNT instead: a stream with
+# a terminal event yields 2 results (translated + fallback), a stream without yields 1.
+turn_results=$(echo "$output" | grep -c '"result"')
+if [[ "$turn_results" -eq 2 ]]; then
+    pass "turn_end produces its own result event (2 total with fallback)"
 else
-    fail "no result event produced" "got: $output"
+    fail "turn_end did not produce a distinct result event" "expected 2 results, got $turn_results: $output"
 fi
 
 cat > "$TMPDIR_TEST/agentend_events.jsonl" << 'EOF'
@@ -409,10 +422,25 @@ EOF
 output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/agentend_events.jsonl" \
     PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
-if echo "$output" | jq -e 'select(.type == "result")' >/dev/null 2>&1; then
-    pass "agent_end produces a result event"
+agentend_results=$(echo "$output" | grep -c '"result"')
+if [[ "$agentend_results" -eq 2 ]]; then
+    pass "agent_end produces its own result event (2 total with fallback)"
 else
-    fail "agent_end did not produce result" "got: $output"
+    fail "agent_end did not produce a distinct result event" "expected 2 results, got $agentend_results: $output"
+fi
+
+# a stream with no terminal event yields exactly one (the fallback) result.
+cat > "$TMPDIR_TEST/noterminal_results.jsonl" << 'EOF'
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"text only"}}
+EOF
+output_noterm=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/noterminal_results.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+noterm_results=$(echo "$output_noterm" | grep -c '"result"')
+if [[ "$noterm_results" -eq 1 ]]; then
+    pass "no terminal event yields exactly one (fallback) result"
+else
+    fail "unexpected result count without terminal event" "expected 1, got $noterm_results: $output_noterm"
 fi
 
 # ---------------------------------------------------------------------------
@@ -459,6 +487,26 @@ if echo "$output" | grep -q "tool_execution_start" && echo "$output" | grep -q "
     pass "tool events included when PI_VERBOSE=1"
 else
     fail "tool events not included (PI_VERBOSE=1)" "got: $output"
+fi
+
+# ---------------------------------------------------------------------------
+# test: invalid PI_VERBOSE warns and falls back to 0 (tool events suppressed)
+# ---------------------------------------------------------------------------
+echo "test: invalid PI_VERBOSE falls back to 0"
+
+MOCK_STDOUT_FILE="$TMPDIR_TEST/tool_events.jsonl" \
+    PI_VERBOSE=banana \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" -p "test prompt" 2>"$TMPDIR_TEST/verbose_err" >"$TMPDIR_TEST/verbose_out"
+if grep -qi "PI_VERBOSE must be 0 or 1" "$TMPDIR_TEST/verbose_err"; then
+    pass "invalid PI_VERBOSE prints warning"
+else
+    fail "no warning for invalid PI_VERBOSE" "stderr: $(cat "$TMPDIR_TEST/verbose_err")"
+fi
+if grep -q "\[tool\]" "$TMPDIR_TEST/verbose_out"; then
+    fail "tool events leaked with invalid PI_VERBOSE (should default to 0)" "got: $(cat "$TMPDIR_TEST/verbose_out")"
+else
+    pass "invalid PI_VERBOSE defaults to 0 (tool events suppressed)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -554,6 +602,82 @@ if echo "$output" | grep -q "<<<RALPHEX:ALL_TASKS_DONE>>>"; then
     pass "ralphex signal preserved in translated output"
 else
     fail "ralphex signal lost in translation" "got: $output"
+fi
+
+# ---------------------------------------------------------------------------
+# test: a signal split across token-level deltas reassembles into ONE block.
+# pi streams assistant text token-by-token; ralphex's per-block detectSignal can
+# only match a <<<RALPHEX:...>>> signal if the whole signal lands in a single
+# content_block_delta. this is the core reason the wrapper buffers deltas into lines.
+# ---------------------------------------------------------------------------
+echo "test: signal split across token deltas reassembled into one block"
+
+cat > "$TMPDIR_TEST/split_signal_events.jsonl" << 'EOF'
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"<<<"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"RALPHEX"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":":ALL"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"_TASKS_DONE"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":">>>"}}
+{"type":"turn_end"}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/split_signal_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+# the complete signal must appear within a single emitted content_block_delta line,
+# exactly as ralphex's detectSignal (strings.Contains on one block) would see it.
+if echo "$output" | grep '"content_block_delta"' \
+    | jq -e 'select(.delta.text | contains("<<<RALPHEX:ALL_TASKS_DONE>>>"))' >/dev/null 2>&1; then
+    pass "split signal reassembled into a single content_block_delta"
+else
+    fail "split signal not reassembled into one block" "got: $output"
+fi
+
+# ---------------------------------------------------------------------------
+# test: token-level deltas join without per-token newlines (no garbled output).
+# ---------------------------------------------------------------------------
+echo "test: token deltas joined without per-token newlines"
+
+cat > "$TMPDIR_TEST/token_events.jsonl" << 'EOF'
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"The"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" quick"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" brown fox"}}
+{"type":"turn_end"}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/token_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+if echo "$output" | grep '"content_block_delta"' \
+    | jq -e 'select(.delta.text == "The quick brown fox\n")' >/dev/null 2>&1; then
+    pass "token deltas joined into a single line without internal newlines"
+else
+    fail "token deltas garbled with per-token newlines" "got: $output"
+fi
+
+# multi-line assistant text flushes each complete line as its own block.
+echo "test: embedded newlines split into separate line blocks"
+
+cat > "$TMPDIR_TEST/multiline_events.jsonl" << 'EOF'
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"line one\nline"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" two"}}
+{"type":"turn_end"}
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/multiline_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" TMPDIR_TEST="$TMPDIR_TEST" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+line_one=$(echo "$output" | grep '"content_block_delta"' \
+    | jq -rc 'select(.delta.text == "line one\n") | .delta.text' 2>/dev/null)
+line_two=$(echo "$output" | grep '"content_block_delta"' \
+    | jq -rc 'select(.delta.text == "line two\n") | .delta.text' 2>/dev/null)
+if [[ -n "$line_one" && -n "$line_two" ]]; then
+    pass "embedded newline split into separate line blocks"
+else
+    fail "embedded newline not split correctly" "got: $output"
 fi
 
 # ---------------------------------------------------------------------------

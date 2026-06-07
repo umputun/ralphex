@@ -389,20 +389,24 @@ The wrapper translates pi JSONL events as follows:
 
 | pi event | Claude event |
 |---|---|
-| `message_update` + `assistantMessageEvent.type == "text_delta"` | `content_block_delta` with the delta text |
+| `message_update` + `assistantMessageEvent.type == "text_delta"` | buffered; each complete line is flushed as one `content_block_delta` |
 | `tool_execution_start` / `tool_execution_update` / `tool_execution_end` | skipped by default (set `PI_VERBOSE=1` to include) |
 | `session` header, `queue_update`, `compaction_*`, `auto_retry_*` | skipped |
-| `turn_end` / `agent_end` | `result` (end of turn) |
+| `turn_end` / `agent_end` | flush remaining buffer, then `result` (end of turn) |
+
+pi streams assistant text as token-level deltas (e.g. `"The"`, `" quick"`, `" brown"`), so the wrapper buffers deltas and emits only complete lines. Emitting one event per token would garble the log with a newline after every token and, more importantly, split `<<<RALPHEX:...>>>` signals across blocks — the executor's per-block signal detection only matches a signal that lands intact in a single `content_block_delta`.
 
 A fallback `{"type":"result","result":""}` is always emitted, covering pi exiting without a `turn_end`/`agent_end` event. Stderr is captured and emitted as `content_block_delta` events after the main stream for error/limit pattern detection, and pi's exit code is preserved.
 
 ### How it works
 
 ```bash
-# pi emits JSONL like:
-{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"fixed the bug"}}
+# pi emits token-level JSONL deltas like:
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"fixed the"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" bug"}}
+{"type":"turn_end"}
 
-# wrapper translates to:
+# wrapper buffers tokens and flushes the complete line:
 {"type":"content_block_delta","delta":{"type":"text_delta","text":"fixed the bug\n"}}
 ```
 

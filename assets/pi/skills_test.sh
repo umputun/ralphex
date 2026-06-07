@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # skills_test.sh — validates pi SKILL.md frontmatter for required fields and the
-# pi name pattern, plus a body-content check (no Claude-only tool tokens) for the
-# skills that have been ported to pi. The body check is extended to cover more
-# skills as each is ported.
+# pi name pattern, plus a body-content check (no Claude-only tool tokens) for every
+# pi skill.
 
 set -euo pipefail
 
@@ -41,20 +40,8 @@ fm_value() {
 
 expected_skills="ralphex ralphex-plan ralphex-update ralphex-adopt"
 
-# ported_skills have had their bodies adapted for pi and must contain no
-# Claude-only tool tokens. All four skills are now ported.
-ported_skills="ralphex ralphex-plan ralphex-update ralphex-adopt"
-
-# Claude-only tokens that must not appear in a ported pi skill body.
+# Claude-only tokens that must not appear in a pi skill body.
 claude_tokens="AskUserQuestion TaskOutput subagent_type run_in_background ~/.claude/"
-
-is_ported() {
-    local needle="$1" item
-    for item in $ported_skills; do
-        [[ "$item" == "$needle" ]] && return 0
-    done
-    return 1
-}
 
 echo "running pi skills frontmatter tests"
 echo ""
@@ -113,19 +100,17 @@ for name in $expected_skills; do
         pass "$name: no argument-hint key"
     fi
 
-    # ported skills must not reference Claude-only tools anywhere in the file
-    if is_ported "$name"; then
-        found_tokens=""
-        for token in $claude_tokens; do
-            if grep -qF -- "$token" "$file"; then
-                found_tokens="$found_tokens $token"
-            fi
-        done
-        if [[ -n "$found_tokens" ]]; then
-            fail "$name: no Claude-only tokens" "found:$found_tokens"
-        else
-            pass "$name: no Claude-only tokens"
+    # pi skills must not reference Claude-only tools anywhere in the file
+    found_tokens=""
+    for token in $claude_tokens; do
+        if grep -qF -- "$token" "$file"; then
+            found_tokens="$found_tokens $token"
         fi
+    done
+    if [[ -n "$found_tokens" ]]; then
+        fail "$name: no Claude-only tokens" "found:$found_tokens"
+    else
+        pass "$name: no Claude-only tokens"
     fi
 done
 
