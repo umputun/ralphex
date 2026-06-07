@@ -46,11 +46,11 @@ bash scripts/pi-as-claude/pi-as-claude_docs_test.sh
 
 ### No assistant text in the progress log
 
-The wrapper emits only assistant text by default and skips tool execution events as noise. To see tool activity (file reads, shell commands, edits), set `PI_VERBOSE=1`:
+The wrapper emits only assistant text by default and skips tool execution events as noise. To see tool activity (file reads, shell commands, edits), export `PI_VERBOSE=1` before running ralphex (ralphex passes `claude_command` to the OS verbatim as the executable, so an inline `env VAR=val` prefix would not work — the child inherits the exported environment instead):
 
-```ini
-# in ~/.config/ralphex/config or .ralphex/config
-claude_command = env PI_VERBOSE=1 /path/to/scripts/pi-as-claude/pi-as-claude.sh
+```bash
+export PI_VERBOSE=1
+ralphex docs/plans/feature.md
 ```
 
 ### Provider / API key errors
