@@ -80,6 +80,13 @@ elif [[ -n "$PI_THINKING" ]]; then
     thinking="$PI_THINKING"
 fi
 
+# detect review prompts and prepend a pi-appropriate adapter.
+# pi exposes no parallel sub-agents, so instruct sequential per-agent review.
+if [[ "$prompt" == *"<<<RALPHEX:REVIEW_DONE>>>"* ]]; then
+    adapter_text=$'Ralphex review adapter for pi:\n- Interpret review "Task tool" instructions as sequential steps: perform each review agent\'s work one at a time.\n- pi does not support parallel sub-agents, so execute each review task sequentially using pi\'s read, bash, edit, and write tools.\n- Apply fixes after completing all review steps.\n- Keep original review workflow and all <<<RALPHEX:...>>> signals unchanged.'
+    prompt="$adapter_text"$'\n\n'"$prompt"
+fi
+
 # build pi arguments: JSON event stream, non-interactive, prompt as positional arg
 pi_args=(--mode json --print)
 [[ -n "$PI_PROVIDER" ]] && pi_args+=(--provider "$PI_PROVIDER")
@@ -117,11 +124,30 @@ trap forward_signal TERM
 pi "${pi_args[@]}" 2>"$stderr_file" > "$stdout_pipe" &
 pi_pid=$!
 
-# read from stdout_pipe line by line and wrap in JSON.
-# NOTE: this is a basic passthrough; Task 2 replaces it with pi JSON event mapping.
+# read pi's JSONL event stream line by line and translate to claude stream-json.
+# only assistant text is emitted by default — tool executions, the session header,
+# and other lifecycle events are noise and are skipped (include tool lines with
+# PI_VERBOSE=1).
+#
+# event mapping:
+#   message_update + assistantMessageEvent.type=="text_delta" -> content_block_delta
+#   tool_execution_start/update/end                           -> skipped (or PI_VERBOSE=1)
+#   session header, queue_update, compaction_*, auto_retry_*  -> skipped
+#   turn_end / agent_end                                      -> result (end of turn)
 while IFS= read -r line || [[ -n "$line" ]]; do
-    jq -cn --arg text "$line" \
-        '{type: "content_block_delta", delta: {type: "text_delta", text: ($text + "\n")}}'
+    [[ -z "$line" ]] && continue
+    printf '%s\n' "$line" | jq -c --argjson verbose "$PI_VERBOSE" '
+        if .type == "message_update" and .assistantMessageEvent.type == "text_delta" then
+            {type: "content_block_delta", delta: {type: "text_delta",
+                text: ((.assistantMessageEvent.delta // "") + "\n")}}
+        elif ((.type // "") | startswith("tool_execution_")) and $verbose == 1 then
+            {type: "content_block_delta", delta: {type: "text_delta",
+                text: ("[tool] " + .type + " " + (.toolName // "") + "\n")}}
+        elif .type == "turn_end" or .type == "agent_end" then
+            {type: "result", result: ""}
+        else empty
+        end
+    ' 2>/dev/null || true
 done < "$stdout_pipe"
 
 # wait for pi to finish and capture its exit code
@@ -129,7 +155,16 @@ pi_exit=0
 wait "$pi_pid" || pi_exit=$?
 pi_pid=""
 
-# emit fallback result event
+# emit stderr as content_block_delta events so ralphex error/limit pattern
+# detection still works (pi may report rate limits / failures on stderr).
+if [[ -s "$stderr_file" ]]; then
+    while IFS= read -r err_line || [[ -n "$err_line" ]]; do
+        [[ -z "$err_line" ]] && continue
+        printf '%s\n' "$err_line" | jq -Rc '{type: "content_block_delta", delta: {type: "text_delta", text: (. + "\n")}}'
+    done < "$stderr_file"
+fi
+
+# emit fallback result event (covers pi exiting without a turn_end/agent_end)
 echo '{"type":"result","result":""}'
 
 # preserve pi's exit code

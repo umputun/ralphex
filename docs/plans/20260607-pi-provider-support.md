@@ -121,23 +121,23 @@ can ship independently.
 - [x] run `shellcheck` + tests — must pass before next task
 
 ### Task 2: pi JSON event → stream-json translation
-- [ ] translate JSONL with `jq`: `message_update` +
+- [x] translate JSONL with `jq`: `message_update` +
       `assistantMessageEvent.type=="text_delta"` → `content_block_delta`
       (`text_delta`, append `\n`); `turn_end`/`agent_end` → `result`; `session`
       header and `tool_execution_*` skipped by default; include tool lines only
       when `PI_VERBOSE=1`; always emit a fallback `{"type":"result","result":""}`
-- [ ] emit captured stderr lines as `content_block_delta` events after stdout so
+- [x] emit captured stderr lines as `content_block_delta` events after stdout so
       ralphex error/limit pattern detection still works — mirror
       `gemini-as-claude.sh` lines 106–112; preserve pi's exit code
-- [ ] add review-prompt adapter: detect `<<<RALPHEX:REVIEW_DONE>>>`, prepend
+- [x] add review-prompt adapter: detect `<<<RALPHEX:REVIEW_DONE>>>`, prepend
       pi-appropriate adapter text (pi exposes no parallel sub-agents → instruct
       sequential per-agent review using pi's read/bash/edit/write tools), and
       keep all `<<<RALPHEX:...>>>` signals unchanged
-- [ ] write tests for event translation (text deltas emitted, tool events
+- [x] write tests for event translation (text deltas emitted, tool events
       skipped by default, `PI_VERBOSE=1` includes them, terminal `result`)
-- [ ] write tests for review-prompt detection, adapter injection, and signal
+- [x] write tests for review-prompt detection, adapter injection, and signal
       passthrough; plus stderr emission and exit-code preservation
-- [ ] run `shellcheck` + tests — must pass before next task
+- [x] run `shellcheck` + tests — must pass before next task
 
 ### Task 3: Wrapper docs & repo integration
 - [ ] add `scripts/pi-as-claude/README.md` (config snippet, env vars
