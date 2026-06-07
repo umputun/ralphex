@@ -346,6 +346,68 @@ fixed the bug
 
 For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text), the wrapper prepends sequential instructions to run the review flow sequentially rather than attempting parallel execution.
 
+## pi CLI wrapper (included example)
+
+The repository includes a wrapper at `scripts/pi-as-claude/pi-as-claude.sh` that translates pi's `--mode json` JSONL event stream to Claude stream-json format. Like the Codex and Copilot wrappers, it uses `jq` for JSON parsing.
+
+The wrapper runs pi with `--mode json --print` and the prompt as a positional argument, so pi streams structured JSONL events that the wrapper maps into Claude `content_block_delta` / `result` output.
+
+### Setup
+
+```ini
+# in ~/.config/ralphex/config or .ralphex/config
+claude_command = /path/to/scripts/pi-as-claude/pi-as-claude.sh
+```
+
+For a one-off run without editing config:
+
+```bash
+ralphex --claude-command=/path/to/scripts/pi-as-claude/pi-as-claude.sh docs/plans/feature.md
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PI_PROVIDER` | (pi default: `google`) | Provider passed as `--provider` when set |
+| `PI_MODEL` | (pi default) | Model used when ralphex does not append a `--model` flag |
+| `PI_THINKING` | (pi default) | Thinking level used when ralphex does not append an `--effort` flag |
+| `PI_VERBOSE` | `0` | Set to `1` to include tool execution events in the stream |
+
+### Thinking / effort mapping
+
+ralphex appends `--model <m>` / `--effort <e>` per phase. The wrapper forwards `--model` to pi's `--model` and maps `--effort` to pi's `--thinking`:
+
+| ralphex effort | pi thinking |
+|---|---|
+| `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | passed through verbatim |
+| `max` | `xhigh` (pi has no `max`; a one-line note is printed to stderr) |
+
+### Event translation
+
+The wrapper translates pi JSONL events as follows:
+
+| pi event | Claude event |
+|---|---|
+| `message_update` + `assistantMessageEvent.type == "text_delta"` | `content_block_delta` with the delta text |
+| `tool_execution_start` / `tool_execution_update` / `tool_execution_end` | skipped by default (set `PI_VERBOSE=1` to include) |
+| `session` header, `queue_update`, `compaction_*`, `auto_retry_*` | skipped |
+| `turn_end` / `agent_end` | `result` (end of turn) |
+
+A fallback `{"type":"result","result":""}` is always emitted, covering pi exiting without a `turn_end`/`agent_end` event. Stderr is captured and emitted as `content_block_delta` events after the main stream for error/limit pattern detection, and pi's exit code is preserved.
+
+### How it works
+
+```bash
+# pi emits JSONL like:
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"fixed the bug"}}
+
+# wrapper translates to:
+{"type":"content_block_delta","delta":{"type":"text_delta","text":"fixed the bug\n"}}
+```
+
+For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text), the wrapper prepends adapter instructions telling the model to execute review agent tasks sequentially using pi's `read`/`bash`/`edit`/`write` tools, since pi exposes no parallel sub-agents.
+
 ## Writing your own wrapper
 
 A wrapper script must:

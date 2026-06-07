@@ -46,6 +46,7 @@ scripts/ralphex-dk/ # Docker wrapper script (Python) with tests
 scripts/codex-as-claude/ # codex wrapper for Claude-compatible output
 scripts/copilot-as-claude/ # GitHub Copilot CLI wrapper for Claude-compatible output
 scripts/gemini-as-claude/ # gemini wrapper for Claude-compatible output
+scripts/pi-as-claude/ # pi wrapper for Claude-compatible output
 scripts/hg2git/     # Mercurial-to-git translation script with tests
 scripts/opencode/   # opencode wrapper scripts with tests
 scripts/internal/   # internal dev/CI scripts (prep-toy-test, init-docker, etc.)
@@ -106,7 +107,7 @@ Key files:
 
 ### Alternative Providers for Claude Phases
 
-`claude_command`/`claude_args` replace Claude Code with any `stream-json`-compatible CLI. Included wrappers: `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/copilot-as-claude/copilot-as-claude.sh`. Wrappers must ignore unknown flags gracefully (`*) shift ;;`) — default Claude flags may still be passed via config fallback. See `docs/custom-providers.md`.
+`claude_command`/`claude_args` replace Claude Code with any `stream-json`-compatible CLI. Included wrappers: `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/copilot-as-claude/copilot-as-claude.sh`, `scripts/pi-as-claude/pi-as-claude.sh`. Wrappers must ignore unknown flags gracefully (`*) shift ;;`) — default Claude flags may still be passed via config fallback. See `docs/custom-providers.md`.
 
 Env vars:
 - Codex: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE`

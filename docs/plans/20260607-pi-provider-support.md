@@ -140,20 +140,20 @@ can ship independently.
 - [x] run `shellcheck` + tests — must pass before next task
 
 ### Task 3: Wrapper docs & repo integration
-- [ ] add `scripts/pi-as-claude/README.md` (config snippet, env vars
+- [x] add `scripts/pi-as-claude/README.md` (config snippet, env vars
       `PI_MODEL`/`PI_PROVIDER`/`PI_THINKING`/`PI_VERBOSE`, requirements `pi`+`jq`,
       troubleshooting) — mirror `gemini-as-claude/README.md`
-- [ ] add a **pi** section to `docs/custom-providers.md` (JSON-mode notes,
+- [x] add a **pi** section to `docs/custom-providers.md` (JSON-mode notes,
       event-translation table, env vars, thinking/effort mapping)
-- [ ] update `README.md` + `llms.txt` wrapper inventories to include
+- [x] update `README.md` + `llms.txt` wrapper inventories to include
       `scripts/pi-as-claude/pi-as-claude.sh`; add `pi` to the optional
       Requirements lists
-- [ ] update `CLAUDE.md` Project Structure + wrapper inventory to list
+- [x] update `CLAUDE.md` Project Structure + wrapper inventory to list
       `scripts/pi-as-claude/`
-- [ ] write tests: extend/copy the `copilot-as-claude_docs_test.sh` pattern (or a
+- [x] write tests: extend/copy the `copilot-as-claude_docs_test.sh` pattern (or a
       small grep-based check) asserting the wrapper path is referenced in
       `README.md`, `llms.txt`, and `docs/custom-providers.md`
-- [ ] run tests — must pass before next task
+- [x] run tests — must pass before next task
 
 ### Task 4: Scaffold assets/pi tree & confirm pi tool mapping
 - [ ] confirm pi's tool model from `pi --help` / docs and record the
