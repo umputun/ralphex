@@ -22,62 +22,48 @@ which ralphex
 - **Linux (RHEL/Fedora)**: download `.rpm` from https://github.com/umputun/ralphex/releases
 - **Any platform with Go**: `go install github.com/umputun/ralphex/cmd/ralphex@latest`
 
-Use AskUserQuestion to confirm installation method, then guide through it. **Do not proceed until `which ralphex` succeeds.**
+Ask the user inline which installation method they prefer, then guide through it. **Do not proceed until `which ralphex` succeeds.**
 
 ## Step 1: Check for Plan Argument
 
-Check `$ARGUMENTS` for optional plan file path:
-- if argument provided: validate file exists using Read tool, skip plan selection in Step 3
-- if no argument: will ask for plan selection in Step 3
+Arguments arrive appended as user input (pi has no `$ARGUMENTS` placeholder). If the user named a plan file:
+- validate it exists with pi's `read` tool (or `bash` `test -f`), then skip plan selection in Step 3
+- if no plan was named: ask for plan selection in Step 3
 
 ## Step 2: Ask Execution Mode
 
-Use AskUserQuestion:
-- header: "Mode"
-- question: "Which execution mode should ralphex use?"
-- options:
-  - label: "Full (Recommended)"
-    description: "Task execution + Claude review + Codex loop + final Claude review"
-  - label: "Review"
-    description: "Skip tasks, run full review pipeline (Claude + Codex + Claude)"
-  - label: "Codex-only"
-    description: "Skip tasks and first Claude review, run only Codex loop"
+Ask the user inline which execution mode ralphex should use (pi is interactive — ask directly and wait for the reply). Offer:
+- **Full (Recommended)**: Task execution + Claude review + Codex loop + final Claude review
+- **Review**: Skip tasks, run full review pipeline (Claude + Codex + Claude)
+- **Codex-only**: Skip tasks and first Claude review, run only Codex loop
 
-## Step 3: Plan Selection (if no argument provided)
+## Step 3: Plan Selection (if no plan named)
 
 **If Full mode selected:**
-- Use Glob: `docs/plans/*.md` (excludes completed/)
+- List candidate plans with pi `bash`: `ls -t docs/plans/*.md` (excludes completed/; `-t` sorts newest first)
 - Plan is REQUIRED
-- **IMPORTANT**: Glob returns oldest-first, so REVERSE the list to get most recent first
-- Build AskUserQuestion with up to 4 most recent plans
-- First option (most recent) should have "(Recommended)" suffix
+- Ask the user inline to pick one of the up-to-4 most recent plans
+- Present the most recent first with a "(Recommended)" note
 - User MUST select one
 
 **If Review or Codex-only mode selected:**
-- Use Glob: `docs/plans/**/*.md` (includes completed/ for context)
+- List candidate plans with pi `bash`: `ls -t docs/plans/**/*.md docs/plans/*.md 2>/dev/null` (includes completed/ for context, newest first)
 - Plan is OPTIONAL
-- **IMPORTANT**: Glob returns oldest-first, so REVERSE the list to get most recent first
-- Build AskUserQuestion with up to 4 most recent plans PLUS "None" option at the end
-- First plan option (most recent) should have "(Recommended)" suffix
-- "None" option description: "Review existing changes without a plan file"
-- If user selects "None", run without plan file
+- Ask the user inline to pick one of the up-to-4 most recent plans, or "None"
+- Present the most recent first with a "(Recommended)" note
+- "None" means: review existing changes without a plan file
+- If user selects "None", run without a plan file
 
 ## Step 4: Ask Max Iterations
 
-Use AskUserQuestion:
-- header: "Iterations"
-- question: "Maximum number of task iterations?"
-- options:
-  - label: "50 (Recommended)"
-    description: "Default - suitable for most plans"
-  - label: "25"
-    description: "Shorter plans or quick iterations"
-  - label: "100"
-    description: "Large plans with many tasks"
+Ask the user inline for the maximum number of task iterations:
+- **50 (Recommended)**: Default - suitable for most plans
+- **25**: Shorter plans or quick iterations
+- **100**: Large plans with many tasks
 
 ## Step 5: Launch ralphex in Background
 
-Build and run the command:
+Build the command:
 
 ```bash
 ralphex \
@@ -87,7 +73,14 @@ ralphex \
   [plan-file]             # from argument OR plan selection (omit if "None" selected)
 ```
 
-Run using Bash tool with `run_in_background: true`. **Save the task_id from the response** - needed for status checks later.
+Launch it detached so it survives this session, using pi's `bash` tool. Redirect output and record the PID for later status checks:
+
+```bash
+nohup ralphex [flags] [plan-file] >/dev/null 2>&1 &
+echo "ralphex PID: $!"
+```
+
+**Save the printed PID** — needed for status checks later.
 
 **Determine progress filename** based on mode and plan selection:
 - Full mode + plan: `.ralphex/progress/progress-{plan-stem}.txt`
@@ -101,13 +94,13 @@ Where `{plan-stem}` is the plan filename without extension (e.g., `fix-bugs` fro
 
 ## Step 6: Confirm Launch
 
-1. Wait 10-15 seconds for initialization
+1. Wait 10-15 seconds for initialization (e.g., pi `bash`: `sleep 12`)
 2. Read last 20 lines of progress file: `tail -20 [progress-filename]`
 3. Confirm ralphex started by checking for "Plan:", "Branch:", "Started:" lines
 4. Report launch confirmation:
 
 ```
-ralphex started. Task ID: [task_id]
+ralphex started. PID: [pid]
 
 Plan: [plan file from progress file]
 Branch: [branch from progress file]
@@ -128,7 +121,7 @@ Ask "check ralphex" to get status update.
 
 If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex doing":
 
-1. Use TaskOutput tool with `block: false` to check process status (use task_id from Step 5)
+1. Check whether the process is still alive with pi `bash`: `kill -0 [pid] 2>/dev/null && echo running || echo exited` (use the PID from Step 5)
 2. Read last 40 lines of progress file (use filename from Step 5)
 
 **If process still running:**
@@ -138,9 +131,9 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
   - "review pass 1/2" → Claude Review phase
 - Show recent activity lines
 
-**If process exited (TaskOutput shows completion):**
-- Exit code 0 → success, report "ralphex completed successfully"
-- Exit code non-zero → failure, report "ralphex failed"
+**If process exited:**
+- A `Completed:` footer in the progress file → success, report "ralphex completed successfully"
+- A `Failed:` footer (or abnormal last lines) → failure, report "ralphex failed"
 - Read final lines of progress file for summary
 
 **After reporting status, STOP. Do not offer to do anything else.**
@@ -154,8 +147,8 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
 - After launch confirmation: wait for user to explicitly request status check
 - After status check: report and stop
 
-## Nested Claude Code Sessions
+## Nested Agent Sessions
 
-ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Claude Code. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully instead of looping.
+ralphex automatically strips the `CLAUDECODE` env var from child processes, so it runs cleanly even when launched from inside another agent session. If a nested-session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully instead of looping.
 
 Running from a standalone terminal is still recommended for the best experience.

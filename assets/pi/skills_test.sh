@@ -42,8 +42,8 @@ fm_value() {
 expected_skills="ralphex ralphex-plan ralphex-update ralphex-adopt"
 
 # ported_skills have had their bodies adapted for pi and must contain no
-# Claude-only tool tokens. Extend this list as remaining skills are ported.
-ported_skills="ralphex-plan ralphex-adopt"
+# Claude-only tool tokens. All four skills are now ported.
+ported_skills="ralphex ralphex-plan ralphex-update ralphex-adopt"
 
 # Claude-only tokens that must not appear in a ported pi skill body.
 claude_tokens="AskUserQuestion TaskOutput subagent_type run_in_background ~/.claude/"

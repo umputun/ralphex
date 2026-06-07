@@ -61,7 +61,7 @@ A file is **customized** only if it contains at least one uncommented, non-empty
 
 ## Step 3: Compare Files
 
-For each file in the defaults dump (`config`, `prompts/*.txt`, `agents/*.txt`), compare with the corresponding file in the user's config directory.
+For each file in the defaults dump (`config`, `prompts/*.txt`, `agents/*.txt`), compare with the corresponding file in the user's config directory. Use pi's `read` tool (or `bash` with `diff`/`grep`) to read and compare both sides.
 
 **Algorithm to detect customized files**: a file is customized if it contains at least one non-empty line that does NOT start with `#`. Files that are missing, empty, or contain only comment lines (`# ...`) and whitespace are do-nothing defaults.
 
@@ -83,7 +83,7 @@ Note: files that exist only in the dump directory (no corresponding user file) a
 
 ### Smart merge needed
 - File has uncommented content that differs from the raw dump default (after stripping `#`-prefixed lines from both sides)
-- **Action**: needs Claude to semantically analyze and propose merge
+- **Action**: needs the agent to semantically analyze and propose a merge
 
 ## Step 4: Present Summary
 
@@ -101,22 +101,17 @@ Smart merge needed (N files):
 
 If nothing needs merging, report "all config files are up to date — no changes needed" and skip to cleanup.
 
-Otherwise, use AskUserQuestion to confirm proceeding:
-- header: "Proceed"
-- question: "Review smart merges? Each customized file will be reviewed one by one."
-- options:
-  - label: "Yes, proceed"
-    description: "Review and merge customized files one at a time"
-  - label: "Skip, just show details"
-    description: "Show what changed without modifying anything"
+Otherwise, ask the user inline whether to proceed (pi is interactive — ask directly and wait for the reply):
+- **Yes, proceed**: Review and merge customized files one at a time
+- **Skip, just show details**: Show what changed without modifying anything
 
-If user selects "Skip, just show details": for each file needing smart merge, show the diff between the user's file and the new default, then skip to Step 6 (Cleanup) without modifying any files.
+If user chooses "Skip, just show details": for each file needing smart merge, show the diff between the user's file and the new default, then skip to Step 6 (Cleanup) without modifying any files.
 
 ## Step 5: Process Smart Merges
 
 For each customized file that needs merging:
 
-1. **Read both versions** - the new default and the user's current version
+1. **Read both versions** - the new default and the user's current version (pi `read`)
 2. **Analyze the differences semantically**:
    - What did the user customize? (added content, changed wording, different instructions)
    - What changed in the new default? (structural changes, new template variables, new sections, removed sections)
@@ -130,18 +125,12 @@ For each customized file that needs merging:
    - Brief summary of what changed in defaults
    - Brief summary of what user customized
    - The proposed merged version
-5. **Use AskUserQuestion** for each file:
-   - header: "Merge"
-   - question: "How to handle <filename>?"
-   - options:
-     - label: "Accept merge"
-       description: "Use the proposed merged version"
-     - label: "Keep mine"
-       description: "Keep your current version unchanged"
-     - label: "Use new default"
-       description: "Replace with new default (discard customizations)"
+5. **Ask the user inline** for each file how to handle `<filename>`:
+   - **Accept merge**: Use the proposed merged version
+   - **Keep mine**: Keep your current version unchanged
+   - **Use new default**: Replace with new default (discard customizations)
 
-6. Apply the user's choice
+6. Apply the user's choice with pi's `write` tool
 
 ## Step 6: Cleanup
 

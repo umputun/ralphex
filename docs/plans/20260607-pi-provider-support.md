@@ -192,19 +192,19 @@ can ship independently.
 - [x] run tests — must pass before next task
 
 ### Task 6: Adapt ralphex & ralphex-update skills for pi
-- [ ] port `ralphex` (launcher) SKILL.md: replace `Bash` `run_in_background` +
+- [x] port `ralphex` (launcher) SKILL.md: replace `Bash` `run_in_background` +
       `TaskOutput` monitoring with pi `bash` backgrounding + `tail` of
       `.ralphex/progress/progress-*.txt`; `AskUserQuestion`→inline; `Glob`→pi
       `bash` find; keep the `CLAUDECODE`-stripped / standalone-terminal guidance
       reframed for pi
-- [ ] port `ralphex-update` SKILL.md: map `Bash`/`Read`/`Write`/`Glob`/
+- [x] port `ralphex-update` SKILL.md: map `Bash`/`Read`/`Write`/`Glob`/
       `AskUserQuestion` to pi equivalents; keep the customized-file detection and
       smart-merge algorithm intact (`ralphex --dump-defaults`, comment-stripping
       comparison)
-- [ ] extend the validator test to cover all four `assets/pi/skills/*/SKILL.md`
-- [ ] write tests asserting no Claude-only tool references remain in any of the
+- [x] extend the validator test to cover all four `assets/pi/skills/*/SKILL.md`
+- [x] write tests asserting no Claude-only tool references remain in any of the
       four pi skill files
-- [ ] run tests — must pass before next task
+- [x] run tests — must pass before next task
 
 ### Task 7: Verify acceptance criteria
 - [ ] verify the wrapper emits valid stream-json for assistant text, skips tool
