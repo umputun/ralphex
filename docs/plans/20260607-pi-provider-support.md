@@ -207,14 +207,14 @@ can ship independently.
 - [x] run tests — must pass before next task
 
 ### Task 7: Verify acceptance criteria
-- [ ] verify the wrapper emits valid stream-json for assistant text, skips tool
+- [x] verify the wrapper emits valid stream-json for assistant text, skips tool
       noise by default, emits a terminal `result`, and preserves pi's exit code
       (mock-`pi` tests green)
-- [ ] verify all four pi skills exist with valid frontmatter and contain no
+- [x] verify all four pi skills exist with valid frontmatter and contain no
       Claude-only tool references
-- [ ] run full test suite (`make test`) — must pass
-- [ ] run `make lint` and `shellcheck scripts/pi-as-claude/*.sh` — all clean
-- [ ] run `make fmt`; verify 80%+ coverage on any new Go test code added
+- [x] run full test suite (`make test`) — must pass
+- [x] run `make lint` and `shellcheck scripts/pi-as-claude/*.sh` — all clean
+- [x] run `make fmt`; verify 80%+ coverage on any new Go test code added
 
 ### Task 8: [Final] Documentation & versioning
 - [ ] confirm `docs/custom-providers.md`, `README.md`, `llms.txt`, and
