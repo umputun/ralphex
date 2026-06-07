@@ -156,24 +156,24 @@ can ship independently.
 - [x] run tests — must pass before next task
 
 ### Task 4: Scaffold assets/pi tree & confirm pi tool mapping
-- [ ] confirm pi's tool model from `pi --help` / docs and record the
+- [x] confirm pi's tool model from `pi --help` / docs and record the
       Claude→pi mapping in **Technical Details** below: `AskUserQuestion`→inline
       question (pi is interactive, model asks and waits); `Task`+`subagent_type:
       Explore`→inline exploration via pi `read`/`bash`(grep/find); `Bash`
       `run_in_background`+`TaskOutput`→pi `bash` backgrounding + tailing
       `.ralphex/progress/*`; `Glob`/`Grep`→pi `bash` find/grep; `Write`→pi `write`
-- [ ] create `assets/pi/skills/{ralphex,ralphex-plan,ralphex-update,ralphex-adopt}/SKILL.md`
+- [x] create `assets/pi/skills/{ralphex,ralphex-plan,ralphex-update,ralphex-adopt}/SKILL.md`
       directory structure mirroring `assets/claude/skills/`
-- [ ] define frontmatter translation rules: keep `name`/`description`; convert
+- [x] define frontmatter translation rules: keep `name`/`description`; convert
       `allowed-tools` array → pi space-delimited string mapped to pi tool names
       (`read bash edit write`); drop Claude-only `argument-hint` from skills;
       note args arrive as appended user input (no `$ARGUMENTS` in pi skills)
-- [ ] add `assets/pi/README.md`: install via `~/.pi/agent/skills/` (or
+- [x] add `assets/pi/README.md`: install via `~/.pi/agent/skills/` (or
       `.pi/skills/` / `pi --skill <path>`), invoke as `/skill:ralphex-plan`
-- [ ] write a frontmatter-validator test (shell or Go under the appropriate
+- [x] write a frontmatter-validator test (shell or Go under the appropriate
       package) asserting required fields + `name` pattern for every
       `assets/pi/skills/*/SKILL.md`
-- [ ] run tests — must pass before next task
+- [x] run tests — must pass before next task
 
 ### Task 5: Adapt ralphex-plan & ralphex-adopt skills for pi
 - [ ] port `ralphex-plan` SKILL.md: replace the `Task`/`Explore` subagent step
@@ -249,15 +249,34 @@ file and emit it after stdout; always close with `{"type":"result","result":""}`
 accepted; `max` → `xhigh` (pi has no `max`; print a one-line stderr note, like
 codex's max-effort handling).
 
-**Claude→pi tool mapping for skills (to be confirmed in Task 4):**
+**Claude→pi tool mapping for skills (confirmed in Task 4):**
+
+pi's built-in tools are `read`, `bash`, `edit`, `write` (from `pi --help` and
+https://pi.dev/docs/latest). pi exposes no `Task`/subagent surface and no
+structured multi-choice question tool, which drives the mappings below.
+
 | Claude skill tool | pi equivalent |
 |-------------------|---------------|
 | `AskUserQuestion` | inline question — pi is interactive; model asks, user replies |
 | `Task` + `subagent_type: Explore` | inline exploration via pi `read` + `bash` (find/grep) |
 | `Bash` `run_in_background` + `TaskOutput` | pi `bash` backgrounding + `tail` of `.ralphex/progress/*` |
 | `Glob` / `Grep` | pi `bash` (`find` / `grep`) |
-| `Read` / `Write` | pi `read` / `write` |
-| frontmatter `allowed-tools: [..]` (array) | pi `allowed-tools: read bash edit write` (space-delimited) |
+| `Read` / `Write` / `Edit` | pi `read` / `write` / `edit` |
+| frontmatter `allowed-tools: [..]` (array) | pi `allowed-tools: read bash write` (space-delimited) |
+
+**Frontmatter translation rules (Task 4):**
+- add a required `name:` field (pi requires it; `[a-z0-9-]`, ≤64 chars) set to
+  the skill directory name; Claude skills derive the name from the file path and
+  omit it.
+- keep `description:` (≤1024 chars).
+- convert `allowed-tools` from a Claude array (`[Bash, Read, ...]`) to a pi
+  space-delimited string of pi tool names: `Bash`/`Glob`/`Grep`→`bash`,
+  `Read`→`read`, `Write`→`write`, `Edit`→`edit`; `AskUserQuestion`, `Task`, and
+  `TaskOutput` have no pi tool and are dropped (handled inline). Per-skill
+  resolved value: `ralphex` → `read bash`; `ralphex-plan`/`ralphex-update`/
+  `ralphex-adopt` → `read bash write`.
+- drop the Claude-only `argument-hint:` key (pi skills receive args appended as
+  user input — no `$ARGUMENTS` placeholder).
 
 ## Post-Completion
 *Manual / external — no checkboxes, informational only.*
