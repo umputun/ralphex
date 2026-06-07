@@ -217,13 +217,13 @@ can ship independently.
 - [x] run `make fmt`; verify 80%+ coverage on any new Go test code added
 
 ### Task 8: [Final] Documentation & versioning
-- [ ] confirm `docs/custom-providers.md`, `README.md`, `llms.txt`, and
+- [x] confirm `docs/custom-providers.md`, `README.md`, `llms.txt`, and
       `CLAUDE.md` consistently reference both the pi wrapper and the pi skills
-- [ ] document pi skill install in the integration docs; decide and note whether
+- [x] document pi skill install in the integration docs; decide and note whether
       pi skills need their own manifest (see Post-Completion) — do **not** bump
       `.claude-plugin/plugin.json` for `assets/pi/` changes (that version gates
       only `assets/claude/`); record the rationale
-- [ ] update `llms.txt` "Requirements" to list `pi` as an optional provider CLI
+- [x] update `llms.txt` "Requirements" to list `pi` as an optional provider CLI
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`.*
 

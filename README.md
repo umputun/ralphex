@@ -1406,6 +1406,33 @@ The `/ralphex` command runs ralphex in the background and provides status update
 
 > **Note:** ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Claude Code. However, running from a standalone terminal is still recommended for the best experience. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully.
 
+## pi Integration (Optional)
+
+pi users get the same slash-command convenience through pi-adapted versions of the ralphex skills, shipped under [`assets/pi/skills/`](assets/pi/). These are independent of the [`pi-as-claude` wrapper](scripts/pi-as-claude/pi-as-claude.sh): the wrapper lets ralphex run *with* pi, the skills let you drive ralphex *from inside* pi.
+
+### Available Skills
+
+| Skill | Invoke | Description |
+|-------|--------|-------------|
+| `ralphex` | `/skill:ralphex [plan-file]` | Launch and monitor ralphex execution |
+| `ralphex-plan` | `/skill:ralphex-plan <task>` | Create structured implementation plans |
+| `ralphex-update` | `/skill:ralphex-update` | Smart-merge updated defaults into customized config |
+| `ralphex-adopt` | `/skill:ralphex-adopt <source>` | Convert plans from other formats into ralphex format |
+
+### Installation
+
+pi discovers skills from `~/.pi/agent/skills/` (user-level), `.pi/skills/` (project-level), or a path passed via `pi --skill <path>`:
+
+```bash
+# user-level (all projects)
+mkdir -p ~/.pi/agent/skills
+cp -r assets/pi/skills/* ~/.pi/agent/skills/
+```
+
+Invoke as `/skill:<name> [args]`; pi appends args after the name as user input (no `$ARGUMENTS` placeholder). See [`assets/pi/README.md`](assets/pi/) for details.
+
+> **Note:** The pi skills are not part of the Claude Code plugin (`.claude-plugin/`) — that manifest gates only `assets/claude/`. The pi skills are installed by copying files into a pi skills directory, so they carry no plugin/marketplace version.
+
 ## For LLMs
 
 See [llms.txt](llms.txt) for LLM-optimized documentation.

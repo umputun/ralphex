@@ -136,6 +136,30 @@ assert_contains \
     "scripts/pi-as-claude/pi-as-claude.sh" \
     "CLAUDE alternative provider docs mention pi wrapper path"
 
+# pi skills (assets/pi) referenced consistently across docs
+assert_contains \
+    "$REPO_ROOT/docs/custom-providers.md" \
+    "assets/pi/skills/" \
+    "custom providers doc references pi skills"
+assert_contains \
+    "$REPO_ROOT/README.md" \
+    "assets/pi/skills/" \
+    "top-level README references pi skills"
+assert_contains \
+    "$REPO_ROOT/README.md" \
+    "/skill:ralphex-plan" \
+    "top-level README documents pi skill invocation"
+assert_contains \
+    "$REPO_ROOT/llms.txt" \
+    "assets/pi/skills/" \
+    "llms.txt references pi skills"
+
+# manifest rationale: assets/pi changes do not trigger a Claude plugin bump
+assert_contains \
+    "$REPO_ROOT/CLAUDE.md" \
+    "assets/pi/" \
+    "CLAUDE records pi skills manifest rationale"
+
 echo ""
 echo "summary: $passed passed, $failed failed, $total total"
 
