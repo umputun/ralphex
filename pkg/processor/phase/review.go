@@ -85,7 +85,10 @@ func (p *ReviewPhase) Loop(ctx context.Context, prefix string) error {
 		}
 
 		if execResult.TimedOut {
-			p.log.Print("session timed out, retrying review iteration...")
+			p.log.Print("session timed out, retrying review iteration after %s...", retryBackoff)
+			if err := p.policy.Sleep(ctx, retryBackoff); err != nil {
+				return fmt.Errorf("interrupted: %w", err)
+			}
 			continue
 		}
 

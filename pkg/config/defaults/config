@@ -264,8 +264,8 @@ codex_error_patterns = Rate limit exceeded,rate limit reached,429 Too Many Reque
 
 # claude_retry_patterns: transient claude/fya output markers to retry like timeouts
 # comma-separated list of substrings (case-insensitive matching)
-# default: FYA_TRANSIENT_TIMEOUT
-claude_retry_patterns = FYA_TRANSIENT_TIMEOUT
+# default: FYA_TRANSIENT_TIMEOUT,API Error: 529,API Error: 502,API Error: 503,API Error: 504
+claude_retry_patterns = FYA_TRANSIENT_TIMEOUT,API Error: 529,API Error: 502,API Error: 503,API Error: 504
 
 # ------------------------------------------------------------------------------
 # rate limit wait and retry
@@ -275,8 +275,9 @@ claude_retry_patterns = FYA_TRANSIENT_TIMEOUT
 # comma-separated list of substrings (case-insensitive matching)
 # when detected AND wait_on_limit is set, ralphex waits and retries
 # when detected WITHOUT wait_on_limit, falls through to error pattern behavior
-# default: You've hit your limit,You've hit your session limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,API Error: 529,API Error: 502,API Error: 503,API Error: 504
-claude_limit_patterns = You've hit your limit,You've hit your session limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,API Error: 529,API Error: 502,API Error: 503,API Error: 504
+# transient HTTP errors (529/502/503/504) live in claude_retry_patterns, not here
+# default: You've hit your limit,You've hit your session limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit
+claude_limit_patterns = You've hit your limit,You've hit your session limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit
 
 # codex_limit_patterns: patterns to detect rate limits in codex/external output
 # comma-separated list of substrings (case-insensitive matching)
