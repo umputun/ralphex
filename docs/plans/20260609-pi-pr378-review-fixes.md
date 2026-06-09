@@ -173,19 +173,19 @@ What stays (do NOT remove — these are wrapper docs, not skill docs):
 
 ### Task 4: Update the docs test suite
 
-- [ ] in `scripts/pi-as-claude/pi-as-claude_docs_test.sh`, remove the
+- [x] in `scripts/pi-as-claude/pi-as-claude_docs_test.sh`, remove the
       assertions that reference removed content: `assets/pi/skills/` in
       `docs/custom-providers.md`, `README.md`, and `llms.txt`; the
       `/skill:ralphex-plan` README assertion; and the `assets/pi/` manifest
       rationale assertion in `CLAUDE.md`
-- [ ] keep the wrapper-path assertions (`scripts/pi-as-claude/` and
+- [x] keep the wrapper-path assertions (`scripts/pi-as-claude/` and
       `scripts/pi-as-claude/pi-as-claude.sh`) — those still hold
-- [ ] add an assertion (optional but recommended) guarding that `## pi
+- [x] add an assertion (optional but recommended) guarding that `## pi
       Integration` no longer appears in `README.md` / `llms.txt`, to prevent
       reintroduction
-- [ ] run `shellcheck scripts/pi-as-claude/pi-as-claude_docs_test.sh` — no
+- [x] run `shellcheck scripts/pi-as-claude/pi-as-claude_docs_test.sh` — no
       warnings
-- [ ] run `bash scripts/pi-as-claude/pi-as-claude_docs_test.sh` — all pass
+- [x] run `bash scripts/pi-as-claude/pi-as-claude_docs_test.sh` — all pass
 
 ### Task N-1: Verify acceptance criteria
 
