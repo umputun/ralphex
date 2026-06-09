@@ -14,6 +14,9 @@
 #   PI_MODEL             - model to use (passed as --model when --model flag absent)
 #   PI_THINKING          - thinking level (used when --effort flag absent)
 #   PI_VERBOSE           - set to 1 to include tool execution output (default: 0)
+#   PI_EXTRA_ARGS        - extra args appended verbatim to the pi invocation,
+#                          word-split on whitespace (e.g. "--nolo-mode full" to
+#                          auto-approve tools in non-interactive runs)
 
 set -euo pipefail
 
@@ -61,6 +64,7 @@ if [[ "$PI_VERBOSE" != "0" && "$PI_VERBOSE" != "1" ]]; then
     echo "warning: PI_VERBOSE must be 0 or 1, got '$PI_VERBOSE', defaulting to 0" >&2
     PI_VERBOSE=0
 fi
+PI_EXTRA_ARGS="${PI_EXTRA_ARGS:-}"
 
 # resolve model: explicit --model flag wins over PI_MODEL env
 model="$model_flag"
@@ -92,6 +96,12 @@ pi_args=(--mode json --print)
 [[ -n "$PI_PROVIDER" ]] && pi_args+=(--provider "$PI_PROVIDER")
 [[ -n "$model" ]] && pi_args+=(--model "$model")
 [[ -n "$thinking" ]] && pi_args+=(--thinking "$thinking")
+# append caller-supplied extra args (word-split); guard the empty case so the
+# array expansion does not trip `set -u` on bash 3.2 (macOS system bash).
+if [[ -n "$PI_EXTRA_ARGS" ]]; then
+    read -ra pi_extra_args <<< "$PI_EXTRA_ARGS"
+    pi_args+=("${pi_extra_args[@]}")
+fi
 pi_args+=("$prompt")
 
 # temporary files for stderr capture and stdout piping.

@@ -192,6 +192,41 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# test: PI_EXTRA_ARGS appended verbatim (word-split) before the prompt
+# ---------------------------------------------------------------------------
+echo "test: PI_EXTRA_ARGS passthrough"
+
+rm -f "$TMPDIR_TEST/pi_args"
+MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
+    PI_EXTRA_ARGS="--nolo-mode full" \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1
+
+recorded=$(cat "$TMPDIR_TEST/pi_args")
+if echo "$recorded" | grep -q -- "--nolo-mode full"; then
+    pass "PI_EXTRA_ARGS appended to pi invocation"
+else
+    fail "PI_EXTRA_ARGS not appended" "args: $recorded"
+fi
+
+# extra args precede the prompt (prompt must stay the final positional arg)
+if echo "$recorded" | grep -q -- "--nolo-mode full test prompt"; then
+    pass "PI_EXTRA_ARGS inserted before the prompt"
+else
+    fail "PI_EXTRA_ARGS not ordered before prompt" "args: $recorded"
+fi
+
+# no stray args when PI_EXTRA_ARGS unset
+rm -f "$TMPDIR_TEST/pi_args"
+run_wrapper -p "test prompt" >/dev/null 2>&1
+recorded=$(cat "$TMPDIR_TEST/pi_args")
+if echo "$recorded" | grep -q -- "--nolo-mode"; then
+    fail "extra args present when PI_EXTRA_ARGS unset" "args: $recorded"
+else
+    pass "no extra args when PI_EXTRA_ARGS unset"
+fi
+
+# ---------------------------------------------------------------------------
 # test: --effort → --thinking mapping (passthrough levels)
 # ---------------------------------------------------------------------------
 echo "test: effort to thinking mapping"
