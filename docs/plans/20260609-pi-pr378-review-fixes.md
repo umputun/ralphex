@@ -204,9 +204,11 @@ What stays (do NOT remove — these are wrapper docs, not skill docs):
 
 ### Task N: Update documentation
 
-- [ ] no extra docs needed beyond Task 3's edits — the wrapper README and
+- [x] no extra docs needed beyond Task 3's edits — the wrapper README and
       provider bullets already document pi as a wrapper-only provider; confirm
-      they read coherently after the skill sections are gone
+      they read coherently after the skill sections are gone (fixed one stale
+      "prompt as a positional argument" line in docs/custom-providers.md to
+      describe stdin delivery, matching the Task 1 wrapper change)
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`*
 

@@ -350,7 +350,7 @@ For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text),
 
 The repository includes a wrapper at `scripts/pi-as-claude/pi-as-claude.sh` that translates pi's `--mode json` JSONL event stream to Claude stream-json format. Like the Codex and Copilot wrappers, it uses `jq` for JSON parsing.
 
-The wrapper runs pi with `--mode json --print` and the prompt as a positional argument, so pi streams structured JSONL events that the wrapper maps into Claude `content_block_delta` / `result` output.
+The wrapper runs pi with `--mode json --print` and passes the prompt on stdin (avoiding the per-arg command-line length cap), so pi streams structured JSONL events that the wrapper maps into Claude `content_block_delta` / `result` output.
 
 ### Setup
 
