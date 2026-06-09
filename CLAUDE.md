@@ -490,7 +490,7 @@ If you're an AI agent preparing a contribution, complete this checklist:
 
 ## Workflow Rules
 
-- **Plugin version**: bump `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` versions on release if skill files (`assets/claude/`) changed since last plugin version bump. This gates ONLY `assets/claude/`; changes to the pi skills (`assets/pi/`) do NOT trigger a plugin bump — pi skills are installed by copying files into a pi skills directory (`~/.pi/agent/skills/`, `.pi/skills/`, or `pi --skill <path>`) and carry no plugin/marketplace manifest
+- **Plugin version**: bump `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` versions on release if skill files (`assets/claude/`) changed since last plugin version bump
 - **CHANGELOG**: Never modify during development - updates are part of release process only
 - **Version sections**: Never add entries to existing version sections - versions are immutable once released
 - **Linter warnings**: Add exclusions to `.golangci.yml` instead of `_, _ =` prefixes for fmt.Fprintf/Fprintln

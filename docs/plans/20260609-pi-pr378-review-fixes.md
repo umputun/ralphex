@@ -151,24 +151,24 @@ What stays (do NOT remove — these are wrapper docs, not skill docs):
 
 ### Task 3: Remove the assets/pi skill tree and its doc sections
 
-- [ ] `git rm -r assets/pi` (removes `README.md`, `skills_test.sh`, and the four
+- [x] `git rm -r assets/pi` (removes `README.md`, `skills_test.sh`, and the four
       `skills/*/SKILL.md` files)
-- [ ] remove the entire `## pi Integration (Optional)` section from `README.md`
+- [x] remove the entire `## pi Integration (Optional)` section from `README.md`
       (heading through the trailing plugin-manifest note, ~lines 1409–1435)
-- [ ] remove the entire `## pi Integration (Optional)` section from `llms.txt`
+- [x] remove the entire `## pi Integration (Optional)` section from `llms.txt`
       (heading, the `---` separators around it, through the manifest note,
       ~lines 333–354) — keep the wrapper bullet in Requirements and the
       `claude_command` wrapper notes
-- [ ] remove the `### Companion pi skills` subsection from
+- [x] remove the `### Companion pi skills` subsection from
       `docs/custom-providers.md` (keep the pi **wrapper** section above it)
-- [ ] update the `CLAUDE.md` plugin-version workflow bullet (~line 493): drop
+- [x] update the `CLAUDE.md` plugin-version workflow bullet (~line 493): drop
       the clause about pi skills not triggering a plugin bump; restore it to the
       pre-PR wording that gates only `assets/claude/`
-- [ ] verify the surviving wrapper references stay: `CLAUDE.md`
+- [x] verify the surviving wrapper references stay: `CLAUDE.md`
       project-structure `scripts/pi-as-claude/` line and providers paragraph,
       `llms.txt` Requirements pi bullet, `docs/custom-providers.md` pi wrapper
       section, `scripts/pi-as-claude/README.md`
-- [ ] write tests: this task has no code logic — covered by the doc-test update
+- [x] write tests: this task has no code logic — covered by the doc-test update
       in Task 4 (the cross-doc assertions are the regression guard)
 
 ### Task 4: Update the docs test suite

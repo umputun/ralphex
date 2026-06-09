@@ -412,10 +412,6 @@ A fallback `{"type":"result","result":""}` is always emitted, covering pi exitin
 
 For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text), the wrapper prepends adapter instructions telling the model to execute review agent tasks sequentially using pi's `read`/`bash`/`edit`/`write` tools, since pi exposes no parallel sub-agents.
 
-### Companion pi skills
-
-The wrapper lets ralphex run *with* pi. To drive ralphex *from inside* pi, the repository also ships pi-adapted ralphex skills under `assets/pi/skills/` (`ralphex`, `ralphex-plan`, `ralphex-update`, `ralphex-adopt`). Install them into a pi skills directory and invoke as `/skill:ralphex-plan ...`. The two parts are independent — see `assets/pi/README.md` for install and usage.
-
 ## Writing your own wrapper
 
 A wrapper script must:

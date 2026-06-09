@@ -330,31 +330,6 @@ When user asks to install the `/ralphex-adopt` command:
 
 ---
 
-## pi Integration (Optional)
-
-pi users can drive ralphex from inside pi via pi-adapted ralphex skills under `assets/pi/skills/` (`ralphex`, `ralphex-plan`, `ralphex-update`, `ralphex-adopt`). These are independent of the `scripts/pi-as-claude/pi-as-claude.sh` wrapper: the wrapper lets ralphex run *with* pi, the skills let you drive ralphex *from inside* pi.
-
-Install by copying the skill directories into a pi skills location, then invoke as `/skill:<name> [args]`:
-
-```bash
-# user-level (all projects)
-mkdir -p ~/.pi/agent/skills
-cp -r assets/pi/skills/* ~/.pi/agent/skills/
-
-# project-level
-mkdir -p .pi/skills
-cp -r assets/pi/skills/* .pi/skills/
-
-# one-off run without installing
-pi --skill assets/pi/skills/ralphex-plan
-```
-
-pi appends any args after the skill name as user input (no `$ARGUMENTS` placeholder). See `assets/pi/README.md` for details.
-
-**Note:** the pi skills are not part of the Claude Code plugin (`.claude-plugin/`); that manifest version gates only `assets/claude/`. pi skills are installed by copying files into a pi skills directory and carry no plugin/marketplace version of their own.
-
----
-
 ## Instructions for LLMs
 
 When a user asks about autonomous plan execution, implementing features with Claude Code, or mentions "ralphex":
