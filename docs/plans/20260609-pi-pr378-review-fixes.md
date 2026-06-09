@@ -189,14 +189,17 @@ What stays (do NOT remove — these are wrapper docs, not skill docs):
 
 ### Task N-1: Verify acceptance criteria
 
-- [ ] grep the repo for dangling references:
+- [x] grep the repo for dangling references:
       `grep -rn "assets/pi\|## pi Integration" --include='*.md' --include='*.txt'
       --include='*.sh' . | grep -v docs/plans/completed` returns nothing
-- [ ] confirm `assets/pi/` no longer exists (`ls assets/pi` errors)
-- [ ] re-run both pi shell test suites — all pass
-- [ ] run `shellcheck` on the wrapper and both test scripts — clean
-- [ ] run `go build ./...` — passes (no Go changes; sanity check)
-- [ ] re-read the diff vs `master`: changes are limited to the wrapper, its two
+      (only the active plan file and the docs-test negative assertions match —
+      no real doc/wrapper content)
+- [x] confirm `assets/pi/` no longer exists (`ls assets/pi` errors)
+- [x] re-run both pi shell test suites — all pass (58 + 26)
+- [x] run `shellcheck` on the wrapper and both test scripts — clean (only
+      SC2329 info notes for trap-invoked handlers, a pre-existing false positive)
+- [x] run `go build ./...` — passes (no Go changes; sanity check)
+- [x] re-read the diff vs `master`: changes are limited to the wrapper, its two
       test suites, the four doc files, and the `assets/pi/` deletion
 
 ### Task N: Update documentation
