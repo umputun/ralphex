@@ -91,18 +91,21 @@ if [[ "$prompt" == *"<<<RALPHEX:REVIEW_DONE>>>"* ]]; then
     prompt="$adapter_text"$'\n\n'"$prompt"
 fi
 
-# build pi arguments: JSON event stream, non-interactive, prompt as positional arg
+# build pi arguments: JSON event stream, non-interactive. the prompt is NOT placed
+# on argv — `pi --mode json --print` reads it from stdin when no positional message
+# is given. a large review prompt (full diff) can exceed Linux's 128 KB per-arg cap,
+# so we deliver it via stdin (see prompt_file below), mirroring copilot-as-claude.sh.
 pi_args=(--mode json --print)
 [[ -n "$PI_PROVIDER" ]] && pi_args+=(--provider "$PI_PROVIDER")
 [[ -n "$model" ]] && pi_args+=(--model "$model")
 [[ -n "$thinking" ]] && pi_args+=(--thinking "$thinking")
 # append caller-supplied extra args (word-split); guard the empty case so the
 # array expansion does not trip `set -u` on bash 3.2 (macOS system bash).
+# these are now the final entries of pi_args (no positional prompt follows).
 if [[ -n "$PI_EXTRA_ARGS" ]]; then
     read -ra pi_extra_args <<< "$PI_EXTRA_ARGS"
     pi_args+=("${pi_extra_args[@]}")
 fi
-pi_args+=("$prompt")
 
 # temporary files for stderr capture and stdout piping.
 # use a private temp directory for the FIFO to avoid TOCTOU race.
@@ -111,9 +114,14 @@ stderr_file=$(mktemp)
 stdout_pipe="$tmp_dir/stdout.fifo"
 mkfifo "$stdout_pipe"
 
+# deliver the (possibly adapter-prepended) prompt to pi via stdin, not argv:
+# avoids the per-arg length cap on large review prompts containing a full diff.
+prompt_file=$(mktemp)
+printf '%s' "$prompt" > "$prompt_file"
+
 # cleanup temp files on exit
 cleanup() {
-    rm -f "$stderr_file" "$stdout_pipe"
+    rm -f "$stderr_file" "$stdout_pipe" "$prompt_file"
     rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
@@ -131,7 +139,7 @@ trap forward_signal TERM
 
 # run pi in background, capturing stderr and piping stdout through named pipe.
 # this allows us to capture the PID for SIGTERM forwarding while still streaming output.
-pi "${pi_args[@]}" 2>"$stderr_file" > "$stdout_pipe" &
+pi "${pi_args[@]}" < "$prompt_file" 2>"$stderr_file" > "$stdout_pipe" &
 pi_pid=$!
 
 # translate pi's JSONL event stream into claude stream-json.

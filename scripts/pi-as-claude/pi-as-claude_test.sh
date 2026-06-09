@@ -40,14 +40,15 @@ fail() {
 # MOCK_STDERR_FILE: file containing text to emit on stderr
 # MOCK_EXIT_CODE:   exit code to return (default 0)
 # pi_args:          arguments written to $TMPDIR_TEST/pi_args
+# pi_prompt:        stdin captured to $TMPDIR_TEST/pi_prompt (the prompt arrives
+#                   via stdin now, not as a positional arg)
 create_mock_pi() {
     local mock_script="$TMPDIR_TEST/pi"
     cat > "$mock_script" << 'MOCK_EOF'
 #!/usr/bin/env bash
 echo "$@" > "$TMPDIR_TEST/pi_args"
-# capture the last positional arg (the prompt) separately for assertions
-for arg; do true; done
-printf '%s' "$arg" > "$TMPDIR_TEST/pi_prompt"
+# capture stdin (the prompt) separately for assertions
+cat > "$TMPDIR_TEST/pi_prompt"
 
 if [[ -n "${MOCK_STDOUT_FILE:-}" && -f "$MOCK_STDOUT_FILE" ]]; then
     cat "$MOCK_STDOUT_FILE"
@@ -80,11 +81,11 @@ echo "running pi-as-claude.sh tests"
 echo ""
 
 # ---------------------------------------------------------------------------
-# test: pi launched with --mode json --print and prompt as positional arg
+# test: pi launched with --mode json --print and prompt delivered via stdin
 # ---------------------------------------------------------------------------
 echo "test: pi invocation flags"
 
-rm -f "$TMPDIR_TEST/pi_args"
+rm -f "$TMPDIR_TEST/pi_args" "$TMPDIR_TEST/pi_prompt"
 run_wrapper -p "test prompt" >/dev/null 2>&1
 
 recorded=$(cat "$TMPDIR_TEST/pi_args")
@@ -101,9 +102,16 @@ else
 fi
 
 if [[ "$(cat "$TMPDIR_TEST/pi_prompt")" == "test prompt" ]]; then
-    pass "prompt passed as positional arg"
+    pass "prompt delivered via stdin"
 else
-    fail "prompt not passed as positional arg" "got: $(cat "$TMPDIR_TEST/pi_prompt")"
+    fail "prompt not delivered via stdin" "got: $(cat "$TMPDIR_TEST/pi_prompt")"
+fi
+
+# the prompt must NOT appear on argv (avoids the per-arg length cap)
+if echo "$recorded" | grep -q -- "test prompt"; then
+    fail "prompt leaked onto argv" "args: $recorded"
+else
+    pass "prompt absent from argv"
 fi
 
 # ---------------------------------------------------------------------------
@@ -192,7 +200,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# test: PI_EXTRA_ARGS appended verbatim (word-split) before the prompt
+# test: PI_EXTRA_ARGS appended verbatim (word-split); no positional prompt follows
 # ---------------------------------------------------------------------------
 echo "test: PI_EXTRA_ARGS passthrough"
 
@@ -209,11 +217,11 @@ else
     fail "PI_EXTRA_ARGS not appended" "args: $recorded"
 fi
 
-# extra args precede the prompt (prompt must stay the final positional arg)
-if echo "$recorded" | grep -q -- "--nolo-mode full test prompt"; then
-    pass "PI_EXTRA_ARGS inserted before the prompt"
+# no positional prompt is appended after the extra args anymore (prompt is on stdin)
+if echo "$recorded" | grep -q -- "test prompt"; then
+    fail "prompt leaked onto argv after PI_EXTRA_ARGS" "args: $recorded"
 else
-    fail "PI_EXTRA_ARGS not ordered before prompt" "args: $recorded"
+    pass "no positional prompt appended after PI_EXTRA_ARGS"
 fi
 
 # no stray args when PI_EXTRA_ARGS unset
@@ -342,9 +350,9 @@ else
 fi
 
 if [[ "$(cat "$TMPDIR_TEST/pi_prompt")" == "prompt from stdin" ]]; then
-    pass "stdin prompt passed as positional arg to pi"
+    pass "stdin prompt forwarded to pi via stdin"
 else
-    fail "stdin prompt not passed to pi" "got: $(cat "$TMPDIR_TEST/pi_prompt")"
+    fail "stdin prompt not forwarded to pi" "got: $(cat "$TMPDIR_TEST/pi_prompt")"
 fi
 
 # ---------------------------------------------------------------------------
