@@ -129,25 +129,25 @@ What stays (do NOT remove — these are wrapper docs, not skill docs):
 
 ### Task 2: Neutralize stray RALPHEX signals on stderr
 
-- [ ] in the stderr re-emission loop (the `while IFS= read -r err_line` block),
+- [x] in the stderr re-emission loop (the `while IFS= read -r err_line` block),
       replace the literal `<<<RALPHEX:` token in each stderr line with a benign
       variant before emitting (e.g. insert a space: `<<< RALPHEX:`) so it can no
       longer match signal detection, while leaving all other text — including
       rate-limit / `API Error:` phrases — intact for error/limit pattern checks
-- [ ] use a shell-native substitution (e.g. bash parameter expansion
+- [x] use a shell-native substitution (e.g. bash parameter expansion
       `${err_line//<<<RALPHEX:/<<< RALPHEX:}`) so no extra `jq`/`sed` pass is
       added; keep the existing `jq -Rc` JSON-encoding of the result
-- [ ] add a comment explaining why: stderr is emitted for error/limit detection
+- [x] add a comment explaining why: stderr is emitted for error/limit detection
       only, and a literal signal token on stderr must not be mistaken for a real
       completion signal
-- [ ] add a test in `pi-as-claude_test.sh`: feed a stderr line containing
+- [x] add a test in `pi-as-claude_test.sh`: feed a stderr line containing
       `<<<RALPHEX:ALL_TASKS_DONE>>>` via `MOCK_STDERR_FILE` and assert the
       emitted stream contains no intact `<<<RALPHEX:ALL_TASKS_DONE>>>` token
-- [ ] add a companion test: a stderr line with a rate-limit phrase (e.g.
+- [x] add a companion test: a stderr line with a rate-limit phrase (e.g.
       `You've hit your usage limit`) is still emitted verbatim as a
       `content_block_delta` so error/limit detection keeps working
-- [ ] run `shellcheck scripts/pi-as-claude/pi-as-claude.sh` — no warnings
-- [ ] run `bash scripts/pi-as-claude/pi-as-claude_test.sh` — all pass
+- [x] run `shellcheck scripts/pi-as-claude/pi-as-claude.sh` — no warnings
+- [x] run `bash scripts/pi-as-claude/pi-as-claude_test.sh` — all pass
 
 ### Task 3: Remove the assets/pi skill tree and its doc sections
 

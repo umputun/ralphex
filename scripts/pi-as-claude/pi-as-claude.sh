@@ -191,9 +191,15 @@ pi_pid=""
 
 # emit stderr as content_block_delta events so ralphex error/limit pattern
 # detection still works (pi may report rate limits / failures on stderr).
+# stderr is emitted only for error/limit detection, so neutralize any literal
+# `<<<RALPHEX:` signal token first: re-emitted stderr runs through ralphex's
+# signal detection, and a stray token on stderr must not be mistaken for a real
+# completion signal. inserting a space breaks the prefix detectSignal keys on
+# while leaving rate-limit / `API Error:` phrases intact for error/limit checks.
 if [[ -s "$stderr_file" ]]; then
     while IFS= read -r err_line || [[ -n "$err_line" ]]; do
         [[ -z "$err_line" ]] && continue
+        err_line="${err_line//<<<RALPHEX:/<<< RALPHEX:}"
         printf '%s\n' "$err_line" | jq -Rc '{type: "content_block_delta", delta: {type: "text_delta", text: (. + "\n")}}'
     done < "$stderr_file"
 fi

@@ -748,6 +748,56 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# test: a stray RALPHEX signal token on stderr is neutralized so it cannot be
+# misread as a real completion signal by ralphex's signal detection.
+# ---------------------------------------------------------------------------
+echo "test: stderr signal token neutralized"
+
+cat > "$TMPDIR_TEST/stderr_signal.txt" << 'EOF'
+unexpected: <<<RALPHEX:ALL_TASKS_DONE>>> appeared in pi diagnostics
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
+    MOCK_STDERR_FILE="$TMPDIR_TEST/stderr_signal.txt" \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+if echo "$output" | grep -q -- "<<<RALPHEX:ALL_TASKS_DONE>>>"; then
+    fail "stderr signal token leaked intact into output" "got: $output"
+else
+    pass "stderr signal token neutralized (no intact <<<RALPHEX:...>>>)"
+fi
+
+# the line is still emitted (just with the token broken), so error context survives
+if echo "$output" | grep -q "appeared in pi diagnostics"; then
+    pass "neutralized stderr line still emitted"
+else
+    fail "neutralized stderr line dropped entirely" "got: $output"
+fi
+
+# ---------------------------------------------------------------------------
+# test: a rate-limit phrase on stderr is still emitted verbatim so error/limit
+# pattern detection keeps working after signal neutralization.
+# ---------------------------------------------------------------------------
+echo "test: stderr rate-limit phrase preserved verbatim"
+
+cat > "$TMPDIR_TEST/stderr_limit.txt" << 'EOF'
+You've hit your usage limit
+EOF
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
+    MOCK_STDERR_FILE="$TMPDIR_TEST/stderr_limit.txt" \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+
+limit_delta=$(echo "$output" | grep "hit your usage limit")
+if echo "$limit_delta" | jq -e '.delta.text | contains("You'\''ve hit your usage limit")' >/dev/null 2>&1; then
+    pass "rate-limit phrase emitted verbatim as content_block_delta"
+else
+    fail "rate-limit phrase not emitted verbatim" "got: $output"
+fi
+
+# ---------------------------------------------------------------------------
 # test: exit code preservation (success and failure)
 # ---------------------------------------------------------------------------
 echo "test: exit code preservation"
