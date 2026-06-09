@@ -96,7 +96,10 @@ func (p *TaskPhase) Run(ctx context.Context) error {
 		}
 
 		if execResult.TimedOut {
-			p.log.Print("%s session timed out, retrying task iteration...", execName)
+			p.log.Print("%s session timed out, retrying task iteration after %s...", execName, retryBackoff)
+			if err := p.policy.Sleep(ctx, retryBackoff); err != nil {
+				return fmt.Errorf("interrupted: %w", err)
+			}
 			continue
 		}
 

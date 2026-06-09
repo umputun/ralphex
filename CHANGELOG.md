@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.1 - 2026-06-08
+
+### Fixed
+
+- Retry transient HTTP errors (529/502/503/504) without --wait #377 @umputun
+
 ## v1.5.0 - 2026-06-03
 
 ### New Features

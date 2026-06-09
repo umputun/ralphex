@@ -293,7 +293,7 @@ func TestTaskPhase_Run_BreakAbort(t *testing.T) {
 	assert.Len(t, exec.RunCalls(), 1)
 }
 
-func TestTaskPhase_Run_TimeoutContinuesWithoutSleeping(t *testing.T) {
+func TestTaskPhase_Run_TimeoutBacksOffThenContinues(t *testing.T) {
 	planFile := writeTaskPhasePlan(t, "# Plan\n### Task 1: first\n- [x] done")
 	exec := newTaskPhaseMockExecutor(nil)
 	phase := taskPhaseFromRunner(t, taskPhaseTestOpts{
@@ -312,7 +312,7 @@ func TestTaskPhase_Run_TimeoutContinuesWithoutSleeping(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, exec.RunCalls(), 2)
-	assert.Empty(t, policy.sleepCalls)
+	assert.Equal(t, []time.Duration{retryBackoff}, policy.sleepCalls, "timeout retry waits the backoff once")
 }
 
 func writeTaskPhasePlan(t *testing.T, content string) string {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,16 +171,18 @@ func TestReviewPhase_Loop_TimeoutContinues(t *testing.T) {
 	log := newMockLogger("progress.txt")
 	exec := newTaskPhaseMockExecutor(nil)
 	phase, _ := reviewPhaseFromRunner(t, reviewPhaseTestOpts{cfg: Config{MaxIterations: 50}, exec: exec, log: log})
-	phase.policy = newScriptedTestPolicy(log,
+	policy := newScriptedTestPolicy(log,
 		ExecutionResult{TimedOut: true},
 		ExecutionResult{Result: executor.Result{Output: "review done", Signal: status.ReviewDone}},
 	)
+	phase.policy = policy
 
 	err := phase.Loop(t.Context(), "")
 
 	require.NoError(t, err)
 	assert.Len(t, exec.RunCalls(), 2)
 	assertLogContains(t, log, "retrying review iteration")
+	assert.Equal(t, []time.Duration{retryBackoff}, policy.sleepCalls, "timeout retry waits the backoff once")
 }
 
 func TestReviewPhase_First_CodexTimeoutSurfacesAsError(t *testing.T) {

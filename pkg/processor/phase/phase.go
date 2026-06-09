@@ -21,6 +21,10 @@ const (
 	planIterationDivisor   = 5
 )
 
+// retryBackoff is the pause before re-running an iteration that timed out or hit
+// a transient retry pattern, applied in the task and review retry loops.
+const retryBackoff = 5 * time.Second
+
 // Config contains the runner settings consumed by phase engines.
 type Config struct {
 	PlanDescription       string
