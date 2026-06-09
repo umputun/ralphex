@@ -112,7 +112,7 @@ Key files:
 Env vars:
 - Codex: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE`
 - Copilot: `COPILOT_MODEL`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`
-- pi: `PI_PROVIDER`, `PI_MODEL`, `PI_THINKING`, `PI_VERBOSE`
+- pi: `PI_PROVIDER`, `PI_MODEL`, `PI_THINKING`, `PI_VERBOSE`, `PI_EXTRA_ARGS`
 Copilot wrapper: native autopilot mode — `--autopilot --no-ask-user --allow-all` for task/review, `--autopilot --allow-all` for plan runs (so `QUESTION` signals surface).
 
 ### AWS Bedrock Provider (Docker Wrapper Only)

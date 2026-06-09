@@ -99,12 +99,13 @@ pi_args=(--mode json --print)
 [[ -n "$PI_PROVIDER" ]] && pi_args+=(--provider "$PI_PROVIDER")
 [[ -n "$model" ]] && pi_args+=(--model "$model")
 [[ -n "$thinking" ]] && pi_args+=(--thinking "$thinking")
-# append caller-supplied extra args (word-split); guard the empty case so the
-# array expansion does not trip `set -u` on bash 3.2 (macOS system bash).
-# these are now the final entries of pi_args (no positional prompt follows).
+# append caller-supplied extra args (word-split). a whitespace-only value passes
+# the `-n` check but yields an empty array after `read`, and expanding an empty
+# array trips `set -u` on bash 3.2 (macOS system bash) — so guard on the element
+# count, not the raw string. these are the final entries of pi_args (no prompt follows).
 if [[ -n "$PI_EXTRA_ARGS" ]]; then
     read -ra pi_extra_args <<< "$PI_EXTRA_ARGS"
-    pi_args+=("${pi_extra_args[@]}")
+    [[ ${#pi_extra_args[@]} -gt 0 ]] && pi_args+=("${pi_extra_args[@]}")
 fi
 
 # temporary files for stderr capture and stdout piping.

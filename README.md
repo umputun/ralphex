@@ -1127,6 +1127,7 @@ Provider-specific environment variables:
 - `CODEX_VERBOSE` - set to `1` to include command execution output in the stream (default: `0`, only agent messages are shown)
 - `PI_PROVIDER`, `PI_MODEL`, `PI_THINKING` - pi provider, model, and thinking-level selection (used when ralphex does not append `--model`/`--effort`)
 - `PI_VERBOSE` - set to `1` to include tool execution events in the stream (default: `0`, only assistant text is shown)
+- `PI_EXTRA_ARGS` - extra flags appended verbatim to the pi invocation (word-split on whitespace); e.g. `--nolo-mode full` to auto-approve tools in non-interactive runs
 
 See [custom providers documentation](https://github.com/umputun/ralphex/blob/master/docs/custom-providers.md) for a detailed guide on writing wrappers for other providers.
 

@@ -234,6 +234,18 @@ else
     pass "no extra args when PI_EXTRA_ARGS unset"
 fi
 
+# whitespace-only PI_EXTRA_ARGS must not crash under `set -u` on bash 3.2:
+# it yields an empty array after `read`, and expanding it would be an unbound-var error.
+rm -f "$TMPDIR_TEST/pi_args"
+if MOCK_STDOUT_FILE="$TMPDIR_TEST/minimal_events.txt" \
+    PI_EXTRA_ARGS="   " \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1; then
+    pass "whitespace-only PI_EXTRA_ARGS does not crash"
+else
+    fail "whitespace-only PI_EXTRA_ARGS crashed the wrapper" "exit: $?"
+fi
+
 # ---------------------------------------------------------------------------
 # test: --effort → --thinking mapping (passthrough levels)
 # ---------------------------------------------------------------------------

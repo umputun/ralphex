@@ -373,6 +373,7 @@ ralphex --claude-command=/path/to/scripts/pi-as-claude/pi-as-claude.sh docs/plan
 | `PI_MODEL` | (pi default) | Model used when ralphex does not append a `--model` flag |
 | `PI_THINKING` | (pi default) | Thinking level used when ralphex does not append an `--effort` flag |
 | `PI_VERBOSE` | `0` | Set to `1` to include tool execution events in the stream |
+| `PI_EXTRA_ARGS` | (none) | Extra flags appended verbatim to the pi invocation (word-split on whitespace); e.g. `--nolo-mode full` to auto-approve tools in non-interactive runs |
 
 ### Thinking / effort mapping
 
