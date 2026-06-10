@@ -140,12 +140,23 @@ type Logger struct {
 
 // Config holds logger configuration.
 type Config struct {
-	PlanFile        string // plan filename (used to derive progress filename)
-	PlanDescription string // plan description for plan mode (used for filename)
-	Mode            string // execution mode: full, review, codex-only, plan
-	Branch          string // current git branch
-	BranchOverride  string // explicit branch name override (--branch flag); when set, used as filename stem instead of plan file
-	NoColor         bool   // disable color output (sets color.NoColor globally)
+	PlanFile        string    // plan filename (used to derive progress filename)
+	PlanDescription string    // plan description for plan mode (used for filename)
+	Mode            string    // execution mode: full, review, codex-only, plan
+	Branch          string    // current git branch
+	BranchOverride  string    // explicit branch name override (--branch flag); when set, used as filename stem instead of plan file
+	Params          RunParams // user-set run parameters recorded in the header
+	NoColor         bool      // disable color output (sets color.NoColor globally)
+}
+
+// RunParams holds user-set executor/model parameters written to the progress
+// file header. empty fields are omitted from the header so only explicitly
+// configured parameters appear in the dashboard.
+type RunParams struct {
+	Executor    string // executor name when not the default claude (e.g. "codex")
+	PlanModel   string // model[:effort] spec for plan creation
+	TaskModel   string // model[:effort] spec for task execution
+	ReviewModel string // model[:effort] spec for review phases
 }
 
 // NewLogger creates a logger writing to both a progress file and stdout.
@@ -252,6 +263,18 @@ func (l *Logger) writeHeader(cfg Config) {
 	l.writeFileLocked("Plan: %s\n", planStr)
 	l.writeFileLocked("Branch: %s\n", cfg.Branch)
 	l.writeFileLocked("Mode: %s\n", cfg.Mode)
+	if cfg.Params.Executor != "" {
+		l.writeFileLocked("Executor: %s\n", cfg.Params.Executor)
+	}
+	if cfg.Params.PlanModel != "" {
+		l.writeFileLocked("Plan model: %s\n", cfg.Params.PlanModel)
+	}
+	if cfg.Params.TaskModel != "" {
+		l.writeFileLocked("Task model: %s\n", cfg.Params.TaskModel)
+	}
+	if cfg.Params.ReviewModel != "" {
+		l.writeFileLocked("Review model: %s\n", cfg.Params.ReviewModel)
+	}
 	l.writeFileLocked("Started: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	l.writeFileLocked("%s\n\n", separatorLine)
 }

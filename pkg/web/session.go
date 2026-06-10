@@ -54,10 +54,14 @@ const (
 
 // SessionMetadata holds parsed information from progress file header.
 type SessionMetadata struct {
-	PlanPath  string    // path to plan file (from "Plan:" header line)
-	Branch    string    // git branch (from "Branch:" header line)
-	Mode      string    // execution mode: full, review, codex-only (from "Mode:" header line)
-	StartTime time.Time // start time (from "Started:" header line)
+	PlanPath    string    // path to plan file (from "Plan:" header line)
+	Branch      string    // git branch (from "Branch:" header line)
+	Mode        string    // execution mode: full, review, codex-only (from "Mode:" header line)
+	Executor    string    // executor name when not the default claude (from "Executor:" header line)
+	PlanModel   string    // model[:effort] spec for plan creation (from "Plan model:" header line)
+	TaskModel   string    // model[:effort] spec for task execution (from "Task model:" header line)
+	ReviewModel string    // model[:effort] spec for review phases (from "Review model:" header line)
+	StartTime   time.Time // start time (from "Started:" header line)
 }
 
 // defaultTopic is the SSE topic used for all events within a session.
