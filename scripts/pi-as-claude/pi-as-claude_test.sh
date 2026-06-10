@@ -430,6 +430,36 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# test: jq not found exits with error (jq guard precedes the pi guard)
+# ---------------------------------------------------------------------------
+echo "test: jq not found"
+
+set +e
+no_jq_bin="$TMPDIR_TEST/no_jq_bin"
+mkdir -p "$no_jq_bin"
+for tool in bash mktemp mkfifo cat rm kill env; do
+    tool_path=$(command -v "$tool" 2>/dev/null) && ln -sf "$tool_path" "$no_jq_bin/$tool"
+done
+# include a pi so the failure is attributable to jq, not a missing pi
+ln -sf "$TMPDIR_TEST/pi" "$no_jq_bin/pi"
+PATH="$no_jq_bin" bash "$WRAPPER" -p "test prompt" 2>"$TMPDIR_TEST/no_jq_err"
+no_jq_exit=$?
+rm -r "$no_jq_bin"
+set -e
+
+if [[ $no_jq_exit -ne 0 ]]; then
+    pass "exits non-zero when jq not found"
+else
+    fail "should exit non-zero when jq not found" "got exit code 0"
+fi
+
+if grep -q "jq is required" "$TMPDIR_TEST/no_jq_err"; then
+    pass "error message mentions jq requirement"
+else
+    fail "no error about missing jq" "stderr: $(cat "$TMPDIR_TEST/no_jq_err")"
+fi
+
+# ---------------------------------------------------------------------------
 # test: message_update text_delta translated to content_block_delta
 # ---------------------------------------------------------------------------
 echo "test: text_delta translation"
@@ -606,6 +636,14 @@ if echo "$last_line" | jq -e '.type == "result"' >/dev/null 2>&1; then
     pass "fallback result emitted when no turn_end/agent_end"
 else
     fail "no fallback result event" "got: $output"
+fi
+
+# the unterminated final delta must be flushed by the __eof__ sentinel, not dropped:
+# assert the buffered "partial" text actually surfaces as a content_block_delta.
+if echo "$output" | jq -e 'select(.type == "content_block_delta") | .delta.text == "partial\n"' >/dev/null 2>&1; then
+    pass "unterminated final line flushed on eof"
+else
+    fail "buffered partial line dropped on eof" "got: $output"
 fi
 
 # ---------------------------------------------------------------------------

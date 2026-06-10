@@ -75,11 +75,12 @@ model="$model_flag"
 # except `max`, which pi lacks — fall back to `xhigh` with a one-line note (like codex).
 thinking=""
 if [[ -n "$effort_flag" ]]; then
-    case "$effort_flag" in
-        off|minimal|low|medium|high|xhigh) thinking="$effort_flag" ;;
-        max) thinking="xhigh"; echo "note: pi has no 'max' thinking level; using 'xhigh' instead" >&2 ;;
-        *)   thinking="$effort_flag" ;; # passthrough; pi validates
-    esac
+    if [[ "$effort_flag" == "max" ]]; then
+        thinking="xhigh"
+        echo "note: pi has no 'max' thinking level; using 'xhigh' instead" >&2
+    else
+        thinking="$effort_flag" # passthrough; pi validates the rest
+    fi
 elif [[ -n "$PI_THINKING" ]]; then
     thinking="$PI_THINKING"
 fi

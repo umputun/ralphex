@@ -875,6 +875,8 @@ Agents to launch:
 - `claude` - Claude Code CLI
 - `fzf` - for plan selection (optional)
 - `codex` - for external review (optional)
+- `gemini` - alternative provider for Claude phases (optional, via `scripts/gemini-as-claude/`)
+- `agy` - Antigravity CLI, alternative provider for Claude phases (optional, via `scripts/agy-as-claude/`)
 - `pi` - alternative provider for Claude phases (optional, via `scripts/pi-as-claude/`)
 
 ## Configuration
