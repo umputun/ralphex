@@ -1,90 +1,99 @@
-# Add pi Provider Support (wrapper + skills)
+# Add pi Provider Support (wrapper)
 
 ## Overview
 
-Add first-class support for **pi** (the `pi` agentic coding CLI, v0.78.1+) to
-ralphex in two independent deliverables:
+Add support for **pi** (the `pi` agentic coding CLI, v0.78.1+) to ralphex as a
+drop-in Claude-compatible provider:
 
-1. **`pi-as-claude` wrapper script** — a shell wrapper that adapts pi's
-   `--mode json` event stream into the Claude `stream-json` format ralphex's
-   `ClaudeExecutor` parses, so pi can drive the task and review phases as a
-   drop-in `claude_command`, exactly like the existing
-   `gemini-as-claude`/`codex-as-claude` wrappers.
-
-2. **pi-adapted ralphex skills** — pi-compatible versions of the four Claude
-   skills (`ralphex`, `ralphex-plan`, `ralphex-update`, `ralphex-adopt`) under a
-   new `assets/pi/` tree, so pi users get the same slash-command convenience
-   that Claude Code users get from `assets/claude/`.
+- **`pi-as-claude` wrapper script** — a shell wrapper that adapts pi's
+  `--mode json` event stream into the Claude `stream-json` format ralphex's
+  `ClaudeExecutor` parses, so pi can drive the task and review phases as a
+  drop-in `claude_command`, exactly like the existing
+  `gemini-as-claude`/`codex-as-claude`/`copilot-as-claude` wrappers.
 
 **Why:** pi is another supported agent CLI for users who prefer it (or whose
-provider/billing favors it). The wrapper unblocks running ralphex *with* pi; the
-skills unblock driving ralphex *from inside* pi. The two parts share no code and
-can ship independently.
+provider/billing favors it). The wrapper unblocks running ralphex *with* pi.
+
+Every other provider (codex, copilot, gemini, agy, opencode) is wrapper-only,
+so pi follows the same shape: a wrapper plus one-line provider bullets in the
+docs — no forked skill tree to keep in sync with `assets/claude/skills/`.
+
+Two design points baked in from the start (rather than retrofitted):
+- the prompt is delivered to pi via **stdin**, never on argv, so a large review
+  prompt with a full diff cannot blow past the OS per-arg length cap; and
+- stderr is re-emitted for ralphex's error/limit pattern detection, but any
+  literal `<<<RALPHEX:...>>>` token on stderr is neutralized first so it cannot
+  be misread as a real completion signal.
 
 ## Context (from discovery)
 
-**Wrapper side — existing pattern:**
-- `scripts/gemini-as-claude/gemini-as-claude.sh` — plain-text wrapper (closest
-  template for arg parsing, FIFO + background PID + SIGTERM forwarding, stderr
-  capture, review-prompt adapter, fallback `result` event).
+**Existing wrapper pattern:**
+- `scripts/gemini-as-claude/gemini-as-claude.sh` — closest template for arg
+  parsing, FIFO + background PID + SIGTERM forwarding, stderr capture,
+  review-prompt adapter, and the fallback `result` event.
 - `scripts/codex-as-claude/codex-as-claude.sh` — JSONL-translation wrapper
-  (closest template for the jq event-mapping approach we need for pi's JSON mode).
-- Each wrapper dir has: `<name>.sh`, `<name>_test.sh` (mock-CLI shell tests),
-  `README.md`. `copilot-as-claude` adds a `*_docs_test.sh`.
-- ralphex contract (`docs/custom-providers.md`): wrapper reads prompt from stdin
-  (primary) or `-p` (fallback), ignores unknown flags gracefully (`*) shift ;;`),
-  receives appended `--model <m>` / `--effort <e>` flags, and must emit
-  `content_block_delta` (text) + a terminal `result` event.
+  (closest template for the jq event-mapping approach pi's JSON mode needs);
+  pipes the prompt to the child via stdin.
+- `scripts/copilot-as-claude/copilot-as-claude.sh` — writes the prompt to a
+  temp file and redirects `copilot ... < "$prompt_file"`; the template for
+  pi's stdin delivery, since pi already runs in the background through a FIFO.
+- Each wrapper dir has `<name>.sh`, `<name>_test.sh` (mock-CLI shell tests),
+  and `README.md`; `copilot-as-claude` adds a `*_docs_test.sh`.
+- ralphex contract (`docs/custom-providers.md`): wrapper reads prompt from
+  stdin (primary) or `-p` (fallback), ignores unknown flags gracefully
+  (`*) shift ;;`), receives appended `--model <m>` / `--effort <e>` flags, and
+  must emit `content_block_delta` (text) + a terminal `result` event.
 
 **pi facts (from `pi --help` and https://pi.dev/docs/latest):**
 - `--mode json` → JSONL event stream (one JSON object per line). Key events:
   `{"type":"session",...}` header; `message_update` with
   `assistantMessageEvent.type:"text_delta"` + `.delta` for assistant text;
   `tool_execution_start|update|end`; `turn_end`; `agent_end`.
-- `--print, -p` for non-interactive; prompt passed as positional arg.
+- `--print, -p` for non-interactive. With no positional message given,
+  `pi --mode json --print` reads the prompt from **stdin** (verified: piped
+  text appears as the user message) — so the prompt need never go on argv.
 - `--provider <name>` (default google), `--model <pattern>` (supports
   `provider/id` and `:<thinking>`), `--thinking off|minimal|low|medium|high|xhigh`,
   `--api-key` (defaults to provider env vars).
-- Built-in tools: `read, bash, edit, write`. No `Task`/subagent or structured
-  multi-choice tool surfaced — this drives the skill adaptation.
-- Skills: `SKILL.md` + YAML frontmatter (`name` [a-z0-9-, ≤64], `description`
-  [≤1024], optional `allowed-tools` *space-delimited*, `disable-model-invocation`,
-  `metadata`, `compatibility`, `license`). Discovered from `~/.pi/agent/skills/`,
-  `.pi/skills/`, package `skills/`, settings, or `--skill <path>`. Invoked as
-  `/skill:<name> [args]`; args appended as user input (no `$ARGUMENTS` in skills).
-- Prompt templates (`~/.pi/agent/prompts/*.md`, `/name`) *do* support
-  `$ARGUMENTS`/`$1`/`argument-hint` — a possible alternative delivery, but we
-  chose the SKILL.md route to mirror `assets/claude/skills/`.
+- Built-in tools: `read, bash, edit, write`. No `Task`/subagent surface and no
+  parallel sub-agents — so the review-prompt adapter instructs sequential
+  per-agent review.
+
+**Signal/detection facts:**
+- Signal marker prefix is the literal `<<<RALPHEX:` (`pkg/status/status.go`,
+  `pkg/progress/progress.go:462`); `detectSignal` keys on the full
+  `<<<RALPHEX:NAME>>>` token. Error/limit patterns (rate-limit text,
+  `API Error:`, etc.) never contain that token, so neutralizing only
+  `<<<RALPHEX:` in re-emitted stderr preserves error/limit detection.
 
 **Repo touch-points to update:** `docs/custom-providers.md`, `README.md`,
-`llms.txt`, `CLAUDE.md` (Project Structure + wrapper inventory).
+`llms.txt`, `CLAUDE.md` (Project Structure + wrapper inventory) — one-line
+provider references only.
 
 ## Development Approach
 
 - **Testing approach**: Regular (implement, then add mock-`pi` shell tests
   mirroring `gemini-as-claude_test.sh`).
 - Complete each task fully before the next; small, focused changes.
-- **Every task includes new/updated tests** for code it adds — success and
+- **Every task includes new/updated tests** for the code it adds — success and
   error/edge cases. All tests pass before the next task starts.
 - After editing any shell script, run `shellcheck` (project rule).
 - Wrapper tests must use a **mock `pi`** on `PATH` — never invoke real pi (no
   LLM calls, no credits) in unit tests. Live-pi verification is Post-Completion.
-- Keep the two parts (wrapper / skills) independently shippable.
 
 ## Testing Strategy
 
 - **Unit tests**: required per task.
   - Wrapper: `scripts/pi-as-claude/pi-as-claude_test.sh` — mock-`pi` shell tests
-    covering arg parsing, env handling, effort→thinking mapping, JSON event
-    translation, signal passthrough, stderr handling, exit-code preservation
-    (model on `gemini-as-claude_test.sh`).
-  - Skills: a lightweight validator (shell or Go test) asserting each
-    `assets/pi/skills/*/SKILL.md` has valid required frontmatter and contains no
-    Claude-only tool references (`AskUserQuestion`, `TaskOutput`,
-    `subagent_type`, `run_in_background`, `~/.claude/`).
-- **E2E tests**: ralphex's Go/Playwright e2e suite is unaffected (no Go code
-  changes expected). A real end-to-end pi run is a Post-Completion manual step.
-- `shellcheck` clean on the new wrapper and its test script.
+    covering arg parsing, env handling, effort→thinking mapping, stdin prompt
+    delivery, JSON event translation, signal passthrough, stderr handling
+    (including signal-token neutralization), and exit-code preservation.
+  - Docs: `scripts/pi-as-claude/pi-as-claude_docs_test.sh` — cross-doc
+    assertions that the wrapper path is referenced consistently in `README.md`,
+    `llms.txt`, `docs/custom-providers.md`, and `CLAUDE.md`.
+- **No Go changes**: ralphex's Go/Playwright e2e suite is unaffected; run
+  `go build ./...` once as a sanity check.
+- `shellcheck` clean on the new wrapper and its test scripts.
 
 ## Progress Tracking
 
@@ -94,10 +103,8 @@ can ship independently.
 
 ## What Goes Where
 
-- **Implementation Steps** (`[ ]`): wrapper script + tests, skill files + tests,
-  in-repo docs.
-- **Post-Completion** (no checkboxes): live pi run, real ralphex+pi toy run,
-  real pi skill invocation, plugin/marketplace + website-serving decisions.
+- **Implementation Steps** (`[ ]`): wrapper script + tests, in-repo docs.
+- **Post-Completion** (no checkboxes): live pi run, real ralphex+pi toy run.
 
 ## Implementation Steps
 
@@ -105,124 +112,88 @@ can ship independently.
 - [x] create `scripts/pi-as-claude/pi-as-claude.sh`: `set -euo pipefail`,
       dependency checks (`jq`, `pi`), prompt sourcing from `-p` then stdin
       (only when `! -t 0`), missing-prompt error, ignore unknown flags
-      (`*) shift ;;`) — mirror `gemini-as-claude.sh` lines 17–45
+      (`*) shift ;;`) — mirror `gemini-as-claude.sh`
 - [x] parse `--model` and `--effort` explicitly: forward `--model` to pi
       `--model`; translate `--effort` → pi `--thinking`
       (`low|medium|high|xhigh` passthrough, `minimal|off` allowed, `max`→`xhigh`
       with a stderr note since pi has no `max`); honor `PI_PROVIDER`,
-      `PI_MODEL` (used when `--model` absent), `PI_THINKING`, `PI_VERBOSE` env
-- [x] build pi args (`--mode json --print` + resolved provider/model/thinking,
-      prompt as positional arg) and launch via private-tmp FIFO + background PID
-      + `trap forward_signal TERM` + stderr capture — mirror
-      `gemini-as-claude.sh` lines 61–93
+      `PI_MODEL` (used when `--model` absent), `PI_THINKING`, `PI_VERBOSE`, and
+      `PI_EXTRA_ARGS` (word-split, appended verbatim for non-interactive tool
+      approval) env vars
+- [x] build pi args (`--mode json --print` + resolved provider/model/thinking +
+      `PI_EXTRA_ARGS`) and deliver the prompt via **stdin**, not argv: write the
+      (possibly adapter-prepended) prompt to a `mktemp` temp file cleaned up in
+      the `cleanup()` trap, and launch pi with `< "$prompt_file"` through the
+      private-tmp FIFO + background PID + `trap forward_signal TERM` + stderr
+      capture — mirror `copilot-as-claude.sh` for the stdin redirect and
+      `gemini-as-claude.sh` for the FIFO/signal structure
 - [x] write tests for arg parsing, env handling, and effort→thinking mapping
       (incl. `max`→`xhigh` note) using a mock `pi`
-- [x] write tests for `-p` vs stdin prompt sourcing and the missing-prompt error
+- [x] write tests for `-p` vs stdin prompt sourcing, the missing-prompt error,
+      stdin delivery to pi (mock captures stdin, not a positional arg), and
+      `PI_EXTRA_ARGS` passthrough (no positional prompt is ever appended)
 - [x] run `shellcheck` + tests — must pass before next task
 
-### Task 2: pi JSON event → stream-json translation
+### Task 2: pi JSON event → stream-json translation & stderr handling
 - [x] translate JSONL with `jq`: `message_update` +
       `assistantMessageEvent.type=="text_delta"` → `content_block_delta`
-      (`text_delta`, append `\n`); `turn_end`/`agent_end` → `result`; `session`
-      header and `tool_execution_*` skipped by default; include tool lines only
-      when `PI_VERBOSE=1`; always emit a fallback `{"type":"result","result":""}`
+      (`text_delta`); buffer token deltas into whole lines so `<<<RALPHEX:...>>>`
+      signals survive translation even when split across deltas;
+      `turn_end`/`agent_end` → `result`; `session` header and
+      `tool_execution_*` skipped by default (included only when `PI_VERBOSE=1`);
+      always emit a fallback `{"type":"result","result":""}`
 - [x] emit captured stderr lines as `content_block_delta` events after stdout so
-      ralphex error/limit pattern detection still works — mirror
-      `gemini-as-claude.sh` lines 106–112; preserve pi's exit code
+      ralphex error/limit pattern detection still works, but **neutralize** the
+      literal `<<<RALPHEX:` token per line first (bash parameter expansion
+      `${err_line//<<<RALPHEX:/<<< RALPHEX:}`) so a stray signal token on stderr
+      cannot be read as a real completion signal; preserve pi's exit code
 - [x] add review-prompt adapter: detect `<<<RALPHEX:REVIEW_DONE>>>`, prepend
       pi-appropriate adapter text (pi exposes no parallel sub-agents → instruct
       sequential per-agent review using pi's read/bash/edit/write tools), and
       keep all `<<<RALPHEX:...>>>` signals unchanged
-- [x] write tests for event translation (text deltas emitted, tool events
-      skipped by default, `PI_VERBOSE=1` includes them, terminal `result`)
-- [x] write tests for review-prompt detection, adapter injection, and signal
-      passthrough; plus stderr emission and exit-code preservation
+- [x] write tests for event translation (line-buffered text deltas emitted,
+      tool events skipped by default, `PI_VERBOSE=1` includes them, terminal
+      `result`) and for review-prompt detection / adapter injection / signal
+      passthrough
+- [x] write tests for stderr handling: a stderr line containing
+      `<<<RALPHEX:ALL_TASKS_DONE>>>` is emitted with **no** intact signal token,
+      while a rate-limit phrase (e.g. `You've hit your usage limit`) still flows
+      through verbatim for error/limit detection; plus exit-code preservation
 - [x] run `shellcheck` + tests — must pass before next task
 
 ### Task 3: Wrapper docs & repo integration
 - [x] add `scripts/pi-as-claude/README.md` (config snippet, env vars
-      `PI_MODEL`/`PI_PROVIDER`/`PI_THINKING`/`PI_VERBOSE`, requirements `pi`+`jq`,
-      troubleshooting) — mirror `gemini-as-claude/README.md`
+      `PI_MODEL`/`PI_PROVIDER`/`PI_THINKING`/`PI_VERBOSE`/`PI_EXTRA_ARGS`,
+      requirements `pi`+`jq`, troubleshooting) — mirror `gemini-as-claude/README.md`
 - [x] add a **pi** section to `docs/custom-providers.md` (JSON-mode notes,
-      event-translation table, env vars, thinking/effort mapping)
+      event-translation table, env vars, thinking/effort mapping, stdin prompt
+      delivery)
 - [x] update `README.md` + `llms.txt` wrapper inventories to include
       `scripts/pi-as-claude/pi-as-claude.sh`; add `pi` to the optional
-      Requirements lists
-- [x] update `CLAUDE.md` Project Structure + wrapper inventory to list
-      `scripts/pi-as-claude/`
-- [x] write tests: extend/copy the `copilot-as-claude_docs_test.sh` pattern (or a
-      small grep-based check) asserting the wrapper path is referenced in
-      `README.md`, `llms.txt`, and `docs/custom-providers.md`
-- [x] run tests — must pass before next task
+      Requirements lists — one-line provider references, no dedicated
+      `## pi Integration` section
+- [x] update `CLAUDE.md` Project Structure + alternative-providers paragraph to
+      list `scripts/pi-as-claude/`
+- [x] add `scripts/pi-as-claude/pi-as-claude_docs_test.sh` (mirror the
+      `copilot-as-claude_docs_test.sh` pattern) asserting the wrapper path is
+      referenced in `README.md`, `llms.txt`, `docs/custom-providers.md`, and
+      `CLAUDE.md`
+- [x] run `shellcheck` + tests — must pass before next task
 
-### Task 4: Scaffold assets/pi tree & confirm pi tool mapping
-- [x] confirm pi's tool model from `pi --help` / docs and record the
-      Claude→pi mapping in **Technical Details** below: `AskUserQuestion`→inline
-      question (pi is interactive, model asks and waits); `Task`+`subagent_type:
-      Explore`→inline exploration via pi `read`/`bash`(grep/find); `Bash`
-      `run_in_background`+`TaskOutput`→pi `bash` backgrounding + tailing
-      `.ralphex/progress/*`; `Glob`/`Grep`→pi `bash` find/grep; `Write`→pi `write`
-- [x] create `assets/pi/skills/{ralphex,ralphex-plan,ralphex-update,ralphex-adopt}/SKILL.md`
-      directory structure mirroring `assets/claude/skills/`
-- [x] define frontmatter translation rules: keep `name`/`description`; convert
-      `allowed-tools` array → pi space-delimited string mapped to pi tool names
-      (`read bash edit write`); drop Claude-only `argument-hint` from skills;
-      note args arrive as appended user input (no `$ARGUMENTS` in pi skills)
-- [x] add `assets/pi/README.md`: install via `~/.pi/agent/skills/` (or
-      `.pi/skills/` / `pi --skill <path>`), invoke as `/skill:ralphex-plan`
-- [x] write a frontmatter-validator test (shell or Go under the appropriate
-      package) asserting required fields + `name` pattern for every
-      `assets/pi/skills/*/SKILL.md`
-- [x] run tests — must pass before next task
-
-### Task 5: Adapt ralphex-plan & ralphex-adopt skills for pi
-- [x] port `ralphex-plan` SKILL.md: replace the `Task`/`Explore` subagent step
-      with pi inline exploration; `AskUserQuestion` one-at-a-time prompts →
-      inline questions the model asks the user; keep all plan-format rules
-      (Task-keyword constraint, checkboxes only in Task sections, per-task tests)
-- [x] port `ralphex-adopt` SKILL.md: replace `AskUserQuestion`; replace the
-      `~/.claude/plugins/.../launch-revdiff.sh` path with pi's revdiff path if
-      available else the in-chat review fallback; preserve all source-format
-      conversion rules and the English `Task` keyword requirement
-- [x] ensure argument handling matches pi skills (args appended as user input),
-      adjusting any `$ARGUMENTS` references in the prose
-- [x] write/extend validator tests for these two files: valid frontmatter + no
-      Claude-only tokens (`AskUserQuestion`, `TaskOutput`, `subagent_type`,
-      `run_in_background`, `~/.claude/`)
-- [x] run tests — must pass before next task
-
-### Task 6: Adapt ralphex & ralphex-update skills for pi
-- [x] port `ralphex` (launcher) SKILL.md: replace `Bash` `run_in_background` +
-      `TaskOutput` monitoring with pi `bash` backgrounding + `tail` of
-      `.ralphex/progress/progress-*.txt`; `AskUserQuestion`→inline; `Glob`→pi
-      `bash` find; keep the `CLAUDECODE`-stripped / standalone-terminal guidance
-      reframed for pi
-- [x] port `ralphex-update` SKILL.md: map `Bash`/`Read`/`Write`/`Glob`/
-      `AskUserQuestion` to pi equivalents; keep the customized-file detection and
-      smart-merge algorithm intact (`ralphex --dump-defaults`, comment-stripping
-      comparison)
-- [x] extend the validator test to cover all four `assets/pi/skills/*/SKILL.md`
-- [x] write tests asserting no Claude-only tool references remain in any of the
-      four pi skill files
-- [x] run tests — must pass before next task
-
-### Task 7: Verify acceptance criteria
+### Task 4: Verify acceptance criteria
 - [x] verify the wrapper emits valid stream-json for assistant text, skips tool
-      noise by default, emits a terminal `result`, and preserves pi's exit code
-      (mock-`pi` tests green)
-- [x] verify all four pi skills exist with valid frontmatter and contain no
-      Claude-only tool references
-- [x] run full test suite (`make test`) — must pass
+      noise by default, emits a terminal `result`, preserves pi's exit code, and
+      delivers the prompt via stdin (mock-`pi` tests green)
+- [x] verify stderr error/limit detection still works while stray RALPHEX tokens
+      on stderr are neutralized
+- [x] run full test suite (`make test`) and `go build ./...` — must pass
 - [x] run `make lint` and `shellcheck scripts/pi-as-claude/*.sh` — all clean
-- [x] run `make fmt`; verify 80%+ coverage on any new Go test code added
+- [x] run `make fmt`
 
-### Task 8: [Final] Documentation & versioning
+### Task 5: [Final] Documentation
 - [x] confirm `docs/custom-providers.md`, `README.md`, `llms.txt`, and
-      `CLAUDE.md` consistently reference both the pi wrapper and the pi skills
-- [x] document pi skill install in the integration docs; decide and note whether
-      pi skills need their own manifest (see Post-Completion) — do **not** bump
-      `.claude-plugin/plugin.json` for `assets/pi/` changes (that version gates
-      only `assets/claude/`); record the rationale
+      `CLAUDE.md` consistently reference the pi wrapper as a wrapper-only
+      provider and read coherently
 - [x] update `llms.txt` "Requirements" to list `pi` as an optional provider CLI
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`.*
@@ -231,52 +202,38 @@ can ship independently.
 
 **Wrapper invocation (target):**
 ```
-printf '%s' "$prompt" passed as positional arg to:
-pi --mode json --print [--provider $PI_PROVIDER] [--model $MODEL] [--thinking $LEVEL]
+pi --mode json --print [--provider $PI_PROVIDER] [--model $MODEL] \
+   [--thinking $LEVEL] [$PI_EXTRA_ARGS...]   < "$prompt_file"
 ```
-Run in background through a FIFO; forward `SIGTERM`; capture stderr to a temp
-file and emit it after stdout; always close with `{"type":"result","result":""}`.
+The prompt is written to a temp file and redirected on stdin (never appended to
+argv) so a large review prompt cannot exceed the OS per-arg length cap. pi runs
+in the background through a FIFO; `SIGTERM` is forwarded to `$pi_pid`; stderr is
+captured to a temp file and emitted after stdout; the stream always closes with
+`{"type":"result","result":""}`. The stdin redirect (vs `printf | pi`) keeps the
+existing background/PID structure intact, matching `copilot-as-claude.sh`.
 
 **Event mapping (jq):**
 | pi event | stream-json output |
 |----------|--------------------|
-| `message_update` + `assistantMessageEvent.type=="text_delta"` | `content_block_delta` (`text_delta`, text + `\n`) |
+| `message_update` + `assistantMessageEvent.type=="text_delta"` | buffered into whole lines → `content_block_delta` (`text_delta`) |
 | `tool_execution_start/update/end` | skipped (emit only if `PI_VERBOSE=1`) |
 | `session` header, `queue_update`, `compaction_*`, `auto_retry_*` | skipped |
-| `turn_end` / `agent_end` | `result` |
+| `turn_end` / `agent_end` | flush buffer, then `result` |
+
+Token deltas are re-assembled into whole lines before emission so a
+`<<<RALPHEX:...>>>` signal lands intact in a single block (per-block
+`detectSignal` could never match a signal split across token deltas).
 
 **Effort → pi thinking:** `low/medium/high/xhigh` passthrough; `minimal`/`off`
 accepted; `max` → `xhigh` (pi has no `max`; print a one-line stderr note, like
 codex's max-effort handling).
 
-**Claude→pi tool mapping for skills (confirmed in Task 4):**
-
-pi's built-in tools are `read`, `bash`, `edit`, `write` (from `pi --help` and
-https://pi.dev/docs/latest). pi exposes no `Task`/subagent surface and no
-structured multi-choice question tool, which drives the mappings below.
-
-| Claude skill tool | pi equivalent |
-|-------------------|---------------|
-| `AskUserQuestion` | inline question — pi is interactive; model asks, user replies |
-| `Task` + `subagent_type: Explore` | inline exploration via pi `read` + `bash` (find/grep) |
-| `Bash` `run_in_background` + `TaskOutput` | pi `bash` backgrounding + `tail` of `.ralphex/progress/*` |
-| `Glob` / `Grep` | pi `bash` (`find` / `grep`) |
-| `Read` / `Write` / `Edit` | pi `read` / `write` / `edit` |
-| frontmatter `allowed-tools: [..]` (array) | pi `allowed-tools: read bash write` (space-delimited) |
-
-**Frontmatter translation rules (Task 4):**
-- add a required `name:` field (pi requires it; `[a-z0-9-]`, ≤64 chars) set to
-  the skill directory name; Claude skills derive the name from the file path and
-  omit it.
-- keep `description:` (≤1024 chars).
-- convert `allowed-tools` from a Claude array (`[Bash, Read, ...]`) to a pi
-  space-delimited string of pi tool names: `Bash`/`Glob`/`Grep`→`bash`,
-  `Read`→`read`, `Write`→`write`, `Edit`→`edit`; `AskUserQuestion`, `Task`, and
-  `TaskOutput` have no pi tool and are dropped (handled inline). Per-skill
-  resolved value: `ralphex` → `read bash`; `ralphex-plan`/`ralphex-update`/
-  `ralphex-adopt` → `read bash write`.
-- drop the Claude-only `argument-hint:` key (pi skills receive args appended as
-  user input — no `$ARGUMENTS` placeholder).
+**stderr sanitization:** bash parameter expansion
+`${err_line//<<<RALPHEX:/<<< RALPHEX:}` neutralizes every signal token on a line
+with no extra process spawn. Only `<<<RALPHEX:` is rewritten; the rest of the
+line (rate-limit / `API Error:` phrases) is untouched, so error/limit pattern
+detection keeps working while a literal signal token on stderr cannot be
+mistaken for a real completion signal.
 
 ## Post-Completion
 *Manual / external — no checkboxes, informational only.*
@@ -286,13 +243,5 @@ structured multi-choice question tool, which drives the mappings below.
   shapes match the jq mapping (adjust if pi's actual field names differ).
 - End-to-end ralphex toy run with
   `claude_command=scripts/pi-as-claude/pi-as-claude.sh` (`scripts/internal/
-  prep-toy-test.sh`), watching `.ralphex/progress/*` to confirm streaming works.
-- Install one pi skill (`~/.pi/agent/skills/ralphex-plan/SKILL.md`) and invoke
-  `/skill:ralphex-plan ...` inside pi to confirm it runs end-to-end.
-
-**Distribution decisions (external):**
-- Whether/how to serve `assets/pi/*` from ralphex.com alongside `assets/claude/*`
-  (the `prep_site` copy step), and whether pi skills warrant a pi-side package/
-  manifest analogous to `.claude-plugin/`.
-- Whether to add a `pi install <source>`-friendly package layout for one-command
-  skill installation.
+  prep-toy-test.sh`), watching `.ralphex/progress/*` to confirm streaming and
+  signal detection work with a real pi session.
