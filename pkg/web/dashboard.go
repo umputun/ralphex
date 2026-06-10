@@ -31,6 +31,7 @@ type DashboardConfig struct {
 	Host            string           // host/IP to bind to (default "127.0.0.1")
 	PlanFile        string           // path to plan file (empty for watch-only mode)
 	Branch          string           // current git branch
+	RunParams       string           // formatted run parameters (executor/models) for header display
 	WatchDirs       []string         // CLI watch directories
 	ConfigWatchDirs []string         // config file watch directories
 	Colors          *progress.Colors // colors for output
@@ -42,6 +43,7 @@ type Dashboard struct {
 	host            string
 	planFile        string
 	branch          string
+	runParams       string
 	baseLog         Logger
 	watchDirs       []string
 	configWatchDirs []string
@@ -56,6 +58,7 @@ func NewDashboard(cfg DashboardConfig, holder *status.PhaseHolder) *Dashboard {
 		host:            cfg.Host,
 		planFile:        cfg.PlanFile,
 		branch:          cfg.Branch,
+		runParams:       cfg.RunParams,
 		baseLog:         cfg.BaseLog,
 		watchDirs:       cfg.WatchDirs,
 		configWatchDirs: cfg.ConfigWatchDirs,
@@ -79,11 +82,12 @@ func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 	}
 
 	cfg := ServerConfig{
-		Port:     d.port,
-		Host:     d.host,
-		PlanName: planName,
-		Branch:   d.branch,
-		PlanFile: d.planFile,
+		Port:      d.port,
+		Host:      d.host,
+		PlanName:  planName,
+		Branch:    d.branch,
+		RunParams: d.runParams,
+		PlanFile:  d.planFile,
 	}
 
 	// determine if we should use multi-session mode

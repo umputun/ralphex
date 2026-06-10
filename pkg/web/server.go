@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/plan"
@@ -24,11 +25,12 @@ var embeddedFS embed.FS
 
 // ServerConfig holds configuration for the web server.
 type ServerConfig struct {
-	Port     int    // port to listen on
-	Host     string // host/IP to bind to (default "127.0.0.1")
-	PlanName string // plan name to display in dashboard
-	Branch   string // git branch name
-	PlanFile string // path to plan file for /api/plan endpoint
+	Port      int    // port to listen on
+	Host      string // host/IP to bind to (default "127.0.0.1")
+	PlanName  string // plan name to display in dashboard
+	Branch    string // git branch name
+	RunParams string // formatted run parameters (executor/models) to display in dashboard
+	PlanFile  string // path to plan file for /api/plan endpoint
 }
 
 // host returns the bind address, defaulting to "127.0.0.1" if not set.
@@ -137,8 +139,29 @@ func (s *Server) Session() *Session {
 
 // templateData holds data for the dashboard template.
 type templateData struct {
-	PlanName string
-	Branch   string
+	PlanName  string
+	Branch    string
+	RunParams string
+}
+
+// FormatRunParams builds the display string for user-set run parameters,
+// e.g. "codex · task gpt-5.5:high · review gpt-5.5:low". empty fields are
+// skipped; returns "" when no parameters were set.
+func FormatRunParams(executor, planModel, taskModel, reviewModel string) string {
+	parts := make([]string, 0, 4)
+	if executor != "" {
+		parts = append(parts, executor)
+	}
+	if planModel != "" {
+		parts = append(parts, "plan "+planModel)
+	}
+	if taskModel != "" {
+		parts = append(parts, "task "+taskModel)
+	}
+	if reviewModel != "" {
+		parts = append(parts, "review "+reviewModel)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // handleIndex serves the main dashboard page.
@@ -151,8 +174,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := templateData{
-		PlanName: s.cfg.PlanName,
-		Branch:   s.cfg.Branch,
+		PlanName:  s.cfg.PlanName,
+		Branch:    s.cfg.Branch,
+		RunParams: s.cfg.RunParams,
 	}
 
 	if err := s.tmpl.Execute(w, data); err != nil {
@@ -300,10 +324,12 @@ type SessionInfo struct {
 	// dir is the short display name for the project (last path segment of session directory).
 	Dir string `json:"dir"`
 	// DirPath is the full filesystem path to the session directory (used for grouping and copy-to-clipboard).
-	DirPath      string     `json:"dirPath,omitempty"`
-	PlanPath     string     `json:"planPath,omitempty"`
-	Branch       string     `json:"branch,omitempty"`
-	Mode         string     `json:"mode,omitempty"`
+	DirPath  string `json:"dirPath,omitempty"`
+	PlanPath string `json:"planPath,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	// RunParams is the formatted user-set run parameters (executor/models) for header display.
+	RunParams    string     `json:"runParams,omitempty"`
 	StartTime    time.Time  `json:"startTime"`
 	LastModified time.Time  `json:"lastModified"`
 	DiffStats    *DiffStats `json:"diffStats,omitempty"`
@@ -352,6 +378,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			PlanPath:     meta.PlanPath,
 			Branch:       meta.Branch,
 			Mode:         meta.Mode,
+			RunParams:    FormatRunParams(meta.Executor, meta.PlanModel, meta.TaskModel, meta.ReviewModel),
 			StartTime:    meta.StartTime,
 			LastModified: session.GetLastModified(),
 			DiffStats:    session.GetDiffStats(),

@@ -442,6 +442,7 @@ func setupProgressLogger(o opts, req executePlanRequest, branch string) (progres
 			Mode:           string(req.Mode),
 			Branch:         branch,
 			BranchOverride: req.BranchOverride,
+			Params:         runHeaderParams(o, req.Config, req.Mode),
 			NoColor:        o.NoColor,
 		}, req.Colors, holder)
 		if err != nil {
@@ -552,12 +553,14 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	// wrap logger with broadcast logger if --serve is enabled
 	var runnerLog processor.Logger = plr.baseLog
 	if o.Serve {
+		params := runHeaderParams(o, req.Config, req.Mode)
 		dashboard := web.NewDashboard(web.DashboardConfig{
 			BaseLog:         plr.baseLog,
 			Port:            o.Port,
 			Host:            o.Host,
 			PlanFile:        req.PlanFile,
 			Branch:          branch,
+			RunParams:       web.FormatRunParams(params.Executor, params.PlanModel, params.TaskModel, params.ReviewModel),
 			WatchDirs:       o.Watch,
 			ConfigWatchDirs: req.Config.WatchDirs,
 			Colors:          req.Colors,
@@ -711,6 +714,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 		Mode:           string(req.Mode),
 		Branch:         branch,
 		BranchOverride: req.BranchOverride,
+		Params:         runHeaderParams(o, req.Config, req.Mode),
 		NoColor:        o.NoColor,
 	}, req.Colors, holder)
 	if err != nil {
@@ -1063,6 +1067,28 @@ func resolveSpec(cliVal, cfgVal string) string {
 	return cfgVal
 }
 
+// runHeaderParams returns the user-set run parameters recorded in the progress
+// file header (and shown in the web dashboard). only explicitly configured
+// values are included: the review model is recorded only when set directly
+// (not its task_model fallback), while plan mode records the effective plan
+// spec since plan_model falls back to task_model by design.
+func runHeaderParams(o opts, cfg *config.Config, mode processor.Mode) progress.RunParams {
+	p := progress.RunParams{}
+	if cfg == nil {
+		return p
+	}
+	if cfg.Executor == config.ExecutorCodex {
+		p.Executor = config.ExecutorCodex
+	}
+	if mode == processor.ModePlan {
+		p.PlanModel = resolvePlanSpec(o, cfg)
+		return p
+	}
+	p.TaskModel = resolveSpec(o.TaskModel, cfg.TaskModel)
+	p.ReviewModel = resolveSpec(o.ReviewModel, cfg.ReviewModel)
+	return p
+}
+
 func resolvePlanSpec(o opts, cfg *config.Config) string {
 	if planSpec := resolveSpec(o.PlanModel, cfg.PlanModel); planSpec != "" {
 		return planSpec
@@ -1128,6 +1154,7 @@ func runPlanMode(ctx context.Context, o opts, req executePlanRequest, selector *
 		PlanDescription: o.PlanDescription,
 		Mode:            string(processor.ModePlan),
 		Branch:          branch,
+		Params:          runHeaderParams(o, req.Config, processor.ModePlan),
 		NoColor:         o.NoColor,
 	}, req.Colors, holder)
 	if err != nil {
