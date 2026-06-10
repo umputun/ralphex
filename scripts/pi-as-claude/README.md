@@ -6,7 +6,9 @@ pi CLI wrapper for ralphex, allowing pi to replace Claude Code in task and revie
 
 ### pi-as-claude.sh
 
-Wraps the pi CLI to produce Claude-compatible stream-json output. Acts as a drop-in replacement for `claude` in task and review phases. It translates pi's `--mode json` JSONL event stream into the `content_block_delta` / `result` events that ralphex's `ClaudeExecutor` parses.
+Wraps the pi CLI to produce Claude-compatible stream-json output. Acts as a drop-in replacement for `claude` in task and review phases. It translates pi's `--mode json` JSONL event stream into the `content_block_delta` / `result` events that ralphex's `ClaudeExecutor` parses. Plan creation mode (`ralphex --plan`) has no pi-specific adapter and is untested.
+
+Suppressed events (tool executions, lifecycle noise) are emitted as empty keepalive deltas so a configured `idle_timeout` does not kill a healthy session during a long silent tool run. pi's stderr is re-emitted after the main stream for ralphex error/limit pattern detection; any literal `<<<RALPHEX:` token on stderr is neutralized to `<<< RALPHEX:` (a space is inserted) so stray diagnostics cannot be mistaken for a real completion signal.
 
 **Configuration** (`~/.config/ralphex/config` or `.ralphex/config`):
 

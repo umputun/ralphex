@@ -46,6 +46,7 @@ scripts/ralphex-dk/ # Docker wrapper script (Python) with tests
 scripts/codex-as-claude/ # codex wrapper for Claude-compatible output
 scripts/copilot-as-claude/ # GitHub Copilot CLI wrapper for Claude-compatible output
 scripts/gemini-as-claude/ # gemini wrapper for Claude-compatible output
+scripts/agy-as-claude/ # Antigravity (agy) CLI wrapper for Claude-compatible output
 scripts/pi-as-claude/ # pi wrapper for Claude-compatible output
 scripts/hg2git/     # Mercurial-to-git translation script with tests
 scripts/opencode/   # opencode wrapper scripts with tests
@@ -107,13 +108,14 @@ Key files:
 
 ### Alternative Providers for Claude Phases
 
-`claude_command`/`claude_args` replace Claude Code with any `stream-json`-compatible CLI. Included wrappers: `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/copilot-as-claude/copilot-as-claude.sh`, `scripts/pi-as-claude/pi-as-claude.sh`. Wrappers must ignore unknown flags gracefully (`*) shift ;;`) — default Claude flags may still be passed via config fallback. See `docs/custom-providers.md`.
+`claude_command`/`claude_args` replace Claude Code with any `stream-json`-compatible CLI. Included wrappers: `scripts/codex-as-claude/codex-as-claude.sh`, `scripts/copilot-as-claude/copilot-as-claude.sh`, `scripts/gemini-as-claude/gemini-as-claude.sh`, `scripts/agy-as-claude/agy-as-claude.sh`, `scripts/opencode/opencode-as-claude.sh`, `scripts/pi-as-claude/pi-as-claude.sh`. Wrappers must ignore unknown flags gracefully (`*) shift ;;`) — default Claude flags may still be passed via config fallback. See `docs/custom-providers.md`.
 
 Env vars:
 - Codex: `CODEX_MODEL`, `CODEX_SANDBOX`, `CODEX_VERBOSE`
 - Copilot: `COPILOT_MODEL`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`
 - pi: `PI_PROVIDER`, `PI_MODEL`, `PI_THINKING`, `PI_VERBOSE`, `PI_EXTRA_ARGS`
 Copilot wrapper: native autopilot mode — `--autopilot --no-ask-user --allow-all` for task/review, `--autopilot --allow-all` for plan runs (so `QUESTION` signals surface).
+pi wrapper: line-buffers pi's token-level text deltas so `<<<RALPHEX:...>>>` signals land intact in one `content_block_delta`; suppressed events emit empty keepalive deltas so `idle_timeout` doesn't fire during silent tool runs; literal `<<<RALPHEX:` on re-emitted stderr is neutralized to `<<< RALPHEX:`; the prompt reaches pi via stdin (temp-file redirect), never argv; translation jq runs in the background with an interruptible `wait` so the TERM-forwarding trap fires while pi is alive. Task/review phases only — plan creation mode has no pi adapter.
 
 ### AWS Bedrock Provider (Docker Wrapper Only)
 

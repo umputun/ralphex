@@ -474,7 +474,8 @@ output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/text_events.jsonl" \
     PATH="$TMPDIR_TEST:$PATH" \
     bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 
-text_line=$(echo "$output" | grep '"content_block_delta"' | head -1)
+# skipped events emit empty keepalive deltas, so select the first non-empty one
+text_line=$(echo "$output" | grep '"content_block_delta"' | jq -c 'select(.delta.text != "")' | head -1)
 if echo "$text_line" | jq -e '.delta.text == "hello world\n"' >/dev/null 2>&1; then
     pass "text_delta translated to content_block_delta with trailing newline"
 else
@@ -496,6 +497,14 @@ echo "test: terminal result event"
 # the wrapper always emits a fallback result, so a single result event would pass even
 # if turn_end/agent_end translation were broken. assert the COUNT instead: a stream with
 # a terminal event yields 2 results (translated + fallback), a stream without yields 1.
+# re-run against a dedicated fixture so this section does not depend on the previous one.
+cat > "$TMPDIR_TEST/turnend_events.jsonl" << 'EOF'
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"}}
+{"type":"turn_end"}
+EOF
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/turnend_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
 turn_results=$(echo "$output" | grep -c '"result"')
 if [[ "$turn_results" -eq 2 ]]; then
     pass "turn_end produces its own result event (2 total with fallback)"
@@ -531,6 +540,25 @@ else
     fail "unexpected result count without terminal event" "expected 1, got $noterm_results: $output_noterm"
 fi
 
+# agentic multi-turn sessions emit one turn_end per turn: text from every turn
+# must survive, with one result per turn plus the fallback (N+1 total).
+cat > "$TMPDIR_TEST/multiturn_events.jsonl" << 'EOF'
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"first turn"}}
+{"type":"turn_end"}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"second turn"}}
+{"type":"turn_end"}
+EOF
+output_multi=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/multiturn_events.jsonl" \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+multi_results=$(echo "$output_multi" | grep -c '"result"')
+if echo "$output_multi" | grep -q "first turn" && echo "$output_multi" | grep -q "second turn" \
+    && [[ "$multi_results" -eq 3 ]]; then
+    pass "multi-turn stream preserves text from all turns (N+1 results)"
+else
+    fail "multi-turn stream mishandled" "results: $multi_results, got: $output_multi"
+fi
+
 # ---------------------------------------------------------------------------
 # test: tool execution events skipped by default (PI_VERBOSE=0)
 # ---------------------------------------------------------------------------
@@ -561,6 +589,16 @@ else
     pass "tool events skipped (PI_VERBOSE=0)"
 fi
 
+# suppressed events must still emit empty keepalive deltas: ralphex's idle_timeout
+# resets on every wrapper stdout line, so a silent long tool execution would
+# otherwise kill a healthy session. the fixture has 3 tool events -> 3 keepalives.
+keepalives=$(echo "$output" | grep '"content_block_delta"' | jq -c 'select(.delta.text == "")' | wc -l | tr -d ' ')
+if [[ "$keepalives" -eq 3 ]]; then
+    pass "suppressed tool events emit empty keepalive deltas"
+else
+    fail "expected 3 keepalive deltas for 3 suppressed tool events" "got $keepalives: $output"
+fi
+
 # ---------------------------------------------------------------------------
 # test: tool execution events included when PI_VERBOSE=1
 # ---------------------------------------------------------------------------
@@ -575,6 +613,26 @@ if echo "$output" | grep -q "tool_execution_start" && echo "$output" | grep -q "
     pass "tool events included when PI_VERBOSE=1"
 else
     fail "tool events not included (PI_VERBOSE=1)" "got: $output"
+fi
+
+# a verbose tool line must NOT flush a partially buffered assistant line: flushing
+# mid-line would split a buffered <<<RALPHEX:...>>> signal across blocks, the
+# exact failure the line buffering exists to prevent.
+cat > "$TMPDIR_TEST/tool_split_events.jsonl" << 'EOF'
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"<<<RALPHEX:ALL"}}
+{"type":"tool_execution_start","toolName":"bash"}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"_TASKS_DONE>>>"}}
+{"type":"turn_end"}
+EOF
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/tool_split_events.jsonl" \
+    PI_VERBOSE=1 \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+if echo "$output" | grep '"content_block_delta"' \
+    | jq -e 'select(.delta.text | contains("<<<RALPHEX:ALL_TASKS_DONE>>>"))' >/dev/null 2>&1; then
+    pass "verbose tool event does not split a buffered signal"
+else
+    fail "verbose tool event split a buffered signal across blocks" "got: $output"
 fi
 
 # ---------------------------------------------------------------------------
@@ -602,8 +660,14 @@ fi
 # ---------------------------------------------------------------------------
 echo "test: invalid JSON tolerated"
 
+# scalar/array JSON lines and non-object event fields must be tolerated too:
+# indexing a scalar aborts jq, which would silently truncate the whole stream.
 cat > "$TMPDIR_TEST/garbage_events.jsonl" << 'EOF'
 not json at all
+123
+"a bare json string"
+[1,2,3]
+{"type":"message_update","assistantMessageEvent":"not an object"}
 {"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"after garbage"}}
 {"type":"turn_end"}
 EOF
@@ -876,6 +940,114 @@ if [[ $fail_exit -eq 7 ]]; then
 else
     fail "pi exit code not preserved" "got: $fail_exit"
 fi
+
+# ---------------------------------------------------------------------------
+# test: realistic failure — pi dies with empty stdout, a limit phrase on stderr,
+# and a non-zero exit. this is the exact scenario the stderr re-emission exists
+# for (plan-quota errors land on stderr while stdout stays empty).
+# ---------------------------------------------------------------------------
+echo "test: empty stdout with stderr limit and non-zero exit"
+
+: > "$TMPDIR_TEST/empty_stdout.txt"
+cat > "$TMPDIR_TEST/stderr_quota.txt" << 'EOF'
+You've hit your usage limit
+EOF
+
+set +e
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/empty_stdout.txt" \
+    MOCK_STDERR_FILE="$TMPDIR_TEST/stderr_quota.txt" \
+    MOCK_EXIT_CODE=1 \
+    PATH="$TMPDIR_TEST:$PATH" \
+    bash "$WRAPPER" -p "test prompt" 2>/dev/null)
+quota_exit=$?
+set -e
+
+if echo "$output" | grep "hit your usage limit" | jq -e '.type == "content_block_delta"' >/dev/null 2>&1; then
+    pass "stderr limit phrase emitted despite empty stdout"
+else
+    fail "stderr limit phrase missing with empty stdout" "got: $output"
+fi
+if echo "$output" | tail -1 | jq -e '.type == "result"' >/dev/null 2>&1; then
+    pass "fallback result emitted after stderr on failure"
+else
+    fail "no fallback result on failure path" "got: $output"
+fi
+if [[ $quota_exit -eq 1 ]]; then
+    pass "non-zero exit preserved on failure path"
+else
+    fail "exit code not preserved on failure path" "got: $quota_exit"
+fi
+
+# ---------------------------------------------------------------------------
+# test: SIGTERM to the wrapper is forwarded to the pi child while pi is alive.
+# the translation jq runs in the background with an interruptible `wait` so the
+# TERM trap fires promptly; a regression to a foreground jq would defer the trap
+# until pi exits on its own (ralphex masks this via process-group kills, but
+# direct supervisors signal only the wrapper).
+# ---------------------------------------------------------------------------
+echo "test: SIGTERM forwarded to pi child"
+
+hang_bin="$TMPDIR_TEST/hang_bin"
+mkdir -p "$hang_bin"
+cat > "$hang_bin/pi" << 'HANG_EOF'
+#!/usr/bin/env bash
+cat > /dev/null  # consume the prompt
+echo $$ > "$TMPDIR_TEST/hang_pi_pid"
+exec sleep 30
+HANG_EOF
+chmod +x "$hang_bin/pi"
+
+rm -f "$TMPDIR_TEST/hang_pi_pid"
+PATH="$hang_bin:$PATH" bash "$WRAPPER" -p "test prompt" >/dev/null 2>&1 &
+wrapper_pid=$!
+
+# wait for the mock pi to start (it records its PID once running)
+for _ in $(seq 1 50); do
+    [[ -f "$TMPDIR_TEST/hang_pi_pid" ]] && break
+    sleep 0.1
+done
+
+kill -TERM "$wrapper_pid" 2>/dev/null || true
+
+# the wrapper must exit promptly (well under the mock's 30s sleep)
+for _ in $(seq 1 50); do
+    kill -0 "$wrapper_pid" 2>/dev/null || break
+    sleep 0.1
+done
+
+if kill -0 "$wrapper_pid" 2>/dev/null; then
+    fail "wrapper did not exit promptly after SIGTERM"
+    kill -9 "$wrapper_pid" 2>/dev/null || true
+    term_exit=-1
+else
+    set +e
+    wait "$wrapper_pid"
+    term_exit=$?
+    set -e
+    pass "wrapper exits promptly on SIGTERM while pi is running"
+fi
+
+if [[ $term_exit -eq 143 ]]; then
+    pass "wrapper exits 143 on SIGTERM"
+else
+    fail "unexpected exit code on SIGTERM" "expected 143, got: $term_exit"
+fi
+
+hang_pid=$(cat "$TMPDIR_TEST/hang_pi_pid" 2>/dev/null || echo "")
+# pi may need a moment to die after the forwarded TERM
+if [[ -n "$hang_pid" ]]; then
+    for _ in $(seq 1 20); do
+        kill -0 "$hang_pid" 2>/dev/null || break
+        sleep 0.1
+    done
+fi
+if [[ -n "$hang_pid" ]] && kill -0 "$hang_pid" 2>/dev/null; then
+    fail "pi child still alive after wrapper received SIGTERM" "pid: $hang_pid"
+    kill -9 "$hang_pid" 2>/dev/null || true
+else
+    pass "SIGTERM forwarded to pi child"
+fi
+rm -rf "$hang_bin"
 
 # ---------------------------------------------------------------------------
 # summary

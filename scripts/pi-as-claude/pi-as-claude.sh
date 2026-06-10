@@ -109,32 +109,36 @@ if [[ -n "$PI_EXTRA_ARGS" ]]; then
     [[ ${#pi_extra_args[@]} -gt 0 ]] && pi_args+=("${pi_extra_args[@]}")
 fi
 
-# temporary files for stderr capture and stdout piping.
-# use a private temp directory for the FIFO to avoid TOCTOU race.
+# all temp files live in one private directory: a single rm -rf cleans up,
+# and the private dir avoids a TOCTOU race on the FIFO. the EXIT trap is
+# registered immediately after mktemp so a failure in any later setup step
+# (mkfifo, prompt write) cannot leak the directory.
 tmp_dir=$(mktemp -d)
-stderr_file=$(mktemp)
+cleanup() {
+    rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
+
+stderr_file="$tmp_dir/stderr"
 stdout_pipe="$tmp_dir/stdout.fifo"
 mkfifo "$stdout_pipe"
 
 # deliver the (possibly adapter-prepended) prompt to pi via stdin, not argv:
 # avoids the per-arg length cap on large review prompts containing a full diff.
-prompt_file=$(mktemp)
+prompt_file="$tmp_dir/prompt"
 printf '%s' "$prompt" > "$prompt_file"
 
-# cleanup temp files on exit
-cleanup() {
-    rm -f "$stderr_file" "$stdout_pipe" "$prompt_file"
-    rm -rf "$tmp_dir"
-}
-trap cleanup EXIT
-
-# trap SIGTERM and forward to pi child process for graceful shutdown
+# trap SIGTERM and forward to pi child process for graceful shutdown.
+# the exit fires the EXIT trap, which handles cleanup. for this trap to run
+# promptly the translation jq below must NOT be a foreground command: bash
+# defers traps until the current foreground external command finishes, and jq
+# only exits when pi closes the FIFO — so jq runs in the background and the
+# script waits on it with the interruptible `wait` builtin.
 pi_pid=""
 forward_signal() {
     if [[ -n "$pi_pid" ]]; then
         kill -TERM "$pi_pid" 2>/dev/null || true
     fi
-    cleanup
     exit 143
 }
 trap forward_signal TERM
@@ -146,8 +150,11 @@ pi_pid=$!
 
 # translate pi's JSONL event stream into claude stream-json.
 # only assistant text is emitted by default — tool executions, the session header,
-# and other lifecycle events are noise and are skipped (include tool lines with
-# PI_VERBOSE=1).
+# and other lifecycle events are noise (include tool lines with PI_VERBOSE=1).
+# suppressed events still emit an EMPTY text delta as a keepalive: ralphex's
+# idle_timeout resets on every line of wrapper stdout, so a long silent tool
+# execution would otherwise kill a healthy session (the executor skips empty
+# text, so keepalives never pollute output or signal detection).
 #
 # pi emits assistant text as token-level `text_delta` deltas (e.g. "The", " quick",
 # " brown"), so the stream must be re-assembled into whole lines before emission.
@@ -155,36 +162,46 @@ pi_pid=$!
 # newline after every token and (b) split ralphex `<<<RALPHEX:...>>>` signals across
 # blocks, where the executor's per-block detectSignal could never match them. we buffer
 # deltas and flush only complete lines, so a signal lands intact in a single block.
+# verbose tool lines deliberately do NOT flush the buffer: flushing a partial
+# line would re-split a buffered signal, the exact failure the buffering prevents.
 #
 # event mapping:
 #   message_update + assistantMessageEvent.type=="text_delta" -> buffered, complete
 #                                                                lines -> content_block_delta
-#   tool_execution_start/update/end                           -> skipped (or PI_VERBOSE=1)
-#   session header, queue_update, compaction_*, auto_retry_*  -> skipped
+#   tool_execution_start/update/end -> keepalive (or "[tool] ..." line with PI_VERBOSE=1)
+#   session header, queue_update, compaction_*, auto_retry_*  -> keepalive
 #   turn_end / agent_end                                      -> flush buffer, then result
 #
 # the whole stream is fed to one jq process (foreach over `inputs`); `fromjson?` skips
-# malformed lines, and a trailing `__eof__` sentinel flushes any unterminated final line.
+# malformed lines and `objects` skips scalar/array JSON (indexing a scalar would abort
+# jq and silently truncate the stream); non-object field shapes are guarded the same
+# way. a trailing `__eof__` sentinel flushes any unterminated final line.
+#
+# jq runs in the background with an interruptible `wait` so the TERM trap can fire
+# while pi is alive (a foreground jq would defer the trap until pi exits).
 jq -Rcn --unbuffered --argjson verbose "$PI_VERBOSE" '
     def emit($t): {type: "content_block_delta", delta: {type: "text_delta", text: $t}};
     def flush:    if .buf != "" then [emit(.buf + "\n")] else [] end;
-    foreach ((inputs | fromjson?), {type: "__eof__"}) as $e (
+    foreach ((inputs | fromjson? | objects), {type: "__eof__"}) as $e (
         {buf: "", out: []};
-        if $e.type == "message_update" and $e.assistantMessageEvent.type == "text_delta" then
-            ((.buf + ($e.assistantMessageEvent.delta // "")) | split("\n")) as $parts
+        if $e.type == "message_update"
+           and (($e.assistantMessageEvent | objects | .type) // "") == "text_delta" then
+            ((.buf + (($e.assistantMessageEvent.delta // "") | tostring)) | split("\n")) as $parts
             | {buf: $parts[-1], out: ($parts[0:-1] | map(emit(. + "\n")))}
-        elif (($e.type // "") | startswith("tool_execution_")) and $verbose == 1 then
-            {buf: "", out: (flush + [emit("[tool] " + $e.type + " " + ($e.toolName // "") + "\n")])}
+        elif ((($e.type | strings) // "") | startswith("tool_execution_")) and $verbose == 1 then
+            {buf: .buf, out: [emit("[tool] " + $e.type + " " + (($e.toolName // "") | tostring) + "\n")]}
         elif $e.type == "turn_end" or $e.type == "agent_end" then
             {buf: "", out: (flush + [{type: "result", result: ""}])}
         elif $e.type == "__eof__" then
             {buf: "", out: flush}
         else
-            {buf: .buf, out: []}
+            {buf: .buf, out: [emit("")]}
         end;
         .out[]
     )
-' < "$stdout_pipe" 2>/dev/null || true
+' < "$stdout_pipe" 2>/dev/null &
+jq_pid=$!
+wait "$jq_pid" || true
 
 # wait for pi to finish and capture its exit code
 pi_exit=0

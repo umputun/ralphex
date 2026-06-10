@@ -391,13 +391,15 @@ The wrapper translates pi JSONL events as follows:
 | pi event | Claude event |
 |---|---|
 | `message_update` + `assistantMessageEvent.type == "text_delta"` | buffered; each complete line is flushed as one `content_block_delta` |
-| `tool_execution_start` / `tool_execution_update` / `tool_execution_end` | skipped by default (set `PI_VERBOSE=1` to include) |
-| `session` header, `queue_update`, `compaction_*`, `auto_retry_*` | skipped |
+| `tool_execution_start` / `tool_execution_update` / `tool_execution_end` | empty keepalive delta by default (set `PI_VERBOSE=1` to include `[tool]` lines) |
+| `session` header, `queue_update`, `compaction_*`, `auto_retry_*` | empty keepalive delta |
 | `turn_end` / `agent_end` | flush remaining buffer, then `result` (end of turn) |
 
 pi streams assistant text as token-level deltas (e.g. `"The"`, `" quick"`, `" brown"`), so the wrapper buffers deltas and emits only complete lines. Emitting one event per token would garble the log with a newline after every token and, more importantly, split `<<<RALPHEX:...>>>` signals across blocks — the executor's per-block signal detection only matches a signal that lands intact in a single `content_block_delta`.
 
-A fallback `{"type":"result","result":""}` is always emitted, covering pi exiting without a `turn_end`/`agent_end` event. Stderr is captured and emitted as `content_block_delta` events after the main stream for error/limit pattern detection, and pi's exit code is preserved.
+Suppressed events are translated to empty text deltas rather than dropped: ralphex's `idle_timeout` resets on every line of wrapper output, so a long tool execution that produced no output at all would otherwise kill a healthy session. The executor ignores empty text, so keepalives never appear in the progress log.
+
+A fallback `{"type":"result","result":""}` is always emitted, covering pi exiting without a `turn_end`/`agent_end` event. Stderr is captured and emitted as `content_block_delta` events after the main stream for error/limit pattern detection, and pi's exit code is preserved. Any literal `<<<RALPHEX:` token on stderr is neutralized first (rewritten to `<<< RALPHEX:` with an inserted space), so a stray signal token echoed in pi diagnostics cannot be mistaken for a real completion signal — rate-limit and `API Error:` phrases pass through verbatim for error/limit detection.
 
 ### How it works
 
@@ -413,6 +415,8 @@ A fallback `{"type":"result","result":""}` is always emitted, covering pi exitin
 
 For review prompts (detected by `<<<RALPHEX:REVIEW_DONE>>>` in the prompt text), the wrapper prepends adapter instructions telling the model to execute review agent tasks sequentially using pi's `read`/`bash`/`edit`/`write` tools, since pi exposes no parallel sub-agents.
 
+The wrapper covers task and review phases only. Plan creation mode (`ralphex --plan`) has no pi-specific adapter for `QUESTION`/`PLAN_DRAFT` handling (unlike the Copilot wrapper) and is untested with pi.
+
 ## Writing your own wrapper
 
 A wrapper script must:
@@ -422,6 +426,7 @@ A wrapper script must:
 3. Ignore other flags gracefully
 4. Stream JSON events to stdout, one per line
 5. Exit with code 0 on success
+6. Optionally re-emit the child's stderr as `content_block_delta` events so ralphex error/limit pattern detection works — neutralize any literal `<<<RALPHEX:` token first (e.g. insert a space) so stray stderr text cannot be mistaken for a completion signal
 
 ### Minimal template
 
