@@ -1190,6 +1190,50 @@ func TestResolveModelSpecs(t *testing.T) {
 	})
 }
 
+func TestRunHeaderParams(t *testing.T) {
+	t.Run("nil config returns empty params", func(t *testing.T) {
+		got := runHeaderParams(opts{}, nil, processor.ModeFull)
+		assert.Equal(t, progress.RunParams{}, got)
+	})
+
+	t.Run("nothing set returns empty params", func(t *testing.T) {
+		got := runHeaderParams(parseTestOpts(t), &config.Config{}, processor.ModeFull)
+		assert.Equal(t, progress.RunParams{}, got)
+	})
+
+	t.Run("cli task and review models", func(t *testing.T) {
+		got := runHeaderParams(parseTestOpts(t, "--task-model", "opus:high", "--review-model", "sonnet:low"), &config.Config{}, processor.ModeFull)
+		assert.Equal(t, progress.RunParams{TaskModel: "opus:high", ReviewModel: "sonnet:low"}, got)
+	})
+
+	t.Run("cli flags override config values", func(t *testing.T) {
+		cfg := &config.Config{TaskModel: "sonnet", ReviewModel: "haiku"}
+		got := runHeaderParams(parseTestOpts(t, "--task-model", "opus"), cfg, processor.ModeFull)
+		assert.Equal(t, progress.RunParams{TaskModel: "opus", ReviewModel: "haiku"}, got)
+	})
+
+	t.Run("review model fallback to task is not recorded", func(t *testing.T) {
+		got := runHeaderParams(parseTestOpts(t, "--task-model", "opus"), &config.Config{}, processor.ModeFull)
+		assert.Equal(t, progress.RunParams{TaskModel: "opus"}, got, "review inherits task implicitly, no separate header line")
+	})
+
+	t.Run("codex executor recorded", func(t *testing.T) {
+		cfg := &config.Config{Executor: config.ExecutorCodex}
+		got := runHeaderParams(parseTestOpts(t, "--codex"), cfg, processor.ModeFull)
+		assert.Equal(t, progress.RunParams{Executor: "codex"}, got)
+	})
+
+	t.Run("plan mode records effective plan model", func(t *testing.T) {
+		got := runHeaderParams(parseTestOpts(t, "--plan-model", "opus:high"), &config.Config{}, processor.ModePlan)
+		assert.Equal(t, progress.RunParams{PlanModel: "opus:high"}, got)
+	})
+
+	t.Run("plan mode falls back to task model", func(t *testing.T) {
+		got := runHeaderParams(parseTestOpts(t, "--task-model", "opus"), &config.Config{}, processor.ModePlan)
+		assert.Equal(t, progress.RunParams{PlanModel: "opus"}, got, "plan_model falls back to task_model by design")
+	})
+}
+
 func TestCodexModelBanner(t *testing.T) {
 	t.Run("task_model_sets_task_and_review", func(t *testing.T) {
 		cfg := &config.Config{CodexModel: "gpt-5.5", CodexReasoningEffort: "xhigh"}

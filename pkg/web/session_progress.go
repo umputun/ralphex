@@ -20,8 +20,15 @@ import (
 //	Plan: path/to/plan.md
 //	Branch: feature-branch
 //	Mode: full
+//	Executor: codex
+//	Plan model: opus:high
+//	Task model: gpt-5.5:high
+//	Review model: gpt-5.5:low
 //	Started: 2026-01-22 10:30:00
 //	------------------------------------------------------------
+//
+// the Executor and model lines are optional — they appear only when the
+// corresponding parameter was set for the run.
 //
 // the second return value reports whether the terminating separator line was
 // observed, which means the header is fully written. during a truncate+rewrite
@@ -52,18 +59,7 @@ func ParseProgressHeader(path string) (meta SessionMetadata, complete bool, err 
 
 		// parse key-value pairs (process line before checking error,
 		// as ReadString may return partial data alongside an error)
-		if val, found := strings.CutPrefix(line, "Plan: "); found {
-			meta.PlanPath = val
-		} else if val, found := strings.CutPrefix(line, "Branch: "); found {
-			meta.Branch = val
-		} else if val, found := strings.CutPrefix(line, "Mode: "); found {
-			meta.Mode = val
-		} else if val, found := strings.CutPrefix(line, "Started: "); found {
-			// header timestamps are written in local time without a zone offset
-			if t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local); parseErr == nil {
-				meta.StartTime = t
-			}
-		}
+		parseHeaderField(&meta, line)
 
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
@@ -74,6 +70,35 @@ func ParseProgressHeader(path string) (meta SessionMetadata, complete bool, err 
 	}
 
 	return meta, complete, nil
+}
+
+// parseHeaderField applies a single header key-value line to meta.
+// unknown lines are ignored.
+func parseHeaderField(meta *SessionMetadata, line string) {
+	fields := []struct {
+		prefix string
+		dst    *string
+	}{
+		{"Plan: ", &meta.PlanPath},
+		{"Branch: ", &meta.Branch},
+		{"Mode: ", &meta.Mode},
+		{"Executor: ", &meta.Executor},
+		{"Plan model: ", &meta.PlanModel},
+		{"Task model: ", &meta.TaskModel},
+		{"Review model: ", &meta.ReviewModel},
+	}
+	for _, f := range fields {
+		if val, found := strings.CutPrefix(line, f.prefix); found {
+			*f.dst = val
+			return
+		}
+	}
+	if val, found := strings.CutPrefix(line, "Started: "); found {
+		// header timestamps are written in local time without a zone offset
+		if t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", val, time.Local); parseErr == nil {
+			meta.StartTime = t
+		}
+	}
 }
 
 // loadProgressFileIntoSession reads a progress file and publishes events to the session's SSE server.

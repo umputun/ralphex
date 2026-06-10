@@ -667,6 +667,14 @@ header h1 {
     content: 'Branch';
 }
 
+.models::before {
+    content: 'Models';
+}
+
+.models:empty {
+    display: none;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    PHASE NAVIGATION
    ═══════════════════════════════════════════════════════════════ */
