@@ -18,7 +18,7 @@ type Values struct {
 	ClaudeCommand              string
 	ClaudeArgs                 string
 	PlanModel                  string // model for plan creation (falls back to TaskModel if empty)
-	TaskModel                  string // model for task execution (e.g., "opus", "sonnet", "haiku")
+	TaskModel                  string // model for task execution (e.g., "fable", "opus", "sonnet", "haiku")
 	ReviewModel                string // model for review phases (falls back to TaskModel if empty)
 	ClaudeErrorPatterns        []string
 	CodexErrorPatterns         []string

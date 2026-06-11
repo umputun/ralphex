@@ -36,6 +36,7 @@ func TestParseOptions(t *testing.T) {
 		{"full model id normalized", "---\nmodel: claude-sonnet-4-5-20250929\n---\nbody", Options{Model: "sonnet"}, "body"},
 		{"full model id haiku normalized", "---\nmodel: claude-haiku-4-5-20251001\n---\nbody", Options{Model: "haiku"}, "body"},
 		{"full model id opus normalized", "---\nmodel: claude-opus-4-6\n---\nbody", Options{Model: "opus"}, "body"},
+		{"full model id fable normalized", "---\nmodel: claude-fable-5\n---\nbody", Options{Model: "fable"}, "body"},
 		{"model keyword preserved", "---\nmodel: sonnet\n---\nbody", Options{Model: "sonnet"}, "body"},
 		{"unknown model kept as-is", "---\nmodel: gpt-5\n---\nbody", Options{Model: "gpt-5"}, "body"},
 
@@ -83,9 +84,10 @@ func TestOptions_Validate(t *testing.T) {
 		{"valid model haiku", Options{Model: "haiku"}, nil},
 		{"valid model sonnet", Options{Model: "sonnet"}, nil},
 		{"valid model opus", Options{Model: "opus"}, nil},
-		{"unknown model", Options{Model: "gpt-5"}, []string{`unknown model "gpt-5", must be one of: haiku, sonnet, opus`}},
+		{"valid model fable", Options{Model: "fable"}, nil},
+		{"unknown model", Options{Model: "gpt-5"}, []string{`unknown model "gpt-5", must be one of: haiku, sonnet, opus, fable`}},
 		{"agent type not validated", Options{AgentType: "anything-goes"}, nil},
-		{"unknown model with agent", Options{Model: "bad", AgentType: "reviewer"}, []string{`unknown model "bad", must be one of: haiku, sonnet, opus`}},
+		{"unknown model with agent", Options{Model: "bad", AgentType: "reviewer"}, []string{`unknown model "bad", must be one of: haiku, sonnet, opus, fable`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
