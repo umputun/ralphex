@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,6 +242,89 @@ plain review output
 		assert.Equal(t, "plain review output", first.Text)
 		assert.Equal(t, EventTypeSection, second.Type)
 		assert.Equal(t, "Review", second.Section)
+	})
+
+	t.Run("emits task end boundaries for finished tasks", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-task-boundaries.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- task iteration 1 ---
+[26-01-22 10:00:01] task one output
+--- task iteration 2 ---
+[26-01-22 10:00:02] task two output
+--- review iteration 1 ---
+[26-01-22 10:00:03] review output
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-task-boundaries", path)
+		defer session.Close()
+
+		require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "seed")))
+		rawEvents, cleanup := subscribeSSEEvents(t, session)
+		defer cleanup()
+		_ = drainChannel(rawEvents, 50*time.Millisecond)
+
+		m.loadProgressFileIntoSession(path, session)
+
+		got := drainChannel(rawEvents, 50*time.Millisecond)
+		events := make([]Event, len(got))
+		for i, raw := range got {
+			require.NoError(t, json.Unmarshal([]byte(raw), &events[i]))
+		}
+
+		var boundaries []string
+		for _, e := range events {
+			if e.Type == EventTypeTaskStart || e.Type == EventTypeTaskEnd {
+				boundaries = append(boundaries, fmt.Sprintf("%s:%d", e.Type, e.TaskNum))
+			}
+		}
+		assert.Equal(t, []string{"task_start:1", "task_end:1", "task_start:2", "task_end:2"}, boundaries)
+
+		session.mu.RLock()
+		lastTask := session.lastTask
+		session.mu.RUnlock()
+		assert.Equal(t, 0, lastTask, "review section ended the last task")
+	})
+
+	t.Run("records last task when file ends mid-task", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-mid-task.txt")
+
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: full
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- task iteration 1 ---
+[26-01-22 10:00:01] task one output
+--- task iteration 2 ---
+[26-01-22 10:00:02] task two output
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-mid-task", path)
+		defer session.Close()
+
+		m.loadProgressFileIntoSession(path, session)
+
+		session.mu.RLock()
+		lastTask := session.lastTask
+		session.mu.RUnlock()
+		assert.Equal(t, 2, lastTask, "task 2 still active at end of file")
 	})
 
 	t.Run("captures diffstats from output line", func(t *testing.T) {

@@ -39,82 +39,179 @@ func TestTailer_ParseLine(t *testing.T) {
 	tailer.inHeader = false // skip header handling for these tests
 
 	t.Run("parses timestamped line", func(t *testing.T) {
-		event := tailer.parseLine("[26-01-22 10:30:45] Hello world")
+		events := tailer.parseLine("[26-01-22 10:30:45] Hello world")
 
-		require.NotNil(t, event)
-		assert.Equal(t, EventTypeOutput, event.Type)
-		assert.Equal(t, "Hello world", event.Text)
-		assert.Equal(t, status.PhaseTask, event.Phase)
-		assert.Equal(t, 2026, event.Timestamp.Year())
-		assert.Equal(t, time.January, event.Timestamp.Month())
-		assert.Equal(t, 22, event.Timestamp.Day())
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeOutput, events[0].Type)
+		assert.Equal(t, "Hello world", events[0].Text)
+		assert.Equal(t, status.PhaseTask, events[0].Phase)
+		assert.Equal(t, 2026, events[0].Timestamp.Year())
+		assert.Equal(t, time.January, events[0].Timestamp.Month())
+		assert.Equal(t, 22, events[0].Timestamp.Day())
 	})
 
 	t.Run("parses section header", func(t *testing.T) {
-		event := tailer.parseLine("--- task iteration 1 ---")
+		events := tailer.parseLine("--- task iteration 1 ---")
 
-		require.NotNil(t, event)
-		assert.Equal(t, EventTypeSection, event.Type)
-		assert.Equal(t, "task iteration 1", event.Section)
-		assert.Equal(t, "task iteration 1", event.Text)
+		require.Len(t, events, 2)
+		assert.Equal(t, EventTypeTaskStart, events[0].Type)
+		assert.Equal(t, 1, events[0].TaskNum)
+		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, "task iteration 1", events[1].Section)
+		assert.Equal(t, "task iteration 1", events[1].Text)
+	})
+
+	t.Run("emits task end before next task start", func(t *testing.T) {
+		events := tailer.parseLine("--- task iteration 2 ---")
+
+		require.Len(t, events, 3)
+		assert.Equal(t, EventTypeTaskEnd, events[0].Type)
+		assert.Equal(t, 1, events[0].TaskNum)
+		assert.Equal(t, EventTypeTaskStart, events[1].Type)
+		assert.Equal(t, 2, events[1].TaskNum)
+		assert.Equal(t, EventTypeSection, events[2].Type)
+	})
+
+	t.Run("emits task end on phase transition", func(t *testing.T) {
+		events := tailer.parseLine("--- review iteration 1 ---")
+
+		require.Len(t, events, 2)
+		assert.Equal(t, EventTypeTaskEnd, events[0].Type)
+		assert.Equal(t, 2, events[0].TaskNum)
+		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, "review iteration 1", events[1].Section)
 	})
 
 	t.Run("detects error lines", func(t *testing.T) {
-		event := tailer.parseLine("[26-01-22 10:30:45] ERROR: something went wrong")
+		events := tailer.parseLine("[26-01-22 10:30:45] ERROR: something went wrong")
 
-		require.NotNil(t, event)
-		assert.Equal(t, EventTypeError, event.Type)
-		assert.Equal(t, "ERROR: something went wrong", event.Text)
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeError, events[0].Type)
+		assert.Equal(t, "ERROR: something went wrong", events[0].Text)
 	})
 
 	t.Run("detects warning lines", func(t *testing.T) {
-		event := tailer.parseLine("[26-01-22 10:30:45] WARN: be careful")
+		events := tailer.parseLine("[26-01-22 10:30:45] WARN: be careful")
 
-		require.NotNil(t, event)
-		assert.Equal(t, EventTypeWarn, event.Type)
-		assert.Equal(t, "WARN: be careful", event.Text)
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeWarn, events[0].Type)
+		assert.Equal(t, "WARN: be careful", events[0].Text)
 	})
 
 	t.Run("detects signal lines", func(t *testing.T) {
-		event := tailer.parseLine("[26-01-22 10:30:45] <<<RALPHEX:COMPLETED>>>")
+		events := tailer.parseLine("[26-01-22 10:30:45] <<<RALPHEX:COMPLETED>>>")
 
-		require.NotNil(t, event)
-		assert.Equal(t, EventTypeSignal, event.Type)
-		assert.Equal(t, "COMPLETED", event.Signal)
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeSignal, events[0].Type)
+		assert.Equal(t, "COMPLETED", events[0].Signal)
 	})
 
 	t.Run("handles plain line without timestamp", func(t *testing.T) {
-		event := tailer.parseLine("plain text line")
+		events := tailer.parseLine("plain text line")
 
-		require.NotNil(t, event)
-		assert.Equal(t, EventTypeOutput, event.Type)
-		assert.Equal(t, "plain text line", event.Text)
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeOutput, events[0].Type)
+		assert.Equal(t, "plain text line", events[0].Text)
 	})
 
 	t.Run("skips header lines", func(t *testing.T) {
 		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
 		tailer.inHeader = true
 
-		event := tailer.parseLine("Plan: /path/to/plan.md")
-		assert.Nil(t, event)
+		events := tailer.parseLine("Plan: /path/to/plan.md")
+		assert.Empty(t, events)
 
-		event = tailer.parseLine("Branch: main")
-		assert.Nil(t, event)
+		events = tailer.parseLine("Branch: main")
+		assert.Empty(t, events)
 	})
 
 	t.Run("exits header mode on separator", func(t *testing.T) {
 		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
 		tailer.inHeader = true
 
-		event := tailer.parseLine("------------------------------------------------------------")
-		assert.Nil(t, event)
+		events := tailer.parseLine("------------------------------------------------------------")
+		assert.Empty(t, events)
 		assert.False(t, tailer.inHeader)
 
 		// now regular lines should be parsed
-		event = tailer.parseLine("[26-01-22 10:30:45] Hello")
-		require.NotNil(t, event)
-		assert.Equal(t, "Hello", event.Text)
+		events = tailer.parseLine("[26-01-22 10:30:45] Hello")
+		require.Len(t, events, 1)
+		assert.Equal(t, "Hello", events[0].Text)
 	})
+
+	t.Run("initial task from config gets task end", func(t *testing.T) {
+		cfg := DefaultTailerConfig()
+		cfg.InitialTask = 3
+		tailer := NewTailer("/tmp/test.txt", cfg)
+		tailer.inHeader = false
+
+		events := tailer.parseLine("--- task iteration 4 ---")
+
+		require.Len(t, events, 3)
+		assert.Equal(t, EventTypeTaskEnd, events[0].Type)
+		assert.Equal(t, 3, events[0].TaskNum)
+		assert.Equal(t, EventTypeTaskStart, events[1].Type)
+		assert.Equal(t, 4, events[1].TaskNum)
+		assert.Equal(t, EventTypeSection, events[2].Type)
+		assert.Equal(t, 4, tailer.CurrentTask())
+	})
+
+	t.Run("generic section in task phase keeps task active", func(t *testing.T) {
+		cfg := DefaultTailerConfig()
+		cfg.InitialTask = 2
+		tailer := NewTailer("/tmp/test.txt", cfg)
+		tailer.inHeader = false
+
+		events := tailer.parseLine("--- some task note ---")
+
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeSection, events[0].Type)
+		assert.Equal(t, 2, tailer.CurrentTask())
+	})
+}
+
+func TestTailer_ParseLineDeferred_TaskBoundaries(t *testing.T) {
+	tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+	tailer.inHeader = false
+	tailer.deferSections = true
+
+	// section emission is deferred until the first following line
+	events := tailer.parseLineDeferred("--- task iteration 1 ---")
+	assert.Empty(t, events)
+
+	events = tailer.parseLineDeferred("[26-01-22 10:00:01] working on task 1")
+	require.Len(t, events, 3)
+	assert.Equal(t, EventTypeTaskStart, events[0].Type)
+	assert.Equal(t, 1, events[0].TaskNum)
+	assert.Equal(t, EventTypeSection, events[1].Type)
+	assert.Equal(t, EventTypeOutput, events[2].Type)
+	assert.Equal(t, 1, tailer.CurrentTask())
+
+	// next task iteration ends the previous task first
+	events = tailer.parseLineDeferred("--- task iteration 2 ---")
+	assert.Empty(t, events)
+
+	events = tailer.parseLineDeferred("[26-01-22 10:00:02] working on task 2")
+	require.Len(t, events, 4)
+	assert.Equal(t, EventTypeTaskEnd, events[0].Type)
+	assert.Equal(t, 1, events[0].TaskNum)
+	assert.Equal(t, EventTypeTaskStart, events[1].Type)
+	assert.Equal(t, 2, events[1].TaskNum)
+	assert.Equal(t, EventTypeSection, events[2].Type)
+	assert.Equal(t, EventTypeOutput, events[3].Type)
+	assert.Equal(t, 2, tailer.CurrentTask())
+
+	// moving past the task phase ends the last task
+	events = tailer.parseLineDeferred("--- review iteration 1 ---")
+	assert.Empty(t, events)
+
+	events = tailer.parseLineDeferred("[26-01-22 10:00:03] reviewing")
+	require.Len(t, events, 3)
+	assert.Equal(t, EventTypeTaskEnd, events[0].Type)
+	assert.Equal(t, 2, events[0].TaskNum)
+	assert.Equal(t, EventTypeSection, events[1].Type)
+	assert.Equal(t, EventTypeOutput, events[2].Type)
+	assert.Equal(t, 0, tailer.CurrentTask())
 }
 
 func TestTailer_PhaseFromSection(t *testing.T) {

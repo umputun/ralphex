@@ -761,6 +761,7 @@
         if (statusValue === 'active') {
             taskEl.classList.add('active');
             statusEl.textContent = '●';
+            taskEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } else if (statusValue === 'done') {
             statusEl.textContent = '✓';
             // mark all checkboxes as checked when task is done
@@ -780,12 +781,20 @@
         }
     }
 
-    // ensure only one task is highlighted as active
+    // ensure only one task is highlighted as active.
+    // tasks run sequentially, so a lower-numbered task losing active status has
+    // finished - mark it done even if its task_end event was never received.
+    // higher-numbered tasks (plan edited mid-run, re-running an earlier task)
+    // fall back to pending unless all their checkboxes are checked.
     function clearActiveTasksExcept(taskNum) {
         var activeTasks = planContent.querySelectorAll('.plan-task.active');
         activeTasks.forEach(function(taskEl) {
             var num = parseInt(taskEl.dataset.taskNum, 10);
             if (num === taskNum) {
+                return;
+            }
+            if (num < taskNum) {
+                updatePlanTaskStatus(num, 'done');
                 return;
             }
             taskEl.classList.remove('active');

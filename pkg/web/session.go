@@ -132,6 +132,13 @@ type Session struct {
 	lastPendingSection string
 	lastPendingPhase   status.Phase
 
+	// lastTask is the task number active after the last ingested byte (from
+	// the loader or a previous tailer). used by Reactivate so a resumed tailer
+	// emits a task_end for that task when the next task iteration or phase
+	// transition arrives, instead of leaving it active in the plan panel.
+	// zero means no task was active.
+	lastTask int
+
 	// stopping is true while StopTailing is mid-flight (between the first
 	// locked section that captures tailer/stopCh/feedDone and the final
 	// locked section that records lastOffset/lastPhase). during that window
@@ -282,6 +289,7 @@ func (s *Session) resetForNewRun() {
 	s.lastPhase = ""
 	s.lastPendingSection = ""
 	s.lastPendingPhase = ""
+	s.lastTask = 0
 	s.loaded = false
 	s.diffStats = nil
 }
@@ -317,6 +325,9 @@ func (s *Session) startTailerLocked(mode tailerStartMode, offset int64) error {
 	cfg := DefaultTailerConfig()
 	if mode != modeFromStart && s.lastPhase != "" {
 		cfg.InitialPhase = s.lastPhase
+	}
+	if mode != modeFromStart {
+		cfg.InitialTask = s.lastTask
 	}
 	if mode == modeResume {
 		cfg.PendingSection = s.lastPendingSection
@@ -484,6 +495,7 @@ func (s *Session) StopTailing() {
 	s.lastOffset = tailer.Offset()
 	s.lastPhase = tailer.Phase()
 	s.lastPendingSection, s.lastPendingPhase = tailer.PendingSection()
+	s.lastTask = tailer.CurrentTask()
 	s.tailer = nil
 	s.stopping = false
 	s.mu.Unlock()
@@ -520,6 +532,14 @@ func (s *Session) setLastPhase(phase status.Phase) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastPhase = phase
+}
+
+// setLastTask updates the task number active after the last ingested byte.
+// package-internal accessor, thread-safe.
+func (s *Session) setLastTask(taskNum int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastTask = taskNum
 }
 
 // IsTailing returns whether the session is currently tailing its progress file.

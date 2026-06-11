@@ -117,6 +117,7 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 	inHeader := true
 	phase := status.PhaseTask
 	var pendingSection string // section header waiting for first timestamped event
+	var currentTask int       // active task number for task_end boundary events
 	var bytesRead int64
 
 	for {
@@ -139,7 +140,7 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 		if line != "" {
 			var parsed ParsedLine
 			parsed, inHeader = parseProgressLine(line, inHeader)
-			phase, pendingSection = m.processProgressLine(session, parsed, phase, pendingSection)
+			phase, pendingSection, currentTask = m.processProgressLine(session, parsed, phase, pendingSection, currentTask)
 		}
 
 		if readErr != nil {
@@ -148,33 +149,42 @@ func (m *SessionManager) loadProgressFileIntoSession(path string, session *Sessi
 	}
 
 	if pendingSection != "" {
-		m.publishEvents(session, buildPendingSectionEvents(pendingSection, phase, time.Now()))
+		var events []Event
+		events, currentTask = buildPendingSectionEvents(pendingSection, phase, time.Now(), currentTask)
+		m.publishEvents(session, events)
 	}
 
 	session.setLastOffset(bytesRead)
 	// record the phase the parser ended on so a later Reactivate resumes with
 	// the correct phase rather than the tailer's default (PhaseTask).
 	session.setLastPhase(phase)
+	// record the active task so a later Reactivate emits its task_end when the
+	// next task iteration or phase transition arrives.
+	session.setLastTask(currentTask)
 }
 
 // processProgressLine handles a single parsed progress line,
-// updating phase and pendingSection state and publishing events as needed.
+// updating phase, pendingSection, and currentTask state and publishing events as needed.
 func (m *SessionManager) processProgressLine(session *Session, parsed ParsedLine,
-	phase status.Phase, pendingSection string) (status.Phase, string) {
+	phase status.Phase, pendingSection string, currentTask int) (status.Phase, string, int) {
 	switch parsed.Type {
 	case ParsedLineSkip:
-		return phase, pendingSection
+		return phase, pendingSection, currentTask
 	case ParsedLineSection:
 		if pendingSection != "" {
-			m.publishEvents(session, buildPendingSectionEvents(pendingSection, phase, time.Now()))
+			var events []Event
+			events, currentTask = buildPendingSectionEvents(pendingSection, phase, time.Now(), currentTask)
+			m.publishEvents(session, events)
 		}
 		phase = parsed.Phase
 		// defer emitting section until we see a timestamped event
-		return phase, parsed.Section
+		return phase, parsed.Section, currentTask
 	case ParsedLineTimestamp:
 		// emit pending section with this event's timestamp (for accurate durations)
 		if pendingSection != "" {
-			m.publishEvents(session, buildPendingSectionEvents(pendingSection, phase, parsed.Timestamp))
+			var events []Event
+			events, currentTask = buildPendingSectionEvents(pendingSection, phase, parsed.Timestamp, currentTask)
+			m.publishEvents(session, events)
 			pendingSection = ""
 		}
 		event := eventFromParsed(parsed, phase)
@@ -187,7 +197,7 @@ func (m *SessionManager) processProgressLine(session *Session, parsed ParsedLine
 	case ParsedLinePlain:
 		m.publishEvent(session, eventFromParsed(parsed, phase))
 	}
-	return phase, pendingSection
+	return phase, pendingSection, currentTask
 }
 
 func (m *SessionManager) publishEvents(session *Session, events []Event) {
