@@ -29,6 +29,12 @@ type TailerConfig struct {
 	// behavior across a restart (e.g. after a flock-race Reactivate).
 	PendingSection string
 	PendingPhase   status.Phase
+
+	// InitialTask carries over the task number that was active after the last
+	// ingested byte (from the loader or a previous tailer), so a resumed tailer
+	// emits a task_end for it when the next task iteration or phase transition
+	// arrives. zero means no task was active.
+	InitialTask int
 }
 
 // DefaultTailerConfig returns default configuration.
@@ -60,6 +66,11 @@ type Tailer struct {
 	deferSections  bool
 	pendingSection string
 	pendingPhase   status.Phase
+
+	// currentTask tracks the active task number so a task_end event can be
+	// emitted before the next task_start or on a phase transition, mirroring
+	// BroadcastLogger boundary semantics. zero means no task is active.
+	currentTask int
 }
 
 // NewTailer creates a new Tailer for the given progress file.
@@ -73,13 +84,14 @@ func NewTailer(path string, config TailerConfig) *Tailer {
 	}
 
 	return &Tailer{
-		path:     path,
-		config:   config,
-		stopCh:   make(chan struct{}),
-		doneCh:   make(chan struct{}),
-		eventCh:  make(chan Event, 2048),
-		phase:    config.InitialPhase,
-		inHeader: true,
+		path:        path,
+		config:      config,
+		stopCh:      make(chan struct{}),
+		doneCh:      make(chan struct{}),
+		eventCh:     make(chan Event, 2048),
+		phase:       config.InitialPhase,
+		inHeader:    true,
+		currentTask: config.InitialTask,
 	}
 }
 
@@ -161,6 +173,16 @@ func (t *Tailer) PendingSection() (string, status.Phase) {
 	return t.pendingSection, t.pendingPhase
 }
 
+// CurrentTask returns the task number active after the last parsed line, or
+// zero if no task is active. callers can persist this across tailer restarts
+// (e.g., reactivation) so the resumed tailer emits a task_end for the task
+// when the next task iteration or phase transition arrives.
+func (t *Tailer) CurrentTask() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.currentTask
+}
+
 // StartFromOffset begins tailing the file seeking to the given byte offset.
 // if offset <= 0, behaves like Start(false) (seeks to end).
 // if offset exceeds current file size the file has been truncated/replaced
@@ -203,6 +225,7 @@ func (t *Tailer) StartFromOffset(offset int64) error {
 		f.Close()
 		t.mu.Lock()
 		t.phase = status.PhaseTask
+		t.currentTask = 0
 		t.mu.Unlock()
 		return t.Start(true)
 	}
@@ -351,10 +374,9 @@ func (t *Tailer) readNewLines() {
 			continue
 		}
 
-		// parse line and emit event
-		event := t.parseLine(line)
-		if event != nil {
-			t.sendEvent(*event)
+		// parse line and emit events
+		for _, event := range t.parseLine(line) {
+			t.sendEvent(event)
 		}
 	}
 }
@@ -404,9 +426,12 @@ var sectionRegex = regexp.MustCompile(`^--- (.+) ---$`)
 // task iteration regex: task iteration N (extracts the number)
 var taskIterationRegex = regexp.MustCompile(`(?i)^task iteration (\d+)$`)
 
-// parseLine parses a progress file line and returns an Event.
+// parseLine parses a progress file line and returns the resulting events.
 // returns nil for lines that should be skipped (header lines).
-func (t *Tailer) parseLine(line string) *Event {
+// section lines produce task boundary events (task_start/task_end) in addition
+// to the section event, so the plan panel tracks task progress on the live
+// tail path the same way it does on the deferred (from-start) path.
+func (t *Tailer) parseLine(line string) []Event {
 	parsed, newInHeader := parseProgressLine(line, t.inHeader)
 	t.inHeader = newInHeader
 
@@ -415,19 +440,13 @@ func (t *Tailer) parseLine(line string) *Event {
 		return nil
 	case ParsedLineSection:
 		t.phase = parsed.Phase
-		return &Event{
-			Type:      EventTypeSection,
-			Phase:     t.phase,
-			Section:   parsed.Section,
-			Text:      parsed.Text,
-			Timestamp: time.Now(),
-		}
+		var events []Event
+		events, t.currentTask = buildPendingSectionEvents(parsed.Section, parsed.Phase, time.Now(), t.currentTask)
+		return events
 	case ParsedLineTimestamp:
-		event := eventFromParsed(parsed, t.phase)
-		return &event
+		return []Event{eventFromParsed(parsed, t.phase)}
 	case ParsedLinePlain:
-		event := eventFromParsed(parsed, t.phase)
-		return &event
+		return []Event{eventFromParsed(parsed, t.phase)}
 	default:
 		return nil
 	}
@@ -483,21 +502,43 @@ func (t *Tailer) emitPendingSection(ts time.Time) []Event {
 	t.pendingSection = ""
 	t.pendingPhase = ""
 
-	return buildPendingSectionEvents(sectionName, phase, ts)
+	var events []Event
+	events, t.currentTask = buildPendingSectionEvents(sectionName, phase, ts, t.currentTask)
+	return events
 }
 
-func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time) []Event {
-	events := make([]Event, 0, 2)
+// buildPendingSectionEvents converts a section header into events, tracking
+// task boundaries: a task_end is emitted for currentTask before the next
+// task_start or when the section moves past the task phase, mirroring
+// BroadcastLogger semantics. returns the events and the updated current task.
+func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time, currentTask int) (events []Event, newCurrentTask int) {
+	events = make([]Event, 0, 3)
+
+	taskNum := 0
 	if matches := taskIterationRegex.FindStringSubmatch(name); matches != nil {
-		if taskNum, err := strconv.Atoi(matches[1]); err == nil {
-			events = append(events, Event{
-				Type:      EventTypeTaskStart,
-				Phase:     phase,
-				TaskNum:   taskNum,
-				Text:      name,
-				Timestamp: ts,
-			})
-		}
+		taskNum, _ = strconv.Atoi(matches[1])
+	}
+
+	if currentTask > 0 && (taskNum > 0 || phase != status.PhaseTask) {
+		events = append(events, Event{
+			Type:      EventTypeTaskEnd,
+			Phase:     phase,
+			TaskNum:   currentTask,
+			Text:      fmt.Sprintf("task %d completed", currentTask),
+			Timestamp: ts,
+		})
+		currentTask = 0
+	}
+
+	if taskNum > 0 {
+		currentTask = taskNum
+		events = append(events, Event{
+			Type:      EventTypeTaskStart,
+			Phase:     phase,
+			TaskNum:   taskNum,
+			Text:      name,
+			Timestamp: ts,
+		})
 	}
 
 	events = append(events, Event{
@@ -508,7 +549,7 @@ func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time) []
 		Timestamp: ts,
 	})
 
-	return events
+	return events, currentTask
 }
 
 func eventFromParsed(parsed ParsedLine, phase status.Phase) Event {
