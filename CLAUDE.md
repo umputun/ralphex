@@ -313,7 +313,7 @@ Implementation:
 **Loading behavior:** agents are loaded with per-file fallback: local `.ralphex/agents/` → global `~/.config/ralphex/agents/` → embedded default. The 5 embedded agents are always the baseline — deleting an agent file from disk does not disable it, the embedded version is used as fallback. To disable a specific agent, remove its `{{agent:name}}` reference from the prompt files (`review_first.txt`, `review_second.txt`), not the agent file itself.
 
 **Frontmatter options:** Agent files support optional YAML frontmatter (`---` delimited) for per-agent model and subagent type:
-- `model: haiku|sonnet|opus` — Claude model for this agent
+- `model: haiku|sonnet|opus|fable` — Claude model for this agent
 - `agent: <type>` — Claude Code Task tool subagent type (default: `general-purpose`)
 - Parsed by `parseOptions()` in `pkg/config/frontmatter.go`, validated by `Options.Validate()`
 - Full model IDs (e.g. `claude-sonnet-4-5-20250929`) are normalized to short keywords (`sonnet`)

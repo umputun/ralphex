@@ -23,7 +23,7 @@ claude_command = claude
 claude_args = --dangerously-skip-permissions --output-format stream-json --verbose
 
 # plan_model: model to use for interactive plan creation
-# syntax: model[:effort] where model is opus/sonnet/haiku (or a full model ID like
+# syntax: model[:effort] where model is fable/opus/sonnet/haiku (or a full model ID like
 # claude-sonnet-4-5-20250929) and effort is low/medium/high/xhigh/max.
 # either part is optional: "opus" sets model only, ":high" sets effort only,
 # "opus:high" sets both. falls back to task_model when empty.
