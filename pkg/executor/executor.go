@@ -244,7 +244,7 @@ type ClaudeExecutor struct {
 	Command        string            // command to execute, defaults to "claude"
 	Args           string            // additional arguments (space-separated), defaults to standard args
 	ArgsSet        bool              // true when Args was explicitly set, including an empty value
-	Model          string            // model override (e.g., "opus", "sonnet", "haiku"); empty = CLI default
+	Model          string            // model override (e.g., "fable", "opus", "sonnet", "haiku"); empty = CLI default
 	Effort         string            // reasoning effort override (e.g., "low", "medium", "high", "xhigh", "max"); empty = CLI default
 	OutputHandler  func(text string) // called for each text chunk, can be nil
 	Debug          bool              // enable debug output

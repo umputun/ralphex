@@ -654,7 +654,7 @@ ralphex --review-patience=3 docs/plans/feature.md
 ralphex --wait=1h docs/plans/feature.md
 
 # use a stronger model for plan creation
-ralphex --plan-model=opus:high --plan="add caching"
+ralphex --plan-model=fable:high --plan="add caching"
 
 # use different models for tasks and reviews
 ralphex --task-model=opus --review-model=sonnet:low docs/plans/feature.md
@@ -780,10 +780,10 @@ Review the code for quality issues...
 
 | Option | Values | Description |
 |--------|--------|-------------|
-| `model` | `haiku`, `sonnet`, `opus` | Claude model for this agent |
+| `model` | `haiku`, `sonnet`, `opus`, `fable` | Claude model for this agent |
 | `agent` | any string | Claude Code Task tool subagent type |
 
-Both options are optional. Without frontmatter, agents use default model and `general-purpose` subagent type. Full model IDs (e.g. `claude-sonnet-4-5-20250929`) are normalized to short keywords (`sonnet`) since Claude Code only accepts `haiku`, `sonnet`, `opus`. Invalid model values are dropped with a warning.
+Both options are optional. Without frontmatter, agents use default model and `general-purpose` subagent type. Full model IDs (e.g. `claude-sonnet-4-5-20250929`) are normalized to short keywords (`sonnet`) since Claude Code only accepts `haiku`, `sonnet`, `opus`, `fable`. Invalid model values are dropped with a warning.
 
 ### Template Syntax
 
