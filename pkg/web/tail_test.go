@@ -78,7 +78,12 @@ func TestTailer_ParseLine(t *testing.T) {
 		require.Len(t, events, 2)
 		assert.Equal(t, EventTypeTaskEnd, events[0].Type)
 		assert.Equal(t, 2, events[0].TaskNum)
+		// task_end is tagged with the task phase even though the section that
+		// triggered the transition is a review section, so it buckets under the
+		// task section in the main output stream.
+		assert.Equal(t, status.PhaseTask, events[0].Phase)
 		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, status.PhaseReview, events[1].Phase)
 		assert.Equal(t, "review iteration 1", events[1].Section)
 	})
 
@@ -209,7 +214,9 @@ func TestTailer_ParseLineDeferred_TaskBoundaries(t *testing.T) {
 	require.Len(t, events, 3)
 	assert.Equal(t, EventTypeTaskEnd, events[0].Type)
 	assert.Equal(t, 2, events[0].TaskNum)
+	assert.Equal(t, status.PhaseTask, events[0].Phase, "task_end keeps the task phase across a transition")
 	assert.Equal(t, EventTypeSection, events[1].Type)
+	assert.Equal(t, status.PhaseReview, events[1].Phase)
 	assert.Equal(t, EventTypeOutput, events[2].Type)
 	assert.Equal(t, 0, tailer.CurrentTask())
 }

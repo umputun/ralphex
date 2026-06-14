@@ -761,7 +761,10 @@
         if (statusValue === 'active') {
             taskEl.classList.add('active');
             statusEl.textContent = '●';
-            taskEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // block:'nearest' confines scrolling to the plan panel; block:'start'
+            // walks all scrollable ancestors and can nudge the whole page when
+            // the panel is off-screen.
+            taskEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else if (statusValue === 'done') {
             statusEl.textContent = '✓';
             // mark all checkboxes as checked when task is done
