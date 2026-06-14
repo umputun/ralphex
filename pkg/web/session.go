@@ -534,6 +534,14 @@ func (s *Session) setLastPhase(phase status.Phase) {
 	s.lastPhase = phase
 }
 
+// getLastTask returns the task number active after the last ingested byte, or
+// zero if no task was active. package-internal accessor, thread-safe.
+func (s *Session) getLastTask() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastTask
+}
+
 // setLastTask updates the task number active after the last ingested byte.
 // package-internal accessor, thread-safe.
 func (s *Session) setLastTask(taskNum int) {

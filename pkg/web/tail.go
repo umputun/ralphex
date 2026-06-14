@@ -511,8 +511,8 @@ func (t *Tailer) emitPendingSection(ts time.Time) []Event {
 // task boundaries: a task_end is emitted for currentTask before the next
 // task_start or when the section moves past the task phase, mirroring
 // BroadcastLogger semantics. returns the events and the updated current task.
-func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time, currentTask int) (events []Event, newCurrentTask int) {
-	events = make([]Event, 0, 3)
+func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time, currentTask int) ([]Event, int) {
+	events := make([]Event, 0, 3)
 
 	taskNum := 0
 	if matches := taskIterationRegex.FindStringSubmatch(name); matches != nil {
@@ -520,9 +520,15 @@ func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time, cu
 	}
 
 	if currentTask > 0 && (taskNum > 0 || phase != status.PhaseTask) {
+		// task_end always belongs to the task phase: the task being closed ran
+		// under PhaseTask regardless of the incoming section's phase (which may
+		// be the review/codex section that triggered the transition). this
+		// mirrors BroadcastLogger.onPhaseChanged tagging task_end with the old
+		// (task) phase, and keeps the event bucketed under the task section in
+		// the main output stream.
 		events = append(events, Event{
 			Type:      EventTypeTaskEnd,
-			Phase:     phase,
+			Phase:     status.PhaseTask,
 			TaskNum:   currentTask,
 			Text:      fmt.Sprintf("task %d completed", currentTask),
 			Timestamp: ts,

@@ -290,10 +290,7 @@ Started: 2026-01-22 10:00:00
 		}
 		assert.Equal(t, []string{"task_start:1", "task_end:1", "task_start:2", "task_end:2"}, boundaries)
 
-		session.mu.RLock()
-		lastTask := session.lastTask
-		session.mu.RUnlock()
-		assert.Equal(t, 0, lastTask, "review section ended the last task")
+		assert.Equal(t, 0, session.getLastTask(), "review section ended the last task")
 	})
 
 	t.Run("records last task when file ends mid-task", func(t *testing.T) {
@@ -321,10 +318,7 @@ Started: 2026-01-22 10:00:00
 
 		m.loadProgressFileIntoSession(path, session)
 
-		session.mu.RLock()
-		lastTask := session.lastTask
-		session.mu.RUnlock()
-		assert.Equal(t, 2, lastTask, "task 2 still active at end of file")
+		assert.Equal(t, 2, session.getLastTask(), "task 2 still active at end of file")
 	})
 
 	t.Run("captures diffstats from output line", func(t *testing.T) {
