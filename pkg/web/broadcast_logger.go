@@ -77,9 +77,14 @@ func (b *BroadcastLogger) PrintSection(section status.Section) {
 	// emit boundary events based on section type
 	switch section.Type {
 	case status.SectionTaskIteration:
-		// emit task end for previous task (if any)
-		if b.currentTask > 0 {
-			b.broadcast(NewTaskEndEvent(b.holder.Get(), b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
+		// close the previous task only on forward progress to a higher-numbered
+		// task. section.Iteration is NextPlanTaskPosition, not a monotonic
+		// counter, so a timeout/FAILED retry re-emits the same N and a mid-run
+		// checkbox uncheck can move it backwards — neither means the current
+		// task finished. task_end is tagged PhaseTask (we are still in the task
+		// phase here) to match the file-parse path.
+		if b.currentTask > 0 && section.Iteration > b.currentTask {
+			b.broadcast(NewTaskEndEvent(status.PhaseTask, b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
 		}
 		b.currentTask = section.Iteration
 		b.broadcast(NewTaskStartEvent(b.holder.Get(), section.Iteration, section.Label))
@@ -107,6 +112,15 @@ func (b *BroadcastLogger) PrintAligned(text string) {
 	b.broadcast(NewOutputEvent(b.holder.Get(), text))
 
 	if signal := extractTerminalSignal(text); signal != "" {
+		// in tasks-only mode the run ends on COMPLETED with no following section
+		// and no phase transition, so onPhaseChanged never closes the final
+		// task. close it here, before the signal event, so terminal cleanup on
+		// the client finds no still-active task. only the success signal closes
+		// a task; FAILED leaves it for terminal cleanup.
+		if signal == signalCompleted && b.currentTask > 0 {
+			b.broadcast(NewTaskEndEvent(status.PhaseTask, b.currentTask, fmt.Sprintf("task %d completed", b.currentTask)))
+			b.currentTask = 0
+		}
 		b.broadcast(NewSignalEvent(b.holder.Get(), signal))
 	}
 }

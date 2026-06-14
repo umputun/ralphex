@@ -321,6 +321,52 @@ Started: 2026-01-22 10:00:00
 		assert.Equal(t, 2, session.getLastTask(), "task 2 still active at end of file")
 	})
 
+	t.Run("closes final task on completion signal in tasks-only run", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "progress-tasks-only.txt")
+
+		// tasks-only run: ends on the completion signal with no review section
+		// following the last task, so the signal must close the final task.
+		content := `# Ralphex Progress Log
+Plan: docs/plan.md
+Branch: main
+Mode: tasks-only
+Started: 2026-01-22 10:00:00
+------------------------------------------------------------
+
+--- task iteration 1 ---
+[26-01-22 10:00:01] task one output
+--- task iteration 2 ---
+[26-01-22 10:00:02] task two output
+[26-01-22 10:00:03] ` + status.Completed + `
+`
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		m := NewSessionManager()
+		defer m.Close()
+		session := NewSession("test-tasks-only", path)
+		defer session.Close()
+
+		require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "seed")))
+		rawEvents, cleanup := subscribeSSEEvents(t, session)
+		defer cleanup()
+		_ = drainChannel(rawEvents, 50*time.Millisecond)
+
+		m.loadProgressFileIntoSession(path, session)
+
+		got := drainChannel(rawEvents, 50*time.Millisecond)
+		var boundaries []string
+		for _, raw := range got {
+			var e Event
+			require.NoError(t, json.Unmarshal([]byte(raw), &e))
+			if e.Type == EventTypeTaskStart || e.Type == EventTypeTaskEnd {
+				boundaries = append(boundaries, fmt.Sprintf("%s:%d", e.Type, e.TaskNum))
+			}
+		}
+		assert.Equal(t, []string{"task_start:1", "task_end:1", "task_start:2", "task_end:2"}, boundaries)
+		assert.Equal(t, 0, session.getLastTask(), "completion signal closed the final task")
+	})
+
 	t.Run("captures diffstats from output line", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "progress-diffstats.txt")

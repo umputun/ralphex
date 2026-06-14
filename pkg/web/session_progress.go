@@ -187,6 +187,11 @@ func (m *SessionManager) processProgressLine(session *Session, parsed ParsedLine
 			m.publishEvents(session, events)
 			pendingSection = ""
 		}
+		// close the final task in --tasks-only runs, which end on COMPLETED with
+		// no following section to trigger the task_end.
+		var endEvents []Event
+		endEvents, currentTask = taskEndOnCompletion(parsed, currentTask)
+		m.publishEvents(session, endEvents)
 		event := eventFromParsed(parsed, phase)
 		if event.Type == EventTypeOutput {
 			if stats, ok := parseDiffStats(event.Text); ok {

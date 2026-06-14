@@ -221,6 +221,80 @@ func TestTailer_ParseLineDeferred_TaskBoundaries(t *testing.T) {
 	assert.Equal(t, 0, tailer.CurrentTask())
 }
 
+func TestTailer_ParseLine_TaskRetryAndBackwards(t *testing.T) {
+	tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+	tailer.inHeader = false
+
+	// advance from task 1 to task 2
+	tailer.parseLine("--- task iteration 1 ---")
+	tailer.parseLine("--- task iteration 2 ---")
+	require.Equal(t, 2, tailer.CurrentTask())
+
+	t.Run("retry of same task does not emit task_end", func(t *testing.T) {
+		// a timeout/FAILED retry re-emits the same iteration number; task 2 did
+		// not finish, so it must not flip done then back to active.
+		events := tailer.parseLine("--- task iteration 2 ---")
+		require.Len(t, events, 2)
+		assert.Equal(t, EventTypeTaskStart, events[0].Type)
+		assert.Equal(t, 2, events[0].TaskNum)
+		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, 2, tailer.CurrentTask())
+	})
+
+	t.Run("backwards move does not mark the higher task done", func(t *testing.T) {
+		// an earlier task's checkbox was unchecked mid-run, so the section
+		// number moves backwards; task 2 is not done and must not be closed.
+		events := tailer.parseLine("--- task iteration 1 ---")
+		require.Len(t, events, 2)
+		assert.Equal(t, EventTypeTaskStart, events[0].Type)
+		assert.Equal(t, 1, events[0].TaskNum)
+		assert.Equal(t, EventTypeSection, events[1].Type)
+		assert.Equal(t, 1, tailer.CurrentTask())
+	})
+}
+
+func TestTailer_ParseLine_CompletionSignalClosesTask(t *testing.T) {
+	t.Run("completion signal closes the active task", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = false
+		tailer.parseLine("--- task iteration 1 ---")
+		require.Equal(t, 1, tailer.CurrentTask())
+
+		// tasks-only runs end on COMPLETED with no following section to trigger
+		// the task_end, so the signal line closes the final task.
+		events := tailer.parseLine("[26-01-22 10:00:05] " + status.Completed)
+		require.Len(t, events, 2)
+		assert.Equal(t, EventTypeTaskEnd, events[0].Type)
+		assert.Equal(t, 1, events[0].TaskNum)
+		assert.Equal(t, status.PhaseTask, events[0].Phase)
+		assert.Equal(t, EventTypeSignal, events[1].Type)
+		assert.Equal(t, "COMPLETED", events[1].Signal)
+		assert.Equal(t, 0, tailer.CurrentTask())
+	})
+
+	t.Run("failed signal leaves the task active", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = false
+		tailer.parseLine("--- task iteration 1 ---")
+
+		events := tailer.parseLine("[26-01-22 10:00:05] " + status.Failed)
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeSignal, events[0].Type)
+		assert.Equal(t, "FAILED", events[0].Signal)
+		assert.Equal(t, 1, tailer.CurrentTask(), "FAILED does not close the task")
+	})
+
+	t.Run("completion signal with no active task is a no-op", func(t *testing.T) {
+		tailer := NewTailer("/tmp/test.txt", DefaultTailerConfig())
+		tailer.inHeader = false
+
+		events := tailer.parseLine("[26-01-22 10:00:05] " + status.Completed)
+		require.Len(t, events, 1)
+		assert.Equal(t, EventTypeSignal, events[0].Type)
+		assert.Equal(t, 0, tailer.CurrentTask())
+	})
+}
+
 func TestTailer_PhaseFromSection(t *testing.T) {
 	tests := []struct {
 		name     string
