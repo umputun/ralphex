@@ -1,7 +1,10 @@
 package web
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -195,6 +198,116 @@ func TestBroadcastLogger_PrintSection_TaskBoundaryEvents(t *testing.T) {
 	// emit another task iteration - should update currentTask
 	bl.PrintSection(status.NewTaskIterationSection(2))
 	assert.Equal(t, 2, bl.currentTask)
+}
+
+func TestBroadcastLogger_PrintSection_RetryDoesNotEmitTaskEnd(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		PrintSectionFunc: func(status.Section) {},
+	}
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+
+	holder := &status.PhaseHolder{}
+	holder.Set(status.PhaseTask)
+	bl := NewBroadcastLogger(mockLogger, session, holder)
+
+	// seed the SSE buffer before subscribing (the replayer stalls the
+	// subscription handshake on an empty buffer).
+	require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "seed")))
+	events, cleanup := subscribeSSEEvents(t, session)
+	defer cleanup()
+	_ = drainChannel(events, 50*time.Millisecond)
+
+	// section number is NextPlanTaskPosition, so a retry re-emits the same N;
+	// task 2 did not finish and must not flip done then back to active.
+	bl.PrintSection(status.NewTaskIterationSection(2))
+	bl.PrintSection(status.NewTaskIterationSection(2))
+
+	boundaries := collectTaskBoundaries(t, drainChannel(events, 50*time.Millisecond))
+	assert.Equal(t, []string{"task_start:2", "task_start:2"}, boundaries)
+	assert.Equal(t, 2, bl.currentTask)
+}
+
+func TestBroadcastLogger_PrintAligned_CompletionClosesTask(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		PrintSectionFunc: func(status.Section) {},
+		PrintAlignedFunc: func(string) {},
+	}
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+
+	holder := &status.PhaseHolder{}
+	holder.Set(status.PhaseTask)
+	bl := NewBroadcastLogger(mockLogger, session, holder)
+
+	// tasks-only run never transitions off the task phase, so onPhaseChanged
+	// never closes the last task - the completion signal must close it.
+	bl.PrintSection(status.NewTaskIterationSection(1))
+	require.Equal(t, 1, bl.currentTask)
+
+	events, cleanup := subscribeSSEEvents(t, session)
+	defer cleanup()
+	_ = drainChannel(events, 50*time.Millisecond)
+
+	bl.PrintAligned("all tasks done " + status.Completed)
+
+	drained := drainChannel(events, 50*time.Millisecond)
+	types := make([]string, 0, len(drained))
+	var taskEnd Event
+	for _, raw := range drained {
+		var e Event
+		require.NoError(t, json.Unmarshal([]byte(raw), &e))
+		types = append(types, string(e.Type))
+		if e.Type == EventTypeTaskEnd {
+			taskEnd = e
+		}
+	}
+	// task_end is emitted before the signal so terminal cleanup on the client
+	// finds no still-active task.
+	assert.Equal(t, []string{"output", "task_end", "signal"}, types)
+	assert.Equal(t, 1, taskEnd.TaskNum)
+	assert.Equal(t, status.PhaseTask, taskEnd.Phase)
+	assert.Equal(t, 0, bl.currentTask)
+}
+
+func TestBroadcastLogger_PrintAligned_FailedDoesNotCloseTask(t *testing.T) {
+	mockLogger := &mocks.LoggerMock{
+		PrintSectionFunc: func(status.Section) {},
+		PrintAlignedFunc: func(string) {},
+	}
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+
+	holder := &status.PhaseHolder{}
+	holder.Set(status.PhaseTask)
+	bl := NewBroadcastLogger(mockLogger, session, holder)
+
+	bl.PrintSection(status.NewTaskIterationSection(1))
+
+	events, cleanup := subscribeSSEEvents(t, session)
+	defer cleanup()
+	_ = drainChannel(events, 50*time.Millisecond)
+
+	bl.PrintAligned("task failed " + status.Failed)
+
+	boundaries := collectTaskBoundaries(t, drainChannel(events, 50*time.Millisecond))
+	assert.Empty(t, boundaries, "FAILED does not close the task")
+	assert.Equal(t, 1, bl.currentTask)
+}
+
+// collectTaskBoundaries extracts "type:taskNum" strings for task_start/task_end
+// events from raw SSE event payloads, preserving order.
+func collectTaskBoundaries(t *testing.T, raw []string) []string {
+	t.Helper()
+	var boundaries []string
+	for _, payload := range raw {
+		var e Event
+		require.NoError(t, json.Unmarshal([]byte(payload), &e))
+		if e.Type == EventTypeTaskStart || e.Type == EventTypeTaskEnd {
+			boundaries = append(boundaries, fmt.Sprintf("%s:%d", e.Type, e.TaskNum))
+		}
+	}
+	return boundaries
 }
 
 func TestBroadcastLogger_PrintSection_IterationEvents(t *testing.T) {

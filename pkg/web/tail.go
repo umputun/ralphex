@@ -444,7 +444,9 @@ func (t *Tailer) parseLine(line string) []Event {
 		events, t.currentTask = buildPendingSectionEvents(parsed.Section, parsed.Phase, time.Now(), t.currentTask)
 		return events
 	case ParsedLineTimestamp:
-		return []Event{eventFromParsed(parsed, t.phase)}
+		endEvents, newTask := taskEndOnCompletion(parsed, t.currentTask)
+		t.currentTask = newTask
+		return append(endEvents, eventFromParsed(parsed, t.phase))
 	case ParsedLinePlain:
 		return []Event{eventFromParsed(parsed, t.phase)}
 	default:
@@ -475,6 +477,9 @@ func (t *Tailer) parseLineDeferred(line string) []Event {
 		if t.pendingSection != "" {
 			events = append(events, t.emitPendingSection(parsed.Timestamp)...)
 		}
+		var endEvents []Event
+		endEvents, t.currentTask = taskEndOnCompletion(parsed, t.currentTask)
+		events = append(events, endEvents...)
 		events = append(events, eventFromParsed(parsed, t.phase))
 		return events
 	case ParsedLinePlain:
@@ -507,6 +512,35 @@ func (t *Tailer) emitPendingSection(ts time.Time) []Event {
 	return events
 }
 
+// taskEndEvent builds a task_end boundary event for the given task. it is
+// always tagged with status.PhaseTask: the task being closed ran under the task
+// phase regardless of what section triggered the close (which may be a
+// review/codex section or a completion signal), mirroring
+// BroadcastLogger.onPhaseChanged and keeping the event bucketed under the task
+// section in the main output stream.
+func taskEndEvent(taskNum int, ts time.Time) Event {
+	return Event{
+		Type:      EventTypeTaskEnd,
+		Phase:     status.PhaseTask,
+		TaskNum:   taskNum,
+		Text:      fmt.Sprintf("task %d completed", taskNum),
+		Timestamp: ts,
+	}
+}
+
+// taskEndOnCompletion returns a task_end event (and the cleared task number)
+// when a timestamped line carries the success-completion signal while a task is
+// still active. this closes the final task in --tasks-only runs, which end on
+// COMPLETED with no following section to trigger the task_end. only the success
+// signal closes a task; FAILED leaves it for terminal cleanup. returns nil and
+// the unchanged task number for every other line.
+func taskEndOnCompletion(parsed ParsedLine, currentTask int) ([]Event, int) {
+	if currentTask > 0 && parsed.Signal == signalCompleted {
+		return []Event{taskEndEvent(currentTask, parsed.Timestamp)}, 0
+	}
+	return nil, currentTask
+}
+
 // buildPendingSectionEvents converts a section header into events, tracking
 // task boundaries: a task_end is emitted for currentTask before the next
 // task_start or when the section moves past the task phase, mirroring
@@ -519,20 +553,15 @@ func buildPendingSectionEvents(name string, phase status.Phase, ts time.Time, cu
 		taskNum, _ = strconv.Atoi(matches[1])
 	}
 
-	if currentTask > 0 && (taskNum > 0 || phase != status.PhaseTask) {
-		// task_end always belongs to the task phase: the task being closed ran
-		// under PhaseTask regardless of the incoming section's phase (which may
-		// be the review/codex section that triggered the transition). this
-		// mirrors BroadcastLogger.onPhaseChanged tagging task_end with the old
-		// (task) phase, and keeps the event bucketed under the task section in
-		// the main output stream.
-		events = append(events, Event{
-			Type:      EventTypeTaskEnd,
-			Phase:     status.PhaseTask,
-			TaskNum:   currentTask,
-			Text:      fmt.Sprintf("task %d completed", currentTask),
-			Timestamp: ts,
-		})
+	// close the current task only on forward progress to a higher-numbered task,
+	// or when leaving the task phase. the section number is NextPlanTaskPosition,
+	// not a monotonic counter, so a timeout/FAILED retry re-emits the same N and
+	// a mid-run checkbox uncheck can move it backwards — neither means the
+	// current task finished, so neither should mark it done.
+	movingToLaterTask := taskNum > currentTask
+	leavingTaskPhase := taskNum == 0 && phase != status.PhaseTask
+	if currentTask > 0 && (movingToLaterTask || leavingTaskPhase) {
+		events = append(events, taskEndEvent(currentTask, ts))
 		currentTask = 0
 	}
 
