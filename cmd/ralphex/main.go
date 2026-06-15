@@ -295,7 +295,7 @@ func run(ctx context.Context, o opts) error {
 	// rev-parse --show-toplevel for repo validation instead (pure hg repos have no .git).
 	if cfg.VcsCommand == "" || cfg.VcsCommand == "git" {
 		if _, statErr := os.Stat(".git"); statErr != nil {
-			return errors.New("must run from repository root (no .git directory found)")
+			return errors.New("must run from repository root (no .git directory found); run from the repo root or 'git init' for a new project")
 		}
 	}
 
@@ -393,16 +393,33 @@ func getCurrentBranch(gitSvc *git.Service) string {
 }
 
 // tryAutoPlanMode attempts to switch to plan mode when no plans are found on the default branch.
-// returns (true, nil) if user canceled, (true, err) if plan mode was attempted, or (false, nil) if auto-plan-mode doesn't apply.
+// when no plans are found but auto-plan-mode does not apply, it returns (true, err) with an
+// explanatory error so the user always learns why interactive plan creation was not offered.
+// returns (true, nil) if the user canceled, (true, err) if plan mode was attempted or refused
+// with a reason, or (false, nil) if the selection error is unrelated to missing plans.
 func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequest,
 	selector *plan.Selector) (bool, error) {
-	if !errors.Is(err, plan.ErrNoPlansFound) || o.Review || o.ExternalOnly || o.CodexOnly || o.TasksOnly {
+	// only a missing-plans error is a candidate for auto-plan-mode; other errors propagate as-is.
+	if !errors.Is(err, plan.ErrNoPlansFound) {
 		return false, nil
 	}
 
+	// interactive plan creation only runs in full execution mode; explain when another mode suppresses it.
+	if o.Review || o.ExternalOnly || o.CodexOnly || o.TasksOnly {
+		return true, fmt.Errorf("interactive plan creation is not available in this mode; provide an existing plan file: %w", err)
+	}
+
 	isDefault, branchErr := req.GitSvc.IsDefaultBranch(req.DefaultBranch)
-	if branchErr != nil || !isDefault {
-		return false, nil //nolint:nilerr // branchErr is intentionally ignored - if we can't get branch, skip auto-plan-mode
+	if branchErr != nil {
+		return true, fmt.Errorf(
+			"cannot offer interactive plan creation: failed to determine current branch (%v); "+
+				"pass a plan file or use --plan: %w", branchErr, err)
+	}
+	if !isDefault {
+		return true, fmt.Errorf(
+			"interactive plan creation is only offered on the default branch %q (currently on %q); "+
+				"switch to %q, pass a plan file, or use --plan: %w",
+			req.DefaultBranch, getCurrentBranch(req.GitSvc), req.DefaultBranch, err)
 	}
 
 	description := plan.PromptDescription(ctx, os.Stdin, req.Colors)
@@ -827,7 +844,7 @@ func checkClaudeDep(cfg *config.Config) error {
 		claudeCmd = "claude"
 	}
 	if _, err := exec.LookPath(claudeCmd); err != nil {
-		return fmt.Errorf("%s not found in PATH", claudeCmd)
+		return fmt.Errorf("%s not found in PATH; install Claude Code or set claude_command in config to a compatible CLI", claudeCmd)
 	}
 	return nil
 }
@@ -841,7 +858,7 @@ func checkCodexDep(cfg *config.Config) error {
 		codexCmd = "codex"
 	}
 	if _, err := exec.LookPath(codexCmd); err != nil {
-		return fmt.Errorf("%s not found in PATH", codexCmd)
+		return fmt.Errorf("%s not found in PATH; install the codex CLI or set codex_command in config", codexCmd)
 	}
 	return nil
 }
@@ -1339,7 +1356,7 @@ func initLocal(configDir string) error {
 	if !hasGit && !hasHg {
 		cfg, loadErr := config.LoadReadOnly(configDir)
 		if loadErr != nil || cfg.VcsCommand == "" || cfg.VcsCommand == "git" {
-			return errors.New("must run from repository root (no .git or .hg directory found)")
+			return errors.New("must run from repository root (no .git or .hg directory found); cd to the repository root before running --init")
 		}
 		// custom VCS backend configured — validate repo root using the backend command
 		if validErr := validateRepoRoot(cfg.VcsCommand); validErr != nil {
@@ -1390,7 +1407,7 @@ func validateRepoRoot(vcsCommand string) error {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 	if root != cwd {
-		return fmt.Errorf("not at repository root (root is %s)", root)
+		return fmt.Errorf("not at repository root (root is %s); cd %s and re-run", root, root)
 	}
 	return nil
 }
