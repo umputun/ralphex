@@ -532,6 +532,7 @@ Two images are published:
 |------|---------|---------|
 | Claude Code | latest | AI coding assistant |
 | Codex | latest | External code review |
+| fya | latest | Optional claude print-mode wrapper (PTY-backed) |
 | Node.js/npm | 24.x | Required for Claude Code |
 | Python/pip | 3.x | Scripts and automation |
 | git | 2.x | Version control |

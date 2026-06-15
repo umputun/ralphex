@@ -210,7 +210,7 @@ ralphex provides Docker images for isolated execution:
 
 | Image | Contents |
 |-------|----------|
-| `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, Node.js, Python, git, docker-cli, make, gcc, bash, fzf, ripgrep |
+| `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, fya, Node.js, Python, git, docker-cli, make, gcc, bash, fzf, ripgrep |
 | `ghcr.io/umputun/ralphex-go:latest` | Go development: base + Go 1.26, golangci-lint, moq, goimports |
 
 **Using Docker wrapper** (requires Python 3.9+):
