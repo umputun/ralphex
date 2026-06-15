@@ -180,12 +180,12 @@ go.mongodb.org/mongo-driver/x/bsonx/bsoncore
 ## explicit; go 1.25.0
 golang.org/x/net/html
 golang.org/x/net/html/atom
-# golang.org/x/sys v0.45.0
+# golang.org/x/sys v0.46.0
 ## explicit; go 1.25.0
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.43.0
+# golang.org/x/term v0.44.0
 ## explicit; go 1.25.0
 golang.org/x/term
 # golang.org/x/text v0.36.0
@@ -198,7 +198,7 @@ golang.org/x/text/internal/tag
 golang.org/x/text/language
 golang.org/x/text/transform
 golang.org/x/text/unicode/norm
-# gopkg.in/ini.v1 v1.67.2
+# gopkg.in/ini.v1 v1.67.3
 ## explicit; go 1.13
 gopkg.in/ini.v1
 # gopkg.in/yaml.v3 v3.0.1

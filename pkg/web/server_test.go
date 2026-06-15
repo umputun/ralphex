@@ -37,9 +37,10 @@ func TestServer_HandleIndex(t *testing.T) {
 	session := NewSession("test", "/tmp/test.txt")
 	defer session.Close()
 	srv, err := NewServer(ServerConfig{
-		Port:     8080,
-		PlanName: "my-plan.md",
-		Branch:   "feature-branch",
+		Port:      8080,
+		PlanName:  "my-plan.md",
+		Branch:    "feature-branch",
+		RunParams: "codex · task gpt-5.5:high",
 	}, session)
 	require.NoError(t, err)
 
@@ -62,6 +63,7 @@ func TestServer_HandleIndex(t *testing.T) {
 		assert.Contains(t, bodyStr, "Ralphex Dashboard")
 		assert.Contains(t, bodyStr, "my-plan.md")
 		assert.Contains(t, bodyStr, "feature-branch")
+		assert.Contains(t, bodyStr, "codex · task gpt-5.5:high")
 	})
 
 	t.Run("returns 404 for non-root paths", func(t *testing.T) {
@@ -394,6 +396,9 @@ func TestServer_HandleSessions(t *testing.T) {
 Plan: docs/plans/test-plan.md
 Branch: feature-branch
 Mode: full
+Executor: codex
+Task model: gpt-5.5:high
+Review model: gpt-5.5:low
 Started: 2026-01-22 10:30:00
 ------------------------------------------------------------
 [10:30:00] Starting execution
@@ -432,6 +437,7 @@ Started: 2026-01-22 10:30:00
 		assert.Equal(t, "docs/plans/test-plan.md", sessions[0].PlanPath)
 		assert.Equal(t, "feature-branch", sessions[0].Branch)
 		assert.Equal(t, "full", sessions[0].Mode)
+		assert.Equal(t, "codex · task gpt-5.5:high · review gpt-5.5:low", sessions[0].RunParams)
 	})
 
 	t.Run("rejects non-GET methods", func(t *testing.T) {
@@ -820,6 +826,27 @@ func TestExtractProjectDir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := extractProjectDir(tc.path)
 			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestFormatRunParams(t *testing.T) {
+	tests := []struct {
+		name                                        string
+		executor, planModel, taskModel, reviewModel string
+		want                                        string
+	}{
+		{name: "all empty", want: ""},
+		{name: "executor only", executor: "codex", want: "codex"},
+		{name: "task model only", taskModel: "opus:high", want: "task opus:high"},
+		{name: "task and review models", taskModel: "opus", reviewModel: "sonnet:low", want: "task opus · review sonnet:low"},
+		{name: "executor with models", executor: "codex", taskModel: "gpt-5.5:high", reviewModel: "gpt-5.5:low", want: "codex · task gpt-5.5:high · review gpt-5.5:low"},
+		{name: "plan model only", planModel: "opus:high", want: "plan opus:high"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, FormatRunParams(tc.executor, tc.planModel, tc.taskModel, tc.reviewModel))
 		})
 	}
 }

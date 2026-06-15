@@ -56,7 +56,7 @@ ralphex --review-patience=3 docs/plans/feature.md
 ralphex --wait=1h docs/plans/feature.md
 
 # use a stronger model for plan creation
-ralphex --plan-model=opus:high --plan="add caching"
+ralphex --plan-model=fable:high --plan="add caching"
 
 # use different models for tasks and reviews
 ralphex --task-model=opus --review-model=sonnet:low docs/plans/feature.md
@@ -148,7 +148,7 @@ Under the codex executor (`--codex` or `executor = codex`), `plan_model`/`task_m
 
 ```ini
 # in ~/.config/ralphex/config
-plan_model = opus:high
+plan_model = fable:high
 task_model = sonnet:medium
 review_model = sonnet:low
 ```
@@ -211,7 +211,7 @@ ralphex provides Docker images for isolated execution:
 
 | Image | Contents |
 |-------|----------|
-| `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, Node.js, Python, git, docker-cli, make, gcc, bash, fzf, ripgrep |
+| `ghcr.io/umputun/ralphex:latest` | Base: Claude Code, Codex, fya, Node.js, Python, git, docker-cli, make, gcc, bash, fzf, ripgrep |
 | `ghcr.io/umputun/ralphex-go:latest` | Go development: base + Go 1.26, golangci-lint, moq, goimports |
 
 **Using Docker wrapper** (requires Python 3.9+):

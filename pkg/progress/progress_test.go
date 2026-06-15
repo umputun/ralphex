@@ -76,6 +76,62 @@ func TestNewLogger(t *testing.T) {
 	}
 }
 
+func TestNewLogger_HeaderRunParams(t *testing.T) {
+	colors := testColors()
+
+	tests := []struct {
+		name        string
+		params      RunParams
+		wantLines   []string
+		absentLines []string
+	}{
+		{
+			name:        "no params set omits all lines",
+			params:      RunParams{},
+			absentLines: []string{"Executor: ", "Plan model: ", "Task model: ", "Review model: "},
+		},
+		{
+			name:        "task model only",
+			params:      RunParams{TaskModel: "opus:high"},
+			wantLines:   []string{"Task model: opus:high\n"},
+			absentLines: []string{"Executor: ", "Plan model: ", "Review model: "},
+		},
+		{
+			name:      "codex executor with task and review models",
+			params:    RunParams{Executor: "codex", TaskModel: "gpt-5.5:high", ReviewModel: "gpt-5.5:low"},
+			wantLines: []string{"Executor: codex\n", "Task model: gpt-5.5:high\n", "Review model: gpt-5.5:low\n"},
+		},
+		{
+			name:        "plan model only",
+			params:      RunParams{PlanModel: "opus:high"},
+			wantLines:   []string{"Plan model: opus:high\n"},
+			absentLines: []string{"Executor: ", "Task model: ", "Review model: "},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			origDir, _ := os.Getwd()
+			require.NoError(t, os.Chdir(t.TempDir()))
+			defer func() { _ = os.Chdir(origDir) }()
+
+			holder := &status.PhaseHolder{}
+			l, err := NewLogger(Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main", Params: tc.params}, colors, holder)
+			require.NoError(t, err)
+			defer l.Close()
+
+			content, err := os.ReadFile(l.Path())
+			require.NoError(t, err)
+			for _, want := range tc.wantLines {
+				assert.Contains(t, string(content), want)
+			}
+			for _, absent := range tc.absentLines {
+				assert.NotContains(t, string(content), absent)
+			}
+		})
+	}
+}
+
 func TestNewLogger_AppendOnRestart(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
