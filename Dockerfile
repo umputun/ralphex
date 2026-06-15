@@ -50,7 +50,7 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && \
     { [ -n "$TAG" ] && [ "$TAG" != "null" ]; } || { echo "error: could not resolve latest fya release"; exit 1; } && \
     wget -qO- "https://github.com/umputun/fya/releases/download/${TAG}/fya_${TAG#v}_linux_${ARCH}.tar.gz" | \
         tar -xz -C /usr/local/bin fya && \
-    command -v fya >/dev/null || { echo "error: fya CLI not found"; exit 1; }
+    fya --version >/dev/null || { echo "error: fya CLI not runnable"; exit 1; }
 
 # copy ralphex binary
 COPY --from=build /build/ralphex /srv/ralphex
