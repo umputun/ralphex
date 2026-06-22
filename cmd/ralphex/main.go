@@ -416,10 +416,17 @@ func tryAutoPlanMode(ctx context.Context, err error, o opts, req executePlanRequ
 				"pass a plan file or use --plan: %w", branchErr, err)
 	}
 	if !isDefault {
+		// normalize the default-branch name for display the same way matchesDefaultBranch compares it:
+		// strip the origin/ prefix and fall back to main/master when unset, so the hint names the
+		// local branch the user can actually switch to rather than "origin/main" or an empty string.
+		defaultName := strings.TrimPrefix(req.DefaultBranch, "origin/")
+		if defaultName == "" {
+			defaultName = "main/master"
+		}
 		return true, fmt.Errorf(
 			"interactive plan creation is only offered on the default branch %q (currently on %q); "+
 				"switch to %q, pass a plan file, or use --plan: %w",
-			req.DefaultBranch, getCurrentBranch(req.GitSvc), req.DefaultBranch, err)
+			defaultName, getCurrentBranch(req.GitSvc), defaultName, err)
 	}
 
 	description := plan.PromptDescription(ctx, os.Stdin, req.Colors)
@@ -1407,7 +1414,7 @@ func validateRepoRoot(vcsCommand string) error {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 	if root != cwd {
-		return fmt.Errorf("not at repository root (root is %s); cd %s and re-run", root, root)
+		return fmt.Errorf("not at repository root (root is %s); cd %q and re-run", root, root)
 	}
 	return nil
 }

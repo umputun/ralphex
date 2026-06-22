@@ -451,6 +451,16 @@ func TestTryAutoPlanMode(t *testing.T) {
 		assert.Contains(t, err.Error(), "--plan")
 	})
 
+	t.Run("origin_prefixed_default_branch_is_normalized_for_display", func(t *testing.T) {
+		req, selector := newReq(t, "master")
+		req.DefaultBranch = "origin/main"
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
+		assert.True(t, handled)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"main"`, "origin/ prefix stripped for display")
+		assert.NotContains(t, err.Error(), "origin/main", "raw remote-tracking ref not shown to user")
+	})
+
 	t.Run("tasks_only_mode_refuses_with_reason", func(t *testing.T) {
 		req, selector := newReq(t, "master")
 		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{TasksOnly: true}, req, selector)
