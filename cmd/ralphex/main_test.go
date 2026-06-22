@@ -426,6 +426,58 @@ func TestAutoPlanModeDetection(t *testing.T) {
 	})
 }
 
+func TestTryAutoPlanMode(t *testing.T) {
+	newReq := func(t *testing.T, branch string) (executePlanRequest, *plan.Selector) {
+		t.Helper()
+		dir := setupTestRepo(t)
+		gitSvc, err := git.NewService(dir, testColors().Info())
+		require.NoError(t, err)
+		if branch != "master" {
+			require.NoError(t, gitSvc.CreateBranch(branch))
+		}
+		selector := plan.NewSelector(filepath.Join(dir, "docs", "plans"), testColors())
+		req := executePlanRequest{GitSvc: gitSvc, DefaultBranch: "master", Colors: testColors()}
+		return req, selector
+	}
+
+	t.Run("non_default_branch_refuses_with_reason", func(t *testing.T) {
+		req, selector := newReq(t, "feature-x")
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
+		assert.True(t, handled, "missing-plans error on feature branch is handled")
+		require.Error(t, err)
+		require.ErrorIs(t, err, plan.ErrNoPlansFound, "wrapped sentinel preserved for callers")
+		assert.Contains(t, err.Error(), "default branch")
+		assert.Contains(t, err.Error(), "feature-x")
+		assert.Contains(t, err.Error(), "--plan")
+	})
+
+	t.Run("origin_prefixed_default_branch_is_normalized_for_display", func(t *testing.T) {
+		req, selector := newReq(t, "master")
+		req.DefaultBranch = "origin/main"
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
+		assert.True(t, handled)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"main"`, "origin/ prefix stripped for display")
+		assert.NotContains(t, err.Error(), "origin/main", "raw remote-tracking ref not shown to user")
+	})
+
+	t.Run("tasks_only_mode_refuses_with_reason", func(t *testing.T) {
+		req, selector := newReq(t, "master")
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{TasksOnly: true}, req, selector)
+		assert.True(t, handled)
+		require.Error(t, err)
+		require.ErrorIs(t, err, plan.ErrNoPlansFound)
+		assert.Contains(t, err.Error(), "not available in this mode")
+	})
+
+	t.Run("unrelated_error_is_not_handled", func(t *testing.T) {
+		req, selector := newReq(t, "master")
+		handled, err := tryAutoPlanMode(t.Context(), errors.New("fzf not found"), opts{}, req, selector)
+		assert.False(t, handled, "non-missing-plans error propagates to caller untouched")
+		require.NoError(t, err)
+	})
+}
+
 func TestCheckClaudeDep(t *testing.T) {
 	t.Run("uses_configured_command", func(t *testing.T) {
 		cfg := &config.Config{ClaudeCommand: "nonexistent-command-12345"}
