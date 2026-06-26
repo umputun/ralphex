@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.6.0 - 2026-06-26
+
+### New Features
+
+- Surface the reason when ralphex refuses to run #392 @umputun
+- Install latest fya in base docker image #390 @umputun
+- Add new Anthropic model Fable to supported agent models #384 @Alex-Kopylov
+- Display user-set run parameters (models, executor) in web dashboard #382 @vlondon
+- Add pi provider support (wrapper + skills) #378 @olomix
+
+### Improved
+
+- Bump actions/checkout from 6 to 7 #391 @dependabot
+- Bump golang.org/x/term from 0.43.0 to 0.44.0 #389 @dependabot
+- Bump golang.org/x/sys from 0.45.0 to 0.46.0 #388 @dependabot
+- Bump gopkg.in/ini.v1 from 1.67.2 to 1.67.3 #387 @dependabot
+
+### Fixed
+
+- Plan panel marks finished tasks done and scrolls to the active task #383 @vlondon
+
 ## v1.5.1 - 2026-06-08
 
 ### Fixed
