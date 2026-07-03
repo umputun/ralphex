@@ -765,6 +765,9 @@ Started: 2026-01-22 10:00:00
 		if testing.Short() {
 			t.Skip("skipping 65MB allocation in short mode")
 		}
+		if raceEnabled {
+			t.Skip("skipping under -race: parsing a 65MB line takes ~90s without the race detector and exceeds the test binary timeout with it")
+		}
 		dir := t.TempDir()
 		path := filepath.Join(dir, "progress-huge.txt")
 
