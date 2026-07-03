@@ -1463,7 +1463,9 @@ func isResetOnly(o opts) bool {
 
 // startInterruptWatcher prints immediate feedback when context is canceled.
 // if graceful shutdown doesn't complete within 5 seconds, force exits.
-// cleanup, if not nil, is called only on the force-exit (5s timeout) path before os.Exit.
+// cleanup, if not nil, is called only on the force-exit (5s timeout) path before
+// os.Exit; it gets an additional bounded wait (2s, via runCleanupBounded) so a
+// stuck cleanup cannot prevent the exit — worst-case total is ~7s after cancel.
 // returns a cleanup function that must be called (via defer) to prevent goroutine leaks.
 func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 	done := make(chan struct{})
@@ -1474,9 +1476,7 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 			select {
 			case <-time.After(5 * time.Second):
 				fmt.Fprintf(os.Stderr, "force exit\n")
-				if cleanup != nil {
-					cleanup()
-				}
+				runCleanupBounded(cleanup, 2*time.Second)
 				os.Exit(1)
 			case <-done:
 			}
@@ -1484,6 +1484,28 @@ func startInterruptWatcher(ctx context.Context, cleanup func()) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// runCleanupBounded runs cleanup in a separate goroutine and waits for it to
+// finish, but no longer than timeout. this bounds the force-exit path: cleanup
+// shares a sync.Once with the graceful shutdown's deferred worktree cleanup, so
+// when that cleanup is already in flight and stuck (e.g. a hanging git worktree
+// remove), calling it directly would block inside Once.Do forever and os.Exit
+// would never be reached.
+func runCleanupBounded(cleanup func(), timeout time.Duration) {
+	if cleanup == nil {
+		return
+	}
+	doneCh := make(chan struct{})
+	go func() {
+		cleanup()
+		close(doneCh)
+	}()
+	select {
+	case <-doneCh:
+	case <-time.After(timeout):
+		fmt.Fprintf(os.Stderr, "cleanup did not finish in time, exiting anyway\n")
+	}
 }
 
 // applyCLIOverrides applies CLI flag overrides to config.

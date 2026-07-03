@@ -3044,6 +3044,50 @@ func TestMakePauseHandler_EOFAborts(t *testing.T) {
 	assert.False(t, result, "handler should return false on EOF (stdin closed = abort)")
 }
 
+func TestRunCleanupBounded(t *testing.T) {
+	tests := []struct {
+		name        string
+		nilCleanup  bool
+		stuck       bool
+		maxDuration time.Duration
+	}{
+		{name: "nil cleanup returns immediately", nilCleanup: true, maxDuration: 50 * time.Millisecond},
+		{name: "fast cleanup runs to completion", maxDuration: 50 * time.Millisecond},
+		{name: "stuck cleanup returns after timeout instead of blocking forever", stuck: true, maxDuration: 500 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unblock := make(chan struct{})
+			ran := make(chan struct{})
+			defer close(unblock) // release a stuck cleanup goroutine at test end
+
+			var cleanup func()
+			switch {
+			case tt.nilCleanup:
+				cleanup = nil
+			case tt.stuck:
+				cleanup = func() { <-unblock } // models a hung Once.Do (git worktree remove stuck)
+			default:
+				cleanup = func() { close(ran) }
+			}
+
+			start := time.Now()
+			runCleanupBounded(cleanup, 100*time.Millisecond)
+			elapsed := time.Since(start)
+
+			assert.Less(t, elapsed, tt.maxDuration, "runCleanupBounded must not block past its timeout")
+			if !tt.nilCleanup && !tt.stuck {
+				select {
+				case <-ran:
+				default:
+					t.Fatal("cleanup should have run to completion")
+				}
+			}
+		})
+	}
+}
+
 // branchExists checks if a branch exists in the given git repository.
 func branchExists(t *testing.T, dir, branch string) bool {
 	t.Helper()
