@@ -6,6 +6,7 @@ import io
 import os
 import platform
 import shutil
+import stat
 import sys
 import tempfile
 import threading
@@ -43,6 +44,7 @@ from ralphex_dk import (  # noqa: E402
     get_claude_provider,
     get_docker_socket_gid,
     get_global_gitignore,
+    handle_update_script,
     is_docker_enabled,
     is_sensitive_name,
     keychain_service_name,
@@ -1031,6 +1033,38 @@ class TestMainArgparse(EnvTestCase):
             result = main()
         self.assertEqual(len(calls), 1)
         self.assertEqual(result, 0)
+
+    def test_update_script_preserves_readable_mode(self) -> None:
+        """updated wrapper keeps its 0755 mode, not 0711 unreadable by non-owner (issue #397)."""
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            script_path = tmp / "ralphex"
+            script_path.write_text("#!/usr/bin/env python3\n# old\n")
+            script_path.chmod(0o755)
+            new_content = b"#!/usr/bin/env python3\n# new\n"
+
+            class _Resp:
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *_a):
+                    return False
+
+                def read(self_inner):
+                    return new_content
+
+            with unittest.mock.patch("ralphex_dk.urlopen", return_value=_Resp()), \
+                    unittest.mock.patch("sys.stdin", io.StringIO("y\n")), \
+                    unittest.mock.patch("sys.stderr", io.StringIO()):
+                rc = handle_update_script(script_path)
+
+            self.assertEqual(rc, 0)
+            mode = script_path.stat().st_mode & 0o777
+            self.assertTrue(mode & stat.S_IROTH, f"world-read bit lost, mode={oct(mode)}")
+            self.assertEqual(mode, 0o755, f"expected 0755 preserved, got {oct(mode)}")
+            self.assertEqual(script_path.read_text(), new_content.decode())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_env_flags_build_cli_env(self) -> None:
         """CLI -E/--env flags are converted to docker -e flags."""

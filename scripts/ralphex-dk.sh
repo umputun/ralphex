@@ -856,8 +856,12 @@ def handle_update_script(script_path: Path) -> int:
         answer = sys.stdin.readline()  # returns "" on EOF, treated as "no"
 
         if answer.strip().lower() == "y":
+            # capture the current mode before copy2 overwrites it with the
+            # tmpfile's restrictive 0600, otherwise the result is 0711 (rwx--x--x)
+            # and the interpreter can't read the script for any non-owner user
+            original_mode = script_path.stat().st_mode
             shutil.copy2(tmp_path, str(script_path))
-            script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            script_path.chmod(original_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
             print("wrapper updated", file=sys.stderr)
         else:
             print("wrapper update skipped", file=sys.stderr)
