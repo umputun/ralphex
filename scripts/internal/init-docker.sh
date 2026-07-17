@@ -113,7 +113,8 @@ update_cli_tools
 if [ -d /mnt/claude ]; then
     mkdir -p /home/app/.claude
     # copy config files only (not cache, history, debug, todos, etc.)
-    for f in .credentials.json settings.json settings.local.json CLAUDE.md format.sh; do
+    # .credentials.json is rw bind-mounted directly to host when present as a file; skip here
+    for f in settings.json settings.local.json CLAUDE.md format.sh; do
         [ -e "/mnt/claude/$f" ] && cp -L "/mnt/claude/$f" "/home/app/.claude/$f" 2>/dev/null || true
     done
     # copy essential directories (symlinked in dotfiles setups)
@@ -135,6 +136,12 @@ fi
 # copy codex credentials if mounted
 if [ -d /mnt/codex ]; then
     mkdir -p /home/app/.codex
-    cp -rL /mnt/codex/* /home/app/.codex/ 2>/dev/null || true
+    for entry in /mnt/codex/*; do
+        [ -e "$entry" ] || continue
+        name="$(basename "$entry")"
+        # auth.json is rw bind-mounted directly to host when present as a file; skip here
+        [ "$name" = "auth.json" ] && continue
+        cp -rL "$entry" "/home/app/.codex/$name" 2>/dev/null || true
+    done
     chown -R app:app /home/app/.codex
 fi

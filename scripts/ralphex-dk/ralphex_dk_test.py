@@ -496,6 +496,57 @@ class TestBuildDockerCmd(_FakeHomeTestCase):
         finally:
             os.unlink(tmp_path)
 
+class TestOAuthTokenPersistence(_FakeHomeTestCase):
+    def test_codex_auth_json_rw_mount_when_file_exists(self) -> None:
+        """build_volumes adds rw bind-mount for ~/.codex/auth.json when it is a regular file."""
+        codex_dir = self.fake_home / ".codex"
+        codex_dir.mkdir()
+        auth_file = codex_dir / "auth.json"
+        auth_file.write_text('{"token": "x"}')
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        expected = f"{auth_file.resolve()}:/home/app/.codex/auth.json"
+        self.assertIn(expected, vols)
+        # must be rw (no :ro suffix)
+        idx = vols.index(expected)
+        self.assertNotIn(":ro", vols[idx])
+
+    def test_codex_auth_json_no_mount_when_absent(self) -> None:
+        """build_volumes does not add auth.json mount when ~/.codex/auth.json is missing."""
+        codex_dir = self.fake_home / ".codex"
+        codex_dir.mkdir()
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        self.assertNotIn("/home/app/.codex/auth.json", " ".join(vols))
+
+    def test_codex_auth_json_no_mount_when_directory(self) -> None:
+        """build_volumes does not add auth.json mount when the path is a directory (not a file)."""
+        codex_dir = self.fake_home / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "auth.json").mkdir()  # directory, not file
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        self.assertNotIn("/home/app/.codex/auth.json", " ".join(vols))
+
+    def test_claude_credentials_rw_mount_when_file_exists(self) -> None:
+        """build_volumes adds rw bind-mount for ~/.claude/.credentials.json when it is a regular file."""
+        claude_dir = self.fake_home / ".claude"
+        creds_file = claude_dir / ".credentials.json"
+        creds_file.write_text('{"token": "y"}')
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        expected = f"{creds_file.resolve()}:/home/app/.claude/.credentials.json"
+        self.assertIn(expected, vols)
+        idx = vols.index(expected)
+        self.assertNotIn(":ro", vols[idx])
+
+    def test_claude_credentials_no_mount_when_absent(self) -> None:
+        """build_volumes does not add .credentials.json rw mount when the file does not exist."""
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        self.assertNotIn("/home/app/.claude/.credentials.json", " ".join(vols))
+
+
 class TestKeychainServiceName(unittest.TestCase):
     def test_default_claude_dir(self) -> None:
         """default ~/.claude returns base service name without suffix."""
@@ -3182,7 +3233,8 @@ def run_tests() -> None:
                TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags,
                TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDetectExplicitSecrets, TestDryRun,
                TestDockerSocketGid, TestDockerSocketMount, TestBuildDockerCommandDockerGid,
-               TestDockerLinuxWarning, TestDryRunDocker, TestDockerNetwork]:
+               TestDockerLinuxWarning, TestDryRunDocker, TestDockerNetwork,
+               TestOAuthTokenPersistence]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

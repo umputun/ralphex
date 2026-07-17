@@ -377,6 +377,13 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
 
     # 1. claude_home (resolved) -> /mnt/claude:ro
     add(resolve_path(claude_home), "/mnt/claude", ro=True)
+    # rw bind-mount for .credentials.json so token refreshes persist back to host;
+    # only when the file already exists as a regular file — missing source with -v creates
+    # a directory at the destination, breaking claude credential loading.
+    # macOS keychain path (creds_temp) is handled separately below; no write-back there.
+    claude_creds = claude_home / ".credentials.json"
+    if claude_creds.is_file():
+        add(resolve_path(claude_creds), "/home/app/.claude/.credentials.json")
 
     # 2. cwd -> /workspace
     add(cwd, "/workspace")
@@ -398,6 +405,11 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
     if codex_dir.is_dir():
         add(resolve_path(codex_dir), "/mnt/codex", ro=True)
         add_symlink_targets(codex_dir)
+        # rw bind-mount for auth.json so token refreshes persist back to host;
+        # only when the file exists as a regular file — missing source with -v creates a directory.
+        codex_auth = codex_dir / "auth.json"
+        if codex_auth.is_file():
+            add(resolve_path(codex_auth), "/home/app/.codex/auth.json")
 
     # 7. ~/.config/ralphex -> /home/app/.config/ralphex + symlink targets
     # always mount, creating the host dir if missing — this ensures docker
