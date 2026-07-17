@@ -33,6 +33,9 @@ jobs:
       - name: test docker wrapper script
         run: python3 scripts/ralphex-dk.sh --test
 
+      - name: test container init script
+        run: sh scripts/internal/init-docker_test.sh
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

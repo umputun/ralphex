@@ -390,10 +390,11 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 **Container CAN access (read-write):**
 - Project directory mounted at `/workspace` - full access to create, modify, delete files
 - Git operations within the project (branch, commit, etc.)
+- `~/.claude/.credentials.json` and `~/.codex/auth.json` - bind-mounted individually into the container's home so OAuth token refreshes persist back to the host instead of being lost when the container exits
 
 **Container CAN access (read-only):**
-- `~/.claude/` - credentials and settings (copied at startup, not modified)
-- `~/.codex/` - codex credentials if present
+- `~/.claude/` - settings, commands, skills, and agents (copied into the container at startup)
+- `~/.codex/` - codex config if present
 - `~/.config/ralphex/` - user-level ralphex configuration
 - `~/.gitconfig` - git identity for commits
 - Global gitignore (`core.excludesFile`) - auto-detected and mounted
@@ -413,7 +414,8 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 </details>
 
 **Volume mounts:**
-- **Read-only**: `~/.claude` and `~/.codex` mounted to `/mnt/`, copied at startup to preserve isolation
+- **Read-only**: `~/.claude` and `~/.codex` mounted to `/mnt/`, copied at startup to preserve isolation (the two credential files below are bind-mounted separately instead of copied)
+- **Read-write (single-file)**: `~/.claude/.credentials.json` and `~/.codex/auth.json` bind-mounted to the matching paths under the container's home, so refreshed OAuth tokens are written back to the host
 - **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
 - **Extra mounts**: user-defined volumes via `-v`/`--volume` flags or `RALPHEX_EXTRA_VOLUMES` env var
 
