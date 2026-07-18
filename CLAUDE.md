@@ -140,6 +140,20 @@ Key functions in `scripts/ralphex-dk.sh`:
 
 `--network MODE` flag (or `RALPHEX_DOCKER_NETWORK`) passes `--network <value>` to `docker run` — lets the container reach docker-compose services on localhost.
 
+### CLI Refresh at Container Start
+
+The Dockerfile installs claude/codex unpinned, so a published tag freezes both at whatever npm served on that build (#410). Since they ship far more often than ralphex is tagged, a stale image silently resolves a short model alias (`sonnet`) to an older model rather than failing. Claude's own updater cannot apply here: npm installs it root-owned under `/usr/local/lib/node_modules` and the container runs as `app`, so the check only prints a startup notice — hence `ENV DISABLE_AUTOUPDATER=1` in the Dockerfile. The refresh is opt-in (`RALPHEX_CLI_UPDATE`): the base `ralphex` image leaves it off so authors building on it get no surprise npm install, network call, or version drift at start; `Dockerfile-go` bakes `ENV RALPHEX_CLI_UPDATE=1` so the wrapper's default image (`ralphex-go`) stays current.
+
+`update_cli_tools()` in `scripts/internal/init-docker.sh` runs `npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest` at start when the refresh is enabled, as root, before baseimage drops to `app`. Usually ~5s, bounded by `CLI_UPDATE_TIMEOUT` (90s) plus `--fetch-timeout=20000 --fetch-retries=1` — npm's own defaults (300s fetch-timeout, 2 retries) would let a black-holed registry stall every start for minutes. Best effort by design: install failure or deadline leaves the baked versions in place and returns 0. npm exit 0 does not imply working CLIs, so both are smoke-checked via `cli_version()` (bounded by `CLI_SMOKE_TIMEOUT`, 20s); the install replaces the baked packages in place, leaving no fallback, so a broken or hung CLI is reported loudly (pointing at re-running without `RALPHEX_CLI_UPDATE`) rather than failing later unexplained.
+
+Every `timeout` here passes `-k "$CLI_KILL_GRACE"`. Busybox `timeout` sends only SIGTERM by default, and a process ignoring it runs to completion **and exits 0** — so a bare `timeout` would neither bind the deadline nor report the overrun as a failure.
+
+`run_cli_install()` and `cli_version()` exist as stub seams: both wrap a `timeout` that execs a real binary, so a shell-function `npm`/`claude` stub would not intercept and the suite would install for real on the test machine. `cli_update_enabled()` gates on `RALPHEX_CLI_UPDATE` (opt-in, off by default; truthy `1`/`true`/`yes`), lowercasing and stripping whitespace to match `is_docker_enabled()` in `scripts/ralphex-dk.sh`. `build_base_env_vars()` there forwards a host-set `RALPHEX_CLI_UPDATE` into the container; when unset it forwards nothing, leaving the image's own default in charge (off for base, on for `ralphex-go`). The `--help` path pins `RALPHEX_CLI_UPDATE=0` on its own `docker run`, overriding a forwarded opt-in or the baked go-image default: the entrypoint is `/init.sh` and runs `/srv/init.sh` whatever command it is given, so rendering help would otherwise trigger the install.
+
+Exercised by `scripts/internal/init-docker_test.sh` via the `INIT_DOCKER_SOURCE_ONLY` guard — run it by hand (`sh scripts/internal/init-docker_test.sh`), no CI job or make target invokes it. `CLI_UPDATE_LOG` exists so that suite does not write to the caller's real `/tmp`.
+
+Known trade-off (applies only when enabled): this pulls `@latest` as root on every start, after the credential/workspace mounts are attached, so an upstream compromise executes npm lifecycle scripts with those mounts present (build-time installs had no user mounts). Off-by-default in the base image keeps that exposure opt-in. `--ignore-scripts` is not an option — claude-code's postinstall fetches its native binary, so the CLI is unusable without it.
+
 ### Git Package API
 
 Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, error)`

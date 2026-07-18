@@ -39,6 +39,7 @@ Environment variables:
   RALPHEX_PORT           Web dashboard port with --serve (default: 8080)
   RALPHEX_DOCKER_SOCKET  Enable Docker socket mount ("1", "true", "yes")
   RALPHEX_DOCKER_NETWORK Docker network mode (e.g., "host", "my-network")
+  RALPHEX_CLI_UPDATE     Update claude/codex at start ("1", "true", "yes"), off by default
   RALPHEX_EXTRA_ENV      Comma-separated env vars (VAR=value or VAR to inherit)
   RALPHEX_EXTRA_VOLUMES  Comma-separated volume mounts (src:dst[:opts])
 
@@ -115,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
               RALPHEX_PORT           Web dashboard port with --serve (default: 8080)
               RALPHEX_DOCKER_SOCKET  Enable Docker socket mount ("1", "true", "yes")
               RALPHEX_DOCKER_NETWORK Docker network mode (e.g., "host", "my-network")
+              RALPHEX_CLI_UPDATE     Update claude/codex at start ("1", "true", "yes"), off by default
               RALPHEX_EXTRA_ENV      Comma-separated env vars (VAR=value or VAR)
               RALPHEX_EXTRA_VOLUMES  Comma-separated volume mounts (src:dst[:opts])
 
@@ -899,7 +901,7 @@ def build_base_env_vars() -> list[str]:
     tz = detect_timezone()
     # TIME_ZONE configures baseimage's /etc/localtime; TZ is what Go's time
     # package reads for time.Local, so both must be set for consistent timestamps.
-    return [
+    result = [
         "-e", f"APP_UID={os.getuid()}",
         "-e", f"TIME_ZONE={tz}",
         "-e", f"TZ={tz}",
@@ -907,6 +909,12 @@ def build_base_env_vars() -> list[str]:
         "-e", "INIT_QUIET=1",
         "-e", "CLAUDE_CONFIG_DIR=/home/app/.claude",
     ]
+    # forward the opt-in so init.sh refreshes the CLIs; unset leaves the image's own default
+    # (off for the base image, baked on for ralphex-go) in charge
+    cli_update = os.environ.get("RALPHEX_CLI_UPDATE", "")
+    if cli_update:
+        result.extend(["-e", f"RALPHEX_CLI_UPDATE={cli_update}"])
+    return result
 
 
 def build_docker_command(
@@ -1061,6 +1069,10 @@ def main() -> int:
             volumes = build_volumes(creds_temp, claude_home)
             cmd = ["docker", "run", "--rm"]
             cmd.extend(build_base_env_vars())
+            # rendering help resolves no models, and the image entrypoint runs init.sh regardless of
+            # the command. force the refresh off here (overriding a forwarded opt-in or the ralphex-go
+            # image's baked-in default) so help is not preceded by a two-package npm install
+            cmd.extend(["-e", "RALPHEX_CLI_UPDATE=0"])
             cmd.extend(volumes)
             cmd.extend(["-w", "/workspace"])
             cmd.extend([image, "/srv/ralphex", "--help"])

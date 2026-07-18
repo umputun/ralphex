@@ -4,6 +4,12 @@ FROM ghcr.io/umputun/ralphex:${BASE_TAG}
 
 LABEL org.opencontainers.image.description="Autonomous plan execution with Claude Code - Go development"
 
+# opt this image into the claude/codex refresh at container start. ralphex-go is the wrapper's
+# default image, so the common path stays current even when this tag is weeks old (see #410); the
+# base ralphex image leaves this off so downstream authors decide. override per run with
+# RALPHEX_CLI_UPDATE=0.
+ENV RALPHEX_CLI_UPDATE=1
+
 # install latest go from official distribution
 ARG GO_VERSION=1.26.1
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && \

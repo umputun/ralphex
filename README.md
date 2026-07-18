@@ -433,8 +433,28 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 - `RALPHEX_EXTRA_ENV` - Extra environment variables, comma-separated (e.g., `DEBUG=1,API_KEY`). Format: `VAR=value` or `VAR` (inherit from host). Security warning emitted for sensitive names (KEY, SECRET, TOKEN, etc.) with explicit values - use name-only form for secure credential passing
 - `RALPHEX_DOCKER_SOCKET` - Enable Docker socket mount: `1`, `true`, or `yes` (Docker wrapper only). CLI flag: `--docker`
 - `RALPHEX_DOCKER_NETWORK` - Docker network mode (e.g., `host`, `my-network`). Useful for reaching docker-compose services. CLI flag: `--network`
+- `RALPHEX_CLI_UPDATE` - Refresh claude/codex to their current npm releases at container start: `1`, `true`, or `yes` (Docker images only). Off by default in the base image; baked on in `ralphex-go`
 - `TZ` - Override container timezone (default: auto-detected from host via `/etc/localtime`). Example: `TZ=Europe/Berlin ralphex docs/plans/feature.md`
 - `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
+
+**CLI freshness in the container:**
+
+The image installs claude and codex unpinned, so a published tag freezes them at whatever npm served on that build. Both ship far more often than ralphex is tagged, and a stale claude fails silently rather than loudly: a short model alias like `sonnet` resolves to whatever that build knew about, so `--task-model=sonnet` can quietly run an older model. Claude's own updater cannot help here, since npm installs it root-owned and the container runs as the `app` user.
+
+Setting `RALPHEX_CLI_UPDATE=1` refreshes both CLIs to their current npm releases on start, before dropping privileges. It usually adds about 5 seconds and is capped by a 90 second deadline. Best effort: if npm fails or the deadline is hit, the versions baked into the image are used and the run continues. If the install succeeds but a CLI does not run, the container says so rather than failing later without explanation.
+
+The base `ralphex` image leaves this **off** so anyone building on it gets no surprise npm install, network call, or version drift at container start. The `ralphex-go` image (the wrapper's default) bakes it **on**, so the common path stays current. Enable it yourself for a single run:
+
+```bash
+RALPHEX_CLI_UPDATE=1 ralphex docs/plans/feature.md
+```
+
+Or bake it into a custom image so every run refreshes:
+
+```dockerfile
+FROM ghcr.io/umputun/ralphex:latest
+ENV RALPHEX_CLI_UPDATE=1
+```
 
 **Docker socket support:**
 
@@ -589,6 +609,8 @@ ENV CARGO_HOME=/home/app/.cargo PATH="${PATH}:${CARGO_HOME}/bin"
 RUN apk add --no-cache openjdk21-jdk
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk PATH="${PATH}:${JAVA_HOME}/bin"
 ```
+
+Add `ENV RALPHEX_CLI_UPDATE=1` to your image if you want it to refresh claude/codex to the latest npm release on every container start, the way `ralphex-go` does. The base image leaves it off.
 
 Build and use:
 ```bash

@@ -23,8 +23,91 @@ seed_claude_plugins() {
     done
 }
 
+# cli_update_enabled reports whether claude/codex should be refreshed before the run. off by default
+# so the base image stays quiet: authors building on it get no surprise npm install, network call, or
+# version drift at container start. the image installs both CLIs unpinned, so a published tag freezes
+# them at whatever npm served on that build, and both ship far more often than ralphex is tagged (see
+# #410). a stale claude does not fail loudly, it resolves a short model alias like `sonnet` to an
+# older model. opt in with RALPHEX_CLI_UPDATE=1: our ralphex-go image bakes it in, custom images add
+# `ENV RALPHEX_CLI_UPDATE=1`, or set it per run via the wrapper.
+cli_update_enabled() {
+    # same truthy set and case-insensitivity as is_docker_enabled() in scripts/ralphex-dk.sh
+    val=$(printf '%s' "${RALPHEX_CLI_UPDATE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+    case "$val" in
+        1|true|yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# hard deadline for the whole refresh. npm's own defaults are far too slow to rely on here
+# (fetch-timeout 300s, 2 retries), so a black-holed registry would stall every container start for
+# minutes. the bounded npm settings keep a single attempt short; the timeout caps the total.
+CLI_UPDATE_TIMEOUT=${CLI_UPDATE_TIMEOUT:-90}
+
+# deadline for a single `<cli> --version` smoke check
+CLI_SMOKE_TIMEOUT=${CLI_SMOKE_TIMEOUT:-20}
+
+# grace before SIGKILL. busybox timeout only sends SIGTERM by default, and a process that ignores it
+# runs to completion *and reports success* — so without -k neither deadline above actually binds.
+CLI_KILL_GRACE=${CLI_KILL_GRACE:-10}
+
+# overridable so tests do not write to the caller's real /tmp
+CLI_UPDATE_LOG=${CLI_UPDATE_LOG:-/tmp/cli-update.log}
+CLI_VERSION_FILE=${CLI_VERSION_FILE:-/tmp/cli-version.txt}
+
+# update_cli_tools refreshes claude and codex to their current npm releases. best effort by design:
+# on failure (offline, registry down, deadline hit) the image's baked versions stay in place and the
+# run continues. runs as root, before baseimage drops to the app user, because the npm global dir is
+# root-owned.
+# run_cli_install performs the install itself, kept separate so tests can stub it: `timeout` execs a
+# real binary, so a shell-function npm stub would not intercept and the suite would install for real.
+run_cli_install() {
+    timeout -k "$CLI_KILL_GRACE" "$CLI_UPDATE_TIMEOUT" npm install -g \
+        --fetch-timeout=20000 --fetch-retries=1 \
+        @anthropic-ai/claude-code@latest @openai/codex@latest >"$CLI_UPDATE_LOG" 2>&1
+}
+
+# cli_version prints $1's version, or nothing if it fails or hangs. same stub-seam reason as
+# run_cli_install: timeout execs a real binary, so a shell-function stub would not intercept.
+#
+# the version goes through a file rather than straight up the caller's command substitution: timeout
+# kills the CLI, but a child it spawned inherits the substitution's pipe and keeps it open, so $()
+# would block on the grandchild long past the deadline (measured: 30s against a 2s deadline).
+cli_version() {
+    if timeout -k "$CLI_KILL_GRACE" "$CLI_SMOKE_TIMEOUT" "$1" --version >"$CLI_VERSION_FILE" 2>/dev/null; then
+        cat "$CLI_VERSION_FILE" 2>/dev/null
+    fi
+}
+
+update_cli_tools() {
+    cli_update_enabled || return 0
+    if ! run_cli_install; then
+        # report why: the fallback is a silently older claude, which is the failure this whole step
+        # exists to prevent, and the log dies with the container
+        echo "ralphex: cli update failed, using versions baked into the image"
+        tail -3 "$CLI_UPDATE_LOG" 2>/dev/null | sed 's/^/ralphex:   /'
+        return 0
+    fi
+    # npm exiting 0 only means the install completed, not that either CLI runs. the install replaced
+    # the baked packages in place, so there is no fallback left to return to: say so loudly rather
+    # than let the run fail later with no hint of the cause. empty means missing, broken, or hung.
+    claude_ver=$(cli_version claude)
+    codex_ver=$(cli_version codex)
+    if [ -z "$claude_ver" ]; then
+        echo "ralphex: claude is broken after the update - re-run without RALPHEX_CLI_UPDATE to use the baked versions" >&2
+        return 0
+    fi
+    if [ -z "$codex_ver" ]; then
+        echo "ralphex: codex is broken after the update - re-run without RALPHEX_CLI_UPDATE to use the baked versions" >&2
+        return 0
+    fi
+    echo "ralphex: cli updated, claude $claude_ver, codex $codex_ver"
+}
+
 # when sourced by the test harness (INIT_DOCKER_SOURCE_ONLY set) expose the functions only
 [ -n "${INIT_DOCKER_SOURCE_ONLY:-}" ] && return 0
+
+update_cli_tools
 
 # copy only essential claude files (not the entire 2GB directory)
 if [ -d /mnt/claude ]; then

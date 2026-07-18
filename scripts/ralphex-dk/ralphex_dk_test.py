@@ -358,6 +358,46 @@ class TestDetectTimezone(unittest.TestCase):
             else:
                 os.environ["TZ"] = old
 
+    def test_cli_update_forwarded_when_set(self) -> None:
+        """RALPHEX_CLI_UPDATE reaches the container so init.sh runs the cli refresh."""
+        old = os.environ.get("RALPHEX_CLI_UPDATE")
+        try:
+            os.environ["RALPHEX_CLI_UPDATE"] = "1"
+            self.assertIn("RALPHEX_CLI_UPDATE=1", build_base_env_vars())
+        finally:
+            if old is None:
+                os.environ.pop("RALPHEX_CLI_UPDATE", None)
+            else:
+                os.environ["RALPHEX_CLI_UPDATE"] = old
+
+    def test_help_forces_cli_update_off(self) -> None:
+        """--help renders help only, but the image entrypoint runs init.sh whatever the command is,
+        so the help path forces the refresh off instead of paying for an npm install it cannot use."""
+        src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ralphex-dk.sh")
+        with open(src) as f:
+            body = f.read()
+        marker = '[image, "/srv/ralphex", "--help"]'
+        self.assertIn(marker, body)
+        # the docker run that builds the help command must force the refresh off
+        help_block = body[:body.index(marker)]
+        help_block = help_block[help_block.rindex('["docker", "run", "--rm"]'):]
+        self.assertIn('"RALPHEX_CLI_UPDATE=0"', help_block)
+
+    def test_cli_update_absent_by_default(self) -> None:
+        """update is opt-in: nothing is forwarded when the flag is unset or empty, leaving the
+        image's own default in charge."""
+        old = os.environ.get("RALPHEX_CLI_UPDATE")
+        try:
+            os.environ.pop("RALPHEX_CLI_UPDATE", None)
+            self.assertFalse([e for e in build_base_env_vars() if e.startswith("RALPHEX_CLI_UPDATE=")])
+            os.environ["RALPHEX_CLI_UPDATE"] = ""
+            self.assertFalse([e for e in build_base_env_vars() if e.startswith("RALPHEX_CLI_UPDATE=")])
+        finally:
+            if old is None:
+                os.environ.pop("RALPHEX_CLI_UPDATE", None)
+            else:
+                os.environ["RALPHEX_CLI_UPDATE"] = old
+
 class TestExtractCredentials(unittest.TestCase):
     def test_write_pattern_adds_trailing_newline(self) -> None:
         """credential write pattern appends newline (matching bash echo behavior)."""

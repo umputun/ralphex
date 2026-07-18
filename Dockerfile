@@ -39,6 +39,11 @@ ENV USE_BUILTIN_RIPGREP=0
 # mark container environment for ralphex (used to auto-disable codex sandbox)
 ENV RALPHEX_DOCKER=1
 
+# claude's own updater can never apply here: npm installs it root-owned and the container runs as
+# app, so the check only prints a startup notice and changes nothing. disable it; init.sh can refresh
+# both CLIs as root when RALPHEX_CLI_UPDATE is set, which this base image leaves off by default.
+ENV DISABLE_AUTOUPDATER=1
+
 # install claude code and codex globally, verify CLI commands exist
 RUN npm install -g @anthropic-ai/claude-code @openai/codex && \
     command -v claude >/dev/null || { echo "error: claude CLI not found"; exit 1; } && \
