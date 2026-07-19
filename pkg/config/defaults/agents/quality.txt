@@ -29,4 +29,3 @@ For each issue:
 - Fix: specific suggestion
 
 Focus on defects that would cause runtime failures, security vulnerabilities, or maintainability problems.
-Report findings only - no positive observations.

@@ -17,6 +17,8 @@ Plan file: {{PLAN_FILE}} - when a plan file exists, read it first for the stated
 
 6. Requirement edge cases - scenarios the requirement implies but the implementation does not handle. Generic boundary-condition bugs (empty inputs, null values) are the quality agent's domain - do not duplicate them here.
 
+7. Scope creep - are there unrelated or unintended changes beyond the stated requirement? Changes should solve only the stated problem.
+
 ## What to Report
 
 For each issue found:
@@ -27,4 +29,3 @@ For each issue found:
 - Fix: what needs to be added or changed
 
 Focus on whether the implementation achieves the goal, not on code style.
-Report findings only - no positive observations.

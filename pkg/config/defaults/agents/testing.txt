@@ -50,4 +50,3 @@ For each finding:
 - Fix: how to improve
 
 Focus on gaps that could let real bugs ship; treat naming and style observations as minor.
-Report findings only - no positive observations.

@@ -57,4 +57,3 @@ For each finding:
 - Effort: trivial/small/medium/large
 
 For large-effort findings, recommend a follow-up plan instead of an in-review fix.
-Report findings only - no positive observations.

@@ -59,5 +59,3 @@ For each gap:
 - Missing: what needs to be documented or corrected
 - Section: where in the documentation it should go
 - Suggested content: draft text or outline
-
-Report findings only - no positive observations.
