@@ -1,8 +1,11 @@
 Review whether the implementation achieves the stated goal/requirement.
 
+Goal: {{GOAL}}
+Plan file: {{PLAN_FILE}} - when a plan file exists, read it first for the stated requirements and success criteria.
+
 ## Core Review Responsibilities
 
-1. Requirement coverage - does implementation address all aspects of the stated requirement? Are there edge cases or scenarios not handled?
+1. Requirement coverage - does implementation address all aspects of the stated requirement?
 
 2. Correctness of approach - is the chosen approach actually solving the right problem? Could it fail to achieve the goal in certain conditions?
 
@@ -12,15 +15,16 @@ Review whether the implementation achieves the stated goal/requirement.
 
 5. Logic flow - does data flow correctly from input to output? Are transformations correct? Is state managed properly?
 
-6. Edge cases - are boundary conditions handled? Empty inputs, null values, concurrent access, error paths?
+6. Requirement edge cases - scenarios the requirement implies but the implementation does not handle. Generic boundary-condition bugs (empty inputs, null values) are the quality agent's domain - do not duplicate them here.
 
 ## What to Report
 
 For each issue found:
+- Location: exact file path and line number
+- Severity: critical/major/minor
 - Issue: clear description of what's wrong
 - Impact: how this prevents achieving the goal
-- Location: file and line reference
 - Fix: what needs to be added or changed
 
-Focus on correctness of approach, not code style.
-Report problems only - no positive observations.
+Focus on whether the implementation achieves the goal, not on code style.
+Report findings only - no positive observations.

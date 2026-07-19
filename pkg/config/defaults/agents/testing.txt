@@ -1,19 +1,17 @@
-Review test coverage and quality.
+Review test coverage and quality for the code changed in this branch. Report pre-existing test gaps only where they intersect the changed code.
 
 ## Test Existence and Coverage
 
 1. Missing tests - new code paths without corresponding tests
 2. Untested error paths - error conditions not verified
-3. Coverage gaps - functions or branches without test coverage
+3. Coverage gaps - changed functions or branches without tests
 4. Integration test needs - system boundaries requiring integration tests
+5. Skipped or disabled tests - tests turned off without justification
 
 ## Test Quality
 
 1. Tests verify behavior, not implementation details
-2. Each test is independent, can run in any order
-3. Descriptive test names that explain what is being tested
-4. Both success and error paths tested
-5. Edge cases and boundary conditions covered
+2. Descriptive test names that explain what is being tested
 
 ## Fake Test Detection
 
@@ -21,7 +19,7 @@ Watch for tests that don't actually verify code:
 - Tests that always pass regardless of code changes
 - Tests checking hardcoded values instead of actual output
 - Tests verifying mock behavior instead of code using the mock
-- Ignored errors with _ or empty error checks
+- Ignored errors (e.g. Go's _ assignment, empty catch blocks)
 - Conditional assertions that always pass
 - Commented out failing test cases
 
@@ -40,12 +38,16 @@ Watch for tests that don't actually verify code:
 4. Concurrent access scenarios
 5. Timeout and cancellation handling
 
+You may run the project's test suite to check for failing or flaky tests - report failures, do not fix them.
+
 ## What to Report
 
 For each finding:
-- Location: test file and function
-- Issue: what's wrong with the test
+- Location: file path and line number - the untested code for coverage gaps, the test for quality issues
+- Severity: critical/major/minor
+- Issue: what's wrong
 - Impact: what bugs could slip through
-- Fix: how to improve the test
+- Fix: how to improve
 
-Report problems only - no positive observations.
+Focus on gaps that could let real bugs ship; treat naming and style observations as minor.
+Report findings only - no positive observations.

@@ -1,10 +1,14 @@
 Detect over-engineered and overcomplicated code - code that works but is more complex than necessary.
 
+Scope: report only over-engineering this branch introduces or makes worse. Pre-existing complexity the branch does not touch is out of scope. Complexity explicitly required by the plan ({{PLAN_FILE}}) is not a finding.
+
+Skip generated code (mocks, protobuf/codegen output), vendored dependencies, and test fixtures.
+
 ## Excessive Abstraction Layers
 
 - Wrapper adds nothing - method just calls another method with same signature
 - Factory for single implementation - factory pattern when only one concrete type exists
-- Interface on producer side - interface defined where implemented, not where consumed
+- Interface on producer side - interface defined where implemented, not where consumed (applies to Go and other structurally-typed languages)
 - Layer cake anti-pattern - handler -> service -> repository when each just passes through
 - DTO/Mapper overkill - multiple types representing same data with conversion functions
 
@@ -17,7 +21,6 @@ Detect over-engineered and overcomplicated code - code that works but is more co
 
 ## Unnecessary Indirection
 
-- Pass-through wrappers - methods that only delegate to dependencies
 - Excessive method chaining - builder pattern for simple constructions
 - Interface wrapping primitives - custom types for standard library types
 - Middleware stacking - multiple middlewares that could be one
@@ -42,13 +45,16 @@ Detect over-engineered and overcomplicated code - code that works but is more co
 - Worker pools for occasional tasks - pooling for operations/hour
 - Connection pooling overkill - complex pooling for single connection
 
+Before reporting any 'unused', 'no callers', or 'never triggers' pattern, verify the absence with a project-wide search (including tests, registrations, and config-driven references) and cite the search result in the finding.
+
 ## What to Report
 
 For each finding:
-- Location: file and line reference
+- Location: exact file path and line number
 - Pattern: which over-engineering pattern detected
 - Problem: why this adds unnecessary complexity
 - Simplification: what simpler code would look like
 - Effort: trivial/small/medium/large
 
-Report problems only - no positive observations.
+For large-effort findings, recommend a follow-up plan instead of an in-review fix.
+Report findings only - no positive observations.

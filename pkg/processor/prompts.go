@@ -102,13 +102,21 @@ func (b *promptBuilder) replaceVariablesWithIteration(prompt string, isFirstIter
 }
 
 // reviewContextInstruction returns the lead-in prepended to every review agent
-// body. agent body files describe WHAT to review; this supplies WHERE — each
-// spawned agent runs in a fresh context with no pointer to the branch diff or
-// changed files unless told to fetch them itself.
+// body. agent body files describe WHAT to review; this supplies WHERE plus the
+// shared reviewer contract — each spawned agent runs in a fresh context with no
+// pointer to the branch diff or changed files unless told to fetch them itself,
+// and without the contract lines an agent may edit files (the parent loop owns
+// fixing), dump pre-existing repo-wide findings every iteration (stalls the
+// zero-findings REVIEW_DONE exit), or leave the no-findings case ambiguous.
 func (b *promptBuilder) reviewContextInstruction() string {
 	branch := b.getDefaultBranch()
 	return fmt.Sprintf("First run `git diff %s...HEAD` and `git diff --stat %s...HEAD` to get the "+
-		"changes, then read the changed source files in full context.\n\n", branch, branch)
+		"changes, then read the changed source files in full context.\n\n"+
+		"Scope: review the changed code and code it directly interacts with; report pre-existing "+
+		"issues outside the changes only when severe.\n"+
+		"This is a read-only review - do not edit files and do not commit; describe fixes, do not apply them.\n"+
+		"Report only issues supported by specific evidence in the code - when unsure, read more context first.\n"+
+		"If you find no issues, output exactly: NO ISSUES FOUND\n\n", branch, branch)
 }
 
 // formatAgentExpansion creates the agent invocation block for an agent, respecting frontmatter overrides.

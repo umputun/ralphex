@@ -3,11 +3,11 @@ Review code for bugs, security issues, and quality problems.
 ## Correctness Review
 
 1. Logic errors - off-by-one errors, incorrect conditionals, wrong operators
-2. Edge cases - empty inputs, nil/null values, boundary conditions, concurrent access
+2. Edge cases - empty inputs, nil/null values, boundary conditions
 3. Error handling - all errors checked, appropriate error wrapping, no silent failures
 4. Resource management - proper cleanup, no leaks, correct resource release
-5. Concurrency issues - race conditions, deadlocks, thread/coroutine leaks
-6. Data integrity - validation, sanitization, consistent state management
+5. Concurrency issues - race conditions, deadlocks, thread/coroutine leaks, unsafe concurrent access
+6. Data integrity - consistent state management, correct transactional boundaries
 
 ## Security Analysis
 
@@ -17,21 +17,16 @@ Review code for bugs, security issues, and quality problems.
 4. Secret exposure - no hardcoded credentials or keys
 5. Information disclosure - error messages, logs, debug info
 
-## Simplicity Assessment
-
-1. Direct solutions first - if simple approach works, don't use complex pattern
-2. No enterprise patterns for simple problems - avoid factories, builders for straightforward code
-3. Question every abstraction - each interface/abstraction must solve real problem
-4. No scope creep - changes solve only the stated problem
-5. No premature optimization - unless addressing proven bottlenecks
+Do not review architectural simplicity or over-engineering - a dedicated simplification agent covers that.
 
 ## What to Report
 
 For each issue:
 - Location: exact file path and line number
+- Severity: critical/major/minor
 - Issue: clear description
 - Impact: how this affects the code
 - Fix: specific suggestion
 
 Focus on defects that would cause runtime failures, security vulnerabilities, or maintainability problems.
-Report problems only - no positive observations.
+Report findings only - no positive observations.

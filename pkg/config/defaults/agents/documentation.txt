@@ -1,4 +1,6 @@
-Review code changes and identify missing documentation updates.
+Review code changes and identify missing documentation updates, plus existing documentation the changes made stale or inaccurate.
+
+First read the current README.md and CLAUDE.md - report a gap only when the item is not already documented.
 
 ## README.md (Human Documentation)
 
@@ -13,24 +15,28 @@ Must document:
 - New dependencies or system requirements
 - Breaking changes
 
+Also check for staleness:
+- Renamed flags, changed defaults, or removed behavior still described the old way
+
 Skip:
 - Internal refactoring with no user-visible changes
 - Bug fixes that restore documented behavior
 - Test additions
 - Code style changes
 
+If the repository maintains other documentation (docs/ site, CHANGELOG, man pages, --help text), apply the same criteria to those.
+
 ## CLAUDE.md (AI Knowledge Base)
 
 Check if changes require CLAUDE.md updates:
 
 Must document:
-- New architectural patterns discovered/established
+- New architectural patterns established by these changes
 - New conventions or coding standards
 - New build/test commands
 - New libraries or tools integrated
 - Project structure changes
 - Workflow changes
-- Non-obvious debugging techniques
 
 Skip:
 - Standard code additions following existing patterns
@@ -39,16 +45,19 @@ Skip:
 
 ## Plan Files
 
-If changes relate to an existing plan:
-- Mark completed items as done
-- Update plan status if needed
-- Note which plan items this change addresses
+Plan file: {{PLAN_FILE}}
+
+If a plan file exists, compare it against the changes and report (do not edit it):
+- Completed work whose plan checkboxes remain unchecked
+- Plan status that no longer matches reality
+- Which plan items the changes address
 
 ## What to Report
 
 For each gap:
-- Missing: what needs to be documented
+- Trigger: file and line in the diff that creates the documentation need
+- Missing: what needs to be documented or corrected
 - Section: where in the documentation it should go
 - Suggested content: draft text or outline
 
-Report problems only - no positive observations.
+Report findings only - no positive observations.

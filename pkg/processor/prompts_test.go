@@ -1288,6 +1288,14 @@ func TestRunner_reviewContextInstruction(t *testing.T) {
 		assert.Contains(t, got, "read the changed source files")
 	})
 
+	t.Run("carries shared reviewer contract", func(t *testing.T) {
+		r := &Runner{cfg: Config{}, log: newMockLogger()}
+		got := newPromptBuilderForTest(r).reviewContextInstruction()
+		assert.Contains(t, got, "read-only review", "agents must not edit files")
+		assert.Contains(t, got, "NO ISSUES FOUND", "clean-case sentinel must be defined")
+		assert.Contains(t, got, "Scope: review the changed code", "findings must be scoped to the diff")
+	})
+
 	t.Run("respects configured default branch", func(t *testing.T) {
 		r := &Runner{cfg: Config{DefaultBranch: "develop"}, log: newMockLogger()}
 		got := newPromptBuilderForTest(r).reviewContextInstruction()
@@ -1396,13 +1404,14 @@ func TestRunner_formatAgentExpansion_AllFiveDefaultAgents(t *testing.T) {
 	for _, name := range names {
 		t.Run("claude_"+name, func(t *testing.T) {
 			r := &Runner{cfg: Config{AppConfig: appCfg}, log: newMockLogger()}
-			result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:" + name + "}}")
+			b := newPromptBuilderForTest(r)
+			result := b.expandAgentReferences("{{agent:" + name + "}}")
 
 			assert.Contains(t, result, "Use the Task tool to launch a general-purpose agent with this prompt:")
 			assert.NotContains(t, result, "spawn_agent")
 			assert.NotContains(t, result, "{{agent:"+name+"}}")
-			// inlined agent body present verbatim
-			assert.Contains(t, result, byName[name])
+			// inlined agent body present verbatim after base-variable expansion
+			assert.Contains(t, result, b.replaceBaseVariables(byName[name]))
 		})
 
 		t.Run("codex_"+name, func(t *testing.T) {
@@ -1412,14 +1421,15 @@ func TestRunner_formatAgentExpansion_AllFiveDefaultAgents(t *testing.T) {
 				cfg: Config{AppConfig: &codexCfg},
 				log: newMockLogger(),
 			}
-			result := newPromptBuilderForTest(r).expandAgentReferences("{{agent:" + name + "}}")
+			b := newPromptBuilderForTest(r)
+			result := b.expandAgentReferences("{{agent:" + name + "}}")
 
 			assert.Contains(t, result, "spawn_agent(agent='reviewer', task='")
 			assert.NotContains(t, result, "Use the Task tool")
 			assert.NotContains(t, result, "{{agent:"+name+"}}")
-			// inlined agent body present with codex single-quoted escaping applied
+			// inlined agent body (base variables expanded) with codex single-quoted escaping applied
 			// (escapeCodexSingleQuoted: backslash first, then single-quote, then CR, then LF)
-			escaped := strings.ReplaceAll(byName[name], `\`, `\\`)
+			escaped := strings.ReplaceAll(b.replaceBaseVariables(byName[name]), `\`, `\\`)
 			escaped = strings.ReplaceAll(escaped, `'`, `\'`)
 			escaped = strings.ReplaceAll(escaped, "\r", `\r`)
 			escaped = strings.ReplaceAll(escaped, "\n", `\n`)
