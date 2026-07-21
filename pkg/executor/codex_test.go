@@ -1782,6 +1782,11 @@ func TestCodexExecutor_formatRolloutEvent(t *testing.T) {
 			line: `{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**First**"},{"type":"summary_text","text":"**Second**"}]}}`,
 			want: "First\nSecond",
 		},
+		{
+			name: "reasoning summary keeps only the first line (title), drops trailing paragraph",
+			line: `{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**Reviewing the diff**\n\nThen a long paragraph of reasoning body that must not be forwarded."}]}}`,
+			want: "Reviewing the diff",
+		},
 		{name: "empty reasoning summary dropped", line: `{"type":"response_item","payload":{"type":"reasoning","summary":[]}}`, want: ""},
 		{name: "custom_tool_call_output skipped", line: `{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"**Detect stale base:**"}}`, want: ""},
 		{name: "function_call_output skipped", line: `{"type":"response_item","payload":{"type":"function_call_output","output":"ok"}}`, want: ""},

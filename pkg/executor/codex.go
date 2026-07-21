@@ -545,7 +545,6 @@ func (e *CodexExecutor) readStdout(r io.Reader) (string, error) {
 // the rollout file's typed `reasoning` records instead (see formatRolloutEvent),
 // which never contain that echo. session id detection in processStderr is
 // independent of display so the rollout tailer still works either way.
-// also deduplicates lines to avoid non-consecutive repeats.
 func (e *CodexExecutor) shouldDisplay(line string, state *codexFilterState) (bool, string) {
 	s := strings.TrimSpace(line)
 	if s == "" {
@@ -812,18 +811,25 @@ func (e *CodexExecutor) formatRolloutEvent(line []byte) string {
 }
 
 // formatReasoningSummary joins a reasoning record's summary titles into a display
-// string, stripping the ** markers codex wraps each title in. returns "" when the
-// record carries no summary text (empty-summary reasoning records exist).
+// string, stripping the ** markers codex wraps each title in. only the first
+// non-empty line of each summary_text is forwarded: codex 0.144.6 emits a single
+// bold title, but other codex versions can append a full paragraph after it, and
+// forwarding the whole value would reintroduce the reasoning flood this filter
+// exists to prevent. returns "" when the record carries no summary text.
 func (e *CodexExecutor) formatReasoningSummary(p rolloutPayload) string {
 	var sb strings.Builder
 	for _, s := range p.Summary {
-		if s.Text == "" {
+		title := strings.TrimSpace(s.Text)
+		if i := strings.IndexByte(title, '\n'); i >= 0 {
+			title = strings.TrimSpace(title[:i])
+		}
+		if title == "" {
 			continue
 		}
 		if sb.Len() > 0 {
 			sb.WriteByte('\n')
 		}
-		sb.WriteString(e.stripBold(s.Text))
+		sb.WriteString(e.stripBold(title))
 	}
 	return sb.String()
 }
