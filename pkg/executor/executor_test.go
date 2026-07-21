@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -245,6 +246,116 @@ func TestClaudeExecutor_parseStream_withHandler(t *testing.T) {
 
 	assert.Equal(t, "chunk1chunk2", result.Output)
 	assert.Equal(t, []string{"chunk1", "chunk2"}, chunks)
+}
+
+func TestClaudeExecutor_subagentLine(t *testing.T) {
+	e := &ClaudeExecutor{}
+
+	tests := []struct {
+		name         string
+		line         string
+		want         string
+		wantThrottle bool
+	}{
+		{
+			name:         "task_progress is a throttled step (no agent name, no tool name)",
+			line:         `{"type":"system","subtype":"task_progress","description":"Running Check file size","subagent_type":"general-purpose","last_tool_name":"Bash"}`,
+			want:         "  Running Check file size\n",
+			wantThrottle: true,
+		},
+		{
+			name: "task_started title is unthrottled",
+			line: `{"type":"system","subtype":"task_started","subagent_type":"qa-expert","description":"QA review of branch"}`,
+			want: "  QA review of branch\n",
+		},
+		{name: "task_started without description skipped", line: `{"type":"system","subtype":"task_started","subagent_type":"general-purpose"}`, want: ""},
+		{name: "task_progress empty description skipped", line: `{"type":"system","subtype":"task_progress"}`, want: ""},
+		{name: "task_updated completion not surfaced", line: `{"type":"system","subtype":"task_updated","task_id":"t1","patch":{"status":"completed"}}`, want: ""},
+		{name: "system init not surfaced", line: `{"type":"system","subtype":"init"}`, want: ""},
+		{name: "assistant event not a task line", line: `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`, want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var event streamEvent
+			require.NoError(t, json.Unmarshal([]byte(tc.line), &event))
+			line, throttle := e.subagentLine(&event)
+			assert.Equal(t, tc.want, line)
+			assert.Equal(t, tc.wantThrottle, throttle)
+		})
+	}
+}
+
+func TestClaudeExecutor_parseStream_surfacesSubagentProgress(t *testing.T) {
+	// subagent system events carry no text block: they must reach OutputHandler as
+	// heartbeat lines (the description only — no agent name, no tool name) but must
+	// NOT pollute the accumulated output or recent-text.
+	input := `{"type":"assistant","message":{"content":[{"type":"text","text":"launching agents"}]}}
+{"type":"system","subtype":"task_started","subagent_type":"general-purpose","description":"QA review of branch"}
+{"type":"system","subtype":"task_progress","description":"Running tests","subagent_type":"general-purpose","last_tool_name":"Bash"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"finished reply"}]}}`
+
+	var chunks []string
+	base := time.Unix(1000, 0)
+	e := &ClaudeExecutor{
+		OutputHandler: func(text string) { chunks = append(chunks, text) },
+		nowFn:         func() time.Time { return base },
+	}
+	result := e.parseStream(context.Background(), strings.NewReader(input), func() {})
+
+	// accumulated output holds only the model's own text, not the heartbeat lines
+	assert.Equal(t, "launchingagentsfinishedreply", strings.ReplaceAll(result.Output, " ", ""))
+	assert.NotContains(t, result.Output, "Running tests")
+	assert.NotContains(t, result.RecentText, "Running tests")
+	// heartbeats forwarded live for visibility: title and step, description only
+	assert.Contains(t, chunks, "  QA review of branch\n")
+	assert.Contains(t, chunks, "  Running tests\n")
+}
+
+func TestClaudeExecutor_parseStream_throttlesSubagentProgress(t *testing.T) {
+	// four subagent heartbeats: with the clock advancing 2s, 2s, then past the
+	// interval, only the first and the last (after the window reopens) are forwarded.
+	input := `{"type":"system","subtype":"task_progress","description":"step 1","subagent_type":"general-purpose"}
+{"type":"system","subtype":"task_progress","description":"step 2","subagent_type":"general-purpose"}
+{"type":"system","subtype":"task_progress","description":"step 3","subagent_type":"general-purpose"}
+{"type":"system","subtype":"task_progress","description":"step 4","subagent_type":"general-purpose"}`
+
+	base := time.Unix(2000, 0)
+	times := []time.Time{base, base.Add(2 * time.Second), base.Add(4 * time.Second), base.Add(subagentProgressInterval + time.Second)}
+	var i int
+	var chunks []string
+	e := &ClaudeExecutor{
+		OutputHandler: func(text string) { chunks = append(chunks, text) },
+		nowFn:         func() time.Time { t := times[i%len(times)]; i++; return t },
+	}
+	e.parseStream(context.Background(), strings.NewReader(input), func() {})
+
+	assert.Equal(t, []string{"  step 1\n", "  step 4\n"}, chunks,
+		"only the first heartbeat and the one after the window reopens should pass")
+}
+
+func TestClaudeExecutor_parseStream_taskStartedNotThrottled(t *testing.T) {
+	// task_started titles (the subagent's task, no tool step) are always shown, even
+	// back-to-back within the throttle window; only per-tool-step task_progress is
+	// throttled. clock never advances so every task_progress after the first is
+	// throttled away, but both titles must still appear.
+	input := `{"type":"system","subtype":"task_started","subagent_type":"qa-expert","description":"QA review of branch"}
+{"type":"system","subtype":"task_progress","description":"step 1","subagent_type":"qa-expert","last_tool_name":"Bash"}
+{"type":"system","subtype":"task_started","subagent_type":"go-test-expert","description":"test review of branch"}
+{"type":"system","subtype":"task_progress","description":"step 2","subagent_type":"go-test-expert","last_tool_name":"Read"}`
+
+	base := time.Unix(3000, 0)
+	var chunks []string
+	e := &ClaudeExecutor{
+		OutputHandler: func(text string) { chunks = append(chunks, text) },
+		nowFn:         func() time.Time { return base },
+	}
+	e.parseStream(context.Background(), strings.NewReader(input), func() {})
+
+	assert.Contains(t, chunks, "  QA review of branch\n", "task_started title always shown")
+	assert.Contains(t, chunks, "  test review of branch\n", "second title shown despite the throttle window")
+	assert.Contains(t, chunks, "  step 1\n", "first task_progress opens the window")
+	assert.NotContains(t, chunks, "  step 2\n", "later task_progress in the same window is throttled")
 }
 
 func TestClaudeExecutor_parseStream_withDebug(t *testing.T) {
