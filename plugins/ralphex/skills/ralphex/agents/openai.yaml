@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ralphex"
+  short_description: "Launch and monitor an autonomous Ralphex run"
+  default_prompt: "Use $ralphex to launch a Ralphex plan and report its startup status."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ralphex Adopt"
+  short_description: "Convert an existing specification into a Ralphex plan"
+  default_prompt: "Use $ralphex-adopt to convert this source into an executable Ralphex plan."
+
+policy:
+  allow_implicit_invocation: true
