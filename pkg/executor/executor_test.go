@@ -792,7 +792,7 @@ func TestPatternMatchError_Error(t *testing.T) {
 
 // enumeratedAPIErrorCodes mirrors the API Error codes in the default claude_error_patterns (#419):
 // specific hard-error codes, not a bare "API Error:" substring that would match narrated "API error:" prose.
-var enumeratedAPIErrorCodes = []string{"API Error: 400", "API Error: 401", "API Error: 403", "API Error: 429", "API Error: 500"}
+var enumeratedAPIErrorCodes = []string{"API Error: 400", "API Error: 401", "API Error: 403", "API Error: 404", "API Error: 413", "API Error: 429", "API Error: 500"}
 
 func TestMatchPattern(t *testing.T) {
 	tests := []struct {
