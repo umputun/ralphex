@@ -54,9 +54,9 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.True(t, values.CodexEnabled)
 	assert.True(t, values.CodexEnabledSet)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded gpt-5.5")
+	assert.Equal(t, "gpt-5.6-sol", values.CodexModel, "codex_model defaults to embedded gpt-5.6-sol")
 	assert.False(t, values.CodexModelSet, "embedded default carries the value but not the explicit-set flag")
-	assert.Equal(t, "xhigh", values.CodexReasoningEffort, "codex_reasoning_effort defaults to embedded xhigh")
+	assert.Equal(t, "high", values.CodexReasoningEffort, "codex_reasoning_effort defaults to embedded high")
 	assert.False(t, values.CodexReasoningEffortSet, "embedded default carries the value but not the explicit-set flag")
 	assert.Equal(t, 3600000, values.CodexTimeoutMs)
 	assert.Equal(t, "read-only", values.CodexSandbox)
@@ -102,7 +102,7 @@ iteration_delay_ms = 5000
 	// values from embedded (not set in global)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded value when not in user config")
+	assert.Equal(t, "gpt-5.6-sol", values.CodexModel, "codex_model defaults to embedded value when not in user config")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
@@ -631,7 +631,7 @@ func TestValues_mergeFrom_CodexModel(t *testing.T) {
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load("", configPath)
 		require.NoError(t, err)
-		assert.Empty(t, values.CodexModel, "explicit empty clears embedded gpt-5.5 so codex inherits from ~/.codex/config.toml")
+		assert.Empty(t, values.CodexModel, "explicit empty clears embedded gpt-5.6-sol so codex inherits from ~/.codex/config.toml")
 		assert.True(t, values.CodexModelSet)
 		assert.Empty(t, values.CodexReasoningEffort)
 		assert.True(t, values.CodexReasoningEffortSet)
@@ -645,8 +645,8 @@ func TestValues_mergeFrom_CodexModel(t *testing.T) {
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load("", configPath)
 		require.NoError(t, err)
-		assert.Equal(t, "gpt-5.5", values.CodexModel)
-		assert.Equal(t, "xhigh", values.CodexReasoningEffort)
+		assert.Equal(t, "gpt-5.6-sol", values.CodexModel)
+		assert.Equal(t, "high", values.CodexReasoningEffort)
 	})
 }
 
@@ -1155,7 +1155,7 @@ func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded gpt-5.5 (uncommented in embedded default)")
+	assert.Equal(t, "gpt-5.6-sol", values.CodexModel, "codex_model defaults to embedded gpt-5.6-sol (uncommented in embedded default)")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 

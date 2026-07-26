@@ -68,18 +68,18 @@ codex_enabled = true
 codex_command = codex
 
 # codex_model: model ID for codex
-# available models: gpt-5.5, gpt-5.3-codex, gpt-5.3-codex-mini
-# default: gpt-5.5
+# available models: gpt-5.6-sol, gpt-5.5, gpt-5.3-codex
+# default: gpt-5.6-sol
 # (set to an empty value, "codex_model =", to inherit from ~/.codex/config.toml instead;
-# commenting the line out keeps the gpt-5.5 default)
-codex_model = gpt-5.5
+# commenting the line out keeps the gpt-5.6-sol default)
+codex_model = gpt-5.6-sol
 
 # codex_reasoning_effort: reasoning effort level for codex
 # available: low, medium, high, xhigh
-# default: xhigh
+# default: high
 # (set to an empty value, "codex_reasoning_effort =", to inherit from ~/.codex/config.toml
-# instead; commenting the line out keeps the xhigh default)
-codex_reasoning_effort = xhigh
+# instead; commenting the line out keeps the high default)
+codex_reasoning_effort = high
 
 # codex_timeout_ms: timeout for codex execution in milliseconds
 # default: 3600000 (1 hour)
