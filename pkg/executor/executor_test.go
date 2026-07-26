@@ -790,6 +790,10 @@ func TestPatternMatchError_Error(t *testing.T) {
 	assert.Equal(t, `detected error pattern: "rate limit exceeded"`, err.Error())
 }
 
+// enumeratedAPIErrorCodes mirrors the API Error codes in the default claude_error_patterns (#419):
+// specific hard-error codes, not a bare "API Error:" substring that would match narrated "API error:" prose.
+var enumeratedAPIErrorCodes = []string{"API Error: 400", "API Error: 401", "API Error: 403", "API Error: 429", "API Error: 500"}
+
 func TestMatchPattern(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -811,6 +815,15 @@ func TestMatchPattern(t *testing.T) {
 		{name: "multiline output", output: "line1\nYou've hit your limit\nline3", patterns: []string{"hit your limit"}, want: "hit your limit"},
 		{name: "api error 500", output: `API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, patterns: []string{"API Error:"}, want: "API Error:"},
 		{name: "not logged in", output: "Not logged in · Please run /login", patterns: []string{"Not logged in"}, want: "Not logged in"},
+		// #419: enumerated API Error codes must not match narrated "API error:" prose (case-insensitive)
+		{name: "narrated api error prose not matched by enumerated codes",
+			output:   `isExpectedAuthMessage matching ("API error: Unauthorized Error", "Unauthorized Error")`,
+			patterns: enumeratedAPIErrorCodes, want: ""},
+		{name: "genuine api error 500 matched by enumerated code",
+			output:   `API Error: 500 {"type":"error"}`,
+			patterns: enumeratedAPIErrorCodes, want: "API Error: 500"},
+		{name: "genuine api error 401 matched by enumerated code",
+			output: "API Error: 401 Unauthorized", patterns: enumeratedAPIErrorCodes, want: "API Error: 401"},
 	}
 
 	for _, tc := range tests {
