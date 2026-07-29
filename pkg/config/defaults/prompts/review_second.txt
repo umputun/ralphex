@@ -55,21 +55,24 @@ SIGNAL LOGIC - READ CAREFULLY:
 
 IMPORTANT: Do not decide on a signal path until you have completed Steps 1-3 in full — all agents finished, all results collected, all findings verified and acted on.
 
+IMPORTANT: A signal marker is irreversible. The moment you write one it takes effect, and you cannot retract it by explaining afterwards that you did not mean it. If you emit a marker it MUST be the final non-empty line of your output, with nothing after it. While you are still reasoning about which path applies, emit nothing.
+
 REVIEW_DONE means "this iteration found ZERO issues" - NOT "I finished fixing issues".
 
 Path A - NO issues found in this iteration:
 - You reviewed the code and found nothing critical/major to fix
-- Output: <<<RALPHEX:REVIEW_DONE>>>
+- End your output with: <<<RALPHEX:REVIEW_DONE>>>
 
 Path B - Issues found AND fixed:
 1. Fix verified critical/major issues only
 2. Run tests and linter - ALL tests must pass, ALL linter issues resolved
 3. Commit fixes: `git commit -m "fix: address code review findings"`
-4. STOP HERE. Do NOT output any signal. Do NOT output REVIEW_DONE.
+4. End your output with a plain-text summary of what you fixed. Emit NO marker at all - not REVIEW_DONE, not TASK_FAILED.
    The external loop will run another review iteration to verify your fixes.
    Your fixes might have introduced new issues - another iteration must check.
 
 Path C - Issues found but cannot fix:
-- Output: <<<RALPHEX:TASK_FAILED>>>
+- This is only for issues you were UNABLE to fix. If you fixed and committed anything this iteration, you are on Path B - describe the remaining issues in plain text and let the next iteration handle them.
+- End your output with: <<<RALPHEX:TASK_FAILED>>>
 
 OUTPUT FORMAT: No markdown formatting (no **bold**, `code`, # headers). Plain text and - lists are fine.
