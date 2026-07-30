@@ -124,4 +124,52 @@ assert_contains "installs codex@latest"       "$src" "@openai/codex@latest"
 # reports success, so neither deadline would bind
 assert "both deadlines force kill" test "$(printf '%s\n' "$src" | grep -c 'timeout -k')" -eq 2
 
+# credential seeding across both wrapper generations. the wrapper rw bind-mounts the credential
+# file when it is new enough; an older wrapper (it updates separately from the image) does not, and
+# the seeding must fall back to copying or the container ends up with no credentials at all.
+# ownership is not asserted: this harness runs unprivileged, so chown app:app cannot succeed here.
+assert_content() {  # $1 = description; $2 = file; $3 = expected content
+    if [ "$(cat "$2" 2>/dev/null)" = "$3" ]; then echo "ok   - $1"; else echo "FAIL - $1"; fail=1; fi
+}
+
+# old wrapper: no bind mount at the target, so the file must be copied in
+csrc="$work/old/src"; cdest="$work/old/dest"
+mkdir -p "$csrc"
+printf 'host-creds' > "$csrc/.credentials.json"
+printf '{}' > "$csrc/settings.json"
+seed_claude_home "$csrc" "$cdest"
+assert_content "old wrapper: .credentials.json copied in" "$cdest/.credentials.json" "host-creds"
+assert_content "old wrapper: settings.json copied in"     "$cdest/settings.json" "{}"
+assert     "old wrapper: creds_bound flag is 0"          test "$creds_bound" = 0
+
+# new wrapper: the bind mount already put the file at the target; copying over it would be a
+# same-file cp, and the caller must skip the chown
+nsrc="$work/new/src"; ndest="$work/new/dest"
+mkdir -p "$nsrc" "$ndest"
+printf 'host-creds' > "$nsrc/.credentials.json"
+printf 'bind-mounted' > "$ndest/.credentials.json"   # stands in for the wrapper's rw bind mount
+seed_claude_home "$nsrc" "$ndest"
+assert_content "new wrapper: bind-mounted creds not overwritten" "$ndest/.credentials.json" "bind-mounted"
+assert     "new wrapper: creds_bound flag is 1"          test "$creds_bound" = 1
+
+# same two generations for codex auth.json
+xsrc="$work/codex-old/src"; xdest="$work/codex-old/dest"
+mkdir -p "$xsrc"
+printf 'host-auth' > "$xsrc/auth.json"
+printf '{}' > "$xsrc/config.toml"
+seed_codex_home "$xsrc" "$xdest"
+assert_content "old wrapper: auth.json copied in"        "$xdest/auth.json" "host-auth"
+assert_content "old wrapper: config.toml copied in"      "$xdest/config.toml" "{}"
+assert     "old wrapper: auth_bound flag is 0"           test "$auth_bound" = 0
+
+ysrc="$work/codex-new/src"; ydest="$work/codex-new/dest"
+mkdir -p "$ysrc" "$ydest"
+printf 'host-auth' > "$ysrc/auth.json"
+printf 'bind-mounted' > "$ydest/auth.json"
+printf '{}' > "$ysrc/config.toml"
+seed_codex_home "$ysrc" "$ydest"
+assert_content "new wrapper: bind-mounted auth not overwritten" "$ydest/auth.json" "bind-mounted"
+assert_content "new wrapper: other codex files still copied"    "$ydest/config.toml" "{}"
+assert     "new wrapper: auth_bound flag is 1"           test "$auth_bound" = 1
+
 if [ "$fail" = 0 ]; then echo "PASS"; else echo "FAILURES"; exit 1; fi

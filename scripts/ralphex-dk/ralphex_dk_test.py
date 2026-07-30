@@ -216,12 +216,18 @@ class _FakeHomeTestCase(unittest.TestCase):
 
 class TestBuildVolumes(_FakeHomeTestCase):
     def test_volume_pairs(self) -> None:
+        creds = self.fake_home / ".claude" / ".credentials.json"
+        creds.write_text('{"token": "x"}')
         with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
             vols = build_volumes(None)
-        # volumes should come in -v pairs
+        # volumes come in flag/spec pairs: -v src:dst[:opts] or --mount type=bind,...
         for i in range(0, len(vols), 2):
-            self.assertEqual(vols[i], "-v")
-            self.assertIn(":", vols[i + 1])
+            flag, spec = vols[i], vols[i + 1]
+            self.assertIn(flag, ("-v", "--mount"))
+            if flag == "-v":
+                self.assertIn(":", spec)
+            else:
+                self.assertTrue(spec.startswith("type=bind,"), f"unexpected --mount spec: {spec}")
 
     def test_includes_workspace_without_selinux(self) -> None:
         with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
@@ -496,6 +502,93 @@ class TestBuildDockerCmd(_FakeHomeTestCase):
         finally:
             os.unlink(tmp_path)
 
+class TestOAuthTokenPersistence(_FakeHomeTestCase):
+    def test_codex_auth_json_rw_mount_when_file_exists(self) -> None:
+        """build_volumes adds rw --mount bind for ~/.codex/auth.json when it is a regular file."""
+        codex_dir = self.fake_home / ".codex"
+        codex_dir.mkdir()
+        auth_file = codex_dir / "auth.json"
+        auth_file.write_text('{"token": "x"}')
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        expected = f'type=bind,"source={auth_file.resolve()}",target=/home/app/.codex/auth.json'
+        self.assertIn(expected, vols)
+        self.assertEqual(vols[vols.index(expected) - 1], "--mount")
+
+    def test_codex_auth_json_no_mount_when_absent(self) -> None:
+        """build_volumes does not add auth.json mount when ~/.codex/auth.json is missing."""
+        codex_dir = self.fake_home / ".codex"
+        codex_dir.mkdir()
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        self.assertNotIn("/home/app/.codex/auth.json", " ".join(vols))
+
+    def test_codex_auth_json_no_mount_when_directory(self) -> None:
+        """build_volumes does not add auth.json mount when the path is a directory (not a file)."""
+        codex_dir = self.fake_home / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "auth.json").mkdir()  # directory, not file
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        self.assertNotIn("/home/app/.codex/auth.json", " ".join(vols))
+
+    def test_claude_credentials_rw_mount_when_file_exists(self) -> None:
+        """build_volumes adds rw --mount bind for ~/.claude/.credentials.json when it is a regular file."""
+        claude_dir = self.fake_home / ".claude"
+        creds_file = claude_dir / ".credentials.json"
+        creds_file.write_text('{"token": "y"}')
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        expected = f'type=bind,"source={creds_file.resolve()}",target=/home/app/.claude/.credentials.json'
+        self.assertIn(expected, vols)
+        self.assertEqual(vols[vols.index(expected) - 1], "--mount")
+
+    def test_claude_credentials_no_mount_when_absent(self) -> None:
+        """build_volumes does not add .credentials.json rw mount when the file does not exist."""
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        self.assertNotIn("/home/app/.claude/.credentials.json", " ".join(vols))
+
+    def test_claude_credentials_no_mount_when_directory(self) -> None:
+        """build_volumes does not add .credentials.json mount when the path is a directory (not a file)."""
+        claude_dir = self.fake_home / ".claude"
+        (claude_dir / ".credentials.json").mkdir()  # directory, not file
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None)
+        self.assertNotIn("/home/app/.claude/.credentials.json", " ".join(vols))
+
+    def test_bind_source_with_comma_is_csv_quoted(self) -> None:
+        """--mount parses as CSV, so a comma in the source path must stay inside quotes or docker
+        rejects the spec and the container never starts."""
+        claude_home = self.fake_home / "a,b" / ".claude"
+        claude_home.mkdir(parents=True)
+        creds_file = claude_home / ".credentials.json"
+        creds_file.write_text('{"token": "z"}')
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=False):
+            vols = build_volumes(None, claude_home=claude_home)
+        expected = f'type=bind,"source={creds_file.resolve()}",target=/home/app/.claude/.credentials.json'
+        self.assertIn(expected, vols)
+
+    def test_bind_specs_carry_no_selinux_option_when_selinux(self) -> None:
+        """--mount bind specs stay label-free under SELinux: docker's --mount has no relabel option
+        and rejects the whole spec, so any label would break container start on SELinux hosts."""
+        claude_dir = self.fake_home / ".claude"
+        (claude_dir / ".credentials.json").write_text('{"token": "y"}')
+        codex_dir = self.fake_home / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "auth.json").write_text('{"token": "x"}')
+        with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=True):
+            vols = build_volumes(None)
+        binds = [v for v in vols if v.startswith("type=bind,")]
+        self.assertEqual(len(binds), 2, f"expected both credential binds, got {binds}")
+        for spec in binds:
+            for opt in ("label=", "relabel=", "selinux=", ",z"):
+                self.assertNotIn(opt, spec, f"docker --mount rejects {opt!r}: {spec}")
+        # the label-free binds are only safe because the parent dirs are :z-relabeled recursively
+        self.assertIn(f"{claude_dir.resolve()}:/mnt/claude:ro,z", vols)
+        self.assertIn(f"{codex_dir.resolve()}:/mnt/codex:ro,z", vols)
+
+
 class TestKeychainServiceName(unittest.TestCase):
     def test_default_claude_dir(self) -> None:
         """default ~/.claude returns base service name without suffix."""
@@ -606,10 +699,12 @@ class TestSelinuxEnabled(unittest.TestCase):
 
 class TestSelinuxVolumeSuffix(_FakeHomeTestCase):
     def test_z_label_in_volumes_when_selinux(self) -> None:
-        """volume mounts include :z label when SELinux is enabled."""
+        """-v volume mounts include :z label when SELinux is enabled."""
         with unittest.mock.patch("ralphex_dk.selinux_enabled", return_value=True):
             vols = build_volumes(None)
         for i in range(1, len(vols), 2):
+            if vols[i].startswith("type=bind,"):
+                continue  # --mount specs carry no selinux label, parent dir's :z relabels them
             has_z = vols[i].endswith(":z") or ",z" in vols[i]
             self.assertTrue(has_z, f"volume {vols[i]} missing :z SELinux label")
 
@@ -3182,7 +3277,8 @@ def run_tests() -> None:
                TestBedrockSkipKeychain, TestBedrockValidation, TestParseEnvFlags, TestExtractEnvFromFlags,
                TestBuildDockerCommand, TestDetectInheritedEnvVars, TestDetectExplicitSecrets, TestDryRun,
                TestDockerSocketGid, TestDockerSocketMount, TestBuildDockerCommandDockerGid,
-               TestDockerLinuxWarning, TestDryRunDocker, TestDockerNetwork]:
+               TestDockerLinuxWarning, TestDryRunDocker, TestDockerNetwork,
+               TestOAuthTokenPersistence]:
         suite.addTests(loader.loadTestsFromTestCase(tc))
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
