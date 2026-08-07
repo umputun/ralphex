@@ -18,10 +18,12 @@ expected = sys.argv[2]
 claude = json.loads((root / ".claude-plugin/plugin.json").read_text())
 market = json.loads((root / ".claude-plugin/marketplace.json").read_text())
 codex = json.loads((root / "plugins/ralphex/.codex-plugin/plugin.json").read_text())
+portable = json.loads((root / "plugins/ralphex/plugin.json").read_text())
 
 assert claude["version"] == expected
 assert market["plugins"][0]["version"] == expected
 assert codex["version"] == expected
+assert portable["version"] == expected
 assert claude["description"] == "Autonomous plan execution with Claude Code - task execution, monitoring, and plan creation"
 assert market["plugins"][0]["description"] == "Autonomous plan execution with Claude Code - task execution, monitoring, and plan creation"
 assert codex["description"] == "Plan-driven implementation, review, adoption, and configuration workflows for Ralphex"
@@ -35,6 +37,7 @@ make_fixture() {
   mkdir -p "$fixture/plugins/ralphex" "$fixture/scripts/internal"
   cp -R "$REPO_ROOT/.claude-plugin" "$fixture/.claude-plugin"
   cp -R "$REPO_ROOT/plugins/ralphex/.codex-plugin" "$fixture/plugins/ralphex/.codex-plugin"
+  cp "$REPO_ROOT/plugins/ralphex/plugin.json" "$fixture/plugins/ralphex/plugin.json"
   cp "$REPO_ROOT/scripts/internal/update-plugin-version.sh" "$fixture/scripts/internal/"
   printf '%s\n' "$fixture"
 }

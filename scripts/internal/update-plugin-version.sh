@@ -44,3 +44,8 @@ if [ -f "plugins/ralphex/.codex-plugin/plugin.json" ]; then
   update_json_version plugins/ralphex/.codex-plugin/plugin.json ".version = \$v"
   echo "Updated Codex plugin.json to version $VERSION"
 fi
+
+if [ -f "plugins/ralphex/plugin.json" ]; then
+  update_json_version plugins/ralphex/plugin.json ".version = \$v"
+  echo "Updated portable plugin.json to version $VERSION"
+fi
