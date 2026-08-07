@@ -824,6 +824,13 @@ func TestMatchPattern(t *testing.T) {
 			patterns: enumeratedAPIErrorCodes, want: "API Error: 500"},
 		{name: "genuine api error 401 matched by enumerated code",
 			output: "API Error: 401 Unauthorized", patterns: enumeratedAPIErrorCodes, want: "API Error: 401"},
+		// #425: "individual spend" sits between "your" and "limit", so the older entries cannot cover this wording
+		{name: "individual spend limit missed by older limit patterns",
+			output:   "You've hit your individual spend limit · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage",
+			patterns: []string{"You've hit your limit", "You've hit your session limit"}, want: ""},
+		{name: "individual spend limit matched by its own pattern",
+			output:   "You've hit your individual spend limit · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage",
+			patterns: []string{"You've hit your individual spend limit"}, want: "You've hit your individual spend limit"},
 	}
 
 	for _, tc := range tests {
