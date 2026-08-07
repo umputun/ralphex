@@ -293,7 +293,7 @@ project/
 ### Error Pattern Detection
 
 Configurable patterns detect rate limit and quota errors in claude/codex output:
-- `claude_error_patterns` / `codex_error_patterns`: comma-separated error patterns (default strings in `llms.txt` and the embedded config). Codex phrases are tightened so review findings that *talk about* rate limiting do not trip a false positive. The claude error set enumerates `API Error:` by code (`400/401/403/404/413/429/500`) rather than the bare substring, so case-insensitive matching does not abort a successful run on narrated `API error:` prose (e.g. a ticket title or a quoted error string); the transient `529/502/503/504` codes are handled by `claude_retry_patterns`, not here
+- `claude_error_patterns` / `codex_error_patterns`: comma-separated error patterns (default strings in the embedded config, mirrored in the README config table; not carried in `llms.txt`). Codex phrases are tightened so review findings that *talk about* rate limiting do not trip a false positive. The claude error set enumerates `API Error:` by code (`400/401/403/404/413/429/500`) rather than the bare substring, so case-insensitive matching does not abort a successful run on narrated `API error:` prose (e.g. a ticket title or a quoted error string); the transient `529/502/503/504` codes are handled by `claude_retry_patterns`, not here
 - Matching is case-insensitive substring search
 - Whitespace is trimmed from each pattern
 - For claude: patterns checked against the last 10 text blocks (not full output) to avoid false positives when analysis text mentions rate limit phrases. Context cancellation paths bypass pattern checks
@@ -307,7 +307,7 @@ Transient retry patterns for wrapper-level stalls:
 - Retry detection is suppressed when `result.Signal` is non-empty: a completed run that emitted a structured signal (e.g. `ALL_TASKS_DONE`) must not be discarded and re-run just because the output text mentions a retry marker. `patternError(recentText, signal)` (`pkg/executor/executor.go`) gates only the retry tier on the signal; limit and error patterns still fire regardless (they surface loudly rather than silently re-running)
 
 Limit patterns for wait+retry behavior:
-- `claude_limit_patterns` / `codex_limit_patterns`: comma-separated limit patterns (default strings in `llms.txt` and the embedded config)
+- `claude_limit_patterns` / `codex_limit_patterns`: comma-separated limit patterns (default strings in the embedded config, mirrored in the README config table and `llms.txt`)
 - `wait_on_limit`: duration string (e.g., "1h", "30m"), disabled by default
 - `--wait` CLI flag overrides `wait_on_limit` config
 - Priority: retry patterns checked first, then limit patterns; if a limit pattern matches AND wait > 0, wait and retry; if match AND wait == 0, fall through to error pattern behavior
