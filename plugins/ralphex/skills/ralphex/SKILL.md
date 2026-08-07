@@ -1,12 +1,11 @@
 ---
 name: ralphex
-description: Run ralphex autonomous plan execution with progress monitoring
-allowed-tools: Bash Read AskUserQuestion TaskOutput Glob
+description: Run Ralphex autonomous plan execution with progress monitoring.
 ---
 
 # ralphex - Autonomous Plan Execution
 
-**SCOPE**: This command ONLY launches ralphex, monitors progress, and reports status. Do NOT take any other actions.
+**SCOPE**: This skill ONLY launches ralphex, monitors progress, and reports status. Do NOT take any other actions.
 
 ## Step 0: Verify CLI Installation
 
@@ -22,17 +21,17 @@ which ralphex
 - **Linux (RHEL/Fedora)**: download `.rpm` from https://github.com/umputun/ralphex/releases
 - **Any platform with Go**: `go install github.com/umputun/ralphex/cmd/ralphex@latest`
 
-Use AskUserQuestion to confirm installation method, then guide through it. **Do not proceed until `which ralphex` succeeds.**
+Use Codex's native interactive question tool to confirm the installation method, then guide through it. If all four methods cannot fit in one question, ask sequential questions so every method remains available. **Do not proceed until `which ralphex` succeeds.**
 
 ## Step 1: Check for Plan Argument
 
-Check `$ARGUMENTS` for optional plan file path:
-- if argument provided: validate file exists using Read tool, skip plan selection in Step 3
+Check the skill invocation for an optional plan file path:
+- if argument provided: validate the file exists with an exact file read, skip plan selection in Step 3
 - if no argument: will ask for plan selection in Step 3
 
 ## Step 2: Ask Execution Mode
 
-Use AskUserQuestion:
+Use Codex's native interactive question tool:
 - header: "Mode"
 - question: "Which execution mode should ralphex use?"
 - options:
@@ -46,25 +45,27 @@ Use AskUserQuestion:
 ## Step 3: Plan Selection (if no argument provided)
 
 **If Full mode selected:**
-- Use Glob: `docs/plans/*.md` (excludes completed/)
+- Search for `docs/plans/*.md` with exact filesystem tools (excludes completed/)
 - Plan is REQUIRED
-- **IMPORTANT**: Glob returns oldest-first, so REVERSE the list to get most recent first
-- Build AskUserQuestion with up to 4 most recent plans
+- Preserve the Claude workflow's oldest-first result handling: REVERSE the list to get most recent first
+- Offer up to 4 most recent plans
 - First option (most recent) should have "(Recommended)" suffix
+- Because a Codex question can show at most 3 options, use sequential questions when needed: offer the first 2 plans plus "More plans", then offer the remaining plans. Do not drop or rename any plan choice.
 - User MUST select one
 
 **If Review or Codex-only mode selected:**
-- Use Glob: `docs/plans/**/*.md` (includes completed/ for context)
+- Search for `docs/plans/**/*.md` with exact filesystem tools (includes completed/ for context)
 - Plan is OPTIONAL
-- **IMPORTANT**: Glob returns oldest-first, so REVERSE the list to get most recent first
-- Build AskUserQuestion with up to 4 most recent plans PLUS "None" option at the end
+- Preserve the Claude workflow's oldest-first result handling: REVERSE the list to get most recent first
+- Offer up to 4 most recent plans PLUS "None" at the end
 - First plan option (most recent) should have "(Recommended)" suffix
 - "None" option description: "Review existing changes without a plan file"
+- Because a Codex question can show at most 3 options, use sequential questions when needed: offer the first 2 plans plus "More choices", then offer the remaining plan choices and "None" across further questions as necessary. Do not drop or rename any choice.
 - If user selects "None", run without plan file
 
 ## Step 4: Ask Max Iterations
 
-Use AskUserQuestion:
+Use Codex's native interactive question tool:
 - header: "Iterations"
 - question: "Maximum number of task iterations?"
 - options:
@@ -87,7 +88,7 @@ ralphex \
   [plan-file]             # from argument OR plan selection (omit if "None" selected)
 ```
 
-Run using Bash tool with `run_in_background: true`. **Save the task_id from the response** - needed for status checks later.
+Run with Codex's native background terminal. **Save the returned session ID** - it is the Codex-native equivalent of Claude's background task ID and is needed for status checks later.
 
 **Determine progress filename** based on mode and plan selection:
 - Full mode + plan: `.ralphex/progress/progress-{plan-stem}.txt`
@@ -107,7 +108,7 @@ Where `{plan-stem}` is the plan filename without extension (e.g., `fix-bugs` fro
 4. Report launch confirmation:
 
 ```
-ralphex started. Task ID: [task_id]
+ralphex started. Session ID: [session-id]
 
 Plan: [plan file from progress file]
 Branch: [branch from progress file]
@@ -128,7 +129,7 @@ Ask "check ralphex" to get status update.
 
 If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex doing":
 
-1. Use TaskOutput tool with `block: false` to check process status (use task_id from Step 5)
+1. Poll the saved Codex background terminal session without blocking (use the session ID from Step 5)
 2. Read last 40 lines of progress file (use filename from Step 5)
 
 **If process still running:**
@@ -138,7 +139,7 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
   - "review pass 1/2" → Claude Review phase
 - Show recent activity lines
 
-**If process exited (TaskOutput shows completion):**
+**If process exited (the background terminal shows completion):**
 - Exit code 0 → success, report "ralphex completed successfully"
 - Exit code non-zero → failure, report "ralphex failed"
 - Read final lines of progress file for summary
@@ -147,7 +148,7 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
 
 ## Constraints
 
-- This command is ONLY for launching and monitoring ralphex
+- This skill is ONLY for launching and monitoring ralphex
 - Do NOT offer to help with code, commits, PRs, or anything else
 - Do NOT make suggestions or recommendations beyond status reporting
 - Do NOT take any actions on the codebase
@@ -156,6 +157,6 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
 
 ## Nested Claude Code Sessions
 
-ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Claude Code. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully instead of looping.
+ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Codex when the configured workflow launches Claude Code. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully instead of looping.
 
 Running from a standalone terminal is still recommended for the best experience.

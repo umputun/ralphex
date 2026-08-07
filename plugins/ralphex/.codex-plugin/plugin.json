@@ -1,0 +1,38 @@
+{
+  "name": "ralphex",
+  "version": "0.20.1",
+  "description": "Plan-driven implementation, review, adoption, and configuration workflows for Ralphex",
+  "author": {
+    "name": "umputun",
+    "email": "umputun@gmail.com",
+    "url": "https://github.com/umputun"
+  },
+  "homepage": "https://ralphex.com/docs/#codex-integration-optional",
+  "repository": "https://github.com/umputun/ralphex",
+  "license": "MIT",
+  "keywords": [
+    "automation",
+    "planning",
+    "code-review",
+    "task-execution"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Ralphex",
+    "shortDescription": "Run and maintain Ralphex workflows",
+    "longDescription": "Create or adopt executable plans, launch autonomous Ralphex runs, monitor progress, and merge updated defaults from Codex.",
+    "developerName": "umputun",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://ralphex.com",
+    "defaultPrompt": [
+      "Use $ralphex-plan to create an executable implementation plan.",
+      "Use $ralphex to launch an existing plan.",
+      "Use $ralphex-adopt to convert an existing specification."
+    ],
+    "brandColor": "#D97706"
+  }
+}

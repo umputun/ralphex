@@ -1,6 +1,6 @@
 ---
 name: ralphex-plan
-description: Create structured implementation plan in docs/plans/
+description: Create structured implementation plan in docs/plans/ through grounded Codex exploration and one-at-a-time questions.
 ---
 
 # Implementation Plan Creation
@@ -33,7 +33,7 @@ Before asking questions, understand what the user is working on:
    - "migrate to Z" / "upgrade W" → migration plan
    - generic request → explore current work
 
-2. **Launch Explore agent** (via Task tool with `subagent_type: Explore`) to gather relevant context based on intent:
+2. **Launch a Codex `explorer` subagent** with a read-only task to gather relevant context based on intent. If the current surface exposes no subagent tool, or spawning is disabled, do the same exploration directly and disclose the fallback:
 
    **For feature development:**
    - locate related existing code and patterns
@@ -63,30 +63,30 @@ Before asking questions, understand what the user is working on:
 
 ## Step 1: Present Context and Ask Focused Questions
 
-Show the discovered context, then ask questions **one at a time** using the AskUserQuestion tool:
+Show the discovered context, then ask questions **one at a time** using Codex's native interactive question tool:
 
 "Based on your request, I found: [context summary]"
 
 **Ask questions one at a time (do not overwhelm with multiple questions):**
 
-1. **Plan purpose**: use AskUserQuestion - "What is the main goal?"
+1. **Plan purpose**: ask "What is the main goal?"
    - provide multiple choice with suggested answer based on discovered intent
    - wait for response before next question
 
-2. **Scope**: use AskUserQuestion - "Which components/files are involved?"
+2. **Scope**: ask "Which components/files are involved?"
    - provide multiple choice with suggested discovered files/areas
    - wait for response before next question
 
-3. **Constraints**: use AskUserQuestion - "Any specific requirements or limitations?"
+3. **Constraints**: ask "Any specific requirements or limitations?"
    - can be open-ended if constraints vary widely
    - wait for response before next question
 
-4. **Testing approach**: use AskUserQuestion - "Do you prefer TDD or regular approach?"
+4. **Testing approach**: ask "Do you prefer TDD or regular approach?"
    - options: "TDD (tests first)" and "Regular (code first, then tests)"
    - store preference for reference during implementation
    - wait for response before next question
 
-5. **Plan title**: use AskUserQuestion - "Short descriptive title?"
+5. **Plan title**: ask "Short descriptive title?"
    - provide suggested name based on intent
 
 After all questions answered, synthesize responses into plan context.
@@ -116,7 +116,7 @@ I see three approaches:
 Which direction appeals to you?
 ```
 
-Use AskUserQuestion tool to let user select preferred approach before creating the plan.
+Use the native interactive question tool to let the user select the preferred approach before creating the plan.
 
 **Skip this step** if:
 - the implementation approach is obvious (single clear path)
@@ -272,7 +272,7 @@ If yes, begin with task 1.
    - Update tests for modified functionality
    - Run project test command
    - Mark completed items with `[x]` in plan file
-   - **Use TodoWrite tool to track progress and mark todos completed immediately (do not batch)**
+   - **Use the available task tracker to track progress and mark todos completed immediately (do not batch)**
 
 2. **If tests fail**:
    - Fix the failures before proceeding

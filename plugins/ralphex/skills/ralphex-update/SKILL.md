@@ -1,7 +1,6 @@
 ---
 name: ralphex-update
-description: Smart-merge updated ralphex defaults into customized prompts/agents
-allowed-tools: Bash Read Write Glob AskUserQuestion
+description: Smart-merge updated Ralphex defaults into customized prompts and agents one file at a time while preserving user intent.
 ---
 
 # ralphex-update - Smart Prompt Merging
@@ -83,7 +82,7 @@ Note: files that exist only in the dump directory (no corresponding user file) a
 
 ### Smart merge needed
 - File has uncommented content that differs from the raw dump default (after stripping `#`-prefixed lines from both sides)
-- **Action**: needs Claude to semantically analyze and propose merge
+- **Action**: needs Codex to semantically analyze and propose merge
 
 ## Step 4: Present Summary
 
@@ -101,7 +100,7 @@ Smart merge needed (N files):
 
 If nothing needs merging, report "all config files are up to date — no changes needed" and skip to cleanup.
 
-Otherwise, use AskUserQuestion to confirm proceeding:
+Otherwise, use Codex's native interactive question tool to confirm proceeding:
 - header: "Proceed"
 - question: "Review smart merges? Each customized file will be reviewed one by one."
 - options:
@@ -130,7 +129,7 @@ For each customized file that needs merging:
    - Brief summary of what changed in defaults
    - Brief summary of what user customized
    - The proposed merged version
-5. **Use AskUserQuestion** for each file:
+5. **Use the native interactive question tool** for each file:
    - header: "Merge"
    - question: "How to handle <filename>?"
    - options:

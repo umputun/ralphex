@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ralphex Update"
+  short_description: "Merge updated Ralphex defaults into local customizations"
+  default_prompt: "Use $ralphex-update to compare and selectively merge current Ralphex defaults."
+
+policy:
+  allow_implicit_invocation: true
