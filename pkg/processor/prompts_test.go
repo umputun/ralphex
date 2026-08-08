@@ -1294,6 +1294,7 @@ func TestRunner_reviewContextInstruction(t *testing.T) {
 		assert.Contains(t, got, "read-only review", "agents must not edit files")
 		assert.Contains(t, got, "NO ISSUES FOUND", "clean-case sentinel must be defined")
 		assert.Contains(t, got, "Scope: review the changed code", "findings must be scoped to the diff")
+		assert.Contains(t, got, "do not launch other agents", "agents must not sub-delegate the review")
 	})
 
 	t.Run("respects configured default branch", func(t *testing.T) {

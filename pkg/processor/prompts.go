@@ -107,7 +107,13 @@ func (b *promptBuilder) replaceVariablesWithIteration(prompt string, isFirstIter
 // pointer to the branch diff or changed files unless told to fetch them itself,
 // and without the contract lines an agent may edit files (the parent loop owns
 // fixing), dump pre-existing repo-wide findings every iteration (stalls the
-// zero-findings REVIEW_DONE exit), or leave the no-findings case ambiguous.
+// zero-findings REVIEW_DONE exit), leave the no-findings case ambiguous, or
+// fan out further agents of its own. the no-delegation line has to live here
+// rather than in review_first.txt/review_second.txt: those reach only the root
+// session, while a spawned agent's whole prompt is this lead-in plus its body.
+// the default subagent type is general-purpose, which itself holds the agent
+// tool, so a reviewer handed a multi-section checklist will otherwise
+// sub-delegate and multiply the run's token cost.
 func (b *promptBuilder) reviewContextInstruction() string {
 	branch := b.getDefaultBranch()
 	return fmt.Sprintf("First run `git diff %s...HEAD` and `git diff --stat %s...HEAD` to get the "+
@@ -115,6 +121,7 @@ func (b *promptBuilder) reviewContextInstruction() string {
 		"Scope: review the changed code and code it directly interacts with; report pre-existing "+
 		"issues outside the changes only when severe.\n"+
 		"This is a read-only review - do not edit files and do not commit; describe fixes, do not apply them.\n"+
+		"Do the whole review yourself in this context - do not launch other agents or delegate any part of it.\n"+
 		"Report only issues supported by specific evidence in the code - when unsure, read more context first.\n"+
 		"If you find no issues, output exactly: NO ISSUES FOUND\n\n", branch, branch)
 }
