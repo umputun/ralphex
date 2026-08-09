@@ -28,6 +28,13 @@ type Result struct {
 
 const recentBlockCount = 10 // number of recent text blocks to keep for pattern matching
 
+// subagentProgressInterval throttles subagent (Task tool) heartbeat lines: at most
+// one is forwarded per interval so a burst of tool steps across several parallel
+// review agents does not flood the progress stream. a single "still working" line
+// every few seconds is enough to show the review is alive. only these synthesized
+// heartbeat lines are throttled — the model's own text output is never dropped.
+const subagentProgressInterval = 10 * time.Second
+
 // PatternMatchError is returned when a configured error pattern is detected in output.
 type PatternMatchError struct {
 	Pattern string // the pattern that matched
@@ -222,6 +229,7 @@ func filterEnv(env []string, keysToRemove ...string) []string {
 // streamEvent represents a JSON event from claude CLI stream output.
 type streamEvent struct {
 	Type    string `json:"type"`
+	Subtype string `json:"subtype"` // for "system" events: init, task_started, task_progress, etc.
 	Message struct {
 		Content []struct {
 			Type string `json:"type"`
@@ -237,6 +245,11 @@ type streamEvent struct {
 		Text string `json:"text"`
 	} `json:"delta"`
 	Result json.RawMessage `json:"result"` // can be string or object with "output" field
+	// subagent (Task tool) progress: newer Claude Code streams subagent activity as
+	// system/task_started (the agent's task title) and system/task_progress (per step)
+	// events whose description names the action; the subagent type is intentionally
+	// not surfaced (stock config runs every review agent as "general-purpose").
+	Description string `json:"description"` // task title / current step, e.g. "Running tests"
 }
 
 // ClaudeExecutor runs claude CLI commands with streaming JSON parsing.
@@ -254,6 +267,16 @@ type ClaudeExecutor struct {
 	IdleTimeout    time.Duration     // kill session after this duration of no output, zero = disabled
 	PreserveAPIKey bool              // when true, ANTHROPIC_API_KEY is passed through to the child; default false strips it
 	cmdRunner      CommandRunner     // for testing, nil uses default
+	nowFn          func() time.Time  // for testing throttle timing, nil uses time.Now
+}
+
+// now returns the current time, using the injected nowFn when set (tests) or
+// time.Now otherwise.
+func (e *ClaudeExecutor) now() time.Time {
+	if e.nowFn != nil {
+		return e.nowFn()
+	}
+	return time.Now()
 }
 
 // Run executes claude CLI with the given prompt and parses streaming JSON output.
@@ -387,6 +410,7 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 	var signal string
 	var recentBlocks [recentBlockCount]string
 	var blockIdx int
+	var lastProgress time.Time // throttle window for subagent heartbeat lines
 
 	err := readLines(ctx, r, func(line string) {
 		idleTouch() // reset idle timer on every line of pipe activity
@@ -407,6 +431,28 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 			if e.OutputHandler != nil {
 				e.OutputHandler(line + "\n")
 			}
+			return
+		}
+
+		// surface subagent (Task tool) progress. newer Claude Code streams subagent
+		// activity as system/task_* events that carry no text block, so extractText
+		// drops them; without this the parent session appears silent for the whole
+		// duration of a multi-agent review. forwarded to OutputHandler only — not
+		// accumulated into output/recentBlocks/signal, which track the model's own text.
+		// task_started (title) is unthrottled; per-step task_progress is throttled so
+		// parallel agents don't flood.
+		if hb, throttle := e.subagentLine(&event); hb != "" {
+			if e.OutputHandler == nil {
+				return
+			}
+			if throttle {
+				if now := e.now(); now.Sub(lastProgress) >= subagentProgressInterval {
+					lastProgress = now
+					e.OutputHandler(hb)
+				}
+				return
+			}
+			e.OutputHandler(hb)
 			return
 		}
 
@@ -446,6 +492,29 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 	}
 
 	return Result{Output: output.String(), RecentText: recent.String(), Signal: signal}
+}
+
+// subagentLine formats a one-line heartbeat for a subagent (Task tool) system
+// event and reports whether the line should be throttled, or "" for events with
+// no surfaced progress. newer Claude Code streams subagent activity as system
+// task_* events whose payload carries no text block; surfacing the description
+// keeps the parent session from appearing silent while a multi-agent review runs.
+// task_started (the agent's task title) is unthrottled; task_progress (per step)
+// is throttled by the caller. the subagent type and tool name are intentionally
+// omitted — the description already names the action, and stock config runs every
+// review agent as "general-purpose" so a "[general-purpose]" prefix is just noise.
+func (e *ClaudeExecutor) subagentLine(event *streamEvent) (line string, throttle bool) {
+	if event.Type != "system" || event.Description == "" {
+		return "", false
+	}
+	switch event.Subtype {
+	case "task_started":
+		return "  " + event.Description + "\n", false
+	case "task_progress":
+		return "  " + event.Description + "\n", true
+	default:
+		return "", false
+	}
 }
 
 // extractText extracts text content from various event types.

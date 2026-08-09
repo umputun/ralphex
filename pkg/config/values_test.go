@@ -54,9 +54,9 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.True(t, values.CodexEnabled)
 	assert.True(t, values.CodexEnabledSet)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded gpt-5.5")
+	assert.Equal(t, "gpt-5.6-sol", values.CodexModel, "codex_model defaults to embedded gpt-5.6-sol")
 	assert.False(t, values.CodexModelSet, "embedded default carries the value but not the explicit-set flag")
-	assert.Equal(t, "xhigh", values.CodexReasoningEffort, "codex_reasoning_effort defaults to embedded xhigh")
+	assert.Equal(t, "high", values.CodexReasoningEffort, "codex_reasoning_effort defaults to embedded high")
 	assert.False(t, values.CodexReasoningEffortSet, "embedded default carries the value but not the explicit-set flag")
 	assert.Equal(t, 3600000, values.CodexTimeoutMs)
 	assert.Equal(t, "read-only", values.CodexSandbox)
@@ -70,9 +70,9 @@ func TestValuesLoader_Load_EmbeddedOnly(t *testing.T) {
 	assert.Equal(t, "docs/plans", values.PlansDir)
 	assert.Equal(t, "git", values.VcsCommand)
 	assert.Empty(t, values.CommitTrailer)
-	assert.Equal(t, []string{"You've hit your limit", "You've hit your session limit", "API Error:", "cannot be launched inside another Claude Code session", "Not logged in", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit"}, values.ClaudeErrorPatterns)
+	assert.Equal(t, []string{"You've hit your limit", "You've hit your session limit", "API Error: 400", "API Error: 401", "API Error: 403", "API Error: 404", "API Error: 413", "API Error: 429", "API Error: 500", "cannot be launched inside another Claude Code session", "Not logged in", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit", "You've hit your individual spend limit"}, values.ClaudeErrorPatterns)
 	assert.Equal(t, []string{"Rate limit exceeded", "rate limit reached", "429 Too Many Requests", "quota exceeded", "insufficient_quota", "You've hit your usage limit"}, values.CodexErrorPatterns)
-	assert.Equal(t, []string{"You've hit your limit", "You've hit your session limit", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit"}, values.ClaudeLimitPatterns)
+	assert.Equal(t, []string{"You've hit your limit", "You've hit your session limit", "Your usage allocation has been disabled by your admin", "You've hit your org's monthly usage limit", "You've hit your individual spend limit"}, values.ClaudeLimitPatterns)
 	assert.Equal(t, []string{"Rate limit exceeded", "rate limit reached", "429 Too Many Requests", "quota exceeded", "insufficient_quota", "You've hit your usage limit"}, values.CodexLimitPatterns)
 	assert.Equal(t, []string{"FYA_TRANSIENT_TIMEOUT", "API Error: 529", "API Error: 502", "API Error: 503", "API Error: 504"}, values.ClaudeRetryPatterns)
 	assert.Zero(t, values.WaitOnLimit)
@@ -102,7 +102,7 @@ iteration_delay_ms = 5000
 	// values from embedded (not set in global)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded value when not in user config")
+	assert.Equal(t, "gpt-5.6-sol", values.CodexModel, "codex_model defaults to embedded value when not in user config")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
@@ -631,7 +631,7 @@ func TestValues_mergeFrom_CodexModel(t *testing.T) {
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load("", configPath)
 		require.NoError(t, err)
-		assert.Empty(t, values.CodexModel, "explicit empty clears embedded gpt-5.5 so codex inherits from ~/.codex/config.toml")
+		assert.Empty(t, values.CodexModel, "explicit empty clears embedded gpt-5.6-sol so codex inherits from ~/.codex/config.toml")
 		assert.True(t, values.CodexModelSet)
 		assert.Empty(t, values.CodexReasoningEffort)
 		assert.True(t, values.CodexReasoningEffortSet)
@@ -645,8 +645,8 @@ func TestValues_mergeFrom_CodexModel(t *testing.T) {
 		loader := newValuesLoader(defaultsFS)
 		values, err := loader.Load("", configPath)
 		require.NoError(t, err)
-		assert.Equal(t, "gpt-5.5", values.CodexModel)
-		assert.Equal(t, "xhigh", values.CodexReasoningEffort)
+		assert.Equal(t, "gpt-5.6-sol", values.CodexModel)
+		assert.Equal(t, "high", values.CodexReasoningEffort)
 	})
 }
 
@@ -1155,7 +1155,7 @@ func TestValuesLoader_Load_AllCommentedConfigFallsBackToEmbedded(t *testing.T) {
 	assert.Equal(t, "--dangerously-skip-permissions --output-format stream-json --verbose", values.ClaudeArgs)
 	assert.True(t, values.CodexEnabled)
 	assert.Equal(t, "codex", values.CodexCommand)
-	assert.Equal(t, "gpt-5.5", values.CodexModel, "codex_model defaults to embedded gpt-5.5 (uncommented in embedded default)")
+	assert.Equal(t, "gpt-5.6-sol", values.CodexModel, "codex_model defaults to embedded gpt-5.6-sol (uncommented in embedded default)")
 	assert.Equal(t, "docs/plans", values.PlansDir)
 }
 
