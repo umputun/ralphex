@@ -157,9 +157,11 @@ Even more noise`
 		assert.NotContains(t, streamedLines, hidden, "header line %q must be hidden", hidden)
 	}
 
-	// verify bold summaries are still shown (stripped of ** markers)
-	assert.Contains(t, streamedLines, "Summary: Found 2 issues", "bold summary should be shown")
-	assert.Contains(t, streamedLines, "Details: processing...", "bold summary should be shown")
+	// stderr reasoning/bold summaries are NOT forwarded — reasoning titles come
+	// from the rollout file instead (see formatRolloutEvent), so skill/tool markdown
+	// codex echoes onto the same stream cannot leak.
+	assert.NotContains(t, streamedLines, "Summary: Found 2 issues", "stderr bold summary must not be forwarded")
+	assert.NotContains(t, streamedLines, "Details: processing...", "stderr bold summary must not be forwarded")
 
 	// verify non-bold post-header noise is filtered
 	for _, line := range streamedLines {
@@ -434,44 +436,34 @@ func TestCodexExecutor_shouldDisplay_headerBlock(t *testing.T) {
 	}
 }
 
-func TestCodexExecutor_shouldDisplay_boldSummaries(t *testing.T) {
+func TestCodexExecutor_shouldDisplay_stderrReasoningSuppressed(t *testing.T) {
+	// stderr reasoning/bold lines are never forwarded — reasoning titles come from
+	// the rollout instead (see formatRolloutEvent). this includes fully-bold skill
+	// headers that codex echoes verbatim and that are shape-identical to real
+	// reasoning titles ("**Detect stale base:**"), which a text-shape filter cannot
+	// separate.
 	e := &CodexExecutor{}
 
 	tests := []struct {
-		name    string
-		line    string
-		state   *codexFilterState
-		wantOk  bool
-		wantOut string
+		name  string
+		line  string
+		state *codexFilterState
 	}{
-		{
-			name:    "bold shown after header",
-			line:    "**Summary: Found issues**",
-			state:   &codexFilterState{headerCount: 2},
-			wantOk:  true,
-			wantOut: "Summary: Found issues",
-		},
-		{
-			name:    "bold shown before header ends",
-			line:    "**Progress...**",
-			state:   &codexFilterState{headerCount: 0},
-			wantOk:  true,
-			wantOut: "Progress...",
-		},
-		{
-			name:    "non-bold filtered after header",
-			line:    "Some random noise",
-			state:   &codexFilterState{headerCount: 2},
-			wantOk:  false,
-			wantOut: "",
-		},
+		{"fully-bold reasoning-shaped title", "**Summary: Found issues**", &codexFilterState{headerCount: 2}},
+		{"fully-bold before header ends", "**Progress...**", &codexFilterState{headerCount: 0}},
+		{"non-bold noise", "Some random noise", &codexFilterState{headerCount: 2}},
+		{"skill header fully bold with colon", "**Detect stale base:**", &codexFilterState{headerCount: 2}},
+		{"skill header PR metadata", "**PR metadata**", &codexFilterState{headerCount: 2}},
+		{"skill markdown bold-prefix + trailing", "**THINK HARD** about every review point:", &codexFilterState{headerCount: 2}},
+		{"skill Problem line", "**Problem**: Silent failures, bugs go unnoticed", &codexFilterState{headerCount: 2}},
+		{"raw skill heading echoed", "If current repo matches PR repo -> create worktree manually:", &codexFilterState{headerCount: 2}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ok, out := e.shouldDisplay(tc.line, tc.state)
-			assert.Equal(t, tc.wantOk, ok)
-			assert.Equal(t, tc.wantOut, out)
+			assert.False(t, ok, "stderr line must not be forwarded")
+			assert.Empty(t, out)
 		})
 	}
 }
@@ -773,79 +765,6 @@ func TestCodexExecutor_finalError(t *testing.T) {
 	}
 }
 
-func TestCodexExecutor_shouldDisplay_deduplication(t *testing.T) {
-	// header block is now suppressed entirely; only bold summaries flow through
-	// and they are deduplicated so the same "**X**" line shown twice in a row
-	// (or with other lines between) is emitted only once.
-	e := &CodexExecutor{}
-
-	tests := []struct {
-		name      string
-		lines     []string
-		wantShown []string
-	}{
-		{
-			name: "duplicate bold summaries filtered",
-			lines: []string{
-				"--------",
-				"header",
-				"--------",
-				"**Findings**",
-				"**Questions**",
-				"**Change Summary**",
-				"**Findings**",       // duplicate
-				"**Questions**",      // duplicate
-				"**Change Summary**", // duplicate
-			},
-			wantShown: []string{"Findings", "Questions", "Change Summary"},
-		},
-		{
-			name: "non-consecutive duplicates filtered",
-			lines: []string{
-				"--------",
-				"model: gpt-5",
-				"--------",
-				"**Processing...**",
-				"**Done**",
-				"**Processing...**", // non-consecutive duplicate
-			},
-			wantShown: []string{"Processing...", "Done"},
-		},
-		{
-			name: "separators alone produce no output",
-			lines: []string{
-				"--------",
-				"header content",
-				"--------",
-				"--------",
-			},
-			wantShown: nil,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			state := &codexFilterState{}
-			var shown []string
-			for _, line := range tc.lines {
-				if ok, out := e.shouldDisplay(line, state); ok {
-					shown = append(shown, out)
-				}
-			}
-			assert.Equal(t, tc.wantShown, shown)
-
-			// no displayed line should appear more than once (full dedup)
-			seenLines := make(map[string]int)
-			for _, s := range shown {
-				seenLines[s]++
-			}
-			for line, count := range seenLines {
-				assert.Equal(t, 1, count, "duplicate line found: %q", line)
-			}
-		})
-	}
-}
-
 func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 	// test that stderr lines of arbitrary length are handled without limit
 
@@ -863,60 +782,43 @@ func TestCodexExecutor_processStderr_largeLines(t *testing.T) {
 			if tc.size >= 65*1024*1024 && testing.Short() {
 				t.Skip("skipping 65MB allocation in short mode")
 			}
-			// embed the large content in a bold summary so it flows through
-			// the (only) display path. header block content is suppressed and
-			// can't be used to verify large-line capture anymore.
+			// a single very large stderr line must be read without a scanner-buffer
+			// overflow. stderr display is header-only now, so the read is verified
+			// through the error-context tail (which captures a truncated copy) rather
+			// than the display path.
 			largeContent := strings.Repeat("x", tc.size)
-			stderr := "**" + largeContent + "**\n"
+			stderr := largeContent + "\n"
 
-			var shown []string
-			e := &CodexExecutor{
-				OutputHandler: func(text string) {
-					shown = append(shown, strings.TrimSuffix(text, "\n"))
-				},
-			}
-
+			e := &CodexExecutor{}
 			res := e.processStderr(context.Background(), strings.NewReader(stderr), stderrStreamOpts{})
 
 			require.NoError(t, res.err, "should handle %d byte line without error", tc.size)
-			assert.Contains(t, shown, largeContent, "large content should be captured")
+			require.Len(t, res.lastLines, 1, "the large line should reach the error-context tail")
+			assert.True(t, strings.HasPrefix(res.lastLines[0], "xxxx"), "tail should hold the large line")
+			assert.True(t, strings.HasSuffix(res.lastLines[0], "..."), "large line should be truncated in the tail")
 		})
 	}
 }
 
 func TestCodexExecutor_Run_largeOutput(t *testing.T) {
-	// test end-to-end with large stderr and stdout. header block is now
-	// suppressed, so the large stderr content is wrapped in a bold summary
-	// (the only display path) to verify the executor does not truncate it.
+	// test end-to-end with large stderr and stdout: a huge stderr line must not
+	// crash or truncate-error the run, and large stdout must be captured in full.
+	// stderr reasoning/bold is no longer displayed, so only stdout capture and
+	// clean completion are asserted.
 	largeStderr := strings.Repeat("x", 200*1024) // 200KB
 	largeStdout := strings.Repeat("y", 500*1024) // 500KB
 
 	mock := &mockCodexRunner{
 		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
-			stderr := "**" + largeStderr + "**\n"
-			return mockStreams(stderr, largeStdout), mockWait(), nil
+			return mockStreams(largeStderr+"\n", largeStdout), mockWait(), nil
 		},
 	}
 
-	var captured []string
-	e := &CodexExecutor{
-		runner:        mock,
-		OutputHandler: func(text string) { captured = append(captured, text) },
-	}
-
+	e := &CodexExecutor{runner: mock}
 	result := e.Run(context.Background(), "test")
 
 	require.NoError(t, result.Error)
 	assert.Equal(t, largeStdout, result.Output, "stdout should be fully captured")
-	// verify large stderr was processed (flows through as bold summary)
-	found := false
-	for _, c := range captured {
-		if strings.Contains(c, strings.Repeat("x", 100)) {
-			found = true
-			break
-		}
-	}
-	assert.True(t, found, "large stderr content should be captured")
 }
 
 func TestCodexExecutor_Run_ErrorPattern(t *testing.T) {
@@ -1870,7 +1772,23 @@ func TestCodexExecutor_formatRolloutEvent(t *testing.T) {
 			line: `{"type":"response_item","payload":{"type":"function_call","name":"spawn_agent","arguments":"{\"agent_type\":\"reviewer\",\"message\":\"qa-expert: review the diff\"}"}}`,
 			want: "",
 		},
-		{name: "reasoning skipped", line: `{"type":"response_item","payload":{"type":"reasoning","summary":[]}}`, want: ""},
+		{
+			name: "reasoning summary renders stripped title",
+			line: `{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**Inspecting diff and go.mod changes**"}]}}`,
+			want: "Inspecting diff and go.mod changes",
+		},
+		{
+			name: "reasoning multi-summary joins with newline",
+			line: `{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**First**"},{"type":"summary_text","text":"**Second**"}]}}`,
+			want: "First\nSecond",
+		},
+		{
+			name: "reasoning summary keeps only the first line (title), drops trailing paragraph",
+			line: `{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**Reviewing the diff**\n\nThen a long paragraph of reasoning body that must not be forwarded."}]}}`,
+			want: "Reviewing the diff",
+		},
+		{name: "empty reasoning summary dropped", line: `{"type":"response_item","payload":{"type":"reasoning","summary":[]}}`, want: ""},
+		{name: "custom_tool_call_output skipped", line: `{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"**Detect stale base:**"}}`, want: ""},
 		{name: "function_call_output skipped", line: `{"type":"response_item","payload":{"type":"function_call_output","output":"ok"}}`, want: ""},
 		{name: "session_meta skipped", line: `{"type":"session_meta","payload":{}}`, want: ""},
 		{name: "turn_context skipped", line: `{"type":"turn_context","payload":{}}`, want: ""},
@@ -1922,7 +1840,7 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 	// both initial-drain and follow-on append behavior.
 	preEvents := []string{
 		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first reply"}]}}`,
-		`{"type":"response_item","payload":{"type":"reasoning","summary":[]}}`,
+		`{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**Inspecting the diff**"}]}}`,
 	}
 	for _, ev := range preEvents {
 		_, writeErr := f.WriteString(ev + "\n")
@@ -1936,9 +1854,9 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 		e.tailRolloutFile(ctx, sessionID, nil)
 	}()
 
-	// wait briefly for initial drain
+	// wait briefly for initial drain (assistant text + reasoning title)
 	deadline := time.Now().Add(2 * time.Second)
-	for len(snapshot()) < 1 && time.Now().Before(deadline) {
+	for len(snapshot()) < 2 && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -1948,7 +1866,7 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 
 	// give the tailer a poll cycle to pick it up
 	deadline = time.Now().Add(2 * time.Second)
-	for len(snapshot()) < 2 && time.Now().Before(deadline) {
+	for len(snapshot()) < 3 && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -1956,9 +1874,10 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 	<-tailDone
 
 	final := snapshot()
-	require.GreaterOrEqual(t, len(final), 2, "expected at least 2 emissions, got %v", final)
+	require.GreaterOrEqual(t, len(final), 3, "expected at least 3 emissions, got %v", final)
 	assert.Contains(t, final[0], "first reply")
-	assert.Contains(t, final[1], "late reply after first read")
+	assert.Contains(t, final[1], "Inspecting the diff", "reasoning title streams from the rollout, stripped of **")
+	assert.Contains(t, final[2], "late reply after first read")
 }
 
 func TestCodexExecutor_findRolloutFile(t *testing.T) {
@@ -2027,7 +1946,7 @@ func TestCodexExecutor_firstRunHeaderEmission(t *testing.T) {
 		assert.Contains(t, captured, "model: gpt-5.5", "first-run model: should leak")
 		assert.Contains(t, captured, "sandbox: danger-full-access", "first-run sandbox: should leak")
 		assert.Contains(t, captured, "reasoning effort: high", "first-run effort: should leak")
-		assert.Contains(t, captured, "Thinking", "bold summary should appear")
+		assert.NotContains(t, captured, "Thinking", "stderr bold reasoning is no longer forwarded (reasoning comes from the rollout)")
 		for _, hidden := range []string{"--------", "workdir: /tmp/x", "provider: openai", "reasoning summaries: auto"} {
 			assert.NotContains(t, captured, hidden, "%q must stay hidden", hidden)
 		}
@@ -2058,6 +1977,8 @@ func TestCodexExecutor_firstRunHeaderEmission(t *testing.T) {
 		for _, hidden := range []string{"model: gpt-5.5", "sandbox: danger-full-access", "reasoning effort: high"} {
 			assert.NotContains(t, secondCaptured, hidden, "second-run %q must be suppressed", hidden)
 		}
-		assert.Contains(t, secondCaptured, "Thinking", "bold summary still shown on second run")
+		// with the header suppressed and stderr reasoning no longer forwarded, a
+		// second run emits nothing to stderr display (reasoning comes from the rollout).
+		assert.Empty(t, secondCaptured, "second run has nothing to forward from stderr")
 	})
 }

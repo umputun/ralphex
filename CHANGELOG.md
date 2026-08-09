@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.6.1 - 2026-07-21
+
+### Improved
+
+- Bump golang.org/x/term from 0.44.0 to 0.45.0 #409 @dependabot
+- Bump golang.org/x/sys from 0.46.0 to 0.47.0 #408 @dependabot
+- Bump golang.org/x/net from 0.53.0 to 0.55.0 #401 @dependabot
+
+### Fixed
+
+- Clean codex review output and surface claude subagent progress #417 @umputun
+- Align default review agents with the review-loop contract #414 @alekb
+- Refresh claude and codex at container start (opt-in) #413 @umputun
+- Skip regenerable plugin-manager state when seeding container #405 @umputun
+- Preserve wrapper file mode on --update-script #404 @umputun
+- Bound force-exit cleanup so a stuck worktree removal cannot prevent exit #400 @paskal
+- Skip 65MB parse test under -race to unhang go test -race ./pkg/web #399 @paskal
+- Tolerate coveralls upload failures in CI 032776cc
+
 ## v1.6.0 - 2026-06-26
 
 ### New Features
