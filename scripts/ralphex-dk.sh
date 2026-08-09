@@ -369,6 +369,18 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
         suffix = ":" + ",".join(opts) if opts else ""
         vols.extend(["-v", f"{src}:{dst}{suffix}"])
 
+    def add_bind_file(src: Path, dst: str) -> None:
+        """add rw bind-mount for a single file via --mount type=bind.
+        docker fails at container start if the source disappears after the is_file() check,
+        instead of silently creating a directory at dst and corrupting the credential path.
+        no selinux option here: docker's --mount has no relabel option (podman's relabel= has
+        no docker equivalent, and z/Z are -v only). the caller mounts the parent dir with :z,
+        and docker's z relabel walks the source tree, so this file's inode is already labeled.
+        source is CSV-quoted because --mount parses as CSV: a comma in the path (via $HOME or
+        CLAUDE_CONFIG_DIR) would otherwise split the field and docker would reject the spec.
+        dst is a fixed literal at both call sites, so it needs no quoting."""
+        vols.extend(["--mount", f'type=bind,"source={src}",target={dst}'])
+
     def add_symlink_targets(src: Path) -> None:
         """add read-only mounts for symlink targets that live under $HOME."""
         for target in symlink_target_dirs(src):
@@ -377,6 +389,14 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
 
     # 1. claude_home (resolved) -> /mnt/claude:ro
     add(resolve_path(claude_home), "/mnt/claude", ro=True)
+    # rw bind-mount for .credentials.json so token refreshes persist back to host;
+    # only when the file already exists as a regular file (is_file() guard).
+    # uses --mount type=bind so docker fails fast if the file disappears before container start,
+    # instead of silently creating a directory at the target and corrupting credential loading.
+    # macOS keychain path (creds_temp) is handled separately below; no write-back there.
+    claude_creds = claude_home / ".credentials.json"
+    if claude_creds.is_file():
+        add_bind_file(resolve_path(claude_creds), "/home/app/.claude/.credentials.json")
 
     # 2. cwd -> /workspace
     add(cwd, "/workspace")
@@ -398,6 +418,15 @@ def build_volumes(creds_temp: Optional[Path], claude_home: Optional[Path] = None
     if codex_dir.is_dir():
         add(resolve_path(codex_dir), "/mnt/codex", ro=True)
         add_symlink_targets(codex_dir)
+        # rw bind-mount for auth.json so token refreshes persist back to host;
+        # only when the file exists as a regular file (is_file() guard).
+        # uses --mount type=bind so docker fails fast if the file disappears before container start.
+        codex_auth = codex_dir / "auth.json"
+        if codex_auth.is_file():
+            add_bind_file(resolve_path(codex_auth), "/home/app/.codex/auth.json")
+        # note: concurrent container runs share these host credential files with no
+        # coordination. if two containers refresh OAuth tokens simultaneously, one may
+        # receive a stale (already-consumed) token. run one container at a time to avoid this.
 
     # 7. ~/.config/ralphex -> /home/app/.config/ralphex + symlink targets
     # always mount, creating the host dir if missing — this ensures docker
