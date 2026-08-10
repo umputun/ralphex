@@ -26,12 +26,15 @@ from ralphex_dk import (  # noqa: E402
     DEFAULT_IMAGE,
     DEFAULT_PORT,
     DEFAULT_DOCKER_SOCKET,
+    ORCAROUTER_DEFAULT_MODELS,
+    ORCAROUTER_ENV_VARS,
     VALID_CLAUDE_PROVIDERS,
     ParsedEnvFlags,
     build_base_env_vars,
     build_bedrock_env_args,
     build_docker_command,
     build_env_vars,
+    build_orcarouter_env_args,
     build_parser,
     build_volumes,
     detect_explicit_secrets,
@@ -1730,6 +1733,115 @@ class TestClaudeProvider(EnvTestCase):
         os.environ["RALPHEX_CLAUDE_PROVIDER"] = ""
         provider = get_claude_provider(None)
         self.assertEqual(provider, "default")
+
+class TestOrcaRouterProvider(EnvTestCase):
+    """tests for orcarouter provider selection and env var handling."""
+    env_vars = [
+        "RALPHEX_CLAUDE_PROVIDER",
+        "ORCAROUTER_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+        "DISABLE_PROMPT_CACHING",
+    ]
+
+    def test_orcarouter_in_valid_providers(self) -> None:
+        """orcarouter is a recognized claude provider."""
+        self.assertIn("orcarouter", VALID_CLAUDE_PROVIDERS)
+
+    def test_cli_flag_orcarouter(self) -> None:
+        """--claude-provider orcarouter → provider is 'orcarouter'."""
+        provider = get_claude_provider("orcarouter")
+        self.assertEqual(provider, "orcarouter")
+
+    def test_env_var_fallback_orcarouter(self) -> None:
+        """no flag, RALPHEX_CLAUDE_PROVIDER=orcarouter → provider is 'orcarouter'."""
+        os.environ["RALPHEX_CLAUDE_PROVIDER"] = "orcarouter"
+        provider = get_claude_provider(None)
+        self.assertEqual(provider, "orcarouter")
+
+    def test_orcarouter_default_provider_no_env(self) -> None:
+        """no flag, no env → provider is 'default'."""
+        provider = get_claude_provider(None)
+        self.assertEqual(provider, "default")
+
+    def test_orcarouter_sets_base_url_and_pins(self) -> None:
+        """always sets gateway base url and default model pins (bare ids fail on gateway)."""
+        args = build_orcarouter_env_args()
+        self.assertIn("-e", args)
+        self.assertIn("ANTHROPIC_BASE_URL=https://api.orcarouter.ai", args)
+        for var, default in ORCAROUTER_DEFAULT_MODELS.items():
+            self.assertIn(f"{var}={default}", args)
+
+    def test_orcarouter_translates_key_inherit_form(self) -> None:
+        """ORCAROUTER_API_KEY → ANTHROPIC_AUTH_TOKEN via inherit form (no value on cmdline)."""
+        os.environ["ORCAROUTER_API_KEY"] = "sk-orca-test123"
+        args = build_orcarouter_env_args()
+        # key value must never appear in the docker args
+        self.assertNotIn("sk-orca-test123", args)
+        # inherit form passes the token from host env
+        self.assertIn("ANTHROPIC_AUTH_TOKEN", args)
+        self.assertEqual(os.environ["ANTHROPIC_AUTH_TOKEN"], "sk-orca-test123")
+
+    def test_orcarouter_no_key_still_sets_base_url(self) -> None:
+        """no key set → gateway base url + pins still applied, no token flag."""
+        args = build_orcarouter_env_args()
+        self.assertIn("ANTHROPIC_BASE_URL=https://api.orcarouter.ai", args)
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", args)
+
+    def test_orcarouter_passes_set_vars(self) -> None:
+        """only passes ORCAROUTER_ENV_VARS that are actually set."""
+        os.environ["ANTHROPIC_MODEL"] = "anthropic/claude-sonnet-5"
+        os.environ["DISABLE_PROMPT_CACHING"] = "1"
+        args = build_orcarouter_env_args()
+        self.assertIn("ANTHROPIC_MODEL", args)
+        self.assertIn("DISABLE_PROMPT_CACHING", args)
+        # ORCAROUTER_API_KEY unset → not passed, and no token translation
+        self.assertNotIn("ORCAROUTER_API_KEY", args)
+
+    def test_orcarouter_skips_user_base_url_override(self) -> None:
+        """user -E ANTHROPIC_BASE_URL wins over auto gateway base url."""
+        existing_env = ["-e", "ANTHROPIC_BASE_URL=https://custom.gateway.ai"]
+        args = build_orcarouter_env_args(existing_env)
+        self.assertNotIn("ANTHROPIC_BASE_URL", args)
+
+    def test_orcarouter_skips_user_model_pins(self) -> None:
+        """user -E overrides a default model pin."""
+        existing_env = ["-e", "ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-opus-4"]
+        args = build_orcarouter_env_args(existing_env)
+        self.assertNotIn("ANTHROPIC_DEFAULT_OPUS_MODEL", args)
+        # other pins still applied
+        self.assertIn("ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-5", args)
+
+    def test_orcarouter_skips_user_inherit(self) -> None:
+        """-E VAR inherit form counts as already-set and is skipped."""
+        os.environ["ANTHROPIC_AUTH_TOKEN"] = "host-token"
+        existing_env = ["-e", "ANTHROPIC_AUTH_TOKEN"]
+        args = build_orcarouter_env_args(existing_env)
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", args)
+
+    def test_orcarouter_honors_host_auth_token(self) -> None:
+        """host ANTHROPIC_AUTH_TOKEN set → used directly, no key translation."""
+        os.environ["ANTHROPIC_AUTH_TOKEN"] = "host-token"
+        os.environ["ORCAROUTER_API_KEY"] = "sk-orca-test123"
+        args = build_orcarouter_env_args()
+        self.assertIn("ANTHROPIC_AUTH_TOKEN", args)
+        self.assertNotIn("sk-orca-test123", args)
+        # key translation must NOT override host token
+        self.assertEqual(os.environ["ANTHROPIC_AUTH_TOKEN"], "host-token")
+
+    def test_orcarouter_no_duplicate_model_pins(self) -> None:
+        """model pins auto-set by the wrapper are not re-added by pass-through (no duplicate -e)."""
+        os.environ["ANTHROPIC_SMALL_FAST_MODEL"] = "anthropic/claude-haiku-4.5"
+        args = build_orcarouter_env_args()
+        # value-form pin present exactly once
+        self.assertEqual(args.count("ANTHROPIC_SMALL_FAST_MODEL=anthropic/claude-haiku-4.5"), 1)
+        # no bare inherit-form duplicate
+        self.assertNotIn("ANTHROPIC_SMALL_FAST_MODEL", args)
 
 class TestDockerEnabled(EnvTestCase):
     """tests for docker socket flag and env var detection."""

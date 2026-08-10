@@ -497,6 +497,30 @@ ralphex docs/plans/feature.md
 
 See [Bedrock setup documentation](docs/bedrock-setup.md) for detailed IAM policies and setup instructions.
 
+**OrcaRouter support:**
+
+When `--claude-provider=orcarouter` or `RALPHEX_CLAUDE_PROVIDER=orcarouter` is set:
+- Keychain credential extraction is skipped (not needed for gateway auth)
+- `ORCAROUTER_API_KEY` is translated to `ANTHROPIC_AUTH_TOKEN` using the docker inherit form (the key value never appears on the command line)
+- Required env vars are passed to container: `ANTHROPIC_BASE_URL` (set to `https://api.orcarouter.ai`), `ANTHROPIC_AUTH_TOKEN`, and default model pins (`anthropic/`-prefixed gateway model IDs)
+
+Required environment for OrcaRouter:
+- `ORCAROUTER_API_KEY` - OrcaRouter API key (starts with `sk-orca-`)
+
+Note: `ANTHROPIC_BASE_URL=https://api.orcarouter.ai` and `anthropic/`-namespaced default model pins are automatically set when using `--claude-provider=orcarouter`. Bare Anthropic model IDs are rejected by the gateway with `model_not_found`.
+
+```bash
+# with API key
+export ORCAROUTER_API_KEY=sk-orca-...
+ralphex --claude-provider=orcarouter docs/plans/feature.md
+
+# or use env var for session-wide setting
+export RALPHEX_CLAUDE_PROVIDER=orcarouter
+ralphex docs/plans/feature.md
+```
+
+See [OrcaRouter setup documentation](docs/orcarouter-setup.md) for detailed setup instructions.
+
 **Extra volume mounts:**
 ```bash
 # via CLI flags (can use multiple -v)

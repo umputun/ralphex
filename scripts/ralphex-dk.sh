@@ -72,7 +72,7 @@ DEFAULT_IMAGE = "ghcr.io/umputun/ralphex-go:latest"
 DEFAULT_PORT = "8080"
 SCRIPT_URL = "https://raw.githubusercontent.com/umputun/ralphex/master/scripts/ralphex-dk.sh"
 SENSITIVE_PATTERNS = ["KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH"]
-VALID_CLAUDE_PROVIDERS = ["default", "bedrock"]
+VALID_CLAUDE_PROVIDERS = ["default", "bedrock", "orcarouter"]
 DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock"
 
 # environment variables to pass through when using bedrock provider
@@ -100,6 +100,37 @@ BEDROCK_ENV_VARS = [
     "ANTHROPIC_BEDROCK_BASE_URL",
     "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
 ]
+
+# environment variables to pass through when using orcarouter provider.
+# ANTHROPIC_BASE_URL is auto-set to the OrcaRouter endpoint when the provider is
+# selected (unless the user pins it via -E); the default model pins below are
+# required because bare Anthropic model ids (e.g. "claude-sonnet-4-5") fail on
+# the gateway with model_not_found unless namespaced with the "anthropic/" prefix.
+ORCAROUTER_ENV_VARS = [
+    # api key (translated to ANTHROPIC_AUTH_TOKEN by build_orcarouter_env_args)
+    "ORCAROUTER_API_KEY",
+    # optional explicit token/base-url override (ANTHROPIC_BASE_URL is auto-set)
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    # optional model configuration (overrides the gateway default pins below)
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    # optional
+    "DISABLE_PROMPT_CACHING",
+]
+
+# gateway default model pins for the orcarouter provider (auto-set unless the user
+# provides one via -E flags). bare model ids fail on the gateway with
+# model_not_found - the "anthropic/" prefix is required.
+ORCAROUTER_DEFAULT_MODELS = {
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+    "ANTHROPIC_SMALL_FAST_MODEL": "anthropic/claude-haiku-4.5",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -137,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="show this help and ralphex help, then exit")
     parser.add_argument("--claude-provider", dest="claude_provider", metavar="PROVIDER",
                         choices=VALID_CLAUDE_PROVIDERS,
-                        help="claude provider: 'default' or 'bedrock' (env: RALPHEX_CLAUDE_PROVIDER)")
+                        help="claude provider: 'default', 'bedrock', or 'orcarouter' (env: RALPHEX_CLAUDE_PROVIDER)")
     parser.add_argument("--docker", action="store_true", dest="docker",
                         help="mount host Docker socket into container (env: RALPHEX_DOCKER_SOCKET)")
     parser.add_argument("--network", dest="network", metavar="MODE",
@@ -542,7 +573,7 @@ def merge_volume_flags(args_volume: list[str]) -> list[str]:
 
 
 def get_claude_provider(cli_provider: Optional[str]) -> str:
-    """get claude provider from CLI flag or env var. returns 'default' or 'bedrock'.
+    """get claude provider from CLI flag or env var. returns 'default', 'bedrock', or 'orcarouter'.
 
     priority: CLI flag > RALPHEX_CLAUDE_PROVIDER env var > 'default'
     raises ValueError if provider value is invalid.
@@ -667,6 +698,55 @@ def build_bedrock_env_args(existing_env: Optional[list[str]] = None) -> list[str
             continue
         # skip session token when user provides explicit credential values to avoid mixing
         if skip_session_token and var == "AWS_SESSION_TOKEN":
+            continue
+        # only pass vars that exist in env AND have non-empty values
+        value = os.environ.get(var, "")
+        if value:
+            result.extend(["-e", var])
+    return result
+
+
+def build_orcarouter_env_args(existing_env: Optional[list[str]] = None) -> list[str]:
+    """build docker -e flags for orcarouter env vars.
+
+    always sets ANTHROPIC_BASE_URL to the OrcaRouter endpoint and pins the default
+    model vars to anthropic-namespaced gateway model ids (bare ids fail on the
+    gateway with model_not_found). ORCAROUTER_API_KEY is translated to
+    ANTHROPIC_AUTH_TOKEN using the inherit form (-e VAR) so the key value never
+    appears on the docker command line / in ps output. other vars are passed
+    through only if they have values in the host environment.
+    skips vars that are already explicitly set in existing_env (from -E flags).
+    """
+    parsed = parse_env_flags(existing_env)
+    already_set = set(parsed.values.keys())
+
+    # translate ORCAROUTER_API_KEY to ANTHROPIC_AUTH_TOKEN unless the user already
+    # provided an explicit token (via -E flag or host environment). the inherit
+    # form keeps the key value out of the command line.
+    if (
+        "ANTHROPIC_AUTH_TOKEN" not in already_set
+        and not os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    ):
+        key = os.environ.get("ORCAROUTER_API_KEY", "")
+        if key:
+            os.environ["ANTHROPIC_AUTH_TOKEN"] = key
+
+    result: list[str] = []
+    auto_set_vars: set[str] = set()  # track auto-set vars so pass-through skips them
+
+    # always set the gateway base url and default model pins when orcarouter
+    # provider is selected (this function is only called in that case)
+    if "ANTHROPIC_BASE_URL" not in already_set:
+        result.extend(["-e", "ANTHROPIC_BASE_URL=https://api.orcarouter.ai"])
+        auto_set_vars.add("ANTHROPIC_BASE_URL")
+    for var, default in ORCAROUTER_DEFAULT_MODELS.items():
+        if var not in already_set:
+            result.extend(["-e", f"{var}={default}"])
+            auto_set_vars.add(var)
+
+    for var in ORCAROUTER_ENV_VARS:
+        # skip vars already set via -E flags or auto-set above (avoids duplicate -e flags)
+        if var in already_set or var == "ANTHROPIC_BASE_URL" or var in auto_set_vars:
             continue
         # only pass vars that exist in env AND have non-empty values
         value = os.environ.get(var, "")
@@ -1084,16 +1164,16 @@ def main() -> int:
         return 1
 
     # handle --help: show wrapper help unconditionally, then try container help if config exists
-    # skip claude_home check when using bedrock provider (no anthropic credentials needed)
+    # skip claude_home check when using bedrock or orcarouter provider (no local claude credentials needed)
     if parsed.help:
         parser.print_help()
         print("\n" + "-" * 70)
-        if provider != "bedrock" and not claude_home.is_dir():
+        if provider not in ("bedrock", "orcarouter") and not claude_home.is_dir():
             print("ralphex options: (cannot show - claude config not found)")
             print("  run 'claude' first to authenticate, then re-run --help")
             return 0
         print("ralphex options (from container):\n")
-        creds_temp = None if provider == "bedrock" else extract_macos_credentials(claude_home)
+        creds_temp = None if provider in ("bedrock", "orcarouter") else extract_macos_credentials(claude_home)
         try:
             volumes = build_volumes(creds_temp, claude_home)
             cmd = ["docker", "run", "--rm"]
@@ -1117,20 +1197,20 @@ def main() -> int:
                     pass
 
     # check required directories (after --help handling)
-    # skip claude_home check when using bedrock provider (no anthropic credentials needed)
-    if provider != "bedrock" and not claude_home.is_dir():
+    # skip claude_home check when using bedrock or orcarouter provider (no local claude credentials needed)
+    if provider not in ("bedrock", "orcarouter") and not claude_home.is_dir():
         print(f"error: {claude_home} directory not found (run 'claude' first to authenticate)", file=sys.stderr)
         return 1
 
     # extract macOS credentials (needed for volume mounts)
-    # skip when using bedrock provider (uses AWS credentials instead)
-    creds_temp = None if provider == "bedrock" else extract_macos_credentials(claude_home)
+    # skip when using bedrock or orcarouter provider (uses gateway credentials instead)
+    creds_temp = None if provider in ("bedrock", "orcarouter") else extract_macos_credentials(claude_home)
 
     # fail fast on macOS if there are no credentials at all: no on-disk file AND
     # keychain extraction returned None. starting the container would surface a
     # confusing "Not logged in" inside claude later.
     if (
-        provider != "bedrock"
+        provider not in ("bedrock", "orcarouter")
         and platform.system() == "Darwin"
         and creds_temp is None
         and not (claude_home / ".credentials.json").exists()
@@ -1157,6 +1237,17 @@ def main() -> int:
         # pass existing extra_env to avoid overriding user's explicit -E values
         bedrock_env_args = build_bedrock_env_args(extra_env)
         extra_env.extend(bedrock_env_args)
+
+    # add orcarouter env vars when using orcarouter provider
+    orcarouter_env_args: list[str] = []  # track for diagnostics
+    orcarouter_user_env: dict[str, str] = {}  # user's -E flags only (pre-merge, for diagnostics)
+    if provider == "orcarouter":
+        # capture user -E flags before extending extra_env so diagnostics can tell
+        # user-overridden vars apart from the ones the wrapper auto-sets
+        orcarouter_user_env = extract_env_from_flags(extra_env)
+        # pass existing extra_env to avoid overriding user's explicit -E values
+        orcarouter_env_args = build_orcarouter_env_args(extra_env)
+        extra_env.extend(orcarouter_env_args)
 
     # merge env var entries with CLI -v/--volume flags (env first, CLI appends)
     extra_volumes = merge_volume_flags(parsed.volume)
@@ -1244,6 +1335,29 @@ def main() -> int:
             bedrock_warnings = validate_bedrock_config(extra_env)
             for warning in bedrock_warnings:
                 print(f"  warning: {warning}", file=sys.stderr)
+        elif provider == "orcarouter":
+            print("claude provider: orcarouter (keychain skipped)", file=sys.stderr)
+            # show credential source (from host env or user -E flags)
+            if os.environ.get("ORCAROUTER_API_KEY") or "ORCAROUTER_API_KEY" in orcarouter_user_env:
+                print("  using ORCAROUTER_API_KEY (translated to ANTHROPIC_AUTH_TOKEN)", file=sys.stderr)
+            elif os.environ.get("ANTHROPIC_AUTH_TOKEN") or "ANTHROPIC_AUTH_TOKEN" in orcarouter_user_env:
+                print("  using ANTHROPIC_AUTH_TOKEN", file=sys.stderr)
+            else:
+                print("  warning: no API key set (set ORCAROUTER_API_KEY or ANTHROPIC_AUTH_TOKEN)", file=sys.stderr)
+            # show which orcarouter env vars are actually being passed (bare names, deduped)
+            passed_vars: list[str] = []
+            # auto-set by the wrapper: gateway base url + default model pins (unless user overrode via -E)
+            for var in ["ANTHROPIC_BASE_URL"] + list(ORCAROUTER_DEFAULT_MODELS.keys()):
+                if var not in orcarouter_user_env:
+                    passed_vars.append(var)
+            # user -E flags and host-env pass-through (inherit form)
+            for var in ORCAROUTER_ENV_VARS:
+                if var == "ANTHROPIC_BASE_URL" or var in passed_vars:
+                    continue
+                if var in orcarouter_user_env or os.environ.get(var):
+                    passed_vars.append(var)
+            if passed_vars:
+                print(f"  passing: {', '.join(passed_vars)}", file=sys.stderr)
 
         # determine port binding
         bind_port = should_bind_port(ralphex_args)

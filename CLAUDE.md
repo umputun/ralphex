@@ -129,6 +129,14 @@ Key functions in `scripts/ralphex-dk.sh`:
 - `export_aws_profile_credentials()` - exports credentials from AWS profile
 - `validate_bedrock_config()` - validates bedrock config, returns warnings
 
+### OrcaRouter Provider (Docker Wrapper Only)
+
+`scripts/ralphex-dk.sh` supports [OrcaRouter](https://www.orcarouter.ai) as a Claude provider (`--claude-provider orcarouter` / `RALPHEX_CLAUDE_PROVIDER`). See `docs/orcarouter-setup.md`.
+
+Key functions in `scripts/ralphex-dk.sh`:
+- `get_claude_provider()` - returns provider from CLI flag or env var
+- `build_orcarouter_env_args()` - builds docker -e flags for ORCAROUTER_ENV_VARS; translates `ORCAROUTER_API_KEY` to `ANTHROPIC_AUTH_TOKEN` via the inherit form, always sets `ANTHROPIC_BASE_URL=https://api.orcarouter.ai`, and pins `anthropic/`-namespaced default model vars (bare Anthropic model IDs fail on the gateway with `model_not_found`)
+
 ### Docker Socket Support (Docker Wrapper Only)
 
 `--docker` flag (or `RALPHEX_DOCKER_SOCKET`) mounts the host Docker socket for testcontainers. Socket path from `DOCKER_HOST` (unix://) or `/var/run/docker.sock`; GID auto-detected and passed via `DOCKER_GID`. Missing socket = fail-fast error.

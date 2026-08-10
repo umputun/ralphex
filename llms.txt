@@ -108,6 +108,11 @@ RALPHEX_CONFIG_DIR=~/my-config ralphex docs/plans/feature.md
 ralphex --claude-provider=bedrock docs/plans/feature.md
 RALPHEX_CLAUDE_PROVIDER=bedrock ralphex docs/plans/feature.md
 
+# use OrcaRouter gateway for Claude (Docker wrapper only)
+export ORCAROUTER_API_KEY=sk-orca-...
+ralphex --claude-provider=orcarouter docs/plans/feature.md
+RALPHEX_CLAUDE_PROVIDER=orcarouter ralphex docs/plans/feature.md
+
 # preserve ANTHROPIC_API_KEY in the claude child env (for API-key auth users)
 ralphex --preserve-anthropic-api-key docs/plans/feature.md
 ```
@@ -238,7 +243,7 @@ ralphex --dry-run docs/plans/feature.md
 - `RALPHEX_DOCKER_NETWORK` - Docker network mode (e.g., `host`, `my-network`). CLI flag: `--network`
 - `RALPHEX_CLI_UPDATE` - Refresh claude/codex to their current npm releases at container start: `1`, `true`, or `yes` (Docker images only). Off by default in the base image; baked on in `ralphex-go`
 - `TZ` - Override container timezone (default: auto-detected from host)
-- `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default` or `bedrock` (Docker wrapper only)
+- `RALPHEX_CLAUDE_PROVIDER` - Claude provider mode: `default`, `bedrock`, or `orcarouter` (Docker wrapper only)
 
 **CLI freshness in the container:**
 
@@ -273,6 +278,20 @@ Required environment for Bedrock:
 Note: `CLAUDE_CODE_USE_BEDROCK=1` is automatically set when using `--claude-provider=bedrock`.
 
 See `docs/bedrock-setup.md` for detailed setup instructions and IAM policies.
+
+**OrcaRouter support** (Docker wrapper only):
+
+When `--claude-provider=orcarouter` or `RALPHEX_CLAUDE_PROVIDER=orcarouter` is set:
+- Keychain credential extraction is skipped (not needed for gateway auth)
+- `ORCAROUTER_API_KEY` is translated to `ANTHROPIC_AUTH_TOKEN` using the docker inherit form (key value never appears on the command line)
+- Required env vars are passed to container: `ANTHROPIC_BASE_URL` (set to `https://api.orcarouter.ai`), `ANTHROPIC_AUTH_TOKEN`, and `anthropic/`-namespaced default model pins
+
+Required environment for OrcaRouter:
+- `ORCAROUTER_API_KEY` - OrcaRouter API key (starts with `sk-orca-`)
+
+Note: `ANTHROPIC_BASE_URL=https://api.orcarouter.ai` and `anthropic/`-prefixed default model pins are automatically set when using `--claude-provider=orcarouter`. Bare Anthropic model IDs are rejected by the gateway with `model_not_found`.
+
+See `docs/orcarouter-setup.md` for detailed setup instructions.
 
 **Creating custom images for other languages:**
 
