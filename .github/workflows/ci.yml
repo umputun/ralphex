@@ -17,6 +17,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: set up go 1.26
@@ -30,8 +31,10 @@ jobs:
         with:
           version: "0.12.3"
 
-      - name: validate portable plugin
-        run: make test-plugin
+      - name: validate portable plugin and version policy
+        run: make test-plugin PLUGIN_VERSION_BASE="$PLUGIN_VERSION_BASE"
+        env:
+          PLUGIN_VERSION_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
 
       - name: build and test
         run: |

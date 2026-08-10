@@ -21,6 +21,15 @@ test:
 
 test-plugin:
 	uv run --with pyyaml==6.0.3 python scripts/validate-portable-plugin.py
+	uv run --with pyyaml==6.0.3 python scripts/validate-portable-plugin_test.py
+	python3 scripts/validate-skill-contracts_test.py
+	python3 scripts/internal/check-plugin-version_test.py
+	./scripts/internal/update-plugin-version_test.sh
+	python3 scripts/internal/check-plugin-version.py --base "$(PLUGIN_VERSION_BASE)"
+
+bump-plugin-version:
+	@test -n "$(VERSION)" || (echo "Usage: make bump-plugin-version VERSION=<version>" >&2; exit 1)
+	./scripts/internal/update-plugin-version.sh "$(VERSION)"
 
 lint:
 	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
@@ -105,4 +114,4 @@ docker-build-go: docker-build
 docker-run:
 	./scripts/ralphex-dk.sh $(ARGS)
 
-.PHONY: all build test test-plugin lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site docker-build docker-build-go docker-run
+.PHONY: all build test test-plugin bump-plugin-version lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site docker-build docker-build-go docker-run
