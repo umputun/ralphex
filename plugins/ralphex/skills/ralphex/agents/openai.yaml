@@ -4,4 +4,4 @@ interface:
   default_prompt: "Use $ralphex to launch a Ralphex plan and report its startup status."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

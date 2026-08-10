@@ -5,6 +5,10 @@ description: Run Ralphex autonomous plan execution with progress monitoring.
 
 # ralphex - Autonomous Plan Execution
 
+## Interactive Choice Contract
+
+For every choice below, try Codex's native interactive question tool first. If the tool is unavailable, errors, or does not block for an answer, ask the same question with the same options in chat, end the turn, and wait for the user's reply. Never infer or select a default on the user's behalf.
+
 **SCOPE**: This skill ONLY launches ralphex, monitors progress, and reports status. Do NOT take any other actions.
 
 ## Step 0: Verify CLI Installation

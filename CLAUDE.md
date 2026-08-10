@@ -4,13 +4,14 @@ Autonomous plan execution with Claude Code - Go rewrite of ralph.py.
 
 ## LLM Documentation
 
-See @llms.txt for usage instructions and Claude Code integration commands.
+See @llms.txt for usage instructions and Claude Code/Codex integration commands.
 
 ## Build Commands
 
 ```bash
 make build      # build binary to .bin/ralphex
 make test       # run tests with coverage
+make test-plugin # validate portable Codex plugin (requires uv; resolves PyYAML)
 make lint       # run golangci-lint
 make fmt        # format code
 ```
@@ -33,6 +34,7 @@ pkg/config/         # configuration loading, defaults, prompts, agents
 pkg/executor/       # claude and codex CLI execution
 pkg/git/            # git operations (external git CLI)
 pkg/input/          # terminal input collector (fzf/fallback, draft review)
+plugins/ralphex/    # portable Codex plugin and workflow skills
 pkg/notify/         # notification delivery (telegram, email, slack, webhook, custom)
 pkg/plan/           # plan file selection, parsing, and manipulation
 pkg/processor/      # pipeline coordinator, prompt rendering, executor policy, signal wrappers
@@ -508,7 +510,7 @@ If you're an AI agent preparing a contribution, complete this checklist:
 
 ## Workflow Rules
 
-- **Plugin version**: bump `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` versions on release if skill files (`assets/claude/`) changed since last plugin version bump
+- **Plugin version**: bump `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `plugins/ralphex/.codex-plugin/plugin.json`, and `plugins/ralphex/plugin.json` on release if skill files under `assets/claude/` or `plugins/ralphex/skills/` changed since the last plugin version bump
 - **CHANGELOG**: Never modify during development - updates are part of release process only
 - **Version sections**: Never add entries to existing version sections - versions are immutable once released
 - **Linter warnings**: Add exclusions to `.golangci.yml` instead of `_, _ =` prefixes for fmt.Fprintf/Fprintln

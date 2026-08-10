@@ -4,4 +4,4 @@ interface:
   default_prompt: "Use $ralphex-plan to explore this request and create a Ralphex implementation plan."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

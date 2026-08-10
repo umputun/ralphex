@@ -5,6 +5,10 @@ description: Convert plans from OpenSpec, spec-kit, GitHub or GitLab issues, gen
 
 # ralphex-adopt - Convert Plans Into ralphex Format
 
+## Interactive Choice Contract
+
+For every choice below, try Codex's native interactive question tool first. If the tool is unavailable, errors, or does not block for an answer, ask the same question with the same options in chat, end the turn, and wait for the user's reply. Never infer or select a default on the user's behalf.
+
 **SCOPE**: Read a source plan in some other format and produce a new ralphex-format plan at `docs/plans/YYYYMMDD-<slug>.md`. The source is never modified. Existing target files are never silently overwritten.
 
 Supported source shapes:
@@ -238,22 +242,33 @@ Read the path from stdout (e.g., `/tmp/ralphex-adopt-aB3xY9.md`) and remember it
 
 An `EXIT` trap is not used because each shell call may use its own subshell — the trap would fire immediately. Cleanup is explicit at the end of Step 6 (success) and on every cancel path (`rm -f <draft-path>` with the literal path substituted).
 
-Use revdiff only when both the `revdiff` executable and a compatible Codex launcher are already available. Do not ask the user to install it. Resolve the launcher from the current repository first, then Codex home, and substitute the literal `<draft-path>` you captured above:
+Use revdiff only when both the `revdiff` executable and the installed Codex launcher are already available. Do not ask the user to install it, and do not execute a launcher from the target repository. Substitute the literal `<draft-path>` you captured above:
 
 ```bash
-SCRIPT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/codex/skills/revdiff/scripts"
-test -d "$SCRIPT_DIR" || SCRIPT_DIR="${CODEX_HOME:-$HOME/.codex}/skills/revdiff/scripts"
-command -v revdiff >/dev/null 2>&1 && test -x "$SCRIPT_DIR/launch-revdiff.sh" && "$SCRIPT_DIR/launch-revdiff.sh" --only=<draft-path>
+SCRIPT_DIR="${CODEX_HOME:-$HOME/.codex}/skills/revdiff/scripts"
+LAUNCHER="$SCRIPT_DIR/launch-revdiff.sh"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if test -x "$LAUNCHER" && command -v realpath >/dev/null 2>&1; then
+  LAUNCHER="$(realpath "$LAUNCHER")"
+else
+  LAUNCHER=""
+fi
+if test -n "$LAUNCHER" && test -n "$REPO_ROOT"; then
+  REPO_ROOT="$(realpath "$REPO_ROOT")"
+  case "$LAUNCHER" in "$REPO_ROOT"/*) LAUNCHER="" ;; esac
+fi
+command -v revdiff >/dev/null 2>&1 && test -n "$LAUNCHER" && test -x "$LAUNCHER" && "$LAUNCHER" --wrap --only=<draft-path>
 ```
 
 If the executable or launcher is unavailable, skip directly to the in-chat fallback below. This is the normal path for users who do not use revdiff.
 
-Read the launcher's stdout from the shell tool result directly. Do not assign it to a shell variable — variables do not persist between shell tool calls (see Step 5 preamble). Exit `10` means annotations were captured and is not a launcher failure.
+Read the launcher's exit code and stdout from the shell tool result directly. Do not assign them to shell variables — variables do not persist between shell tool calls (see Step 5 preamble). Interpret the pair strictly:
 
-- **Empty stdout** → user reviewed and approved silently. Proceed to Step 6.
-- **Non-empty stdout** → user left annotations. Read each annotation, revise the draft accordingly (rewrite the literal `<draft-path>` with the available file-editing tool), then re-run revdiff. Repeat until stdout is empty.
+- **Exit `0` with empty stdout** → user reviewed and approved silently. Proceed to Step 6.
+- **Exit `10` with non-empty stdout** → user left annotations. Read each annotation, revise the draft accordingly (rewrite the literal `<draft-path>` with the available file-editing tool), then re-run revdiff.
+- **Any other result** — including another non-zero exit, timeout, exit `0` with output, or exit `10` without annotations — is not approval. Fall back to the in-chat gate below.
 
-If the launcher path is missing, OR `launch-revdiff.sh` fails with any revdiff-related error (exit code non-zero with "revdiff" in stderr — "not found in PATH", "command not found", etc.), fall back to in-chat review:
+If the executable or safe launcher path is missing, or the launcher returns any result not accepted above, fall back to in-chat review:
 
 - Print the draft content in chat.
 - Use the native interactive question tool: "Approve draft?" with options "Accept", "Revise" (capture feedback as next message), and "Reject" (cancel the conversion).

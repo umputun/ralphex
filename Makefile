@@ -13,12 +13,14 @@ build:
 	cp .bin/ralphex.$(BRANCH) .bin/ralphex
 
 test:
-	uv run --with pyyaml python scripts/validate-portable-plugin.py
 	go clean -testcache
 	go test -race -coverprofile=coverage.out ./...
 	grep -v "_mock.go" coverage.out | grep -v mocks > coverage_no_mocks.out
 	go tool cover -func=coverage_no_mocks.out
 	rm coverage.out coverage_no_mocks.out
+
+test-plugin:
+	uv run --with pyyaml==6.0.3 python scripts/validate-portable-plugin.py
 
 lint:
 	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
@@ -103,4 +105,4 @@ docker-build-go: docker-build
 docker-run:
 	./scripts/ralphex-dk.sh $(ARGS)
 
-.PHONY: all build test lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site docker-build docker-build-go docker-run
+.PHONY: all build test test-plugin lint fmt race version e2e-setup e2e e2e-ui e2e-prep e2e-review e2e-codex prep_site docker-build docker-build-go docker-run

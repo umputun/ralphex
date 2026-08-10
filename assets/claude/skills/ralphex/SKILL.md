@@ -1,6 +1,7 @@
 ---
 name: ralphex
 description: Run ralphex autonomous plan execution with progress monitoring
+argument-hint: 'optional plan file path'
 allowed-tools: Bash Read AskUserQuestion TaskOutput Glob
 ---
 

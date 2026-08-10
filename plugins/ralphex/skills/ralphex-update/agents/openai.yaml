@@ -4,4 +4,4 @@ interface:
   default_prompt: "Use $ralphex-update to compare and selectively merge current Ralphex defaults."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

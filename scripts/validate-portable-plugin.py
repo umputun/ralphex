@@ -2,6 +2,8 @@
 import json, re, sys
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 FIELDS = {"$schema", "name", "version", "description", "author", "homepage", "repository", "license", "keywords", "extensions"}
@@ -9,9 +11,10 @@ SKILL_FIELDS = {"name", "description", "license", "compatibility", "metadata", "
 NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
 
 errors = []
-for legacy_path in ROOT.glob("**/.codex-plugin/plugin.json"):
-    if ".git" in legacy_path.parts or "vendor" in legacy_path.parts:
-        continue
+legacy_paths = list(ROOT.glob("plugins/*/.codex-plugin/plugin.json"))
+if not legacy_paths:
+    errors.append(f"{ROOT / 'plugins'}: no portable plugins found")
+for legacy_path in legacy_paths:
     plugin_root = legacy_path.parents[1]
     portable_path = plugin_root / "plugin.json"
     if not portable_path.is_file():
@@ -43,7 +46,6 @@ for legacy_path in ROOT.glob("**/.codex-plugin/plugin.json"):
                 errors.append(f"{skill_file}: invalid frontmatter")
                 continue
             try:
-                import yaml
                 data = yaml.safe_load(match.group(1)) or {}
             except Exception as exc:
                 errors.append(f"{skill_file}: invalid YAML: {exc}")

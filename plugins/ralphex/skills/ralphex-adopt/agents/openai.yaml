@@ -4,4 +4,4 @@ interface:
   default_prompt: "Use $ralphex-adopt to convert this source into an executable Ralphex plan."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

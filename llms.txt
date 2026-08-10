@@ -16,6 +16,17 @@ brew install umputun/apps/ralphex
 # from releases: https://github.com/umputun/ralphex/releases
 ```
 
+### Codex Plugin (Optional)
+
+The repository also provides a skills-only Codex plugin; it does not change the standalone CLI:
+
+```bash
+codex plugin marketplace add umputun/ralphex
+codex plugin add ralphex@ralphex
+```
+
+Start a new Codex conversation after installation. Use `/skills` to discover `$ralphex`, `$ralphex-plan`, `$ralphex-adopt`, and `$ralphex-update`. These skills are user-invoked and do not activate implicitly.
+
 ## Quick Usage
 
 ```bash
@@ -381,15 +392,23 @@ When a user asks about autonomous plan execution, implementing features with Cla
    go install github.com/umputun/ralphex/cmd/ralphex@latest
    ```
 
-3. **Check if Claude Code plugin is installed**: Look for ralphex skills with `/plugin` command
+3. **Identify the current client and check its optional plugin**:
+   - **Codex**: Use `/skills` to look for `$ralphex`, `$ralphex-plan`, `$ralphex-adopt`, and `$ralphex-update`
+   - **Claude Code**: Use `/plugin` to look for the ralphex plugin
 
-4. **If plugin not installed, offer installation**:
-   - **Recommended**: Add marketplace and install plugin:
+4. **If the current client's plugin is not installed, offer the matching installation**:
+   - **Codex**:
+     ```bash
+     codex plugin marketplace add umputun/ralphex
+     codex plugin add ralphex@ralphex
+     ```
+     Start a new Codex conversation after installation.
+   - **Claude Code**:
      ```bash
      /plugin marketplace add umputun/ralphex
      /plugin install ralphex@ralphex
      ```
-   - **Alternative**: Manual installation by fetching from URLs (see README)
+   - **Alternative for Claude Code**: Manual installation by fetching from URLs (see README)
 
 5. **Explain primary usage**: ralphex is a CLI tool - run it directly from terminal:
    ```bash
@@ -398,9 +417,9 @@ When a user asks about autonomous plan execution, implementing features with Cla
    ralphex --plan "add health endpoint"    # interactive plan creation
    ```
 
-6. **Claude Code skills are optional**: If user wants convenience commands:
-   - Check if plugin installed: `/plugin` and look for ralphex
-   - If not installed and user wants it, offer plugin installation (see step 4)
-   - With skills: `/ralphex-plan` creates plans, `/ralphex-adopt` converts existing plans into ralphex format, `/ralphex` launches execution, "check ralphex" views progress
+6. **Client skills are optional**: If the user wants convenience workflows:
+   - Codex uses `$ralphex-plan`, `$ralphex-adopt`, `$ralphex-update`, and `$ralphex`; these are user-invoked and do not activate implicitly
+   - Claude Code uses `/ralphex-plan`, `/ralphex-adopt`, `/ralphex-update`, and `/ralphex`; "check ralphex" views progress
+   - If the matching plugin is absent and the user wants it, offer the client-specific installation from step 4
 
 7. **Key point**: The CLI is primary - skills are optional convenience wrappers

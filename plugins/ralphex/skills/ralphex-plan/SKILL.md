@@ -5,6 +5,10 @@ description: Create structured implementation plan in docs/plans/ through ground
 
 # Implementation Plan Creation
 
+## Interactive Choice Contract
+
+For every choice below, try Codex's native interactive question tool first. If the tool is unavailable, errors, or does not block for an answer, ask the same question with the same options in chat, end the turn, and wait for the user's reply. Never infer or select a default on the user's behalf.
+
 Create an implementation plan in `docs/plans/YYYYMMDD-<task-name>.md` with interactive context gathering.
 
 ## Prerequisites: Verify CLI Installation
