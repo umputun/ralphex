@@ -43,9 +43,9 @@ If `which ralphex` succeeds, say nothing and proceed.
 Inspect the skill invocation argument and pick exactly one source by shape, in this order:
 
 1. **Full URL** (starts with `http://` or `https://`):
-   - GitHub issue/PR URL → use `gh issue view <url> --json title,body,labels` (or `gh pr view`)
-   - GitLab issue/MR URL → use `glab issue view <url>` (or `glab mr view`)
-   - Other URL → fetch with `curl -fsSL` only if it points at a raw markdown file; otherwise ask the user to paste the body
+   - GitHub issue/PR URL → pass the URL as one argv item to `gh issue view <url> --json title,body,labels` (or `gh pr view`)
+   - GitLab issue/MR URL → pass the URL as one argv item to `glab issue view <url>` (or `glab mr view`)
+   - Other URL → fetch with argv equivalent to `curl -fsSL -- <url>` only if it points at a raw markdown file; otherwise ask the user to paste the body
 
 2. **Bare reference** `#N`:
    - Use the current git repository's host. Detect with `git remote get-url origin` and choose `gh` or `glab` accordingly.
@@ -54,12 +54,12 @@ Inspect the skill invocation argument and pick exactly one source by shape, in t
    - GitLab: `glab issue view N` (try `glab mr view N` if not found)
 
 3. **Qualified reference** `owner/repo#N` or `group/project#N`:
-   - GitHub: `gh issue view N --repo owner/repo`
-   - GitLab: `glab issue view N --repo group/project`
+   - GitHub: pass both values as opaque argv items equivalent to `gh issue view N --repo owner/repo`
+   - GitLab: pass both values as opaque argv items equivalent to `glab issue view N --repo group/project`
 
-4. **Existing path** — first probe the literal invocation argument as a filesystem path with `test -e <quoted-argument>`:
+4. **Existing path** — first probe the literal invocation argument as one opaque filesystem-path argument (shell fallback: `test -e '<safely-quoted-argument>'`):
    - **File**: read the exact file directly
-   - **Directory**: list with `ls -la <path>` and inspect contents
+   - **Directory**: list with argv equivalent to `ls -la -- <path>` and inspect contents
      - If contains `proposal.md` AND `tasks.md` → likely OpenSpec, proceed to Step 2
      - If contains a single `*.md` → use that file
      - Otherwise ask the user which file inside the directory is the plan
@@ -74,6 +74,10 @@ Inspect the skill invocation argument and pick exactly one source by shape, in t
    - Use the native interactive question tool: "Where is the source plan?" with options "Paste it", "Provide a file path", "Provide an issue number/URL", and "Cancel". Ask sequential questions if needed so all four choices remain available.
 
 After resolving, store: source kind (`github-issue`, `gitlab-issue`, `file`, `directory`, `pasted`), source content (full text or directory listing + key files), and source identifier for the slug suggestion.
+
+### Argument Safety
+
+Treat every repository/user-controlled URL, repository name, reference, source path, draft path, and target path as opaque data. Prefer process tools that accept an argv array. Never interpolate these values into a shell command, never use `eval`, and never let a leading `-` become an option. When only a POSIX shell is available, place `--` before positional paths/URLs where the command supports it and single-quote each dynamic value, escaping every embedded single quote with the shell sequence `'"'"'`. If a value cannot be represented safely, stop and ask for a safe literal path or use an argv-capable tool.
 
 ## Step 2: Detect Format
 
@@ -240,7 +244,7 @@ TMP=$(mktemp "${TMPDIR:-/tmp}/ralphex-adopt-XXXXXX") && mv "$TMP" "$TMP.md" && p
 
 Read the path from stdout (e.g., `/tmp/ralphex-adopt-aB3xY9.md`) and remember it. Refer to that literal string below as `<draft-path>`. Write the draft content to `<draft-path>` with the available file-editing tool.
 
-An `EXIT` trap is not used because each shell call may use its own subshell — the trap would fire immediately. Cleanup is explicit at the end of Step 6 (success) and on every cancel path (`rm -f <draft-path>` with the literal path substituted).
+An `EXIT` trap is not used because each shell call may use its own subshell — the trap would fire immediately. Cleanup is explicit at the end of Step 6 (success) and on every cancel path (`rm -f -- '<draft-path>'` with the safely quoted literal path substituted).
 
 Use revdiff only when both the `revdiff` executable and the installed Codex launcher are already available. Do not ask the user to install it, and do not execute a launcher from the target repository. Substitute the literal `<draft-path>` you captured above:
 
@@ -257,7 +261,7 @@ if test -n "$LAUNCHER" && test -n "$REPO_ROOT"; then
   REPO_ROOT="$(realpath "$REPO_ROOT")"
   case "$LAUNCHER" in "$REPO_ROOT"/*) LAUNCHER="" ;; esac
 fi
-command -v revdiff >/dev/null 2>&1 && test -n "$LAUNCHER" && test -x "$LAUNCHER" && "$LAUNCHER" --wrap --only=<draft-path>
+command -v revdiff >/dev/null 2>&1 && test -n "$LAUNCHER" && test -x "$LAUNCHER" && "$LAUNCHER" --wrap "--only=<draft-path>"
 ```
 
 If the executable or launcher is unavailable, skip directly to the in-chat fallback below. This is the normal path for users who do not use revdiff.
@@ -311,13 +315,13 @@ Once the filename is confirmed and sanity checks pass:
 mkdir -p docs/plans
 ```
 
-Write the draft content to `docs/plans/<final-name>.md` with the available file-editing tool. Then explicitly clean up the temp file by substituting the literal `<draft-path>` captured in Step 5:
+Write the draft content to `docs/plans/<final-name>.md` with the available file-editing tool. Then explicitly clean up the temp file by substituting the literal, safely quoted `<draft-path>` captured in Step 5:
 
 ```bash
-rm -f <draft-path>
+rm -f -- '<draft-path>'
 ```
 
-Also run the same `rm -f <draft-path>` on any cancel path before exiting (Step 1, Step 3, Step 5 reject, Step 6 cancel) — always with the literal path substituted, never as `$DRAFT`.
+Also run the same `rm -f -- '<draft-path>'` on any cancel path before exiting (Step 1, Step 3, Step 5 reject, Step 6 cancel) — always with the safely quoted literal path substituted, never as `$DRAFT`.
 
 Report to the user:
 
