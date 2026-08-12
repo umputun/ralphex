@@ -724,6 +724,47 @@ func TestClaudeChildEnv(t *testing.T) {
 			preserveAPIKey: true,
 			want:           []string{"ANTHROPIC_API_KEY_OLD=old", "ANTHROPIC_API_KEY=new"},
 		},
+		{
+			// names spelled out rather than derived from sessionEnvVars: dropping one from the
+			// production list must fail here, which a tautological loop over it would not catch
+			name: "strips every Claude Code session marker",
+			env: []string{
+				"PATH=/usr/bin", "CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli",
+				"CLAUDE_CODE_EXECPATH=/usr/bin/claude", "CLAUDE_CODE_SESSION_ID=abc",
+				"CLAUDE_CODE_CHILD_SESSION=1", "CLAUDE_CODE_BRIDGE_SESSION_ID=def",
+				"CLAUDE_CODE_MESSAGING_SOCKET=/tmp/sock", "CLAUDE_CODE_MESSAGING_TOKEN=tok",
+				"CLAUDE_PID=123", "CLAUDE_EFFORT=high", "HOME=/home/user",
+			},
+			preserveAPIKey: false,
+			want:           []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name: "preserve keeps api key but still strips every session marker",
+			env: []string{
+				"ANTHROPIC_API_KEY=secret", "CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli",
+				"CLAUDE_CODE_EXECPATH=/usr/bin/claude", "CLAUDE_CODE_SESSION_ID=abc",
+				"CLAUDE_CODE_CHILD_SESSION=1", "CLAUDE_CODE_BRIDGE_SESSION_ID=def",
+				"CLAUDE_CODE_MESSAGING_SOCKET=/tmp/sock", "CLAUDE_CODE_MESSAGING_TOKEN=tok",
+				"CLAUDE_PID=123", "CLAUDE_EFFORT=high", "PATH=/usr/bin",
+			},
+			preserveAPIKey: true,
+			want:           []string{"ANTHROPIC_API_KEY=secret", "PATH=/usr/bin"},
+		},
+		{
+			// a CLAUDE_CODE_* prefix strip would eat these; they configure the child and must survive
+			name: "keeps user-set CLAUDE_CODE_ config vars while stripping session markers",
+			env: []string{
+				"CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1",
+				"CLAUDE_CODE_MAX_OUTPUT_TOKENS=8192", "CLAUDE_CODE_SUBAGENT_MODEL=haiku",
+				"CLAUDE_CONFIG_DIR=/custom/config", "CLAUDE_CODE_SESSION_ID=abc", "CLAUDECODE=1",
+			},
+			preserveAPIKey: false,
+			want: []string{
+				"CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1",
+				"CLAUDE_CODE_MAX_OUTPUT_TOKENS=8192", "CLAUDE_CODE_SUBAGENT_MODEL=haiku",
+				"CLAUDE_CONFIG_DIR=/custom/config",
+			},
+		},
 	}
 
 	for _, tc := range tests {
