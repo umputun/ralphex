@@ -10,7 +10,7 @@ require (
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/playwright-community/playwright-go v0.5700.1
 	github.com/pmezard/go-difflib v1.0.0
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 	github.com/tmaxmax/go-sse v0.11.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
@@ -30,7 +30,6 @@ require (
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.9.0 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
