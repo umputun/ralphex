@@ -381,8 +381,7 @@ ralphex appends `--model <m>` / `--effort <e>` per phase. The wrapper forwards `
 
 | ralphex effort | pi thinking |
 |---|---|
-| `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | passed through verbatim |
-| `max` | `xhigh` (pi has no `max`; a one-line note is printed to stderr) |
+| `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | passed through verbatim |
 
 ### Event translation
 
