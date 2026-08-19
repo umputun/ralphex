@@ -61,9 +61,6 @@ github.com/fatih/color
 ## explicit; go 1.23
 github.com/fsnotify/fsnotify
 github.com/fsnotify/fsnotify/internal
-# github.com/go-jose/go-jose/v3 v3.0.5
-## explicit; go 1.12
-github.com/go-jose/go-jose/v3/json
 # github.com/go-pkgz/email v0.8.0
 ## explicit; go 1.19
 github.com/go-pkgz/email
@@ -115,10 +112,10 @@ github.com/muesli/reflow/wordwrap
 # github.com/muesli/termenv v0.16.0
 ## explicit; go 1.17
 github.com/muesli/termenv
-# github.com/playwright-community/playwright-go v0.6000.0
+# github.com/mxschmitt/playwright-go v0.6201.1
 ## explicit; go 1.22
-github.com/playwright-community/playwright-go
-github.com/playwright-community/playwright-go/internal/safe
+github.com/mxschmitt/playwright-go
+github.com/mxschmitt/playwright-go/internal/safe
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib

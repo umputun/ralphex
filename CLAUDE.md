@@ -20,9 +20,9 @@ make fmt        # format code
 `go get -u ./...` does NOT update dependencies behind build tags. The `e2e/` package uses `//go:build e2e`, so playwright-go and other e2e-only deps require a separate update:
 
 ```bash
-go get -u ./...                                          # update main deps
-go get -u -tags=e2e github.com/playwright-community/playwright-go  # update e2e deps
-go mod tidy && go mod vendor                             # tidy and re-vendor
+go get -u ./...                                        # update main deps
+go get -u -tags=e2e github.com/mxschmitt/playwright-go  # update e2e deps
+go mod tidy && go mod vendor                           # tidy and re-vendor
 ```
 
 ## Project Structure
@@ -374,7 +374,7 @@ Playwright-based e2e tests for the web dashboard are in `e2e/` directory:
 
 ```bash
 # install playwright browsers (first time only)
-go run github.com/playwright-community/playwright-go/cmd/playwright@latest install --with-deps chromium
+go run github.com/mxschmitt/playwright-go/cmd/playwright@latest install --with-deps chromium
 
 # run web ui e2e tests
 go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...
