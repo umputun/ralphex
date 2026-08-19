@@ -22,7 +22,7 @@ func (c *consoleMessageImpl) Args() []JSHandle {
 	args := c.event["args"].([]any)
 	out := []JSHandle{}
 	for idx := range args {
-		out = append(out, fromChannel(args[idx]).(*jsHandleImpl))
+		out = append(out, fromChannel(args[idx]).(JSHandle))
 	}
 	return out
 }
@@ -30,6 +30,10 @@ func (c *consoleMessageImpl) Args() []JSHandle {
 func (c *consoleMessageImpl) Location() *ConsoleMessageLocation {
 	location := &ConsoleMessageLocation{}
 	remapMapToStruct(c.event["location"], location)
+	// The wire only carries lineNumber/columnNumber; mirror upstream by
+	// populating the non-deprecated line/column aliases too.
+	location.Line = location.LineNumber
+	location.Column = location.ColumnNumber
 	return location
 }
 
@@ -53,4 +57,12 @@ func newConsoleMessage(event map[string]any) *consoleMessageImpl {
 		bt.worker = worker.(*workerImpl)
 	}
 	return bt
+}
+
+func (c *consoleMessageImpl) Timestamp() (float64, error) {
+	v, ok := c.event["timestamp"]
+	if !ok {
+		return 0, nil
+	}
+	return v.(float64), nil
 }

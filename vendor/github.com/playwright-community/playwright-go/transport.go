@@ -46,7 +46,7 @@ func (t *pipeTransport) Poll() (*message, error) {
 		return nil, fmt.Errorf("could not decode json: %w", err)
 	}
 	if os.Getenv("DEBUGP") != "" {
-		fmt.Fprintf(os.Stdout, "\x1b[33mRECV>\x1b[0m\n%s\n", data)
+		fmt.Fprintf(os.Stdout, "\x1b[33mRECV>\x1b[0m\n%s\n", data) //nolint:errcheck
 	}
 	return msg, nil
 }
@@ -60,6 +60,7 @@ type message struct {
 	Error  *struct {
 		Error Error `json:"error"`
 	} `json:"error,omitempty"`
+	Log []string `json:"log,omitempty"`
 }
 
 func (t *pipeTransport) Send(msg map[string]any) error {
@@ -71,7 +72,7 @@ func (t *pipeTransport) Send(msg map[string]any) error {
 		return fmt.Errorf("pipeTransport: could not marshal json: %w", err)
 	}
 	if os.Getenv("DEBUGP") != "" {
-		fmt.Fprintf(os.Stdout, "\x1b[32mSEND>\x1b[0m\n%s\n", msgBytes)
+		fmt.Fprintf(os.Stdout, "\x1b[32mSEND>\x1b[0m\n%s\n", msgBytes) //nolint:errcheck
 	}
 
 	lengthPadding := make([]byte, 4)

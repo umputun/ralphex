@@ -3,6 +3,7 @@ package playwright
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -21,7 +22,8 @@ func skipFieldSerialization(val reflect.Value) bool {
 	return (typ.Kind() == reflect.Pointer ||
 		typ.Kind() == reflect.Interface ||
 		typ.Kind() == reflect.Map ||
-		typ.Kind() == reflect.Slice) && val.IsNil() || (val.Kind() == reflect.Interface && val.Elem().Kind() == reflect.Pointer && val.Elem().IsNil())
+		typ.Kind() == reflect.Slice ||
+		typ.Kind() == reflect.Func) && val.IsNil() || (val.Kind() == reflect.Interface && val.Elem().Kind() == reflect.Pointer && val.Elem().IsNil())
 }
 
 func transformStructValues(in any) any {
@@ -519,12 +521,12 @@ func unroute(inRoutes []*routeHandlerEntry, url any, handlers ...routeHandler) (
 	return removed, remaining, nil
 }
 
-func serializeMapToNameAndValue(headers map[string]string) []map[string]string {
-	serialized := make([]map[string]string, 0)
+func serializeMapToNameAndValue(headers map[string]string) []NameValue {
+	serialized := make([]NameValue, 0)
 	for name, value := range headers {
-		serialized = append(serialized, map[string]string{
-			"name":  name,
-			"value": value,
+		serialized = append(serialized, NameValue{
+			Name:  name,
+			Value: value,
 		})
 	}
 	return serialized
@@ -576,39 +578,96 @@ func assignStructFields(dest, src any, omitExtra bool) error {
 	return nil
 }
 
-func deserializeNameAndValueToMap(headersArray []map[string]string) map[string]string {
-	unserialized := make(map[string]string)
-	for _, item := range headersArray {
-		unserialized[item["name"]] = item["value"]
+// addSourceURLToScript appends a sourceURL comment so scripts loaded from a file
+// path are attributed to that path in stack traces and DevTools, mirroring
+// upstream addSourceUrlToScript.
+func addSourceURLToScript(source string, path string) string {
+	return source + "\n//# sourceURL=" + strings.ReplaceAll(path, "\n", "")
+}
+
+// formatCallLog renders the server-provided call log appended to command error
+// messages, mirroring upstream formatCallLog. Returns an empty string when the
+// log is absent or contains only empty entries.
+func formatCallLog(log []string) string {
+	hasContent := false
+	for _, l := range log {
+		if l != "" {
+			hasContent = true
+			break
+		}
 	}
-	return unserialized
+	if !hasContent {
+		return ""
+	}
+	return "\nCall log:\n" + strings.Join(log, "\n")
+}
+
+// mergeHeaders converts a name/value header array into a map, merging multiple
+// set-cookie headers into a single newline-separated value (route.Fulfill does
+// not support multiple set-cookie headers).
+func mergeHeaders(headersArray []map[string]string) map[string]string {
+	headers := make(map[string]string)
+	for _, item := range headersArray {
+		name := item["name"]
+		value := item["value"]
+		if strings.ToLower(name) == "set-cookie" {
+			if existing, ok := headers["set-cookie"]; ok {
+				headers["set-cookie"] = existing + "\n" + value
+			} else {
+				headers["set-cookie"] = value
+			}
+		} else {
+			headers[name] = value
+		}
+	}
+	return headers
 }
 
 type recordHarOptions struct {
-	Path           string            `json:"path"`
+	Path           string            `json:"harPath,omitempty"`
 	Content        *HarContentPolicy `json:"content,omitempty"`
 	Mode           *HarMode          `json:"mode,omitempty"`
 	UrlGlob        *string           `json:"urlGlob,omitempty"`
 	UrlRegexSource *string           `json:"urlRegexSource,omitempty"`
 	UrlRegexFlags  *string           `json:"urlRegexFlags,omitempty"`
+	ResourcesDir   *string           `json:"resourcesDir,omitempty"`
 }
 
 type recordHarInputOptions struct {
-	Path        string
-	URL         any
-	Mode        *HarMode
-	Content     *HarContentPolicy
-	OmitContent *bool
+	Path         string
+	URL          any
+	Mode         *HarMode
+	Content      *HarContentPolicy
+	OmitContent  *bool
+	ResourcesDir *string
 }
 
 type harRecordingMetadata struct {
-	Path    string
-	Content *HarContentPolicy
+	Path         string
+	Content      *HarContentPolicy
+	ResourcesDir *string
+}
+
+// resolveRecordVideoDir resolves a relative recordVideo.dir to an absolute path,
+// mirroring the upstream JS/Python clients (path.resolve). Without this the driver
+// receives a relative directory and Video().Path() returns a path relative to the
+// process working directory, which breaks if the cwd changes before the file is read.
+func resolveRecordVideoDir(recordVideo *RecordVideo) error {
+	if recordVideo == nil || recordVideo.Dir == nil {
+		return nil
+	}
+	abs, err := filepath.Abs(*recordVideo.Dir)
+	if err != nil {
+		return err
+	}
+	recordVideo.Dir = String(abs)
+	return nil
 }
 
 func prepareRecordHarOptions(option recordHarInputOptions) recordHarOptions {
-	out := recordHarOptions{
-		Path: option.Path,
+	out := recordHarOptions{}
+	if !strings.HasSuffix(strings.ToLower(option.Path), ".zip") {
+		out.Path = option.Path
 	}
 	if option.URL != nil {
 		switch option.URL.(type) {
@@ -628,6 +687,7 @@ func prepareRecordHarOptions(option recordHarInputOptions) recordHarOptions {
 	} else if option.OmitContent != nil && *option.OmitContent {
 		out.Content = HarContentPolicyOmit
 	}
+	out.ResourcesDir = option.ResourcesDir
 	return out
 }
 

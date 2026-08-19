@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"unsafe"
 )
 
 type EventEmitter interface {
@@ -131,11 +132,28 @@ func (er *eventRegister) count() int {
 }
 
 func (er *eventRegister) removeHandler(handler any) {
-	handlerPtr := reflect.ValueOf(handler).Pointer()
+	target := funcIdentity(handler)
 
 	er.listeners = slices.DeleteFunc(er.listeners, func(l listener) bool {
-		return reflect.ValueOf(l.handler).Pointer() == handlerPtr
+		return funcIdentity(l.handler) == target
 	})
+}
+
+// funcIdentity returns a value that uniquely identifies a func value, so that
+// distinct closures can be told apart when removing listeners.
+//
+// reflect.Value.Pointer() returns only the code entry point of a func, which is
+// shared by every closure produced from the same function literal (for example
+// waiter.createHandler). Removing one such closure with that pointer would match
+// and remove all its siblings, silently unsubscribing unrelated listeners. The
+// closure's data word (the second word of the func interface value) distinguishes
+// individual closures, so we compare on that instead. A nil func has a nil data
+// word; callers never register nil handlers, so that case does not arise here.
+func funcIdentity(handler any) unsafe.Pointer {
+	// A non-nil func value stored in an interface is represented as a pointer to
+	// a runtime func object; the interface's data word is that pointer and is
+	// stable for the lifetime of the closure.
+	return (*[2]unsafe.Pointer)(unsafe.Pointer(&handler))[1]
 }
 
 func (er *eventRegister) callHandlers(payloads ...any) int {
@@ -150,14 +168,26 @@ func (er *eventRegister) callHandlers(payloads ...any) int {
 		handlerV.Call(payloadV[:int(math.Min(float64(handlerV.Type().NumIn()), float64(len(payloadV))))])
 	}
 
+	// Snapshot the listeners and remove the one-shot ones while holding the
+	// lock, but invoke the handlers *without* the lock held. Handlers run
+	// arbitrary user code that may call back into the emitter (e.g. removing a
+	// listener) or block on a server round-trip; holding er across that call
+	// would serialize or deadlock those paths. The snapshot also fixes the set
+	// of handlers for this dispatch: listeners added or removed by a handler
+	// take effect on the next Emit, matching Node's EventEmitter semantics.
 	er.Lock()
-	defer er.Unlock()
-	count := len(er.listeners)
-	for _, l := range er.listeners {
-		if l.once {
-			defer er.removeHandler(l.handler)
-		}
+	if len(er.listeners) == 0 {
+		er.Unlock()
+		return 0
+	}
+	snapshot := slices.Clone(er.listeners)
+	er.listeners = slices.DeleteFunc(er.listeners, func(l listener) bool {
+		return l.once
+	})
+	er.Unlock()
+
+	for _, l := range snapshot {
 		handle(l)
 	}
-	return count
+	return len(snapshot)
 }

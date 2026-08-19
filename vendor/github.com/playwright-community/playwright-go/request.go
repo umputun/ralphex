@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 )
 
 type serializedFallbackOverrides struct {
@@ -22,6 +24,7 @@ type requestImpl struct {
 	redirectedTo       Request
 	failureText        string
 	fallbackOverrides  *serializedFallbackOverrides
+	response           *responseImpl
 }
 
 func (r *requestImpl) URL() string {
@@ -55,6 +58,29 @@ func (r *requestImpl) PostDataJSON(v any) error {
 	if err != nil {
 		return err
 	}
+	// When the request is form-urlencoded, parse it into a key/value object,
+	// matching upstream postDataJSON.
+	contentType := r.Headers()["content-type"]
+	if strings.Contains(contentType, "application/x-www-form-urlencoded") {
+		parsed, err := url.ParseQuery(string(body))
+		if err != nil {
+			return err
+		}
+		entries := make(map[string]string, len(parsed))
+		for k, vs := range parsed {
+			// Keep the last value for a repeated key, matching upstream which
+			// iterates URLSearchParams.entries() (last write wins). url.Values.Get
+			// would return the first value instead.
+			if len(vs) > 0 {
+				entries[k] = vs[len(vs)-1]
+			}
+		}
+		data, err := json.Marshal(entries)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(data, v)
+	}
 	return json.Unmarshal(body, v)
 }
 
@@ -73,6 +99,16 @@ func (r *requestImpl) Headers() map[string]string {
 		return newRawHeaders(serializeMapToNameAndValue(r.fallbackOverrides.Headers)).Headers()
 	}
 	return r.provisionalHeaders.Headers()
+}
+
+// finalRequest walks the redirect chain to the final request, mirroring
+// upstream _finalRequest. The response of a redirected navigation lives on the
+// final request, not the initial 3xx one.
+func (r *requestImpl) finalRequest() *requestImpl {
+	if r.redirectedTo != nil {
+		return r.redirectedTo.(*requestImpl).finalRequest()
+	}
+	return r
 }
 
 func (r *requestImpl) Response() (Response, error) {
@@ -164,13 +200,11 @@ func (r *requestImpl) ActualHeaders() (*rawHeaders, error) {
 		return newRawHeaders(serializeMapToNameAndValue(r.fallbackOverrides.Headers)), nil
 	}
 	if r.allHeaders == nil {
-		response, err := r.Response()
-		if err != nil {
-			return nil, err
-		}
-		if response == nil {
-			return r.provisionalHeaders, nil
-		}
+		// Upstream reads the raw request headers from the channel directly. The
+		// previous code first called r.Response(), which blocks until the
+		// response arrives. Inside a route handler the response only arrives
+		// after the route is continued, so waiting on it deadlocked the handler
+		// and stalled the request (#519).
 		headers, err := r.channel.Send("rawRequestHeaders")
 		if err != nil {
 			return nil, err
@@ -212,13 +246,19 @@ func (r *requestImpl) applyFallbackOverrides(options RouteFallbackOptions) {
 	if options.Method != nil {
 		r.fallbackOverrides.Method = options.Method
 	}
-	r.fallbackOverrides.Headers = options.Headers
+	if options.Headers != nil {
+		r.fallbackOverrides.Headers = options.Headers
+	}
 	if options.PostData != nil {
 		switch v := options.PostData.(type) {
 		case string:
 			r.fallbackOverrides.PostDataBuffer = []byte(v)
 		case []byte:
 			r.fallbackOverrides.PostDataBuffer = v
+		default:
+			if data, err := json.Marshal(v); err == nil {
+				r.fallbackOverrides.PostDataBuffer = data
+			}
 		}
 	}
 }
