@@ -470,15 +470,16 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 		return nil
 	}
 
-	// commit paths are collected from the branch actually taken: git mv leaves both the
-	// source deletion and the destination known to git, while the os.Rename fallback runs
-	// on a source git never tracked, and naming it would fail the commit with
-	// "pathspec ... did not match any file(s) known to git".
+	// paths come from the branch taken, never from re-testing the file. git mv stages the
+	// source deletion, so the source must be committed alongside the destination or the
+	// rename is only half recorded. The fallback carries no such guarantee - an untracked
+	// source reaches it, but so does a tracked one when the destination already exists -
+	// and naming a path git does not know fails the whole commit.
 	commitPaths := []string{destPath}
 
 	// use git mv
 	if err := s.repo.moveFile(sourceFile, destPath); err != nil {
-		// fallback to regular move for untracked files
+		// fallback for anything git mv refuses, an untracked source most commonly
 		if renameErr := os.Rename(sourceFile, destPath); renameErr != nil {
 			return fmt.Errorf("move plan: %w", renameErr)
 		}
