@@ -649,14 +649,12 @@ func (p *testPolicy) Run(ctx context.Context, run func(context.Context, string) 
 }
 
 func (p *testPolicy) HandlePatternMatchError(err error, tool string) error {
-	var patternErr *executor.PatternMatchError
-	if errors.As(err, &patternErr) {
+	if patternErr, ok := errors.AsType[*executor.PatternMatchError](err); ok {
 		p.log.Print("error: detected %q in %s output", patternErr.Pattern, tool)
 		p.log.Print("run '%s' for more information", patternErr.HelpCmd)
 		return err
 	}
-	var limitErr *executor.LimitPatternError
-	if errors.As(err, &limitErr) {
+	if limitErr, ok := errors.AsType[*executor.LimitPatternError](err); ok {
 		p.log.Print("error: detected %q in %s output", limitErr.Pattern, tool)
 		p.log.Print("run '%s' for more information", limitErr.HelpCmd)
 		return err

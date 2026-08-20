@@ -39,7 +39,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # pinned: "latest" silently adopts new linters and turns a green master red
+          # without a commit touching the repo
+          version: v2.13.0
 
       - name: install goveralls
         run: go install github.com/mattn/goveralls@latest

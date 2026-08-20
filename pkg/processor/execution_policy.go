@@ -34,16 +34,15 @@ func (p *retryPolicy) Run(ctx context.Context, run func(context.Context, string)
 			return result
 		}
 
-		var retryErr *executor.RetryPatternError
-		if errors.As(result.Result.Error, &retryErr) {
+		if retryErr, ok := errors.AsType[*executor.RetryPatternError](result.Result.Error); ok {
 			p.log.Print("transient %s error detected: %q, treating as session timeout", toolName, retryErr.Pattern)
 			result.Result.Error = nil
 			result.Result.Signal = ""
 			return phase.ExecutionResult{Result: result.Result, TimedOut: true}
 		}
 
-		var limitErr *executor.LimitPatternError
-		if !errors.As(result.Result.Error, &limitErr) {
+		limitErr, ok := errors.AsType[*executor.LimitPatternError](result.Result.Error)
+		if !ok {
 			return result
 		}
 
@@ -61,14 +60,12 @@ func (p *retryPolicy) Run(ctx context.Context, run func(context.Context, string)
 }
 
 func (p *retryPolicy) HandlePatternMatchError(err error, tool string) error {
-	var patternErr *executor.PatternMatchError
-	if errors.As(err, &patternErr) {
+	if patternErr, ok := errors.AsType[*executor.PatternMatchError](err); ok {
 		p.log.Print("error: detected %q in %s output", patternErr.Pattern, tool)
 		p.log.Print("run '%s' for more information", patternErr.HelpCmd)
 		return err
 	}
-	var limitErr *executor.LimitPatternError
-	if errors.As(err, &limitErr) {
+	if limitErr, ok := errors.AsType[*executor.LimitPatternError](err); ok {
 		p.log.Print("error: detected %q in %s output", limitErr.Pattern, tool)
 		p.log.Print("run '%s' for more information", limitErr.HelpCmd)
 		return err
