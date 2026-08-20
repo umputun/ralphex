@@ -445,6 +445,8 @@ func (s *Service) RemoveWorktree(path string) error {
 }
 
 // MovePlanToCompleted moves a plan file to the completed/ subdirectory and commits.
+// The commit is restricted to the plan paths, so unrelated staged changes in the
+// repository are left staged rather than swept into it.
 // Creates the completed/ directory if it doesn't exist.
 // Uses git mv if the file is tracked, falls back to os.Rename for untracked files.
 // If the source file doesn't exist but the destination does, logs a message and returns nil.
@@ -468,6 +470,12 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 		return nil
 	}
 
+	// commit paths are collected from the branch actually taken: git mv leaves both the
+	// source deletion and the destination known to git, while the os.Rename fallback runs
+	// on a source git never tracked, and naming it would fail the commit with
+	// "pathspec ... did not match any file(s) known to git".
+	commitPaths := []string{destPath}
+
 	// use git mv
 	if err := s.repo.moveFile(sourceFile, destPath); err != nil {
 		// fallback to regular move for untracked files
@@ -478,11 +486,15 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 		if addErr := s.repo.add(destPath); addErr != nil {
 			s.log.Printf("warning: failed to stage moved plan: %v\n", addErr)
 		}
+	} else {
+		commitPaths = append(commitPaths, sourceFile)
 	}
 
-	// commit the move
+	// commit the move, restricted to the plan paths. a bare commit would take the whole
+	// index, and in worktree mode this runs against the user's main checkout, where
+	// anything staged during the run would land under ralphex's message.
 	commitMsg := "move completed plan: " + filepath.Base(sourceFile)
-	if err := s.repo.commit(s.appendTrailer(commitMsg)); err != nil {
+	if err := s.repo.commitFiles(s.appendTrailer(commitMsg), commitPaths...); err != nil {
 		return fmt.Errorf("commit plan move: %w", err)
 	}
 

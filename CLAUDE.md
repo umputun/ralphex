@@ -164,6 +164,7 @@ Single public entry point: `git.NewService(path, logger, vcsCmd...) (*Service, e
 - `Logger` interface for dependency injection, compatible with `*color.Color`
 - Uses `backend` interface internally, implemented by `externalBackend` which shells out to the configured VCS command
 - Optional `vcsCmd` parameter overrides the default `"git"` command (e.g., path to `hg2git.sh` translation script)
+- `MovePlanToCompleted` commits through `commitFiles` (pathspec-restricted), never the bare `commit`. In worktree mode this call runs against the user's *main* checkout, which stays usable during the run, so a bare commit swept anything staged there into `move completed plan: ...` (#435). The source path is only a valid pathspec when the move went through `git mv` — on the `os.Rename` fallback git never tracked it — so the path list is built from the branch taken, not by re-testing the file
 
 Key files:
 - `pkg/git/service.go` - `Service` type, `backend` interface

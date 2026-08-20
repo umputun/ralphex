@@ -501,6 +501,62 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("leaves unrelated staged changes out of the commit", func(t *testing.T) {
+		// pins #435: the archive commit swept unrelated work staged in the main checkout
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "feature.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		require.NoError(t, svc.repo.add(planFile))
+		require.NoError(t, svc.repo.commit("add plan"))
+
+		unrelated := filepath.Join(dir, "unrelated.txt")
+		require.NoError(t, os.WriteFile(unrelated, []byte("wip"), 0o600))
+		require.NoError(t, svc.repo.add(unrelated))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		files := runGit(t, dir, "show", "--name-only", "--format=", "HEAD")
+		assert.NotContains(t, files, "unrelated.txt", "unrelated staged file must stay out of the archive commit")
+		assert.Contains(t, files, filepath.Join("docs", "plans", "completed", "feature.md"))
+
+		stillStaged, err := svc.repo.fileHasChanges(unrelated)
+		require.NoError(t, err)
+		assert.True(t, stillStaged, "unrelated file must remain staged, not discarded")
+	})
+
+	t.Run("leaves unrelated staged changes out of the commit for untracked plan", func(t *testing.T) {
+		// untracked plan takes the os.Rename fallback, which stages only the destination
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "untracked.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+
+		unrelated := filepath.Join(dir, "unrelated.txt")
+		require.NoError(t, os.WriteFile(unrelated, []byte("wip"), 0o600))
+		require.NoError(t, svc.repo.add(unrelated))
+
+		err = svc.MovePlanToCompleted(planFile)
+		require.NoError(t, err)
+
+		files := runGit(t, dir, "show", "--name-only", "--format=", "HEAD")
+		assert.NotContains(t, files, "unrelated.txt", "unrelated staged file must stay out of the archive commit")
+		assert.Contains(t, files, filepath.Join("docs", "plans", "completed", "untracked.md"))
+
+		stillStaged, err := svc.repo.fileHasChanges(unrelated)
+		require.NoError(t, err)
+		assert.True(t, stillStaged, "unrelated file must remain staged, not discarded")
+	})
+
 	t.Run("creates completed directory", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
 		svc, err := NewService(dir, noopServiceLogger())
