@@ -1966,6 +1966,83 @@ func TestModeRequiresBranch(t *testing.T) {
 	}
 }
 
+func TestArchivePlan(t *testing.T) {
+	// #439: a rejected archive commit wrote to stderr, leaving nothing in the run's own record.
+	setup := func(t *testing.T, hook string) (executePlanRequest, *progress.Logger) {
+		t.Helper()
+		dir := setupTestRepo(t)
+		// per-repo hooks are ignored when a global core.hooksPath is set, which is common
+		runGit(t, dir, "config", "core.hooksPath", ".git/hooks")
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "feature.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n"), 0o600))
+		runGit(t, dir, "add", "docs/plans/feature.md")
+		runGit(t, dir, "commit", "-m", "add plan")
+
+		// after the fixture commit, so only the archive commit meets the hook
+		if hook != "" {
+			writeExecutable(t, filepath.Join(dir, ".git", "hooks", "commit-msg"), hook)
+		}
+
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+		log, err := progress.NewLogger(progress.Config{
+			PlanFile: planFile, Mode: "full", Branch: "master", NoColor: true,
+		}, colors, &status.PhaseHolder{})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = log.Close() })
+
+		req := executePlanRequest{
+			PlanFile: planFile, Mode: processor.ModeFull, Colors: colors, GitSvc: gitSvc,
+			Config: &config.Config{MovePlanOnCompletion: true},
+		}
+		return req, log
+	}
+
+	t.Run("rejected_commit_warns_into_progress_file", func(t *testing.T) {
+		req, log := setup(t, "#!/bin/sh\necho 'Invalid commit message format.' >&2\nexit 1\n")
+
+		moved, err := archivePlan(req, log)
+		require.Error(t, err)
+		assert.False(t, moved)
+
+		progressFile, readErr := os.ReadFile(log.Path())
+		require.NoError(t, readErr)
+		assert.Contains(t, string(progressFile), "WARN: failed to move plan to completed")
+	})
+
+	t.Run("successful_move_writes_no_warning", func(t *testing.T) {
+		req, log := setup(t, "")
+
+		moved, err := archivePlan(req, log)
+		require.NoError(t, err)
+		assert.True(t, moved)
+		assert.FileExists(t, filepath.Join(filepath.Dir(req.PlanFile), "completed", "feature.md"))
+
+		progressFile, readErr := os.ReadFile(log.Path())
+		require.NoError(t, readErr)
+		assert.NotContains(t, string(progressFile), "WARN:")
+	})
+
+	t.Run("move_disabled_is_a_no_op", func(t *testing.T) {
+		req, log := setup(t, "")
+		req.Config = &config.Config{MovePlanOnCompletion: false}
+
+		moved, err := archivePlan(req, log)
+		require.NoError(t, err)
+		assert.False(t, moved)
+		assert.FileExists(t, req.PlanFile)
+	})
+}
+
 func TestShouldMovePlan(t *testing.T) {
 	// tests the shouldMovePlan predicate used to guard the plan move call.
 	// all three conditions must be true: non-empty plan file, mode requires branch, and config opts in.
@@ -2835,7 +2912,7 @@ func TestDisplayStats(t *testing.T) {
 
 		req := executePlanRequest{PlanFile: "docs/plans/feature.md", Colors: colors}
 		stats := git.DiffStats{Files: 5, Additions: 200, Deletions: 50}
-		displayStats(req, baseLog, stats, "2m15s", "feature-branch", false)
+		displayStats(req, baseLog, stats, "2m15s", "feature-branch", false, nil)
 	})
 
 	t.Run("without_diff_stats", func(t *testing.T) {
@@ -2850,7 +2927,7 @@ func TestDisplayStats(t *testing.T) {
 		defer func() { _ = baseLog.Close() }()
 
 		req := executePlanRequest{Colors: colors}
-		displayStats(req, baseLog, git.DiffStats{}, "30s", "main", false)
+		displayStats(req, baseLog, git.DiffStats{}, "30s", "main", false, nil)
 	})
 
 	t.Run("with_main_plan_file", func(t *testing.T) {
@@ -2869,19 +2946,22 @@ func TestDisplayStats(t *testing.T) {
 			MainPlanFile: "docs/plans/feature.md",
 			Colors:       colors,
 		}
-		displayStats(req, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s", "feature-wt", false)
+		displayStats(req, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s", "feature-wt", false, nil)
 	})
 
 	// plan-path display must reflect the actual location of the plan file:
 	// completed/ path only when the move succeeded, original path when the move was
 	// skipped or failed. The caller (executePlan) passes planMoved=true only after
 	// a successful MovePlanToCompleted call, so this test drives the flag directly.
+	// a failed archive must also say so in the summary - #439: the warning scrolls past and the run reports success.
 	t.Run("plan_path_reflects_plan_moved_flag", func(t *testing.T) {
 		tests := []struct {
-			name      string
-			req       executePlanRequest
-			planMoved bool
-			wantPath  string
+			name        string
+			req         executePlanRequest
+			planMoved   bool
+			planMoveErr error
+			wantPath    string
+			wantNote    bool
 		}{
 			{
 				name: "moved_shows_completed_path",
@@ -2904,14 +2984,16 @@ func TestDisplayStats(t *testing.T) {
 				wantPath:  "docs/plans/feature.md",
 			},
 			{
-				name: "move_failed_shows_original_path",
+				name: "move_failed_shows_original_path_and_note",
 				req: executePlanRequest{
 					PlanFile: "docs/plans/feature.md",
 					Mode:     processor.ModeFull,
 					Config:   &config.Config{MovePlanOnCompletion: true},
 				},
-				planMoved: false,
-				wantPath:  "docs/plans/feature.md",
+				planMoved:   false,
+				planMoveErr: errors.New("commit plan move: hook rejected"),
+				wantPath:    "docs/plans/feature.md",
+				wantNote:    true,
 			},
 			{
 				name: "review_mode_not_moved_shows_original_path",
@@ -2940,9 +3022,15 @@ func TestDisplayStats(t *testing.T) {
 				req.Colors = colors
 
 				output := captureStdout(t, func() {
-					displayStats(req, baseLog, git.DiffStats{}, "1s", "main", tc.planMoved)
+					displayStats(req, baseLog, git.DiffStats{}, "1s", "main", tc.planMoved, tc.planMoveErr)
 				})
 				assert.Contains(t, output, "  plan: "+tc.wantPath+"\n")
+				if tc.wantNote {
+					assert.Contains(t, output, "plan archive incomplete: commit plan move: hook rejected")
+					assert.Contains(t, output, "git status")
+					return
+				}
+				assert.NotContains(t, output, "plan archive incomplete")
 			})
 		}
 	})

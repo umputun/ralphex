@@ -512,9 +512,13 @@ func buildNotifyResult(req executePlanRequest, branch, elapsed string, stats git
 
 // displayStats prints completion summary with optional diff statistics and paths.
 // mirrors the startup header format using displayMeta for plan/branch/progress.
-// reflects where the plan actually lives: completed/ only when the move actually
-// succeeded; original path when the move was skipped or failed.
-func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.DiffStats, elapsed, branch string, planMoved bool) {
+// shows the completed/ path only when the archive succeeded; original path when it was
+// skipped or failed. a failed archive can still have moved the file on disk, which is
+// what the planMoveErr note points at: it is non-nil only when the archive was attempted
+// and failed, and it goes last because the warning at the failure site is well above the
+// completion line.
+func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.DiffStats, elapsed, branch string,
+	planMoved bool, planMoveErr error) {
 	if stats.Files > 0 {
 		baseLog.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
 		req.Colors.Info().Printf("\ncompleted in %s (%d files, +%d/-%d lines)\n",
@@ -535,6 +539,9 @@ func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.Di
 		}
 	}
 	displayMeta(req.Colors, 2, planPath, branch, baseLog.Path())
+	if planMoveErr != nil {
+		req.Colors.Warn().Printf("  plan archive incomplete: %v (check git status, the move may be left staged)\n", planMoveErr)
+	}
 }
 
 // displayMeta prints plan (if set), branch, and progress log path with the given indent.
@@ -668,24 +675,9 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	// move completed plan to completed/ directory.
 	// use MainGitSvc+MainPlanFile when available (worktree mode) because the plan file is in the main repo.
 	// track actual success so the completion summary reflects where the plan really lives.
-	planMoved := false
-	if shouldMovePlan(req) {
-		moveSvc := req.GitSvc
-		movePlanFile := req.PlanFile
-		if req.MainGitSvc != nil {
-			moveSvc = req.MainGitSvc
-		}
-		if req.MainPlanFile != "" {
-			movePlanFile = req.MainPlanFile
-		}
-		if moveErr := moveSvc.MovePlanToCompleted(movePlanFile); moveErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to move plan to completed: %v\n", moveErr)
-		} else {
-			planMoved = true
-		}
-	}
+	planMoved, planMoveErr := archivePlan(req, plr.baseLog)
 
-	displayStats(req, plr.baseLog, stats, elapsed, branch, planMoved)
+	displayStats(req, plr.baseLog, stats, elapsed, branch, planMoved, planMoveErr)
 	keepDashboardAlive(ctx, o, req, plr.closeLog)
 
 	return nil
@@ -933,6 +925,30 @@ func makePauseHandler(stdin io.Reader, stdout io.Writer) func(ctx context.Contex
 			return false
 		}
 	}
+}
+
+// archivePlan moves a completed plan into completed/ and reports a failure through the progress
+// logger, so the progress file holds it - a bare stderr write left no trace in the run's own record.
+// worktree mode archives in the main repo, hence the MainGitSvc/MainPlanFile preference.
+// the returned error is what displayStats repeats at the end of the summary.
+func archivePlan(req executePlanRequest, log *progress.Logger) (moved bool, err error) {
+	if !shouldMovePlan(req) {
+		return false, nil
+	}
+
+	moveSvc, movePlanFile := req.GitSvc, req.PlanFile
+	if req.MainGitSvc != nil {
+		moveSvc = req.MainGitSvc
+	}
+	if req.MainPlanFile != "" {
+		movePlanFile = req.MainPlanFile
+	}
+
+	if moveErr := moveSvc.MovePlanToCompleted(movePlanFile); moveErr != nil {
+		log.Warn("failed to move plan to completed: %v", moveErr)
+		return false, fmt.Errorf("move %s: %w", filepath.Base(movePlanFile), moveErr)
+	}
+	return true, nil
 }
 
 // shouldMovePlan returns true when a completed plan file should be moved to the
