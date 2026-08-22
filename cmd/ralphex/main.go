@@ -729,17 +729,22 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
+	// resolve the plan copy inside the worktree - the file the run actually ticks. computed here
+	// rather than after the chdir so the progress header can record it for the dashboard.
+	wtPlanFile := worktreePlanFile(req.PlanFile, req.GitSvc.Root(), wtPath)
+
 	// create progress logger BEFORE chdir so progress files land in main repo's .ralphex/progress/.
 	// use branch name derived from plan file since gitSvc still points at the main repo (on master).
 	holder := &status.PhaseHolder{}
 	branch := req.GitSvc.EffectiveBranchName(req.PlanFile, req.BranchOverride)
 	baseLog, err := progress.NewLogger(progress.Config{
-		PlanFile:       req.PlanFile,
-		Mode:           string(req.Mode),
-		Branch:         branch,
-		BranchOverride: req.BranchOverride,
-		Params:         runHeaderParams(o, req.Config, req.Mode),
-		NoColor:        o.NoColor,
+		PlanFile:         req.PlanFile,
+		WorktreePlanFile: wtPlanFile,
+		Mode:             string(req.Mode),
+		Branch:           branch,
+		BranchOverride:   req.BranchOverride,
+		Params:           runHeaderParams(o, req.Config, req.Mode),
+		NoColor:          o.NoColor,
 	}, req.Colors, holder)
 	if err != nil {
 		return fmt.Errorf("create progress logger: %w", err)
@@ -784,10 +789,6 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 	}
 	wtGitSvc.SetCommitTrailer(req.Config.CommitTrailer)
 
-	// resolve plan file path inside the worktree so Claude operates on the local copy,
-	// not the original in the main repo. the plan was copied by CreateWorktreeForPlan.
-	wtPlanFile := resolveWorktreePlanFile(req.PlanFile, req.GitSvc.Root())
-
 	// commit plan file on the feature branch (inside worktree), not on the default branch
 	if planNeedsCommit {
 		if commitErr := wtGitSvc.CommitPlanFile(req.PlanFile, req.GitSvc.Root()); commitErr != nil {
@@ -795,8 +796,15 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 		}
 	}
 
+	// a relative plan path leaves wtPlanFile empty; it still resolves correctly from inside
+	// the worktree, so run with it unchanged.
+	runPlanFile := wtPlanFile
+	if runPlanFile == "" {
+		runPlanFile = req.PlanFile
+	}
+
 	return executePlan(ctx, o, executePlanRequest{
-		PlanFile:      wtPlanFile,
+		PlanFile:      runPlanFile,
 		MainPlanFile:  req.PlanFile, // original path in main repo for MovePlanToCompleted
 		Mode:          req.Mode,
 		GitSvc:        wtGitSvc,
@@ -811,13 +819,15 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 	})
 }
 
-// resolveWorktreePlanFile maps an absolute plan path from the main repo into the worktree CWD.
+// worktreePlanFile maps an absolute plan path from the main repo onto its copy inside wtPath.
 // It resolves symlinks on the plan path to match the repo root (macOS: /tmp -> /private/tmp),
-// then makes the path relative to the root and absolute within the worktree.
-// Falls back to the original path if any step fails or the path is not absolute.
-func resolveWorktreePlanFile(planFile, repoRoot string) string {
+// then joins the repo-relative remainder onto the worktree root, mirroring the layout
+// copyToWorktree writes to. A plan outside repoRoot therefore maps to a path outside wtPath
+// too, which is where the copy really lands. Returns "" only when planFile is relative or
+// filepath.Rel cannot relate the two, leaving the caller to keep the original path.
+func worktreePlanFile(planFile, repoRoot, wtPath string) string {
 	if !filepath.IsAbs(planFile) {
-		return planFile
+		return ""
 	}
 	resolved := planFile
 	if r, err := filepath.EvalSymlinks(resolved); err == nil {
@@ -825,13 +835,9 @@ func resolveWorktreePlanFile(planFile, repoRoot string) string {
 	}
 	rel, err := filepath.Rel(repoRoot, resolved)
 	if err != nil {
-		return planFile
+		return ""
 	}
-	abs, err := filepath.Abs(rel)
-	if err != nil {
-		return planFile
-	}
-	return abs
+	return filepath.Join(wtPath, rel)
 }
 
 // openGitService creates a git.Service for the current directory.

@@ -140,13 +140,14 @@ type Logger struct {
 
 // Config holds logger configuration.
 type Config struct {
-	PlanFile        string    // plan filename (used to derive progress filename)
-	PlanDescription string    // plan description for plan mode (used for filename)
-	Mode            string    // execution mode: full, review, codex-only, plan
-	Branch          string    // current git branch
-	BranchOverride  string    // explicit branch name override (--branch flag); when set, used as filename stem instead of plan file
-	Params          RunParams // user-set run parameters recorded in the header
-	NoColor         bool      // disable color output (sets color.NoColor globally)
+	PlanFile         string    // plan filename (used to derive progress filename)
+	WorktreePlanFile string    // absolute path of the plan copy the run ticks inside the worktree; empty outside worktree mode
+	PlanDescription  string    // plan description for plan mode (used for filename)
+	Mode             string    // execution mode: full, review, codex-only, plan
+	Branch           string    // current git branch
+	BranchOverride   string    // explicit branch name override (--branch flag); when set, used as filename stem instead of plan file
+	Params           RunParams // user-set run parameters recorded in the header
+	NoColor          bool      // disable color output (sets color.NoColor globally)
 }
 
 // RunParams holds user-set executor/model parameters written to the progress
@@ -261,6 +262,11 @@ func (l *Logger) writeHeader(cfg Config) {
 	}
 	l.writeFileLocked("# Ralphex Progress Log\n")
 	l.writeFileLocked("Plan: %s\n", planStr)
+	// worktree runs tick the copy inside the worktree, not the path above; record it so the
+	// dashboard can read the file the run actually writes to while the worktree exists.
+	if cfg.WorktreePlanFile != "" {
+		l.writeFileLocked("Worktree plan: %s\n", cfg.WorktreePlanFile)
+	}
 	l.writeFileLocked("Branch: %s\n", cfg.Branch)
 	l.writeFileLocked("Mode: %s\n", cfg.Mode)
 	if cfg.Params.Executor != "" {

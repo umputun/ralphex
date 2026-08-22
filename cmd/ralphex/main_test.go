@@ -2667,6 +2667,66 @@ func TestRunWithWorktree_UntrackedPlan(t *testing.T) {
 	assert.NoDirExists(t, wtPath, "worktree should be removed")
 }
 
+// pins #440: the dashboard reads the header path, so it must name the copy the run ticks
+func TestRunWithWorktree_RecordsWorktreePlanInHeader(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o750))
+	planPath := filepath.Join(dir, "docs", "plans", "wt-header.md")
+	require.NoError(t, os.WriteFile(planPath, []byte("# WT Header\n\n- [ ] task 1\n"), 0o600))
+	runGit(t, dir, "add", "docs/plans/wt-header.md")
+	runGit(t, dir, "commit", "-m", "add wt header plan")
+
+	gitSvc, err := git.NewService(dir, noopLogger())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+		PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: &config.Config{WorktreeEnabled: true},
+		Colors: testColors(), DefaultBranch: "master", WtCleanup: &worktreeCleanupFn{},
+	})
+	require.Error(t, err, "runner fails on the canceled context, but the header is already written")
+
+	content, readErr := os.ReadFile(filepath.Join(dir, ".ralphex", "progress", "progress-wt-header.txt")) //nolint:gosec // test
+	require.NoError(t, readErr)
+
+	wantWt := filepath.Join(gitSvc.Root(), ".ralphex", "worktrees", "wt-header", "docs", "plans", "wt-header.md")
+	assert.Contains(t, string(content), "Worktree plan: "+wantWt+"\n")
+	assert.Contains(t, string(content), "Plan: "+planPath+"\n", "the main-checkout path stays recorded as the fallback")
+}
+
+func TestWorktreePlanFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		planFile string
+		repoRoot string
+		wtPath   string
+		want     string
+	}{
+		{
+			name: "maps plan into the worktree", planFile: "/repo/docs/plans/a.md", repoRoot: "/repo",
+			wtPath: "/repo/.ralphex/worktrees/a", want: "/repo/.ralphex/worktrees/a/docs/plans/a.md",
+		},
+		{name: "relative plan path yields empty", planFile: "docs/plans/a.md", repoRoot: "/repo", wtPath: "/repo/.ralphex/worktrees/a"},
+		{
+			name: "plan outside the repo root still maps by relative walk", planFile: "/other/a.md", repoRoot: "/repo",
+			wtPath: "/repo/.ralphex/worktrees/a", want: "/repo/.ralphex/worktrees/other/a.md",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, worktreePlanFile(tc.planFile, tc.repoRoot, tc.wtPath))
+		})
+	}
+}
+
 func TestRunWithWorktree_CreateWorktreeError(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, err := os.Getwd()

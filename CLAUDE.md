@@ -176,6 +176,7 @@ Key files:
 
 - Worktrees created at `.ralphex/worktrees/<branch-name>` inside main repo
 - Progress logger created before chdir so files land in main repo's `.ralphex/progress/`
+- The header records two plan paths: `Plan:` is the main-checkout path the run was launched with, `Worktree plan:` (worktree mode only) is the copy the run actually ticks, computed by `worktreePlanFile()` before the logger is built. `handleSessionPlan` (`pkg/web/server.go`) serves the worktree copy while it exists and falls back to `Plan:` once the worktree is removed, so a watch-mode dashboard shows live checkbox state instead of the untouched main copy (#440). Unknown header lines are ignored by `parseHeaderField`, so older readers are unaffected. Not fixed by this: `MovePlanToCompleted` archives the main-checkout copy, which is still unticked, so a finished worktree run's plan panel reads 0 done
 - `MainGitSvc` in `executePlanRequest` handles cross-boundary ops (plan file moves in main repo)
 - Worktree auto-removed on completion, failure, or SIGINT; branch preserved for PR
 - Only active for `ModeFull` and `ModeTasksOnly` (review/plan/external modes skip worktree)

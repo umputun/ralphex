@@ -132,6 +132,50 @@ func TestNewLogger_HeaderRunParams(t *testing.T) {
 	}
 }
 
+func TestNewLogger_HeaderWorktreePlan(t *testing.T) {
+	colors := testColors()
+
+	tests := []struct {
+		name             string
+		worktreePlanFile string
+		wantLines        []string
+		absentLines      []string
+	}{
+		{name: "unset omits the line", absentLines: []string{"Worktree plan: "}},
+		{
+			name:             "set records the worktree copy alongside the original",
+			worktreePlanFile: "/repo/.ralphex/worktrees/feature/docs/plans/feature.md",
+			wantLines: []string{
+				"Plan: docs/plans/feature.md\n",
+				"Worktree plan: /repo/.ralphex/worktrees/feature/docs/plans/feature.md\n",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			origDir, _ := os.Getwd()
+			require.NoError(t, os.Chdir(t.TempDir()))
+			defer func() { _ = os.Chdir(origDir) }()
+
+			holder := &status.PhaseHolder{}
+			cfg := Config{PlanFile: "docs/plans/feature.md", WorktreePlanFile: tc.worktreePlanFile, Mode: "full", Branch: "feature"}
+			l, err := NewLogger(cfg, colors, holder)
+			require.NoError(t, err)
+			defer l.Close()
+
+			content, err := os.ReadFile(l.Path())
+			require.NoError(t, err)
+			for _, want := range tc.wantLines {
+				assert.Contains(t, string(content), want)
+			}
+			for _, absent := range tc.absentLines {
+				assert.NotContains(t, string(content), absent)
+			}
+		})
+	}
+}
+
 func TestNewLogger_AppendOnRestart(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
