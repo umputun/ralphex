@@ -1,13 +1,15 @@
 ---
 name: ralphex
-description: Run ralphex autonomous plan execution with progress monitoring
-argument-hint: 'optional plan file path'
-allowed-tools: Bash Read AskUserQuestion TaskOutput Glob
+description: Run Ralphex autonomous plan execution with progress monitoring.
 ---
 
 # ralphex - Autonomous Plan Execution
 
-**SCOPE**: This command ONLY launches ralphex, monitors progress, and reports status. Do NOT take any other actions.
+## Interactive Choice Contract
+
+For every choice below, try Codex's native interactive question tool first. If the tool is unavailable, errors, or does not block for an answer, ask the same question with the same options in chat, end the turn, and wait for the user's reply. Never infer or select a default on the user's behalf.
+
+**SCOPE**: This skill ONLY launches ralphex, monitors progress, and reports status. Do NOT take any other actions.
 
 ## Step 0: Verify CLI Installation
 
@@ -23,19 +25,19 @@ which ralphex
 - **Linux (RHEL/Fedora)**: download `.rpm` from https://github.com/umputun/ralphex/releases
 - **Any platform with Go**: `go install github.com/umputun/ralphex/cmd/ralphex@latest`
 
-Use AskUserQuestion to confirm installation method, then guide through it. **Do not proceed until `which ralphex` succeeds.**
+Use Codex's native interactive question tool to confirm the installation method, then guide through it. If all four methods cannot fit in one question, ask sequential questions so every method remains available. **Do not proceed until `which ralphex` succeeds.**
 
 ## Step 1: Check for Plan Argument
 
-Check `$ARGUMENTS` for optional plan file path:
-- if argument provided: validate file exists using Read tool, skip plan selection in Step 4
+Check the skill invocation for an optional plan file path:
+- if argument provided: validate the file exists with an exact file read, skip plan selection in Step 4
 - if no argument: will ask for plan selection in Step 4
 
-Treat the selected plan as a path, never as an option. If its text begins with `-`, resolve it to an absolute path with safely quoted Bash and validate that exact resolved file again. If safe normalization is unavailable or ambiguous, reject the path and ask for an explicit `./...` or absolute path.
+Treat the selected plan as a path, never as an option. If its text begins with `-`, resolve it to an absolute path with an argv-safe filesystem operation and validate that exact resolved file again. If safe normalization is unavailable or ambiguous, reject the path and ask for an explicit `./...` or absolute path.
 
 ## Step 2: Ask Executor
 
-Use AskUserQuestion:
+Use Codex's native interactive question tool:
 - header: "Executor"
 - question: "Which executor should ralphex use?"
 - options:
@@ -48,7 +50,7 @@ Use AskUserQuestion:
 
 ## Step 3: Ask Execution Mode
 
-Use AskUserQuestion:
+Use Codex's native interactive question tool:
 - header: "Mode"
 - question: "Which execution mode should ralphex use?"
 - options:
@@ -66,25 +68,27 @@ If "Configured" executor and "External review" are selected, inspect the effecti
 ## Step 4: Plan Selection (if no argument provided)
 
 **If Full pipeline selected:**
-- Use Glob: `docs/plans/*.md` (excludes completed/)
+- Search for `docs/plans/*.md` with exact filesystem tools (excludes completed/)
 - Plan is REQUIRED
-- **IMPORTANT**: Glob returns oldest-first, so REVERSE the list to get most recent first
-- Build AskUserQuestion with up to 4 most recent plans
+- Preserve the Claude workflow's oldest-first result handling: REVERSE the list to get most recent first
+- Offer up to 4 most recent plans
 - First option (most recent) should have "(Recommended)" suffix
+- Because a Codex question can show at most 3 options, use sequential questions when needed: offer the first 2 plans plus "More plans", then offer the remaining plans. Do not drop or rename any plan choice.
 - User MUST select one
 
 **If Review pipeline or External review mode selected:**
-- Use Glob: `docs/plans/**/*.md` (includes completed/ for context)
+- Search for `docs/plans/**/*.md` with exact filesystem tools (includes completed/ for context)
 - Plan is OPTIONAL
-- **IMPORTANT**: Glob returns oldest-first, so REVERSE the list to get most recent first
-- Build AskUserQuestion with up to 4 most recent plans PLUS "None" option at the end
+- Preserve the Claude workflow's oldest-first result handling: REVERSE the list to get most recent first
+- Offer up to 4 most recent plans PLUS "None" at the end
 - First plan option (most recent) should have "(Recommended)" suffix
 - "None" option description: "Review existing changes without a plan file"
+- Because a Codex question can show at most 3 options, use sequential questions when needed: offer the first 2 plans plus "More choices", then offer the remaining plan choices and "None" across further questions as necessary. Do not drop or rename any choice.
 - If user selects "None", run without plan file
 
 ## Step 5: Ask Max Iterations
 
-Use AskUserQuestion:
+Use Codex's native interactive question tool:
 - header: "Iterations"
 - question: "Maximum number of task iterations?"
 - options:
@@ -110,7 +114,9 @@ These values select executables or scripts that the background run would invoke.
 
 ### Review checkout (Review pipeline and External review only)
 
-Both review modes operate on the current checkout. Their review agents can edit files and create commits while fixing findings. Before any ralphex process starts:
+Run this step only for Review pipeline or External review mode. Both modes operate on the current checkout. Their review agents can edit files and create commits while fixing findings.
+
+Before any ralphex process starts:
 
 1. Resolve the named current branch with `git symbolic-ref --quiet --short HEAD`. Detached HEAD or an unresolved/empty branch is a hard failure.
 2. Require `git status --porcelain=v1` to be empty, including staged, tracked, and untracked changes.
@@ -122,18 +128,20 @@ Both review modes operate on the current checkout. Their review agents can edit 
 
 ## Step 7: Launch ralphex in Background
 
-Build and run the command:
+Build the argument vector:
 
-```bash
-ralphex \
-  [--codex]               # only if user selected Codex executor
-  [--review]              # only if user selected Review pipeline
-  [--external-only]       # only if user selected External review
-  [--max-iterations N]    # from user selection (25, 50, or 100)
-  -- '<normalized-plan-file>'  # append both only when a plan was selected
+```text
+["ralphex",
+  "--codex",              # only if user selected Codex executor
+  "--review",             # only if user selected Review pipeline
+  "--external-only",      # only if user selected External review
+  "--max-iterations", N,  # from user selection (25, 50, or 100)
+  "--", plan-file]        # append both only when a plan was selected
 ```
 
-The executor and mode flags are alternatives; include only the flags selected above. `--` must immediately precede the positional plan path. Omit both `--` and the plan path when no plan was selected. POSIX-single-quote the normalized plan path, escaping every embedded single quote with the shell sequence `'"'"'`. Never concatenate an unquoted path or use `eval`.
+The executor and mode flags are alternatives; include only the flags selected above. `--` must immediately precede a positional plan path so even a normalized leading-dash filename cannot become an option. Omit both `--` and the plan item when no plan was selected.
+
+Prefer a process tool that accepts an argv array so the plan path is passed as one opaque argument. Never concatenate a plan path into a shell command. If only a shell terminal is available, POSIX-single-quote every dynamic argument (including the plan path), escaping every embedded single quote with the shell sequence `'"'"'`; stop if a value cannot be represented safely. Never use `eval`.
 
 **Determine progress filename** based on mode and plan selection:
 - Full mode + plan: `.ralphex/progress/progress-{plan-stem}.txt`
@@ -153,19 +161,21 @@ Immediately before spawning the process, repeat every applicable Step 6 check:
 2. For Review pipeline or External review, require the same named branch and resolved base commit, a still-clean status, and a still-non-empty committed `base...HEAD` diff.
 3. If anything changed or cannot be revalidated, stop without launching. Do not reuse the earlier result.
 
-Only after this second gate passes, run using Bash with `run_in_background: true`. **Save the task_id from the response** - needed for status checks later.
+Only after this second gate passes, run with Codex's native background terminal. **Save the returned session ID** - it is the Codex-native equivalent of Claude's background task ID and is needed for status checks later.
 
 ## Step 8: Confirm Launch
 
 1. Wait 10-15 seconds for initialization
-2. Use TaskOutput with `block: false` to read process liveness or completed exit status.
-3. Verify the progress file was created or changed after the recorded launch baseline. Read the new/current last 20 lines with safely quoted Bash: `tail -n 20 -- '<progress-filename>'`.
-4. Confirm a live launch only when TaskOutput reports it running and the current launch produced fresh progress evidence. Existing `Plan:`, `Branch:`, or `Started:` headers alone are not proof.
-5. If it exited non-zero, report launch failure with the exit code and fresh progress tail. If it exited zero before confirmation, report that it already completed rather than saying it is running. If process state or fresh progress cannot be verified, report launch as unconfirmed.
-6. For a live confirmed task, report:
+2. Poll the saved background session and read its liveness or completed exit status.
+3. Verify the progress file was created or changed after the recorded launch baseline. Read the new/current last 20 lines with an argv-safe file tool; shell fallback is `tail -n 20 -- '<safely-quoted-progress-path>'`.
+4. Confirm launch only when both are true:
+   - the session is still running, or it exited with a known status; and
+   - the current launch produced fresh progress evidence after the baseline (new file, changed content, a fresh restart marker, or timestamped activity).
+5. Existing `Plan:`, `Branch:`, or `Started:` headers alone are not proof; they may belong to an earlier run. If the session exited non-zero, report launch failure with the exit code and fresh progress tail. If it exited zero before confirmation, report that it already completed rather than saying it is running. If session state or fresh progress cannot be verified, report launch as unconfirmed.
+6. For a live confirmed session, report:
 
 ```
-ralphex started. Task ID: [task_id]
+ralphex started. Session ID: [session-id]
 
 Plan: [plan file from progress file]
 Branch: [branch from progress file]
@@ -186,7 +196,7 @@ Ask "check ralphex" to get status update.
 
 If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex doing":
 
-1. Use TaskOutput tool with `block: false` to check process status (use task_id from Step 7)
+1. Poll the saved Codex background terminal session without blocking (use the session ID from Step 7)
 2. Read last 40 lines of progress file (use filename from Step 7)
 
 **If process still running:**
@@ -196,7 +206,7 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
   - "review pass 1/2" → Claude Review phase
 - Show recent activity lines
 
-**If process exited (TaskOutput shows completion):**
+**If process exited (the background terminal shows completion):**
 - Exit code 0 → success, report "ralphex completed successfully"
 - Exit code non-zero → failure, report "ralphex failed"
 - Read final lines of progress file for summary
@@ -205,7 +215,7 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
 
 ## Constraints
 
-- This command is ONLY for launching and monitoring ralphex
+- This skill is ONLY for launching and monitoring ralphex
 - Do NOT offer to help with code, commits, PRs, or anything else
 - Do NOT make suggestions or recommendations beyond status reporting
 - Do NOT take any actions on the codebase
@@ -214,6 +224,6 @@ If user explicitly asks "check ralphex", "ralphex status", or "how is ralphex do
 
 ## Nested Claude Code Sessions
 
-ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Claude Code. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully instead of looping.
+ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Codex when the configured workflow launches Claude Code. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully instead of looping.
 
 Running from a standalone terminal is still recommended for the best experience.
