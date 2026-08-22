@@ -36,22 +36,23 @@ type CodexRunner interface {
 // stripAnthropicKey scopes ANTHROPIC_API_KEY filtering to first-class --codex runs;
 // external codex review in default claude mode keeps the host env intact so custom
 // codex wrappers proxying through Anthropic (e.g., scripts/codex-as-claude/codex-as-claude.sh) keep
-// authenticating. CLAUDECODE is always stripped regardless of mode to prevent
-// nested-session errors when codex is launched from inside a Claude Code session.
+// authenticating. the Claude Code session markers are always stripped regardless of mode
+// to prevent nested-session errors when codex is launched from inside a Claude Code session.
 type execCodexRunner struct {
 	stdin             io.Reader
 	stripAnthropicKey bool
 }
 
-// childEnv builds the codex child-process env. CLAUDECODE is always stripped to
-// prevent nested-session errors. ANTHROPIC_API_KEY is stripped only when the
-// caller requested it (first-class --codex mode); default-claude external codex
-// review passes the key through so custom Anthropic-proxying wrappers keep working.
+// childEnv builds the codex child-process env. the Claude Code session markers (see
+// sessionEnvVars) are always stripped to prevent nested-session errors.
+// ANTHROPIC_API_KEY is stripped only when the caller requested it (first-class --codex
+// mode); default-claude external codex review passes the key through so custom
+// Anthropic-proxying wrappers keep working.
 func (r *execCodexRunner) childEnv(env []string) []string {
 	if r.stripAnthropicKey {
-		return filterEnv(env, "ANTHROPIC_API_KEY", "CLAUDECODE")
+		return filterEnv(env, append([]string{"ANTHROPIC_API_KEY"}, sessionEnvVars...)...)
 	}
-	return filterEnv(env, "CLAUDECODE")
+	return filterEnv(env, sessionEnvVars...)
 }
 
 func (r *execCodexRunner) Run(ctx context.Context, name string, args ...string) (CodexStreams, func() error, error) {

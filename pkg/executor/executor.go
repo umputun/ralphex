@@ -92,7 +92,8 @@ func (r *execClaudeRunner) Run(ctx context.Context, name string, args ...string)
 	// to ensure the entire process group is killed, not just the direct child
 	cmd := exec.Command(name, args...) //nolint:noctx // intentional: we handle context cancellation via process group kill
 
-	// build child env: always strip CLAUDECODE (prevents nested session errors); strip
+	// build child env: always strip the Claude Code session markers (prevents nested
+	// session errors, see sessionEnvVars); strip
 	// ANTHROPIC_API_KEY by default so a host-set key cannot silently override OAuth/keychain
 	// auth and bill a different account. preserveAPIKey opts into keeping the key for users
 	// who authenticate Claude Code via API key.
@@ -197,15 +198,38 @@ func stripFlag(args []string, flag string) []string {
 	return result
 }
 
-// claudeChildEnv builds the environment for a child claude process. CLAUDECODE is always
-// stripped to prevent nested-session errors. ANTHROPIC_API_KEY is stripped unless
-// preserveAPIKey is true; preserving it is required for users who authenticate Claude Code
-// via API key rather than OAuth/keychain.
+// sessionEnvVars are the per-session markers Claude Code sets on processes it spawns.
+// any one of them left in a child env makes the spawned claude behave as a nested session:
+// it attaches to the parent's session plumbing, never writes its own transcript, and a PTY
+// wrapper such as fya then waits for output that never arrives until its turn timeout fires,
+// burning a full iteration per attempt with no work done. CLAUDECODE alone covered this
+// before Claude Code 2.1.x introduced the rest.
+//
+// deliberately an explicit list rather than a CLAUDE_CODE_* prefix strip: user-set config
+// vars share that prefix (CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX,
+// CLAUDE_CODE_MAX_OUTPUT_TOKENS, CLAUDE_CODE_SUBAGENT_MODEL) and must reach the child.
+var sessionEnvVars = []string{
+	"CLAUDECODE",
+	"CLAUDE_CODE_ENTRYPOINT",
+	"CLAUDE_CODE_EXECPATH",
+	"CLAUDE_CODE_SESSION_ID",
+	"CLAUDE_CODE_CHILD_SESSION",
+	"CLAUDE_CODE_BRIDGE_SESSION_ID",
+	"CLAUDE_CODE_MESSAGING_SOCKET",
+	"CLAUDE_CODE_MESSAGING_TOKEN",
+	"CLAUDE_PID",
+	"CLAUDE_EFFORT",
+}
+
+// claudeChildEnv builds the environment for a child claude process. the Claude Code session
+// markers (see sessionEnvVars) are always stripped to prevent nested-session errors.
+// ANTHROPIC_API_KEY is stripped unless preserveAPIKey is true; preserving it is required for
+// users who authenticate Claude Code via API key rather than OAuth/keychain.
 func claudeChildEnv(env []string, preserveAPIKey bool) []string {
 	if preserveAPIKey {
-		return filterEnv(env, "CLAUDECODE")
+		return filterEnv(env, sessionEnvVars...)
 	}
-	return filterEnv(env, "ANTHROPIC_API_KEY", "CLAUDECODE")
+	return filterEnv(env, append([]string{"ANTHROPIC_API_KEY"}, sessionEnvVars...)...)
 }
 
 // filterEnv returns a copy of env with specified keys removed.
