@@ -294,6 +294,8 @@ The `--worktree` flag runs plan execution in an isolated git worktree at `.ralph
 
 **Supported modes:** `--worktree` only applies to full mode and `--tasks-only`. It is silently ignored for `--review`, `--external-only`, and `--plan` — these modes operate from the current directory.
 
+**Source checkout state:** Uncommitted files in the source checkout do not have to be stashed first. Ralphex lists them in a warning and does not copy them into the generated worktree. An uncommitted selected plan is copied so it can be committed on the feature branch. A new feature branch starts at the current `HEAD`; an existing feature branch keeps its own tip. Local `.ralphex` configuration is loaded before worktree creation and still applies to the run. Commit any repository changes the plan needs before starting. An unfinished Git operation remains a hard error because completion archives the plan in the source checkout. In-place branch mode also requires a clean checkout because it creates the feature branch in that same working tree.
+
 **Re-running reviews on a worktree branch:** if the task phase completed in a worktree but the review phase needs to be re-run, `cd` into the worktree directory and run the review from there:
 
 ```bash

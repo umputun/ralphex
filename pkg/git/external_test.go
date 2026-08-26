@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -462,6 +463,54 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 		has, err := eb.fileHasChanges("nonexistent.md")
 		require.NoError(t, err)
 		assert.False(t, has)
+	})
+}
+
+func TestExternalBackend_operationInProgress(t *testing.T) {
+	tests := []struct {
+		name      string
+		marker    string
+		operation string
+		directory bool
+	}{
+		{name: "merge", marker: "MERGE_HEAD", operation: "merge"},
+		{name: "cherry-pick", marker: "CHERRY_PICK_HEAD", operation: "cherry-pick"},
+		{name: "revert", marker: "REVERT_HEAD", operation: "revert"},
+		{name: "rebase or am", marker: "rebase-apply", operation: "rebase or am", directory: true},
+		{name: "merge backend rebase", marker: "rebase-merge", operation: "rebase", directory: true},
+		{name: "bisect", marker: "BISECT_START", operation: "bisect"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := setupExternalTestRepo(t)
+			eb, err := newExternalBackend(dir, "git")
+			require.NoError(t, err)
+
+			markerPath := strings.TrimSpace(runGit(t, dir, "rev-parse", "--git-path", tt.marker))
+			if !filepath.IsAbs(markerPath) {
+				markerPath = filepath.Join(dir, markerPath)
+			}
+			if tt.directory {
+				require.NoError(t, os.MkdirAll(markerPath, 0o750))
+			} else {
+				require.NoError(t, os.WriteFile(markerPath, []byte("test"), 0o600))
+			}
+
+			operation, err := eb.operationInProgress()
+			require.NoError(t, err)
+			assert.Equal(t, tt.operation, operation)
+		})
+	}
+
+	t.Run("none", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+
+		operation, err := eb.operationInProgress()
+		require.NoError(t, err)
+		assert.Empty(t, operation)
 	})
 }
 

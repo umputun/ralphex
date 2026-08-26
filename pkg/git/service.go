@@ -34,6 +34,7 @@ type backend interface {
 	isDirty() (bool, error)
 	fileHasChanges(path string) (bool, error)
 	hasChangesOtherThan(path string) ([]string, error)
+	operationInProgress() (string, error)
 	add(path string) error
 	moveFile(src, dst string) error
 	commit(msg string) error
@@ -171,18 +172,20 @@ func (s *Service) EffectiveBranchName(planFile, branchOverride string) string {
 
 // preparePlanBranch validates state, extracts branch name, and checks plan file status.
 // returns branch name and whether the plan file has uncommitted changes.
-// when requireDefault is true, returns error if not on the default branch.
-// when requireDefault is false, returns empty branch name if not on the default branch (caller should skip).
+// when worktreeMode is true, returns error if not on the default branch or when a git operation is
+// unfinished; ordinary uncommitted files in the source checkout are reported but not fatal.
+// when worktreeMode is false, returns empty branch name if not on the default branch (caller should
+// skip), and any uncommitted change other than the plan file is an error.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop", "origin/main").
 // branchOverride, when non-empty, is used directly instead of deriving from planFile.
-func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaultBranch, branchOverride string) (string, bool, error) {
+func (s *Service) preparePlanBranch(planFile string, worktreeMode bool, defaultBranch, branchOverride string) (string, bool, error) {
 	currentBranch, err := s.repo.currentBranch()
 	if err != nil {
 		return "", false, fmt.Errorf("check current branch: %w", err)
 	}
 
 	if !s.matchesDefaultBranch(currentBranch, defaultBranch) {
-		if requireDefault {
+		if worktreeMode {
 			expected := strings.TrimPrefix(defaultBranch, "origin/")
 			if expected == "" {
 				expected = "main/master"
@@ -194,6 +197,20 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 
 	branchName := s.EffectiveBranchName(planFile, branchOverride)
 
+	if worktreeMode {
+		// completion archives the plan in this checkout, so do not start while another git
+		// operation owns its index and commit state.
+		op, opErr := s.repo.operationInProgress()
+		if opErr != nil {
+			return "", false, fmt.Errorf("check for unfinished git operation: %w", opErr)
+		}
+		if op != "" {
+			return "", false, fmt.Errorf("cannot create worktree: %s in progress in %s\n\n"+
+				"ralphex archives the completed plan in this checkout at the end of the run. "+
+				"finish or abort the git operation first", op, s.repo.root())
+		}
+	}
+
 	// check for uncommitted changes to files other than the plan
 	dirtyFiles, err := s.repo.hasChangesOtherThan(planFile)
 	if err != nil {
@@ -201,18 +218,21 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 	}
 	if len(dirtyFiles) > 0 {
 		fileList := s.formatDirtyFiles(dirtyFiles)
-		if requireDefault {
-			return "", false, fmt.Errorf("cannot create worktree: worktree has uncommitted changes other than the plan file\n\n"+
-				"uncommitted files:\n%s", fileList)
+		if !worktreeMode {
+			return "", false, fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+
+				"uncommitted files:\n%s\n\n"+
+				"ralphex needs to create a feature branch from %s to isolate plan work.\n\n"+
+				"options:\n"+
+				"  git stash && ralphex %s && git stash pop   # stash changes temporarily\n"+
+				"  git commit -am \"wip\"                       # commit changes first\n"+
+				"  ralphex --review                           # skip branch creation (review-only mode)",
+				branchName, fileList, currentBranch, planFile)
 		}
-		return "", false, fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+
-			"uncommitted files:\n%s\n\n"+
-			"ralphex needs to create a feature branch from %s to isolate plan work.\n\n"+
-			"options:\n"+
-			"  git stash && ralphex %s && git stash pop   # stash changes temporarily\n"+
-			"  git commit -am \"wip\"                       # commit changes first\n"+
-			"  ralphex --review                           # skip branch creation (review-only mode)",
-			branchName, fileList, currentBranch, planFile)
+		// ordinary source-checkout changes are not copied into the worktree. an uncommitted
+		// selected plan is handled separately below and copied by CreateWorktreeForPlan.
+		s.log.Printf("warning: source checkout has uncommitted files not copied into the worktree\n"+
+			"an uncommitted selected plan is copied separately\n\n"+
+			"uncommitted files:\n%s\n", fileList)
 	}
 
 	// check if plan file needs to be committed (untracked, modified, or staged)
@@ -275,11 +295,12 @@ func (s *Service) CreateBranchForPlan(planFile, defaultBranch, branchOverride st
 // git service) so the commit lands on the feature branch rather than the default branch.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop").
 // branchOverride, when non-empty, is used directly instead of deriving the name from planFile.
+// ordinary uncommitted files in the source checkout are logged but do not block creation. an
+// uncommitted selected plan is copied into the worktree and committed on the feature branch.
 func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch, branchOverride string) (string, bool, error) {
 	planFile = s.resolveFilesystemCase(planFile)
 
-	// check worktree existence early, before preparePlanBranch runs hasChangesOtherThan
-	// (an existing worktree dir would show up as untracked and fail the dirty check)
+	// an existing worktree directory means another instance may already be running this plan
 	earlyBranch := s.EffectiveBranchName(planFile, branchOverride)
 	wtPath := filepath.Join(s.repo.root(), ".ralphex", "worktrees", earlyBranch)
 

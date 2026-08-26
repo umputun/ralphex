@@ -1267,25 +1267,71 @@ func TestService_CreateWorktreeForPlan(t *testing.T) {
 		require.NoError(t, svc.RemoveWorktree(wtPath))
 	})
 
-	t.Run("fails with other uncommitted changes", func(t *testing.T) {
+	t.Run("proceeds with unrelated uncommitted changes and warns", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
-		svc, err := NewService(dir, noopServiceLogger())
+		log := &mockLogger{}
+		svc, err := NewService(dir, log)
 		require.NoError(t, err)
 
-		// create plan file
 		plansDir := filepath.Join(dir, "docs", "plans")
 		require.NoError(t, os.MkdirAll(plansDir, 0o750))
 		planFile := filepath.Join(plansDir, "feature.md")
 		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
 
-		// create another uncommitted file
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed"), 0o600))
+
+		wtPath, planNeedsCommit, err := svc.CreateWorktreeForPlan(planFile, "master", "")
+		require.NoError(t, err)
+		assert.True(t, planNeedsCommit, "untracked plan file should still need commit")
+
+		warning := strings.Join(log.logs, "\n")
+		assert.Contains(t, warning, "uncommitted files not copied into the worktree")
+		assert.Contains(t, warning, "uncommitted selected plan is copied separately")
+		assert.Contains(t, warning, "other.txt")
+		assert.Contains(t, warning, "README.md")
+
+		assert.NoFileExists(t, filepath.Join(wtPath, "other.txt"), "untracked file must not reach the worktree")
+		wtReadme, err := os.ReadFile(filepath.Join(wtPath, "README.md")) //nolint:gosec // test fixture path
+		require.NoError(t, err)
+		assert.Equal(t, "# Test\n", string(wtReadme), "worktree must hold the committed README, not the edit")
+		assert.FileExists(t, filepath.Join(dir, "other.txt"), "source untracked file must stay in place")
+		sourceReadme, err := os.ReadFile(filepath.Join(dir, "README.md")) //nolint:gosec // test fixture path
+		require.NoError(t, err)
+		assert.Equal(t, "changed", string(sourceReadme), "source tracked edit must stay in place")
+
+		assert.FileExists(t, filepath.Join(wtPath, "docs", "plans", "feature.md"))
+
+		require.NoError(t, svc.RemoveWorktree(wtPath))
+	})
+
+	t.Run("rejects resolved merge in source checkout", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		svc, err := NewService(dir, noopServiceLogger())
+		require.NoError(t, err)
+
+		runGit(t, dir, "checkout", "-b", "side")
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "side.txt"), []byte("side"), 0o600))
+		runGit(t, dir, "add", "side.txt")
+		runGit(t, dir, "commit", "-m", "side change")
+
+		runGit(t, dir, "checkout", "master")
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "main.txt"), []byte("main"), 0o600))
+		runGit(t, dir, "add", "main.txt")
+		runGit(t, dir, "commit", "-m", "main change")
+		runGit(t, dir, "merge", "--no-commit", "side")
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "merge-guard.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan"), 0o600))
+		statusBefore := runGit(t, dir, "status", "--porcelain")
 
 		_, _, err = svc.CreateWorktreeForPlan(planFile, "master", "")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot create worktree")
-		assert.Contains(t, err.Error(), "uncommitted changes")
-		assert.Contains(t, err.Error(), "other.txt")
+		assert.Contains(t, err.Error(), "merge in progress")
+		assert.Equal(t, statusBefore, runGit(t, dir, "status", "--porcelain"))
+		assert.NoDirExists(t, filepath.Join(dir, ".ralphex", "worktrees", "merge-guard"))
 	})
 
 	t.Run("fails when worktree already exists", func(t *testing.T) {
