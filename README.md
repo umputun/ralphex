@@ -1263,7 +1263,11 @@ Progress file (`.ralphex/progress/progress-*.txt`) is a real-time execution logâ
 
 **Do I need to commit changes before running ralphex?**
 
-It depends. If the plan file is the only uncommitted change, ralphex auto-commits it after creating the feature branch and continues execution. If other files have uncommitted changes, ralphex shows a helpful error with options: stash temporarily (`git stash`), commit first (`git commit -am "wip"`), or use review-only mode (`ralphex --review`).
+It depends on the mode. If the plan file is the only uncommitted change, ralphex auto-commits it after creating the feature branch and continues execution.
+
+In the default in-place branch mode, other uncommitted files stop the run with a helpful error and options: stash temporarily (`git stash`), commit first (`git commit -am "wip"`), or use review-only mode (`ralphex --review`). The feature branch is created in that same working tree, so unrelated changes would be mixed into the plan's work.
+
+With `--worktree`, they do not stop the run â€” ralphex lists them in a warning and leaves them alone. The catch is the other way round: the worktree is built from committed content, so those edits are not in it. Commit anything the plan depends on before starting. See [Worktree Isolation](#worktree-isolation).
 
 **What's the difference between agents/ and prompts/?**
 

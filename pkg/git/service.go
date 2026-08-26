@@ -184,6 +184,22 @@ func (s *Service) preparePlanBranch(planFile string, worktreeMode bool, defaultB
 		return "", false, fmt.Errorf("check current branch: %w", err)
 	}
 
+	if worktreeMode {
+		// completion archives the plan in this checkout, so do not start while another git
+		// operation owns its index and commit state. checked ahead of the branch guard because
+		// a rebase or a checked-out bisect detaches HEAD, and that guard would otherwise report
+		// an empty branch name for a repository that is mid-operation.
+		op, opErr := s.repo.operationInProgress()
+		if opErr != nil {
+			return "", false, fmt.Errorf("check for unfinished git operation: %w", opErr)
+		}
+		if op != "" {
+			return "", false, fmt.Errorf("cannot create worktree: %s in progress in %s\n\n"+
+				"ralphex archives the completed plan in this checkout at the end of the run. "+
+				"finish or abort the git operation first", op, s.repo.root())
+		}
+	}
+
 	if !s.matchesDefaultBranch(currentBranch, defaultBranch) {
 		if worktreeMode {
 			expected := strings.TrimPrefix(defaultBranch, "origin/")
@@ -196,20 +212,6 @@ func (s *Service) preparePlanBranch(planFile string, worktreeMode bool, defaultB
 	}
 
 	branchName := s.EffectiveBranchName(planFile, branchOverride)
-
-	if worktreeMode {
-		// completion archives the plan in this checkout, so do not start while another git
-		// operation owns its index and commit state.
-		op, opErr := s.repo.operationInProgress()
-		if opErr != nil {
-			return "", false, fmt.Errorf("check for unfinished git operation: %w", opErr)
-		}
-		if op != "" {
-			return "", false, fmt.Errorf("cannot create worktree: %s in progress in %s\n\n"+
-				"ralphex archives the completed plan in this checkout at the end of the run. "+
-				"finish or abort the git operation first", op, s.repo.root())
-		}
-	}
 
 	// check for uncommitted changes to files other than the plan
 	dirtyFiles, err := s.repo.hasChangesOtherThan(planFile)
@@ -500,6 +502,13 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 
 	// use git mv
 	if err := s.repo.moveFile(sourceFile, destPath); err != nil {
+		// git mv refuses an existing destination but os.Rename replaces it without a word, and an
+		// uncommitted archive copy has no other copy anywhere. lstat so a symlink is the collision
+		// rather than whatever it points at.
+		if _, statErr := os.Lstat(destPath); statErr == nil {
+			return fmt.Errorf("move plan: %s already exists, refusing to overwrite it with %s "+
+				"- resolve by hand and re-run", destPath, sourceFile)
+		}
 		// fallback for anything git mv refuses, an untracked source most commonly
 		if renameErr := os.Rename(sourceFile, destPath); renameErr != nil {
 			return fmt.Errorf("move plan: %w", renameErr)
@@ -526,10 +535,12 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 
 // resolvePlanMoveTargets determines the source and destination for MovePlanToCompleted,
 // accounting for files already moved to completed/ or renamed between the dashed
-// (YYYY-MM-DD) and compact (YYYYMMDD) date-prefix conventions. Returns done=true in
-// two cases: the file is already in completed/ (with either basename), or there is a
-// collision between an active in-place rename and a stale completed/<altBase> copy
-// that the move should not clobber.
+// (YYYY-MM-DD) and compact (YYYYMMDD) date-prefix conventions. done=true means the plan
+// is already archived - the source is gone and a completed/ copy is there under either
+// basename - and nothing more, because the caller reports a done move as archived.
+// A source that still exists returns done=false whatever sits in completed/, so a
+// same-basename collision reaches the move path and fails there rather than passing for
+// a successful archive.
 // Probe order mirrors resolvePlanFilePath in pkg/processor/prompts.go: the in-place
 // alternate source is checked before any completed/ probe so a current renamed file
 // wins over a stale completed/ copy left from a prior run.
@@ -549,19 +560,10 @@ func (s *Service) resolvePlanMoveTargets(planFile, completedDir string) (sourceF
 	if altBase != "" {
 		altSourcePath := filepath.Join(filepath.Dir(planFile), altBase)
 		if _, altSrcErr := os.Stat(altSourcePath); altSrcErr == nil {
-			altDestPath := filepath.Join(completedDir, altBase)
-			// collision: a stale completed/<altBase> exists alongside the active in-place
-			// renamed source (e.g. same slug ran twice on the same day). git mv would refuse
-			// because dest exists, and the os.Rename fallback would clobber the stale copy
-			// while leaving the source's deletion unstaged — repo ends up dirty or commit
-			// fails entirely. surface as already-completed instead and preserve both files
-			// for manual resolution.
-			if _, altDestErr := os.Stat(altDestPath); altDestErr == nil {
-				s.log.Printf("plan already in completed/ (renamed: %s); active copy at %s left in place for manual cleanup\n",
-					altBase, altSourcePath)
-				return altSourcePath, altDestPath, true
-			}
-			return altSourcePath, altDestPath, false
+			// a stale completed/<altBase> alongside the active source is a collision, not an
+			// archived plan. done=false so it reaches the move path and fails there: the caller
+			// treats done=true as archived, and this plan is not.
+			return altSourcePath, filepath.Join(completedDir, altBase), false
 		}
 	}
 
