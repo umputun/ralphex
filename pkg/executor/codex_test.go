@@ -1183,6 +1183,30 @@ func TestCodexExecutor_Run_LimitPattern_TruncationResistant(t *testing.T) {
 	assert.Equal(t, "You've hit your usage limit", limitErr.Pattern)
 }
 
+func TestCodexExecutor_Run_LimitPattern_ModelAtCapacity(t *testing.T) {
+	// pins #446: default pattern is the leading clause, message from OpenAI has two sentences
+	exitErr := errors.New("exit status 1")
+	stderr := "--------\nworkdir: /tmp/test\n--------\n" +
+		"ERROR: Selected model is at capacity. Please try a different model.\n"
+
+	mock := &mockCodexRunner{
+		runFunc: func(_ context.Context, _ string, _ ...string) (CodexStreams, func() error, error) {
+			return mockStreams(stderr, ""), mockWaitError(exitErr), nil
+		},
+	}
+	e := &CodexExecutor{
+		runner:        mock,
+		LimitPatterns: []string{"Selected model is at capacity"},
+	}
+
+	result := e.Run(context.Background(), "analyze code")
+
+	require.Error(t, result.Error)
+	var limitErr *LimitPatternError
+	require.ErrorAs(t, result.Error, &limitErr)
+	assert.Equal(t, "Selected model is at capacity", limitErr.Pattern)
+}
+
 func TestCodexExecutor_Run_StderrChatterIgnoredWithoutErrorPrefix(t *testing.T) {
 	// progress chatter on stderr (header banners, bold summaries, model thinking)
 	// must NOT trigger pattern matches even when it contains the configured pattern
