@@ -28,9 +28,15 @@ var multiDashRegex = regexp.MustCompile(`-{2,}`)
 // the current canonical file plus up to nine completed archives.
 const maxProgressRuns = 10
 
-// archiveNameRegex matches exactly the archive basenames archiveCompletedProgress publishes:
-// the completion timestamp plus the random token os.CreateTemp appends.
-var archiveNameRegex = regexp.MustCompile(`^\d{8}-\d{6}-\d+\.txt$`)
+// archivePrefix marks a file as one this package owns and may delete. It must never begin with
+// "progress-", which is what the web dashboard walks for.
+const archivePrefix = "archive-"
+
+// archiveNameRegex matches the archive basenames archiveCompletedProgress publishes. The random
+// token is matched as any non-empty string rather than as digits: os.CreateTemp documents only
+// "a random string", so pinning its current all-digit form would leave pruning silently matching
+// nothing if that ever changed, while archives kept being written.
+var archiveNameRegex = regexp.MustCompile(`^` + archivePrefix + `\d{8}-\d{6}-.+\.txt$`)
 
 // removeProgressArchive and truncateProgressFile are replaceable in tests to exercise prune and
 // rollback failures.
@@ -820,7 +826,7 @@ func archiveCompletedProgress(f *os.File, size int64, completedAt time.Time) (ar
 		return "", fmt.Errorf("create history dir: %w", mkErr)
 	}
 
-	tmp, createErr := os.CreateTemp(historyDir, completedAt.Format("20060102-150405")+"-*.tmp")
+	tmp, createErr := os.CreateTemp(historyDir, archivePrefix+completedAt.Format("20060102-150405")+"-*.tmp")
 	if createErr != nil {
 		return "", fmt.Errorf("create archive temp file: %w", createErr)
 	}

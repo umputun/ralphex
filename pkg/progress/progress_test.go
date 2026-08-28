@@ -907,7 +907,7 @@ func TestNewLogger_ArchiveNameUsesCompletedFooterTime(t *testing.T) {
 	defer func() { _ = l.Close() }()
 
 	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "review",
-		"20260115-103000-*.txt"))
+		"archive-20260115-103000-*.txt"))
 	require.NoError(t, err)
 	require.Len(t, archives, 1)
 	archivedContent, err := os.ReadFile(archives[0])
@@ -947,10 +947,10 @@ func TestNewLogger_PrunesOldestArchivesToTotalRunLimit(t *testing.T) {
 	historyDir := filepath.Join(tmpDir, progressDir, "history", "feature")
 	require.NoError(t, os.MkdirAll(historyDir, 0o750))
 	for i := 1; i < maxProgressRuns; i++ {
-		name := fmt.Sprintf("20260101-0000%02d-000000001.txt", i)
+		name := fmt.Sprintf("archive-20260101-0000%02d-000000001.txt", i)
 		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte(name), 0o600))
 	}
-	oldest := filepath.Join(historyDir, "20260101-000001-000000001.txt")
+	oldest := filepath.Join(historyDir, "archive-20260101-000001-000000001.txt")
 
 	l, err := NewLogger(cfg, testColors(), &status.PhaseHolder{})
 	require.NoError(t, err)
@@ -961,7 +961,7 @@ func TestNewLogger_PrunesOldestArchivesToTotalRunLimit(t *testing.T) {
 	assert.Len(t, archives, maxProgressRuns-1, "canonical file counts as the tenth retained run")
 	_, err = os.Stat(oldest)
 	require.ErrorIs(t, err, os.ErrNotExist)
-	newArchives, err := filepath.Glob(filepath.Join(historyDir, "20260115-103000-*.txt"))
+	newArchives, err := filepath.Glob(filepath.Join(historyDir, "archive-20260115-103000-*.txt"))
 	require.NoError(t, err)
 	assert.Len(t, newArchives, 1)
 }
@@ -979,10 +979,10 @@ func TestNewLogger_PruneFailureWarnsAndStartsWithOverRetention(t *testing.T) {
 	historyDir := filepath.Join(tmpDir, progressDir, "history", "feature")
 	require.NoError(t, os.MkdirAll(historyDir, 0o750))
 	for i := 1; i < maxProgressRuns; i++ {
-		name := fmt.Sprintf("20260101-0000%02d-000000001.txt", i)
+		name := fmt.Sprintf("archive-20260101-0000%02d-000000001.txt", i)
 		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte(name), 0o600))
 	}
-	oldestName := "20260101-000001-000000001.txt"
+	oldestName := "archive-20260101-000001-000000001.txt"
 	originalRemove := removeProgressArchive
 	removeProgressArchive = func(path string) error {
 		if filepath.Base(path) == oldestName {
@@ -1035,7 +1035,7 @@ func TestNewLogger_TruncateFailureRollsBackArchiveAndKeepsHistoryIntact(t *testi
 	historyDir := filepath.Join(tmpDir, progressDir, "history", "feature")
 	require.NoError(t, os.MkdirAll(historyDir, 0o750))
 	for i := 1; i < maxProgressRuns; i++ {
-		name := fmt.Sprintf("20260101-0000%02d-000000001.txt", i)
+		name := fmt.Sprintf("archive-20260101-0000%02d-000000001.txt", i)
 		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte(name), 0o600))
 	}
 	originalTruncate := truncateProgressFile
@@ -1111,6 +1111,30 @@ func TestNewLogger_ArchiveNamesDoNotMatchDashboardDiscovery(t *testing.T) {
 		"archive %q matches the dashboard's progress-*.txt walk and would be listed as a session", found[0])
 }
 
+func TestArchiveNameRegex(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		want bool
+	}{
+		{"digit token", "archive-20260115-103000-1234567890.txt", true},
+		{"letter token", "archive-20260115-103000-aB9xQ.txt", true},
+		{"single char token", "archive-20260115-103000-x.txt", true},
+		{"empty token", "archive-20260115-103000-.txt", false},
+		{"no token", "archive-20260115-103000.txt", false},
+		{"missing marker", "20260115-103000-1234.txt", false},
+		{"progress prefix", "progress-review-20260115-103000-1234.txt", false},
+		{"temp still being written", "archive-20260115-103000-1234.tmp", false},
+		{"short timestamp", "archive-2026115-103000-1234.txt", false},
+		{"unrelated file", "notes.txt", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, archiveNameRegex.MatchString(tc.base))
+		})
+	}
+}
+
 func TestNewLogger_PruneLeavesForeignFilesAlone(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1122,10 +1146,10 @@ func TestNewLogger_PruneLeavesForeignFilesAlone(t *testing.T) {
 	historyDir := filepath.Join(tmpDir, progressDir, "history", "feature")
 	require.NoError(t, os.MkdirAll(historyDir, 0o750))
 	for i := 1; i < maxProgressRuns; i++ {
-		name := fmt.Sprintf("20260101-0000%02d-000000001.txt", i)
+		name := fmt.Sprintf("archive-20260101-0000%02d-000000001.txt", i)
 		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte(name), 0o600))
 	}
-	foreign := []string{"notes.txt", "20260101-000000-partial.tmp", "keep-me.log"}
+	foreign := []string{"notes.txt", "archive-20260101-000000-partial.tmp", "keep-me.log"}
 	for _, name := range foreign {
 		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte(name), 0o600))
 	}
@@ -1138,7 +1162,7 @@ func TestNewLogger_PruneLeavesForeignFilesAlone(t *testing.T) {
 		_, statErr := os.Stat(filepath.Join(historyDir, name))
 		require.NoError(t, statErr, "prune removed %s, which it does not own", name)
 	}
-	_, err = os.Stat(filepath.Join(historyDir, "20260101-000001-000000001.txt"))
+	_, err = os.Stat(filepath.Join(historyDir, "archive-20260101-000001-000000001.txt"))
 	require.ErrorIs(t, err, os.ErrNotExist, "oldest owned archive should still be pruned")
 }
 
@@ -1157,7 +1181,7 @@ func TestNewLogger_SameSecondArchivesUseUniqueNames(t *testing.T) {
 	}
 
 	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "review",
-		"20260115-103000-*.txt"))
+		"archive-20260115-103000-*.txt"))
 	require.NoError(t, err)
 	require.Len(t, archives, 2)
 	first, err := os.ReadFile(archives[0])
