@@ -3,6 +3,7 @@ package progress
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -858,6 +859,12 @@ func TestNewLogger_FreshStartAfterCompleted(t *testing.T) {
 	l2, err := NewLogger(cfg, colors, holder)
 	require.NoError(t, err)
 	assert.Equal(t, progressPath, l2.Path()) // verify both loggers use the same file
+	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "feature", "progress-feature-*.txt"))
+	require.NoError(t, err)
+	require.Len(t, archives, 1)
+	archivedContent, err := os.ReadFile(archives[0])
+	require.NoError(t, err)
+	assert.Equal(t, content1, archivedContent)
 	l2.Print("second session output")
 	require.NoError(t, l2.Close())
 
@@ -877,6 +884,265 @@ func TestNewLogger_FreshStartAfterCompleted(t *testing.T) {
 
 	// new content present
 	assert.Contains(t, contentStr, "second session output")
+}
+
+func TestNewLogger_ArchiveNameUsesCompletedFooterTime(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	canonical := filepath.Join(tmpDir, progressDir, "progress-review.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(canonical), 0o750))
+	content := "# Ralphex Progress Log\nPlan: (no plan - review only)\nBranch: main\nMode: review\n" +
+		"Started: 2026-01-15 10:00:00\n" + separatorLine + "\n\nold run\n\n" + separatorLine +
+		"\nCompleted: 2026-01-15 10:30:00 (30m)\n"
+	require.NoError(t, os.WriteFile(canonical, []byte(content), 0o600))
+
+	l, err := NewLogger(Config{Mode: "review", Branch: "main"}, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "review",
+		"progress-review-20260115-103000-*.txt"))
+	require.NoError(t, err)
+	require.Len(t, archives, 1)
+	archivedContent, err := os.ReadFile(archives[0])
+	require.NoError(t, err)
+	assert.Equal(t, content, string(archivedContent))
+}
+
+func TestNewLogger_CompletedArchiveFailurePreservesCanonical(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	cfg := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}
+	canonical := writeCompletedProgress(t, cfg, "old run")
+	before, err := os.ReadFile(canonical) //nolint:gosec // test file path from t.TempDir
+	require.NoError(t, err)
+	historyPath := filepath.Join(tmpDir, progressDir, "history")
+	require.NoError(t, os.WriteFile(historyPath, []byte("blocks history directory"), 0o600))
+
+	_, err = NewLogger(cfg, testColors(), &status.PhaseHolder{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "archive completed progress file")
+	after, readErr := os.ReadFile(canonical) //nolint:gosec // test file path from t.TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, before, after)
+}
+
+func TestNewLogger_PrunesOldestArchivesToTotalRunLimit(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	cfg := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}
+	writeCompletedProgress(t, cfg, "current completed run")
+	historyDir := filepath.Join(tmpDir, progressDir, "history", "feature")
+	require.NoError(t, os.MkdirAll(historyDir, 0o750))
+	for i := 1; i < maxProgressRuns; i++ {
+		name := fmt.Sprintf("progress-feature-20260101-0000%02d-old.txt", i)
+		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte(name), 0o600))
+	}
+	oldest := filepath.Join(historyDir, "progress-feature-20260101-000001-old.txt")
+
+	l, err := NewLogger(cfg, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+
+	archives, err := filepath.Glob(filepath.Join(historyDir, "progress-feature-*.txt"))
+	require.NoError(t, err)
+	assert.Len(t, archives, maxProgressRuns-1, "canonical file counts as the tenth retained run")
+	_, err = os.Stat(oldest)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	newArchives, err := filepath.Glob(filepath.Join(historyDir, "progress-feature-20260115-103000-*.txt"))
+	require.NoError(t, err)
+	assert.Len(t, newArchives, 1)
+}
+
+func TestNewLogger_PruneFailureWarnsAndStartsWithOverRetention(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	cfg := Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "main"}
+	canonical := writeCompletedProgress(t, cfg, "current completed run")
+	before, err := os.ReadFile(canonical) //nolint:gosec // test file path from t.TempDir
+	require.NoError(t, err)
+	historyDir := filepath.Join(tmpDir, progressDir, "history", "feature")
+	require.NoError(t, os.MkdirAll(historyDir, 0o750))
+	for i := 1; i < maxProgressRuns; i++ {
+		name := fmt.Sprintf("progress-feature-20260101-0000%02d-old.txt", i)
+		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte(name), 0o600))
+	}
+	oldestName := "progress-feature-20260101-000001-old.txt"
+	originalRemove := removeProgressArchive
+	removeProgressArchive = func(path string) error {
+		if filepath.Base(path) == oldestName {
+			return errors.New("injected prune failure")
+		}
+		return os.Remove(path)
+	}
+	t.Cleanup(func() { removeProgressArchive = originalRemove })
+
+	l, err := NewLogger(cfg, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err, "retention failure must not stop the run once the archive is published")
+	require.NoError(t, l.Close())
+
+	after, readErr := os.ReadFile(canonical) //nolint:gosec // test file path from t.TempDir
+	require.NoError(t, readErr)
+	assert.NotContains(t, string(after), "current completed run", "canonical must still start fresh")
+	assert.Contains(t, string(after), "WARN: ")
+	assert.Contains(t, string(after), "prune progress archives")
+	assert.Contains(t, string(after), oldestName, "warning must name the archive it could not remove")
+
+	archives, globErr := filepath.Glob(filepath.Join(historyDir, "progress-feature-*.txt"))
+	require.NoError(t, globErr)
+	assert.Len(t, archives, maxProgressRuns, "blocked prune leaves history one over target until the next reuse")
+	assert.Contains(t, string(before), "current completed run")
+	assertArchiveContains(t, archives, "current completed run")
+}
+
+func assertArchiveContains(t *testing.T, archives []string, want string) {
+	t.Helper()
+	for _, path := range archives {
+		content, err := os.ReadFile(path) //nolint:gosec // test file path from t.TempDir
+		require.NoError(t, err)
+		if strings.Contains(string(content), want) {
+			return
+		}
+	}
+	t.Fatalf("no archive contains %q", want)
+}
+
+func TestNewLogger_SameSecondArchivesUseUniqueNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	cfg := Config{Mode: "review", Branch: "main"}
+	for i := range 2 {
+		writeCompletedProgress(t, cfg, fmt.Sprintf("completed run %d", i))
+		l, err := NewLogger(cfg, testColors(), &status.PhaseHolder{})
+		require.NoError(t, err)
+		require.NoError(t, l.Close())
+	}
+
+	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "review",
+		"progress-review-20260115-103000-*.txt"))
+	require.NoError(t, err)
+	require.Len(t, archives, 2)
+	first, err := os.ReadFile(archives[0])
+	require.NoError(t, err)
+	second, err := os.ReadFile(archives[1])
+	require.NoError(t, err)
+	assert.NotEqual(t, first, second)
+}
+
+func TestNewLogger_ArchivesCompletedLogsInAllModes(t *testing.T) {
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tests := []struct {
+		name string
+		cfg  Config
+		stem string
+	}{
+		{name: "full", cfg: Config{PlanFile: "docs/plans/feature.md", Mode: "full", Branch: "feature"}, stem: "feature"},
+		{name: "review", cfg: Config{Mode: "review", Branch: "feature"}, stem: "review"},
+		{name: "codex only", cfg: Config{Mode: "codex-only", Branch: "feature"}, stem: "codex"},
+		{name: "plan", cfg: Config{Mode: "plan", PlanDescription: "add cache", Branch: "main"}, stem: "plan-add-cache"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			require.NoError(t, os.Chdir(tmpDir))
+			t.Cleanup(func() { require.NoError(t, os.Chdir(origDir)) })
+			writeCompletedProgress(t, tc.cfg, "completed "+tc.name+" run")
+
+			l, err := NewLogger(tc.cfg, testColors(), &status.PhaseHolder{})
+			require.NoError(t, err)
+			require.NoError(t, l.Close())
+
+			archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", tc.stem, "progress-*.txt"))
+			require.NoError(t, err)
+			assert.Len(t, archives, 1)
+		})
+	}
+}
+
+func TestNewLogger_CanonicalNameCollisionsShareHistoryBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	configs := []Config{
+		{Mode: "review", Branch: "feature"},
+		{PlanFile: "docs/plans/review.md", Mode: "full", Branch: "review"},
+	}
+	for i, cfg := range configs {
+		writeCompletedProgress(t, cfg, fmt.Sprintf("colliding run %d", i))
+		l, err := NewLogger(cfg, testColors(), &status.PhaseHolder{})
+		require.NoError(t, err)
+		require.NoError(t, l.Close())
+	}
+
+	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "review", "progress-review-*.txt"))
+	require.NoError(t, err)
+	require.Len(t, archives, 2)
+	contents := make([]string, 0, len(archives))
+	for _, archive := range archives {
+		content, readErr := os.ReadFile(archive) //nolint:gosec // test file path from t.TempDir
+		require.NoError(t, readErr)
+		contents = append(contents, string(content))
+	}
+	assert.Condition(t, func() bool {
+		return strings.Contains(contents[0], "colliding run 0") || strings.Contains(contents[1], "colliding run 0")
+	})
+	assert.Condition(t, func() bool {
+		return strings.Contains(contents[0], "colliding run 1") || strings.Contains(contents[1], "colliding run 1")
+	})
+}
+
+func TestNewLogger_HistoryStemCannotEscapeHistoryDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	cfg := Config{PlanFile: "docs/plans/...md", Mode: "full", Branch: "dots"}
+	writeCompletedProgress(t, cfg, "completed dotted plan")
+	l, err := NewLogger(cfg, testColors(), &status.PhaseHolder{})
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "progress-..", "progress-*.txt"))
+	require.NoError(t, err)
+	assert.Len(t, archives, 1)
+	escaped, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "progress-..-*.txt"))
+	require.NoError(t, err)
+	assert.Empty(t, escaped)
+}
+
+func writeCompletedProgress(t *testing.T, cfg Config, body string) string {
+	t.Helper()
+
+	path := progressFilename(cfg.PlanFile, cfg.PlanDescription, cfg.Mode, cfg.BranchOverride)
+	absPath, err := filepath.Abs(path)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(absPath), 0o750))
+	content := "# Ralphex Progress Log\nPlan: " + cfg.PlanFile + "\nBranch: " + cfg.Branch + "\nMode: " + cfg.Mode +
+		"\nStarted: 2026-01-15 10:00:00\n" + separatorLine + "\n\n" + body + "\n\n" + separatorLine +
+		"\nCompleted: 2026-01-15 10:30:00 (30m)\n"
+	require.NoError(t, os.WriteFile(absPath, []byte(content), 0o600))
+	return absPath
 }
 
 func TestNewLogger_RestartAfterFailure_PreservesContent(t *testing.T) {

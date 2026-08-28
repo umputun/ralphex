@@ -225,7 +225,7 @@ Review-only mode (`--review`) runs the full review pipeline (Phase 2 → Phase 3
 2. Commit the changes
 3. Run `ralphex --review`
 
-ralphex compares the branch against the default branch (`git diff master...HEAD`), launches multi-agent reviews, and iterates fixes until all agents report clean. No plan file is required — if provided, it gives reviewers additional context about the intended changes.
+ralphex compares the branch against the default branch (`git diff master...HEAD`), launches multi-agent reviews, and iterates fixes until all agents report clean, an iteration makes no commit, or the review iteration limit is reached. No plan file is required — if provided, it gives reviewers additional context about the intended changes.
 
 ```bash
 # switch to feature branch with existing changes
@@ -1247,7 +1247,7 @@ Ralphex commits after each completed task. If execution fails, completed tasks a
 
 **What if ralphex is interrupted mid-execution?**
 
-Completed tasks are already committed to the feature branch. To resume, re-run `ralphex docs/plans/<plan>.md`. Ralphex detects completed tasks via `[x]` checkboxes in the plan and continues from the first incomplete task. For review sessions, simply restart. Reviews re-run from iteration 1, but fixes from previous iterations remain in the codebase.
+Completed tasks are already committed to the feature branch. To resume, re-run `ralphex docs/plans/<plan>.md`. Ralphex detects completed tasks via `[x]` checkboxes in the plan and continues from the first incomplete task. For review sessions, simply restart. Reviews re-run from iteration 1, but fixes from previous iterations remain in the codebase. Before reusing a completed progress log, ralphex archives it under `.ralphex/progress/history/<stem>/`; the current log plus its nine newest completed archives are retained. Failed or interrupted runs keep appending to the canonical log with a restart separator.
 
 **Can I adjust the plan or change direction while ralphex is running?**
 
