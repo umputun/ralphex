@@ -28,8 +28,16 @@ var multiDashRegex = regexp.MustCompile(`-{2,}`)
 // the current canonical file plus up to nine completed archives.
 const maxProgressRuns = 10
 
-// removeProgressArchive is replaceable in tests to exercise prune and rollback failures.
-var removeProgressArchive = os.Remove
+// archiveNameRegex matches exactly the archive basenames archiveCompletedProgress publishes:
+// the completion timestamp plus the random token os.CreateTemp appends.
+var archiveNameRegex = regexp.MustCompile(`^\d{8}-\d{6}-\d+\.txt$`)
+
+// removeProgressArchive and truncateProgressFile are replaceable in tests to exercise prune and
+// rollback failures.
+var (
+	removeProgressArchive = os.Remove
+	truncateProgressFile  = func(name string) error { return os.Truncate(name, 0) }
+)
 
 // Colors holds all color configuration for output formatting.
 // use NewColors to create from config.ColorConfig.
@@ -316,7 +324,7 @@ func (l *Logger) Path() string {
 const timestampFormat = "06-01-02 15:04:05"
 
 // separatorLine is the 60-dash separator used in the header and completion footer.
-// isProgressCompleted relies on this exact value to detect completed files.
+// progressCompletedAt relies on this exact value to detect completed files.
 var separatorLine = strings.Repeat("-", 60)
 
 type timestampPrefix struct {
@@ -682,7 +690,7 @@ const maxFailureReasonRunes = 200
 // Replaces Unicode control chars (unicode.IsControl, covers ASCII C0 + C1 ranges)
 // and line/paragraph separators (U+2028, U+2029) with a single space, collapses
 // consecutive whitespace via strings.Fields, and rune-aware truncates to
-// maxFailureReasonRunes. Critical for isProgressCompleted integrity: the reason
+// maxFailureReasonRunes. Critical for progressCompletedAt integrity: the reason
 // must not contain "\n<separatorLine>\nCompleted:" which would false-positive
 // the tail scan.
 func sanitizeFailureReason(s string) string {
@@ -760,18 +768,12 @@ func progressCompletedAt(f *os.File, size int64) (time.Time, bool) {
 	return completedAt, true
 }
 
-// isProgressCompleted reports whether the progress file ends with a successful "Completed:"
-// footer written by Close.
-func isProgressCompleted(f *os.File, size int64) bool {
-	_, completed := progressCompletedAt(f, size)
-	return completed
-}
-
-// archiveAndTruncateCompleted archives a completed canonical log, prunes old archives, and
-// truncates the canonical file. pruneWarn reports a retention failure the caller should surface:
-// once the new archive is published the transcript is safe, so an undeletable old archive must not
-// stop the run. deleting an archive can fail during normal operation, notably on Windows where a
-// dashboard tailing it holds it open, and all NewLogger callers treat an error as fatal.
+// archiveAndTruncateCompleted archives a completed canonical log, truncates the canonical file,
+// then prunes old archives. pruneWarn reports a retention failure the caller should surface: once
+// the canonical file is truncated the run is committed, so an undeletable old archive must not stop
+// it, and every NewLogger caller treats an error as fatal. pruning runs last so a truncate failure
+// rolls back to exactly the state it started in - pruning first would delete the oldest archive to
+// make room for one the rollback then withdraws.
 func archiveAndTruncateCompleted(f *os.File, size int64) (freshStart bool, pruneWarn, err error) {
 	completedAt, completed := progressCompletedAt(f, size)
 	if !completed {
@@ -782,11 +784,11 @@ func archiveAndTruncateCompleted(f *os.File, size int64) (freshStart bool, prune
 	if err != nil {
 		return false, nil, fmt.Errorf("archive completed progress file: %w", err)
 	}
-	if pErr := pruneProgressArchives(filepath.Dir(archivePath), filepath.Base(f.Name()), maxProgressRuns-1); pErr != nil {
-		pruneWarn = fmt.Errorf("prune progress archives: %w", pErr)
+	if tErr := truncateProgressFile(f.Name()); tErr != nil {
+		return false, nil, rollbackProgressArchive(archivePath, fmt.Errorf("truncate completed progress file: %w", tErr))
 	}
-	if tErr := os.Truncate(f.Name(), 0); tErr != nil {
-		return false, pruneWarn, rollbackProgressArchive(archivePath, fmt.Errorf("truncate completed progress file: %w", tErr))
+	if pErr := pruneProgressArchives(filepath.Dir(archivePath), maxProgressRuns-1); pErr != nil {
+		pruneWarn = fmt.Errorf("prune progress archives: %w", pErr)
 	}
 	return true, pruneWarn, nil
 }
@@ -802,6 +804,10 @@ func rollbackProgressArchive(archivePath string, cause error) error {
 // The canonical file is never renamed or reopened, so its lock continues to serialize users of
 // that path. Per-stem history deliberately mirrors the canonical filename namespace, including
 // its existing same-name collisions across modes and plans.
+//
+// The archive basename carries no "progress-" prefix on purpose: the web dashboard discovers
+// sessions by walking for progress-*.txt (pkg/web/watcher.go isProgressFile) and skips neither
+// .ralphex nor history, so a prefixed archive would be listed and replayed as a session of its own.
 func archiveCompletedProgress(f *os.File, size int64, completedAt time.Time) (archivePath string, err error) {
 	base := filepath.Base(f.Name())
 	stem := strings.TrimPrefix(strings.TrimSuffix(base, ".txt"), "progress-")
@@ -814,8 +820,7 @@ func archiveCompletedProgress(f *os.File, size int64, completedAt time.Time) (ar
 		return "", fmt.Errorf("create history dir: %w", mkErr)
 	}
 
-	tmp, createErr := os.CreateTemp(historyDir,
-		fmt.Sprintf("progress-%s-%s-*.tmp", stem, completedAt.Format("20060102-150405")))
+	tmp, createErr := os.CreateTemp(historyDir, completedAt.Format("20060102-150405")+"-*.tmp")
 	if createErr != nil {
 		return "", fmt.Errorf("create archive temp file: %w", createErr)
 	}
@@ -848,16 +853,19 @@ func archiveCompletedProgress(f *os.File, size int64, completedAt time.Time) (ar
 	return archivePath, nil
 }
 
-func pruneProgressArchives(historyDir, canonicalBase string, keep int) error {
+// pruneProgressArchives deletes oldest-first until at most keep archives remain. it matches only
+// the exact name format archiveCompletedProgress publishes, so a stray file a user dropped into the
+// history directory, and the .tmp of an archive still being written, are never deleted. os.ReadDir
+// sorts by filename and the timestamp is fixed-width, so that order is chronological.
+func pruneProgressArchives(historyDir string, keep int) error {
 	entries, err := os.ReadDir(historyDir)
 	if err != nil {
 		return fmt.Errorf("read history dir: %w", err)
 	}
 
-	prefix := strings.TrimSuffix(canonicalBase, ".txt") + "-"
 	archives := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) || !strings.HasSuffix(entry.Name(), ".txt") {
+		if entry.IsDir() || !archiveNameRegex.MatchString(entry.Name()) {
 			continue
 		}
 		archives = append(archives, entry.Name())
