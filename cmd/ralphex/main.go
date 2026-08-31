@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -150,10 +151,8 @@ type startupInfo struct {
 // executePlanRequest holds parameters for plan execution.
 type executePlanRequest struct {
 	PlanFile       string
-	MainPlanFile   string // original plan path in main repo (worktree mode); empty in normal mode
 	Mode           processor.Mode
 	GitSvc         *git.Service
-	MainGitSvc     *git.Service // main repo service for cross-boundary ops (worktree mode); nil in normal mode
 	Config         *config.Config
 	Colors         *progress.Colors
 	DefaultBranch  string // actual default branch for branch/worktree creation (config or auto-detect)
@@ -161,6 +160,7 @@ type executePlanRequest struct {
 	NotifySvc      *notify.Service
 	BranchOverride string              // branch name override (--branch flag); empty = derive from plan filename
 	WtCleanup      *worktreeCleanupFn  // worktree cleanup for interrupt handler; nil when not in worktree mode
+	WtPreserve     *atomic.Bool        // set on archive failure to keep the worktree; nil when not in worktree mode
 	ProgressLog    *progress.Logger    // pre-created logger (worktree mode); nil in normal mode
 	PhaseHolder    *status.PhaseHolder // pre-created holder (worktree mode); nil in normal mode
 }
@@ -529,19 +529,23 @@ func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.Di
 
 	planPath := ""
 	if req.PlanFile != "" {
-		planFile := req.PlanFile
-		if req.MainPlanFile != "" {
-			planFile = req.MainPlanFile
-		}
-		planPath = planFile
+		planPath = req.PlanFile
 		if planMoved {
-			planPath = filepath.Join(filepath.Dir(planFile), "completed", filepath.Base(planFile))
+			planPath = filepath.Join(filepath.Dir(req.PlanFile), "completed", filepath.Base(req.PlanFile))
 		}
 	}
 	displayMeta(req.Colors, 2, planPath, branch, baseLog.Path())
-	if planMoveErr != nil {
-		req.Colors.Warn().Printf("  plan archive incomplete: %v (check git status, the move may be left staged)\n", planMoveErr)
+	if planMoveErr == nil {
+		return
 	}
+	// a retained worktree is about to stop being the working directory, so name it explicitly:
+	// a bare "git status" after the chdir back would inspect the main checkout instead.
+	if req.WtPreserve != nil && req.WtPreserve.Load() {
+		req.Colors.Warn().Printf("  plan archive incomplete: %v (worktree kept at %s, check git -C %s status)\n",
+			planMoveErr, req.GitSvc.Root(), req.GitSvc.Root())
+		return
+	}
+	req.Colors.Warn().Printf("  plan archive incomplete: %v (check git status, the move may be left staged)\n", planMoveErr)
 }
 
 // displayMeta prints plan (if set), branch, and progress log path with the given indent.
@@ -570,7 +574,6 @@ func keepDashboardAlive(ctx context.Context, o opts, req executePlanRequest, clo
 // executePlan runs the main execution loop for a plan file.
 // handles progress logging, web dashboard, runner execution, and post-execution tasks.
 // when req.ProgressLog and req.PhaseHolder are pre-created (worktree mode), uses them directly.
-// when req.MainGitSvc is set, uses it for plan file operations (plan is in main repo).
 func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	branch := getCurrentBranch(req.GitSvc)
 
@@ -663,6 +666,10 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	elapsed := plr.baseLog.Elapsed()
 
+	// archive before the diff stats so the plan rename is part of the branch they describe.
+	// track actual success so the completion summary reflects where the plan really lives.
+	planMoved, planMoveErr := archivePlan(req, plr.baseLog)
+
 	// get diff stats for completion message (optional - errors logged but don't block).
 	// use worktree GitSvc (has correct HEAD with committed changes).
 	stats, statsErr := req.GitSvc.DiffStats(req.BaseRef)
@@ -671,11 +678,6 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	sendNotification(req, branch, elapsed, stats, nil)
-
-	// move completed plan to completed/ directory.
-	// use MainGitSvc+MainPlanFile when available (worktree mode) because the plan file is in the main repo.
-	// track actual success so the completion summary reflects where the plan really lives.
-	planMoved, planMoveErr := archivePlan(req, plr.baseLog)
 
 	displayStats(req, plr.baseLog, stats, elapsed, branch, planMoved, planMoveErr)
 	keepDashboardAlive(ctx, o, req, plr.closeLog)
@@ -759,16 +761,11 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 
 	// register cleanup: restore CWD and remove worktree.
 	// sync.Once prevents double-execution between defer and interrupt handler's force-exit path.
+	// wtPreserve is written by archivePlan and read here from the interrupt watcher's goroutine.
+	wtPreserve := &atomic.Bool{}
 	var cleanupOnce sync.Once
 	cleanup := func() {
-		cleanupOnce.Do(func() {
-			if chdirErr := os.Chdir(origDir); chdirErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to restore working directory: %v\n", chdirErr)
-			}
-			if rmErr := req.GitSvc.RemoveWorktree(wtPath); rmErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to remove worktree: %v\n", rmErr)
-			}
-		})
+		cleanupOnce.Do(func() { cleanupWorktree(req.GitSvc, origDir, wtPath, wtPreserve) })
 	}
 	setupDone = true // disable safety-net defer, main cleanup takes over
 	req.WtCleanup.set(cleanup)
@@ -797,18 +794,34 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 
 	return executePlan(ctx, o, executePlanRequest{
 		PlanFile:      runPlanFile,
-		MainPlanFile:  req.PlanFile, // original path in main repo for MovePlanToCompleted
 		Mode:          req.Mode,
 		GitSvc:        wtGitSvc,
-		MainGitSvc:    req.GitSvc,
 		Config:        req.Config,
 		Colors:        req.Colors,
 		DefaultBranch: req.DefaultBranch,
 		BaseRef:       req.BaseRef,
 		NotifySvc:     req.NotifySvc,
+		WtPreserve:    wtPreserve,
 		ProgressLog:   baseLog,
 		PhaseHolder:   holder,
 	})
+}
+
+// cleanupWorktree restores the original working directory and removes the worktree.
+// removal is skipped when preserve is set: a rejected archive commit leaves the plan rename
+// staged in the worktree, and removal is forced, so the worktree holds the only recoverable
+// copy of that staged state.
+func cleanupWorktree(gitSvc *git.Service, origDir, wtPath string, preserve *atomic.Bool) {
+	if chdirErr := os.Chdir(origDir); chdirErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to restore working directory: %v\n", chdirErr)
+	}
+	if preserve.Load() {
+		fmt.Fprintf(os.Stderr, "worktree kept at %s: the plan archive left changes there\n", wtPath)
+		return
+	}
+	if rmErr := gitSvc.RemoveWorktree(wtPath); rmErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to remove worktree: %v\n", rmErr)
+	}
 }
 
 // worktreePlanFile maps an absolute plan path from the main repo onto its copy inside wtPath.
@@ -935,24 +948,22 @@ func makePauseHandler(stdin io.Reader, stdout io.Writer) func(ctx context.Contex
 
 // archivePlan moves a completed plan into completed/ and reports a failure through the progress
 // logger, so the progress file holds it - a bare stderr write left no trace in the run's own record.
-// worktree mode archives in the main repo, hence the MainGitSvc/MainPlanFile preference.
+// the archive always runs against req.GitSvc, so in worktree mode the move and its commit land
+// on the feature branch alongside the ticked plan rather than in the user's main checkout.
 // the returned error is what displayStats repeats at the end of the summary.
 func archivePlan(req executePlanRequest, log *progress.Logger) (moved bool, err error) {
 	if !shouldMovePlan(req) {
 		return false, nil
 	}
 
-	moveSvc, movePlanFile := req.GitSvc, req.PlanFile
-	if req.MainGitSvc != nil {
-		moveSvc = req.MainGitSvc
-	}
-	if req.MainPlanFile != "" {
-		movePlanFile = req.MainPlanFile
-	}
-
-	if moveErr := moveSvc.MovePlanToCompleted(movePlanFile); moveErr != nil {
+	if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
+		// a rejected commit leaves the rename staged, so the worktree must outlive cleanup
+		// or "git worktree remove --force" discards that recovery state.
+		if req.WtPreserve != nil {
+			req.WtPreserve.Store(true)
+		}
 		log.Warn("failed to move plan to completed: %v", moveErr)
-		return false, fmt.Errorf("move %s: %w", filepath.Base(movePlanFile), moveErr)
+		return false, fmt.Errorf("move %s: %w", filepath.Base(req.PlanFile), moveErr)
 	}
 	return true, nil
 }

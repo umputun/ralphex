@@ -1,21 +1,25 @@
 ---
 worth: later
-where: cmd/ralphex/main.go:945
+where: pkg/web/server.go:239
 added: 2026-08-22
 ---
-# a finished worktree run archives the unticked plan, so the dashboard reports 0 done
+# a finished worktree run leaves the dashboard reading the unticked plan, so it reports 0 done
 
-Under `--worktree` the run ticks the plan copy inside the worktree and commits it on the feature branch.
-The main-checkout copy is never touched. At the end of the run `archivePlan` prefers `MainGitSvc` and
-`MainPlanFile` (`cmd/ralphex/main.go:945-947`), so `MovePlanToCompleted` moves that untouched copy into
-`docs/plans/completed/` and commits it on the main checkout's branch. The archived plan therefore records
-zero completed tasks for a run that finished every one of them.
+Under `--worktree` the run ticks the plan copy inside the worktree and commits it on the feature branch,
+and #450 moved the archive there too, so the completed plan on the branch is the ticked one. The
+main-checkout copy is never touched: it stays unticked at its original `docs/plans/` path, because
+deleting a file the user wrote — untracked, in a checkout ralphex does not own — is not ralphex's call.
 
-The dashboard follows it there. #442 added a `Worktree plan:` header line so `handleSessionPlan` serves the
-copy the run actually ticks, but the worktree is removed at the end of the run, so the path stops
-resolving, the handler falls back to `Plan:`, and `loadPlanWithFallback` finds the unticked copy under
-`completed/`. A finished worktree session in a watch-mode dashboard reads 0 of N done, permanently. This is
-the remaining half of issue #440, which was closed once the during-run case was fixed.
+The dashboard reads that leftover. #442 added a `Worktree plan:` header line so `handleSessionPlan` serves
+the copy the run actually ticks, but the worktree is removed at the end of the run, so the path stops
+resolving, the handler falls back to `Plan:`, and `loadPlanWithFallback` finds the unticked main copy. A
+finished worktree session in a watch-mode dashboard reads 0 of N done, permanently. This is the remaining
+half of issue #440, which was closed once the during-run case was fixed.
+
+The same leftover also stays selectable in the fzf plan picker after a completed run. Filtering it there
+is not cheap either: `Selector` only globs `PlansDir/*.md` (`pkg/plan/plan.go:91-100`) and has no notion of
+which plans completed, so hiding one because a same-named branch exists would also hide it after a failed
+or interrupted run.
 
 Two candidate fixes, and they differ in lifetime rather than difficulty:
 
