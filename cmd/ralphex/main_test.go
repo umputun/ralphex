@@ -2993,8 +2993,9 @@ func TestDisplayStats(t *testing.T) {
 		displayStats(req, baseLog, git.DiffStats{}, "30s", "main", false, nil)
 	})
 
-	// #450: the summary must not name a path inside the worktree that cleanup is about to delete
-	t.Run("worktree_plan_path_renders_relative", func(t *testing.T) {
+	// #450: a worktree archive exists only in the branch, so the path alone names a file that
+	// stops resolving the moment cleanup deletes the worktree and chdirs back to the main checkout
+	t.Run("worktree_archive_path_names_its_branch", func(t *testing.T) {
 		chdirTemp(t)
 		wtRoot, err := os.Getwd()
 		require.NoError(t, err)
@@ -3008,13 +3009,34 @@ func TestDisplayStats(t *testing.T) {
 		defer func() { _ = baseLog.Close() }()
 
 		req := executePlanRequest{
-			PlanFile: filepath.Join(wtRoot, "docs", "plans", "feature.md"),
-			Colors:   colors,
+			PlanFile:   filepath.Join(wtRoot, "docs", "plans", "feature.md"),
+			Colors:     colors,
+			WtPreserve: &atomic.Bool{},
 		}
 		output := captureStdout(t, func() {
 			displayStats(req, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s", "feature-wt", true, nil)
 		})
+		assert.Contains(t, output,
+			"  plan: "+filepath.Join("docs", "plans", "completed", "feature.md")+" (committed on branch feature-wt)\n")
+	})
+
+	t.Run("normal_mode_archive_path_carries_no_branch_note", func(t *testing.T) {
+		chdirTemp(t)
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "main-plan.md", Mode: "full", Branch: "main", NoColor: true,
+		}, colors, holder)
+		require.NoError(t, err)
+		defer func() { _ = baseLog.Close() }()
+
+		req := executePlanRequest{PlanFile: filepath.Join("docs", "plans", "feature.md"), Colors: colors}
+		output := captureStdout(t, func() {
+			displayStats(req, baseLog, git.DiffStats{}, "10s", "feature", true, nil)
+		})
 		assert.Contains(t, output, "  plan: "+filepath.Join("docs", "plans", "completed", "feature.md")+"\n")
+		assert.NotContains(t, output, "committed on branch")
 	})
 
 	// plan-path display must reflect the actual location of the plan file:
@@ -3094,11 +3116,11 @@ func TestDisplayStats(t *testing.T) {
 				})
 				assert.Contains(t, output, "  plan: "+tc.wantPath+"\n")
 				if tc.wantNote {
-					assert.Contains(t, output, "plan archive incomplete: commit plan move: hook rejected")
+					assert.Contains(t, output, "plan archive did not complete: commit plan move: hook rejected")
 					assert.Contains(t, output, "git status")
 					return
 				}
-				assert.NotContains(t, output, "plan archive incomplete")
+				assert.NotContains(t, output, "plan archive did not complete")
 			})
 		}
 	})
@@ -3131,7 +3153,7 @@ func TestDisplayMeta(t *testing.T) {
 			color.Output = &buf
 			t.Cleanup(func() { color.Output = origOutput })
 
-			displayMeta(colors, tc.indent, tc.planFile, tc.branch, tc.progressPath)
+			displayMeta(colors, tc.indent, tc.planFile, "", tc.branch, tc.progressPath)
 
 			out := buf.String()
 			for _, want := range tc.wantContains {

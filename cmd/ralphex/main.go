@@ -527,33 +527,42 @@ func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.Di
 		req.Colors.Info().Printf("\ncompleted in %s\n", elapsed)
 	}
 
-	planPath := ""
+	planPath, planNote := "", ""
 	if req.PlanFile != "" {
 		planPath = req.PlanFile
 		if planMoved {
 			planPath = filepath.Join(filepath.Dir(req.PlanFile), "completed", filepath.Base(req.PlanFile))
+			// in worktree mode the archive exists only in the branch's history: the worktree is
+			// deleted moments later and the main checkout keeps the user's own untouched copy,
+			// so an unqualified path names a file that is about to resolve to nothing.
+			if req.WtPreserve != nil {
+				planNote = " (committed on branch " + branch + ")"
+			}
 		}
 	}
-	displayMeta(req.Colors, 2, planPath, branch, baseLog.Path())
+	displayMeta(req.Colors, 2, planPath, planNote, branch, baseLog.Path())
 	if planMoveErr == nil {
 		return
 	}
 	// a retained worktree is about to stop being the working directory, so name it explicitly:
 	// a bare "git status" after the chdir back would inspect the main checkout instead.
 	if req.WtPreserve != nil && req.WtPreserve.Load() {
-		req.Colors.Warn().Printf("  plan archive incomplete: %v (worktree kept at %s, check git -C %s status)\n",
-			planMoveErr, req.GitSvc.Root(), req.GitSvc.Root())
+		root := req.GitSvc.Root()
+		req.Colors.Warn().Printf("  plan archive did not complete: %v\n"+
+			"  worktree kept at %s - inspect with git -C %s status, then git worktree remove %s before retrying\n",
+			planMoveErr, root, root, root)
 		return
 	}
-	req.Colors.Warn().Printf("  plan archive incomplete: %v (check git status, the move may be left staged)\n", planMoveErr)
+	req.Colors.Warn().Printf("  plan archive did not complete: %v (check git status)\n", planMoveErr)
 }
 
 // displayMeta prints plan (if set), branch, and progress log path with the given indent.
 // file paths are converted to relative for readability.
-func displayMeta(colors *progress.Colors, indent int, planFile, branch, progressPath string) {
+// planNote, when non-empty, is appended after the plan path and is not a path itself.
+func displayMeta(colors *progress.Colors, indent int, planFile, planNote, branch, progressPath string) {
 	pad := strings.Repeat(" ", indent)
 	if planFile != "" {
-		colors.Info().Printf("%splan: %s\n", pad, toRelPath(planFile))
+		colors.Info().Printf("%splan: %s%s\n", pad, toRelPath(planFile), planNote)
 	}
 	colors.Info().Printf("%sbranch: %s\n", pad, branch)
 	colors.Info().Printf("%sprogress log: %s\n", pad, toRelPath(progressPath))
@@ -666,10 +675,8 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 
 	elapsed := plr.baseLog.Elapsed()
 
-	// archive before the diff stats so the plan rename is part of the branch they describe.
-	// track actual success so the completion summary reflects where the plan really lives.
-	planMoved, planMoveErr := archivePlan(req, plr.baseLog)
-
+	// stats are taken before the archive: afterwards the plan is a rename whose sides differ by
+	// every ticked checkbox, so under diff.renames=false git counts its content at both paths.
 	// get diff stats for completion message (optional - errors logged but don't block).
 	// use worktree GitSvc (has correct HEAD with committed changes).
 	stats, statsErr := req.GitSvc.DiffStats(req.BaseRef)
@@ -677,6 +684,10 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 		fmt.Fprintf(os.Stderr, "warning: failed to get diff stats: %v\n", statsErr)
 	}
 
+	// track actual success so the completion summary reflects where the plan really lives
+	planMoved, planMoveErr := archivePlan(req, plr.baseLog)
+
+	// notify after the archive so a retained worktree is already recorded when the message goes out
 	sendNotification(req, branch, elapsed, stats, nil)
 
 	displayStats(req, plr.baseLog, stats, elapsed, branch, planMoved, planMoveErr)
@@ -686,8 +697,9 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 }
 
 // runWithWorktree creates a worktree, creates the progress logger (before chdir so it lands
-// in the main repo), chdirs into the worktree, and runs executePlan. On return the worktree
-// is cleaned up and CWD is restored. req.WtCleanup is populated for interrupt handler use.
+// in the main repo), chdirs into the worktree, and runs executePlan. On return CWD is always
+// restored; the worktree is removed unless the plan archive left state behind in it, in which
+// case it is kept for recovery. req.WtCleanup is populated for interrupt handler use.
 func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err error) {
 	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile, req.DefaultBranch, req.BranchOverride)
 	if err != nil {
@@ -808,15 +820,18 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 }
 
 // cleanupWorktree restores the original working directory and removes the worktree.
-// removal is skipped when preserve is set: a rejected archive commit leaves the plan rename
-// staged in the worktree, and removal is forced, so the worktree holds the only recoverable
-// copy of that staged state.
+// removal is skipped when preserve is set, which covers the whole archive attempt: removal is
+// forced, so anything the attempt left in the worktree - a rename staged by a rejected commit
+// most of all - would go with it. the message is deliberately generic about what is there,
+// since an archive that failed before touching the tree leaves nothing to recover.
 func cleanupWorktree(gitSvc *git.Service, origDir, wtPath string, preserve *atomic.Bool) {
 	if chdirErr := os.Chdir(origDir); chdirErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to restore working directory: %v\n", chdirErr)
 	}
 	if preserve.Load() {
-		fmt.Fprintf(os.Stderr, "worktree kept at %s: the plan archive left changes there\n", wtPath)
+		fmt.Fprintf(os.Stderr, "worktree kept at %s: the plan archive did not complete\n"+
+			"inspect with git -C %s status, then git worktree remove %s before retrying this plan\n",
+			wtPath, wtPath, wtPath)
 		return
 	}
 	if rmErr := gitSvc.RemoveWorktree(wtPath); rmErr != nil {
@@ -956,12 +971,19 @@ func archivePlan(req executePlanRequest, log *progress.Logger) (moved bool, err 
 		return false, nil
 	}
 
+	// armed before the move rather than on failure: a hook that hangs until the interrupt
+	// watcher's force-exit fires would otherwise have cleanup delete the worktree mid-archive,
+	// taking the staged rename with it. cleared again only once the archive has committed.
+	if req.WtPreserve != nil {
+		req.WtPreserve.Store(true)
+		defer func() {
+			if err == nil {
+				req.WtPreserve.Store(false)
+			}
+		}()
+	}
+
 	if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
-		// a rejected commit leaves the rename staged, so the worktree must outlive cleanup
-		// or "git worktree remove --force" discards that recovery state.
-		if req.WtPreserve != nil {
-			req.WtPreserve.Store(true)
-		}
 		log.Warn("failed to move plan to completed: %v", moveErr)
 		return false, fmt.Errorf("move %s: %w", filepath.Base(req.PlanFile), moveErr)
 	}
@@ -1058,7 +1080,7 @@ func printStartupInfo(info startupInfo, colors *progress.Colors) {
 		modeStr = fmt.Sprintf(" (%s mode)", info.Mode)
 	}
 	colors.Info().Printf("starting ralphex loop (max %d iterations)%s\n", info.MaxIterations, modeStr)
-	displayMeta(colors, 0, info.PlanFile, info.Branch, info.ProgressPath)
+	displayMeta(colors, 0, info.PlanFile, "", info.Branch, info.ProgressPath)
 	printExecutorInfo(info, colors)
 	if info.PreserveAnthropicAPIKey {
 		colors.Warn().Printf("auth: ANTHROPIC_API_KEY passthrough enabled\n")

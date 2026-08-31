@@ -492,8 +492,8 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 	}
 
 	// commit the move, restricted to the plan paths. a bare commit would take the whole
-	// index, and in worktree mode this runs against the user's main checkout, where
-	// anything staged during the run would land under ralphex's message.
+	// index of whichever checkout this runs in, sweeping anything the run left staged there
+	// into a commit named for the plan move.
 	commitMsg := "move completed plan: " + filepath.Base(sourceFile)
 	if err := s.repo.commitFiles(s.appendTrailer(commitMsg), commitPaths...); err != nil {
 		return fmt.Errorf("commit plan move: %w", err)
