@@ -227,7 +227,7 @@ Review-only mode (`--review`) runs the full review pipeline (Phase 2 → Phase 3
 2. Commit the changes
 3. Run `ralphex --review`
 
-ralphex compares the branch against the default branch (`git diff master...HEAD`), launches multi-agent reviews, and iterates fixes until all agents report clean. No plan file is required — if provided, it gives reviewers additional context about the intended changes.
+ralphex compares the branch against the default branch (`git diff master...HEAD`), launches multi-agent reviews, and iterates fixes until all agents report clean, an iteration makes no commit, or the review iteration limit is reached. No plan file is required — if provided, it gives reviewers additional context about the intended changes.
 
 ```bash
 # switch to feature branch with existing changes
@@ -295,6 +295,8 @@ When `executor = codex` is set in config and the user has also set `external_rev
 The `--worktree` flag runs plan execution in an isolated git worktree at `.ralphex/worktrees/<branch>`, enabling parallel execution of multiple plans on the same repo without branch conflicts.
 
 **Supported modes:** `--worktree` only applies to full mode and `--tasks-only`. It is silently ignored for `--review`, `--external-only`, and `--plan` — these modes operate from the current directory.
+
+**Source checkout state:** Uncommitted files in the source checkout do not have to be stashed first. Ralphex lists them in a warning and does not copy them into the generated worktree. An uncommitted selected plan is copied so it can be committed on the feature branch. A new feature branch starts at the current `HEAD`; an existing feature branch keeps its own tip. Local `.ralphex` configuration is loaded before worktree creation and still applies to the run. Commit any repository changes the plan needs before starting. An unfinished Git operation remains a hard error because completion archives the plan in the source checkout. In-place branch mode also requires a clean checkout because it creates the feature branch in that same working tree.
 
 **Re-running reviews on a worktree branch:** if the task phase completed in a worktree but the review phase needs to be re-run, `cd` into the worktree directory and run the review from there:
 
@@ -998,9 +1000,9 @@ Provider-related CLI flags (`--claude-command`, `--claude-args`, `--external-rev
 | `color_timestamp` | Timestamp prefix color (hex) | `#8a8a8a` |
 | `color_info` | Informational messages color (hex) | `#b4b4b4` |
 | `claude_error_patterns` | Patterns to detect in claude output (comma-separated) | `You've hit your limit,You've hit your session limit,API Error: 400,API Error: 401,API Error: 403,API Error: 404,API Error: 413,API Error: 429,API Error: 500,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,You've hit your individual spend limit` |
-| `codex_error_patterns` | Patterns to detect in codex output (comma-separated) | `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` |
+| `codex_error_patterns` | Patterns to detect in codex output (comma-separated) | `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit,Selected model is at capacity` |
 | `claude_limit_patterns` | Limit patterns for claude triggering wait+retry (comma-separated) | `You've hit your limit,You've hit your session limit,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,You've hit your individual spend limit` |
-| `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit` |
+| `codex_limit_patterns` | Limit patterns for codex triggering wait+retry (comma-separated) | `Rate limit exceeded,rate limit reached,429 Too Many Requests,quota exceeded,insufficient_quota,You've hit your usage limit,Selected model is at capacity` |
 | `claude_retry_patterns` | Transient claude/fya markers retried like executor timeouts (comma-separated) | `FYA_TRANSIENT_TIMEOUT,API Error: 529,API Error: 502,API Error: 503,API Error: 504` |
 | `wait_on_limit` | Wait duration before retrying on rate limit (e.g., `1h`, `30m`) | disabled |
 | `session_timeout` | Per-session timeout for task/review executor (e.g., `30m`, `1h`). Applies to Claude calls in default executor mode and every executor call under `executor = codex`; external codex/custom review in Claude mode is not affected | disabled |
@@ -1247,7 +1249,7 @@ Ralphex commits after each completed task. If execution fails, completed tasks a
 
 **What if ralphex is interrupted mid-execution?**
 
-Completed tasks are already committed to the feature branch. To resume, re-run `ralphex docs/plans/<plan>.md`. Ralphex detects completed tasks via `[x]` checkboxes in the plan and continues from the first incomplete task. For review sessions, simply restart. Reviews re-run from iteration 1, but fixes from previous iterations remain in the codebase.
+Completed tasks are already committed to the feature branch. To resume, re-run `ralphex docs/plans/<plan>.md`. Ralphex detects completed tasks via `[x]` checkboxes in the plan and continues from the first incomplete task. For review sessions, simply restart. Reviews re-run from iteration 1, but fixes from previous iterations remain in the codebase. Before reusing a completed progress log, ralphex archives it under `.ralphex/progress/history/<stem>/`; the current log plus its nine newest completed archives are retained. Failed or interrupted runs keep appending to the canonical log with a restart separator.
 
 **Can I adjust the plan or change direction while ralphex is running?**
 
@@ -1263,7 +1265,11 @@ Progress file (`.ralphex/progress/progress-*.txt`) is a real-time execution log�
 
 **Do I need to commit changes before running ralphex?**
 
-It depends. If the plan file is the only uncommitted change, ralphex auto-commits it after creating the feature branch and continues execution. If other files have uncommitted changes, ralphex shows a helpful error with options: stash temporarily (`git stash`), commit first (`git commit -am "wip"`), or use review-only mode (`ralphex --review`).
+It depends on the mode. If the plan file is the only uncommitted change, ralphex auto-commits it after creating the feature branch and continues execution.
+
+In the default in-place branch mode, other uncommitted files stop the run with a helpful error and options: stash temporarily (`git stash`), commit first (`git commit -am "wip"`), or use review-only mode (`ralphex --review`). The feature branch is created in that same working tree, so unrelated changes would be mixed into the plan's work.
+
+With `--worktree`, they do not stop the run — ralphex lists them in a warning and leaves them alone. The catch is the other way round: the worktree is built from committed content, so those edits are not in it. Commit anything the plan depends on before starting. See [Worktree Isolation](#worktree-isolation).
 
 **What's the difference between agents/ and prompts/?**
 

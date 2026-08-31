@@ -2,6 +2,7 @@
 package progress
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,6 +23,27 @@ import (
 
 // multiDashRegex collapses multiple consecutive dashes into one.
 var multiDashRegex = regexp.MustCompile(`-{2,}`)
+
+// maxProgressRuns is the total number of runs retained for one canonical progress path:
+// the current canonical file plus up to nine completed archives.
+const maxProgressRuns = 10
+
+// archivePrefix marks a file as one this package owns and may delete. It must never begin with
+// "progress-", which is what the web dashboard walks for.
+const archivePrefix = "archive-"
+
+// archiveNameRegex matches the archive basenames archiveCompletedProgress publishes. The random
+// token is matched as any non-empty string rather than as digits: os.CreateTemp documents only
+// "a random string", so pinning its current all-digit form would leave pruning silently matching
+// nothing if that ever changed, while archives kept being written.
+var archiveNameRegex = regexp.MustCompile(`^` + archivePrefix + `\d{8}-\d{6}-.+\.txt$`)
+
+// removeProgressArchive and truncateProgressFile are replaceable in tests to exercise prune and
+// rollback failures.
+var (
+	removeProgressArchive = os.Remove
+	truncateProgressFile  = func(name string) error { return os.Truncate(name, 0) }
+)
 
 // Colors holds all color configuration for output formatting.
 // use NewColors to create from config.ColorConfig.
@@ -162,9 +184,10 @@ type RunParams struct {
 
 // NewLogger creates a logger writing to both a progress file and stdout.
 // if the progress file already ends with a "Completed:" footer (successful run),
-// it is truncated and a fresh header is written. if the file ended with a "Failed:"
-// footer or has no footer (interrupted/failed run), the existing log is preserved
-// and a restart separator is written so history carries across retries (issue #288).
+// it is archived, truncated, and a fresh header is written. if the file ended with
+// a "Failed:" footer or has no footer (interrupted/failed run), the existing log is
+// preserved and a restart separator is written so history carries across retries
+// (issue #288).
 // colors must be provided (created via NewColors from config).
 // holder is the shared PhaseHolder for reading the current execution phase.
 func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger, error) {
@@ -218,18 +241,22 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 
 	restart := fi.Size() > 0
 
-	// if the file has a completion footer from a previous run, truncate and start fresh.
-	// this prevents mixing unrelated content when the same plan filename is reused.
+	var pruneWarn error
+
+	// if the file has a completion footer from a previous run, archive it, then truncate
+	// and start fresh. this preserves the completed transcript without mixing unrelated
+	// content in the canonical file when the same plan filename is reused.
 	// the file lock is held here, so path and fd refer to the same inode; path-based
 	// truncation is safe. os.Truncate (path-based) is used instead of f.Truncate
 	// (fd-based) because on Windows a fd opened with O_APPEND does not have the
 	// FILE_WRITE_DATA permission required for fd-based truncation ("access is denied").
-	if restart && isProgressCompleted(f, fi.Size()) {
-		if tErr := os.Truncate(f.Name(), 0); tErr != nil {
+	if restart {
+		freshStart, warn, resetErr := archiveAndTruncateCompleted(f, fi.Size())
+		if resetErr != nil {
 			cleanup()
-			return nil, fmt.Errorf("truncate completed progress file: %w", tErr)
+			return nil, resetErr
 		}
-		restart = false
+		restart, pruneWarn = !freshStart, warn
 	}
 
 	l := &Logger{
@@ -250,6 +277,12 @@ func NewLogger(cfg Config, colors *Colors, holder *status.PhaseHolder) (*Logger,
 		l.writeHeader(cfg)
 	}
 	l.writeMu.Unlock()
+
+	// after the header so the warning lands in the new run's log, not before it. a silent skip
+	// would let a permanently undeletable archive push retention past its cap unnoticed.
+	if pruneWarn != nil {
+		l.Warn("%v", pruneWarn)
+	}
 
 	return l, nil
 }
@@ -297,7 +330,7 @@ func (l *Logger) Path() string {
 const timestampFormat = "06-01-02 15:04:05"
 
 // separatorLine is the 60-dash separator used in the header and completion footer.
-// isProgressCompleted relies on this exact value to detect completed files.
+// progressCompletedAt relies on this exact value to detect completed files.
 var separatorLine = strings.Repeat("-", 60)
 
 type timestampPrefix struct {
@@ -663,7 +696,7 @@ const maxFailureReasonRunes = 200
 // Replaces Unicode control chars (unicode.IsControl, covers ASCII C0 + C1 ranges)
 // and line/paragraph separators (U+2028, U+2029) with a single space, collapses
 // consecutive whitespace via strings.Fields, and rune-aware truncates to
-// maxFailureReasonRunes. Critical for isProgressCompleted integrity: the reason
+// maxFailureReasonRunes. Critical for progressCompletedAt integrity: the reason
 // must not contain "\n<separatorLine>\nCompleted:" which would false-positive
 // the tail scan.
 func sanitizeFailureReason(s string) string {
@@ -703,16 +736,14 @@ func (l *Logger) writeStdoutLocked(format string, args ...any) {
 	fmt.Fprintf(l.stdout, format, args...)
 }
 
-// isProgressCompleted reports whether the progress file ends with a successful "Completed:"
-// footer written by Close(). "Failed:" footers are intentionally excluded so failed/aborted
-// runs preserve history on restart (issue #288).
-// reads the last ~256 bytes from the provided file descriptor and checks for the dash separator
-// followed by "Completed:" — the exact pattern Close() writes on success.
-// uses the already-locked fd to avoid TOCTOU path-vs-inode mismatch.
-// returns false for zero-size files or read errors.
-func isProgressCompleted(f *os.File, size int64) bool {
+const completionTimestampLayout = "2006-01-02 15:04:05"
+
+// progressCompletedAt returns the completion time from the successful footer written by Close.
+// "Failed:" footers are intentionally excluded so failed/aborted runs preserve history on restart
+// (issue #288). The already-locked fd avoids a TOCTOU path-vs-inode mismatch.
+func progressCompletedAt(f *os.File, size int64) (time.Time, bool) {
 	if size == 0 {
-		return false
+		return time.Time{}, false
 	}
 
 	// read the last 256 bytes (or less if file is smaller)
@@ -722,12 +753,135 @@ func isProgressCompleted(f *os.File, size int64) bool {
 	buf := make([]byte, tailSize)
 	n, err := f.ReadAt(buf, offset)
 	if err != nil && n == 0 {
-		return false
+		return time.Time{}, false
 	}
 
-	// match the exact pattern written by Close(): 60-dash separator followed by "Completed:".
-	// a plain "Completed:" check would false-positive on Claude output containing that text.
-	return strings.Contains(string(buf[:n]), separatorLine+"\nCompleted:")
+	marker := separatorLine + "\nCompleted: "
+	tail := string(buf[:n])
+	idx := strings.LastIndex(tail, marker)
+	if idx < 0 {
+		return time.Time{}, false
+	}
+	footer := tail[idx+len(marker):]
+	if len(footer) < len(completionTimestampLayout) {
+		return time.Time{}, false
+	}
+	completedAt, parseErr := time.ParseInLocation(completionTimestampLayout,
+		footer[:len(completionTimestampLayout)], time.Local)
+	if parseErr != nil {
+		return time.Time{}, false
+	}
+	return completedAt, true
+}
+
+// archiveAndTruncateCompleted archives a completed canonical log, truncates the canonical file,
+// then prunes old archives. pruneWarn reports a retention failure the caller should surface: once
+// the canonical file is truncated the run is committed, so an undeletable old archive must not stop
+// it, and every NewLogger caller treats an error as fatal. pruning runs last so a truncate failure
+// rolls back to exactly the state it started in - pruning first would delete the oldest archive to
+// make room for one the rollback then withdraws.
+func archiveAndTruncateCompleted(f *os.File, size int64) (freshStart bool, pruneWarn, err error) {
+	completedAt, completed := progressCompletedAt(f, size)
+	if !completed {
+		return false, nil, nil
+	}
+
+	archivePath, err := archiveCompletedProgress(f, size, completedAt)
+	if err != nil {
+		return false, nil, fmt.Errorf("archive completed progress file: %w", err)
+	}
+	if tErr := truncateProgressFile(f.Name()); tErr != nil {
+		return false, nil, rollbackProgressArchive(archivePath, fmt.Errorf("truncate completed progress file: %w", tErr))
+	}
+	if pErr := pruneProgressArchives(filepath.Dir(archivePath), maxProgressRuns-1); pErr != nil {
+		pruneWarn = fmt.Errorf("prune progress archives: %w", pErr)
+	}
+	return true, pruneWarn, nil
+}
+
+func rollbackProgressArchive(archivePath string, cause error) error {
+	if err := removeProgressArchive(archivePath); err != nil {
+		return errors.Join(cause, fmt.Errorf("rollback new archive: %w", err))
+	}
+	return cause
+}
+
+// archiveCompletedProgress copies the locked canonical file to its per-stem history directory.
+// The canonical file is never renamed or reopened, so its lock continues to serialize users of
+// that path. Per-stem history deliberately mirrors the canonical filename namespace, including
+// its existing same-name collisions across modes and plans.
+//
+// The archive basename carries no "progress-" prefix on purpose: the web dashboard discovers
+// sessions by walking for progress-*.txt (pkg/web/watcher.go isProgressFile) and skips neither
+// .ralphex nor history, so a prefixed archive would be listed and replayed as a session of its own.
+func archiveCompletedProgress(f *os.File, size int64, completedAt time.Time) (archivePath string, err error) {
+	base := filepath.Base(f.Name())
+	stem := strings.TrimPrefix(strings.TrimSuffix(base, ".txt"), "progress-")
+	historyStem := stem
+	if historyStem == "" || historyStem == "." || historyStem == ".." {
+		historyStem = "progress-" + historyStem
+	}
+	historyDir := filepath.Join(filepath.Dir(f.Name()), "history", historyStem)
+	if mkErr := os.MkdirAll(historyDir, 0o750); mkErr != nil {
+		return "", fmt.Errorf("create history dir: %w", mkErr)
+	}
+
+	tmp, createErr := os.CreateTemp(historyDir, archivePrefix+completedAt.Format("20060102-150405")+"-*.tmp")
+	if createErr != nil {
+		return "", fmt.Errorf("create archive temp file: %w", createErr)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	written, copyErr := io.Copy(tmp, io.NewSectionReader(f, 0, size))
+	if copyErr != nil {
+		return "", fmt.Errorf("copy progress archive: %w", copyErr)
+	}
+	if written != size {
+		return "", fmt.Errorf("copy progress archive: wrote %d of %d bytes", written, size)
+	}
+	if syncErr := tmp.Sync(); syncErr != nil {
+		return "", fmt.Errorf("sync progress archive: %w", syncErr)
+	}
+	if closeErr := tmp.Close(); closeErr != nil {
+		return "", fmt.Errorf("close progress archive: %w", closeErr)
+	}
+
+	archivePath = strings.TrimSuffix(tmpPath, ".tmp") + ".txt"
+	if renameErr := os.Rename(tmpPath, archivePath); renameErr != nil {
+		return "", fmt.Errorf("publish progress archive: %w", renameErr)
+	}
+	return archivePath, nil
+}
+
+// pruneProgressArchives deletes oldest-first until at most keep archives remain. it matches only
+// the exact name format archiveCompletedProgress publishes, so a stray file a user dropped into the
+// history directory, and the .tmp of an archive still being written, are never deleted. os.ReadDir
+// sorts by filename and the timestamp is fixed-width, so that order is chronological.
+func pruneProgressArchives(historyDir string, keep int) error {
+	entries, err := os.ReadDir(historyDir)
+	if err != nil {
+		return fmt.Errorf("read history dir: %w", err)
+	}
+
+	archives := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !archiveNameRegex.MatchString(entry.Name()) {
+			continue
+		}
+		archives = append(archives, entry.Name())
+	}
+	for _, name := range archives[:max(0, len(archives)-keep)] {
+		if removeErr := removeProgressArchive(filepath.Join(historyDir, name)); removeErr != nil {
+			return fmt.Errorf("remove oldest archive %s: %w", name, removeErr)
+		}
+	}
+	return nil
 }
 
 // progressDir is the directory for progress files within the project.

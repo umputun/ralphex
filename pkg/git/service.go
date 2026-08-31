@@ -34,6 +34,7 @@ type backend interface {
 	isDirty() (bool, error)
 	fileHasChanges(path string) (bool, error)
 	hasChangesOtherThan(path string) ([]string, error)
+	operationInProgress() (string, error)
 	add(path string) error
 	moveFile(src, dst string) error
 	commit(msg string) error
@@ -171,18 +172,37 @@ func (s *Service) EffectiveBranchName(planFile, branchOverride string) string {
 
 // preparePlanBranch validates state, extracts branch name, and checks plan file status.
 // returns branch name and whether the plan file has uncommitted changes.
-// when requireDefault is true, returns error if not on the default branch.
-// when requireDefault is false, returns empty branch name if not on the default branch (caller should skip).
+// when worktreeMode is true, returns error if not on the default branch or when a git operation is
+// unfinished; ordinary uncommitted files in the source checkout are reported but not fatal.
+// when worktreeMode is false, returns empty branch name if not on the default branch (caller should
+// skip), and any uncommitted change other than the plan file is an error.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop", "origin/main").
 // branchOverride, when non-empty, is used directly instead of deriving from planFile.
-func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaultBranch, branchOverride string) (string, bool, error) {
+func (s *Service) preparePlanBranch(planFile string, worktreeMode bool, defaultBranch, branchOverride string) (string, bool, error) {
 	currentBranch, err := s.repo.currentBranch()
 	if err != nil {
 		return "", false, fmt.Errorf("check current branch: %w", err)
 	}
 
+	if worktreeMode {
+		// a worktree forks committed HEAD and carries none of an unfinished operation's index
+		// or staged state, so an unfinished operation makes the source checkout an unsound base
+		// to fork from. checked ahead of the branch guard because a rebase or a checked-out
+		// bisect detaches HEAD, and that guard would otherwise report an empty branch name for
+		// a repository that is mid-operation.
+		op, opErr := s.repo.operationInProgress()
+		if opErr != nil {
+			return "", false, fmt.Errorf("check for unfinished git operation: %w", opErr)
+		}
+		if op != "" {
+			return "", false, fmt.Errorf("cannot create worktree: %s in progress in %s\n\n"+
+				"ralphex does not start a worktree run while the source checkout has an "+
+				"unfinished git operation; finish or abort it first", op, s.repo.root())
+		}
+	}
+
 	if !s.matchesDefaultBranch(currentBranch, defaultBranch) {
-		if requireDefault {
+		if worktreeMode {
 			expected := strings.TrimPrefix(defaultBranch, "origin/")
 			if expected == "" {
 				expected = "main/master"
@@ -201,18 +221,21 @@ func (s *Service) preparePlanBranch(planFile string, requireDefault bool, defaul
 	}
 	if len(dirtyFiles) > 0 {
 		fileList := s.formatDirtyFiles(dirtyFiles)
-		if requireDefault {
-			return "", false, fmt.Errorf("cannot create worktree: worktree has uncommitted changes other than the plan file\n\n"+
-				"uncommitted files:\n%s", fileList)
+		if !worktreeMode {
+			return "", false, fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+
+				"uncommitted files:\n%s\n\n"+
+				"ralphex needs to create a feature branch from %s to isolate plan work.\n\n"+
+				"options:\n"+
+				"  git stash && ralphex %s && git stash pop   # stash changes temporarily\n"+
+				"  git commit -am \"wip\"                       # commit changes first\n"+
+				"  ralphex --review                           # skip branch creation (review-only mode)",
+				branchName, fileList, currentBranch, planFile)
 		}
-		return "", false, fmt.Errorf("cannot create branch %q: worktree has uncommitted changes\n\n"+
-			"uncommitted files:\n%s\n\n"+
-			"ralphex needs to create a feature branch from %s to isolate plan work.\n\n"+
-			"options:\n"+
-			"  git stash && ralphex %s && git stash pop   # stash changes temporarily\n"+
-			"  git commit -am \"wip\"                       # commit changes first\n"+
-			"  ralphex --review                           # skip branch creation (review-only mode)",
-			branchName, fileList, currentBranch, planFile)
+		// ordinary source-checkout changes are not copied into the worktree. an uncommitted
+		// selected plan is handled separately below and copied by CreateWorktreeForPlan.
+		s.log.Printf("warning: source checkout has uncommitted files not copied into the worktree\n"+
+			"an uncommitted selected plan is copied separately\n\n"+
+			"uncommitted files:\n%s\n", fileList)
 	}
 
 	// check if plan file needs to be committed (untracked, modified, or staged)
@@ -275,11 +298,12 @@ func (s *Service) CreateBranchForPlan(planFile, defaultBranch, branchOverride st
 // git service) so the commit lands on the feature branch rather than the default branch.
 // defaultBranch is the resolved default branch name (e.g. "main", "develop").
 // branchOverride, when non-empty, is used directly instead of deriving the name from planFile.
+// ordinary uncommitted files in the source checkout are logged but do not block creation. an
+// uncommitted selected plan is copied into the worktree and committed on the feature branch.
 func (s *Service) CreateWorktreeForPlan(planFile, defaultBranch, branchOverride string) (string, bool, error) {
 	planFile = s.resolveFilesystemCase(planFile)
 
-	// check worktree existence early, before preparePlanBranch runs hasChangesOtherThan
-	// (an existing worktree dir would show up as untracked and fail the dirty check)
+	// an existing worktree directory means another instance may already be running this plan
 	earlyBranch := s.EffectiveBranchName(planFile, branchOverride)
 	wtPath := filepath.Join(s.repo.root(), ".ralphex", "worktrees", earlyBranch)
 
@@ -479,6 +503,13 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 
 	// use git mv
 	if err := s.repo.moveFile(sourceFile, destPath); err != nil {
+		// git mv refuses an existing destination but os.Rename replaces it without a word, and an
+		// uncommitted archive copy has no other copy anywhere. lstat so a symlink is the collision
+		// rather than whatever it points at.
+		if _, statErr := os.Lstat(destPath); statErr == nil {
+			return fmt.Errorf("move plan: %s already exists, refusing to overwrite it with %s "+
+				"- resolve by hand and re-run", destPath, sourceFile)
+		}
 		// fallback for anything git mv refuses, an untracked source most commonly
 		if renameErr := os.Rename(sourceFile, destPath); renameErr != nil {
 			return fmt.Errorf("move plan: %w", renameErr)
@@ -505,10 +536,12 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 
 // resolvePlanMoveTargets determines the source and destination for MovePlanToCompleted,
 // accounting for files already moved to completed/ or renamed between the dashed
-// (YYYY-MM-DD) and compact (YYYYMMDD) date-prefix conventions. Returns done=true in
-// two cases: the file is already in completed/ (with either basename), or there is a
-// collision between an active in-place rename and a stale completed/<altBase> copy
-// that the move should not clobber.
+// (YYYY-MM-DD) and compact (YYYYMMDD) date-prefix conventions. done=true means the plan
+// is already archived - the source is gone and a completed/ copy is there under either
+// basename - and nothing more, because the caller reports a done move as archived.
+// A source that still exists returns done=false whatever sits in completed/, so a
+// same-basename collision reaches the move path and fails there rather than passing for
+// a successful archive.
 // Probe order mirrors resolvePlanFilePath in pkg/processor/prompts.go: the in-place
 // alternate source is checked before any completed/ probe so a current renamed file
 // wins over a stale completed/ copy left from a prior run.
@@ -528,19 +561,10 @@ func (s *Service) resolvePlanMoveTargets(planFile, completedDir string) (sourceF
 	if altBase != "" {
 		altSourcePath := filepath.Join(filepath.Dir(planFile), altBase)
 		if _, altSrcErr := os.Stat(altSourcePath); altSrcErr == nil {
-			altDestPath := filepath.Join(completedDir, altBase)
-			// collision: a stale completed/<altBase> exists alongside the active in-place
-			// renamed source (e.g. same slug ran twice on the same day). git mv would refuse
-			// because dest exists, and the os.Rename fallback would clobber the stale copy
-			// while leaving the source's deletion unstaged — repo ends up dirty or commit
-			// fails entirely. surface as already-completed instead and preserve both files
-			// for manual resolution.
-			if _, altDestErr := os.Stat(altDestPath); altDestErr == nil {
-				s.log.Printf("plan already in completed/ (renamed: %s); active copy at %s left in place for manual cleanup\n",
-					altBase, altSourcePath)
-				return altSourcePath, altDestPath, true
-			}
-			return altSourcePath, altDestPath, false
+			// a stale completed/<altBase> alongside the active source is a collision, not an
+			// archived plan. done=false so it reaches the move path and fails there: the caller
+			// treats done=true as archived, and this plan is not.
+			return altSourcePath, filepath.Join(completedDir, altBase), false
 		}
 	}
 
