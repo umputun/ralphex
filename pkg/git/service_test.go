@@ -523,12 +523,12 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 
 		files := runGit(t, dir, "show", "--name-status", "--format=", "HEAD")
 		assert.NotContains(t, files, "unrelated.txt", "unrelated staged file must stay out of the archive commit")
-		assert.Contains(t, files, filepath.Join("docs", "plans", "completed", "feature.md"))
-		assert.Contains(t, files, filepath.Join("docs", "plans", "feature.md"),
+		assert.Contains(t, files, "docs/plans/completed/feature.md")
+		assert.Contains(t, files, "docs/plans/feature.md",
 			"git mv stages the source deletion, so the source must be committed too or the rename is half recorded")
 
 		tree := runGit(t, dir, "ls-tree", "-r", "--name-only", "HEAD", "docs/")
-		assert.NotContains(t, tree, filepath.Join("docs", "plans", "feature.md")+"\n",
+		assert.NotContains(t, tree, "docs/plans/feature.md\n",
 			"plan must not survive at its original path in HEAD")
 
 		assert.Equal(t, "A  unrelated.txt\n", runGit(t, dir, "status", "--porcelain", "--", unrelated),
@@ -555,7 +555,7 @@ func TestService_MovePlanToCompleted(t *testing.T) {
 
 		files := runGit(t, dir, "show", "--name-status", "--format=", "HEAD")
 		assert.NotContains(t, files, "unrelated.txt", "unrelated staged file must stay out of the archive commit")
-		assert.Contains(t, files, filepath.Join("docs", "plans", "completed", "untracked.md"))
+		assert.Contains(t, files, "docs/plans/completed/untracked.md")
 
 		assert.Equal(t, "A  unrelated.txt\n", runGit(t, dir, "status", "--porcelain", "--", unrelated),
 			"unrelated file must remain staged, not unstaged or discarded")
