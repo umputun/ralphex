@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"fixture-narrated-error"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Useful work is complete. API Error: 500 is the configured example covered by the regression test. <<<RALPHEX:ALL_TASKS_DONE>>>"}]},"parent_tool_use_id":null,"session_id":"fixture-narrated-error"}
+{"type":"result","subtype":"success","is_error":false,"result":"Useful work is complete. API Error: 500 is the configured example covered by the regression test. <<<RALPHEX:ALL_TASKS_DONE>>>","session_id":"fixture-narrated-error"}

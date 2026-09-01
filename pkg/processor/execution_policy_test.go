@@ -102,6 +102,101 @@ func TestExecutionPolicy_RunMapsRetryPatternToTimedOut(t *testing.T) {
 	assertLogContains(t, log, "transient %s error detected")
 }
 
+func TestExecutionPolicy_RunUsesTypedDiagnosticsNotNarration(t *testing.T) {
+	const (
+		limitPhrase = "You've hit your session limit"
+		retryPhrase = "API Error: 529"
+	)
+
+	tests := []struct {
+		name         string
+		results      []executor.Result
+		wantCalls    int
+		wantTimedOut bool
+		wantSignal   string
+		wantOutput   string
+		wantLog      string
+		waitOnLimit  time.Duration
+	}{
+		{
+			name: "trusted limit diagnostic waits and retries",
+			results: []executor.Result{
+				{
+					DiagnosticText: limitPhrase,
+					Error:          &executor.LimitPatternError{Pattern: limitPhrase, HelpCmd: "claude /usage"},
+				},
+				{Output: "completed after waiting", Signal: status.Completed},
+			},
+			wantCalls:   2,
+			wantSignal:  status.Completed,
+			wantOutput:  "completed after waiting",
+			wantLog:     "rate limit detected",
+			waitOnLimit: time.Millisecond,
+		},
+		{
+			name: "quoted limit narration does not wait",
+			results: []executor.Result{{
+				Output: "documentation quotes " + limitPhrase,
+				Signal: status.Completed,
+			}},
+			wantCalls:   1,
+			wantSignal:  status.Completed,
+			wantOutput:  "documentation quotes " + limitPhrase,
+			waitOnLimit: time.Millisecond,
+		},
+		{
+			name: "trusted retry diagnostic maps to one phase retry",
+			results: []executor.Result{{
+				DiagnosticText: retryPhrase,
+				Signal:         status.Completed,
+				Error:          &executor.RetryPatternError{Pattern: retryPhrase},
+			}},
+			wantCalls:    1,
+			wantTimedOut: true,
+			wantLog:      "transient %s error detected",
+		},
+		{
+			name: "quoted retry narration does not request a phase retry",
+			results: []executor.Result{{
+				Output: "documentation quotes " + retryPhrase,
+				Signal: status.Completed,
+			}},
+			wantCalls:  1,
+			wantSignal: status.Completed,
+			wantOutput: "documentation quotes " + retryPhrase,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := newMockLogger()
+			policy := newRetryPolicy(retryPolicyOpts{log: log, waitOnLimit: tt.waitOnLimit})
+			calls := 0
+			run := func(_ context.Context, _ string) executor.Result {
+				result := tt.results[calls]
+				calls++
+				return result
+			}
+
+			result := policy.Run(t.Context(), run, "test prompt", "claude")
+
+			require.NoError(t, result.Result.Error)
+			assert.Equal(t, tt.wantCalls, calls)
+			assert.Equal(t, tt.wantTimedOut, result.TimedOut)
+			assert.Equal(t, tt.wantSignal, result.Result.Signal)
+			assert.Equal(t, tt.wantOutput, result.Result.Output)
+			if tt.wantLog != "" {
+				assertLogContains(t, log, tt.wantLog)
+			} else {
+				for _, call := range log.PrintCalls() {
+					assert.NotContains(t, call.Format, "rate limit detected")
+					assert.NotContains(t, call.Format, "transient %s error detected")
+				}
+			}
+		})
+	}
+}
+
 func TestExecutionPolicy_RunWithLimitRetryNoRetryWhenWaitZero(t *testing.T) {
 	policy := newRetryPolicy(retryPolicyOpts{log: newMockLogger()})
 

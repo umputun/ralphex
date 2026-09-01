@@ -246,12 +246,15 @@ vcs_command = git
 # error pattern detection
 # ------------------------------------------------------------------------------
 
-# claude_error_patterns: patterns to detect in claude output indicating errors
+# Claude patterns match structured CLI diagnostics and non-JSON CLI lines, plus bounded
+# recent output when the process exits non-zero or the stream fails. Ordinary assistant
+# narration and successful result summaries are not pattern input on a clean run.
+# claude_error_patterns: patterns to detect Claude diagnostics or failed-run output indicating errors
 # comma-separated list of substrings (case-insensitive matching)
 # when detected, ralphex exits gracefully with an informative message
 # API Error codes are enumerated rather than a bare "API Error:" so case-insensitive
-# matching does not abort a successful run on narrated "API error:" prose (e.g. a ticket
-# title); transient 529/502/503/504 live in claude_retry_patterns
+# matching stays specific in failed-run wrapper output; transient 529/502/503/504 live
+# in claude_retry_patterns
 # default: You've hit your limit,You've hit your session limit,API Error: 400,API Error: 401,API Error: 403,API Error: 404,API Error: 413,API Error: 429,API Error: 500,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,You've hit your individual spend limit
 claude_error_patterns = You've hit your limit,You've hit your session limit,API Error: 400,API Error: 401,API Error: 403,API Error: 404,API Error: 413,API Error: 429,API Error: 500,cannot be launched inside another Claude Code session,Not logged in,Your usage allocation has been disabled by your admin,You've hit your org's monthly usage limit,You've hit your individual spend limit
 
@@ -265,7 +268,7 @@ codex_error_patterns = Rate limit exceeded,rate limit reached,429 Too Many Reque
 # transient retry pattern detection
 # ------------------------------------------------------------------------------
 
-# claude_retry_patterns: transient claude/fya output markers to retry like timeouts
+# claude_retry_patterns: transient Claude/fya diagnostic or failed-run markers to retry like timeouts
 # comma-separated list of substrings (case-insensitive matching)
 # default: FYA_TRANSIENT_TIMEOUT,API Error: 529,API Error: 502,API Error: 503,API Error: 504
 claude_retry_patterns = FYA_TRANSIENT_TIMEOUT,API Error: 529,API Error: 502,API Error: 503,API Error: 504
@@ -274,7 +277,7 @@ claude_retry_patterns = FYA_TRANSIENT_TIMEOUT,API Error: 529,API Error: 502,API 
 # rate limit wait and retry
 # ------------------------------------------------------------------------------
 
-# claude_limit_patterns: patterns to detect rate limits in claude output
+# claude_limit_patterns: patterns to detect rate limits in Claude diagnostics or failed-run output
 # comma-separated list of substrings (case-insensitive matching)
 # when detected AND wait_on_limit is set, ralphex waits and retries
 # when detected WITHOUT wait_on_limit, falls through to error pattern behavior

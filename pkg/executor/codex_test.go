@@ -887,6 +887,8 @@ func TestCodexExecutor_Run_ErrorPattern(t *testing.T) {
 			result := e.Run(context.Background(), "analyze code")
 
 			assert.Equal(t, tc.wantOutput, result.Output)
+			assert.Empty(t, result.DiagnosticText,
+				"Claude diagnostic provenance must not change Codex result semantics")
 
 			if tc.wantError {
 				require.Error(t, result.Error)

@@ -19,14 +19,44 @@ import (
 
 // Result holds execution result with output and detected signal.
 type Result struct {
-	Output       string // accumulated text output
-	RecentText   string // last 10 text blocks joined, used for pattern matching to avoid false positives
-	Signal       string // detected signal (COMPLETED, FAILED, etc.) or empty
-	Error        error  // execution error if any
-	IdleTimedOut bool   // true when idle timeout fired (derived context canceled, parent alive)
+	Output         string // complete surfaced text output
+	RecentText     string // bounded recent surfaced text retained for display/debug compatibility
+	DiagnosticText string // bounded trusted CLI diagnostics used for pattern matching
+	Signal         string // detected signal (COMPLETED, FAILED, etc.) or empty
+	Error          error  // execution error if any
+	IdleTimedOut   bool   // true when idle timeout fired (derived context canceled, parent alive)
 }
 
-const recentBlockCount = 10 // number of recent text blocks to keep for pattern matching
+// recentBlockCount bounds both recent surfaced output and trusted diagnostics.
+// keeping the windows small avoids retaining stale failures from long sessions.
+const recentBlockCount = 10
+
+// textWindow retains text blocks in chronological order with a fixed memory bound.
+type textWindow struct {
+	blocks [recentBlockCount]string
+	next   int
+}
+
+func (w *textWindow) add(text string) {
+	if text == "" {
+		return
+	}
+	w.blocks[w.next%recentBlockCount] = text
+	w.next++
+}
+
+func (w *textWindow) string() string {
+	var result strings.Builder
+	start := w.next % recentBlockCount
+	for i := range recentBlockCount {
+		block := w.blocks[(start+i)%recentBlockCount]
+		if block != "" {
+			result.WriteString(block)
+			result.WriteString("\n")
+		}
+	}
+	return result.String()
+}
 
 // subagentProgressInterval throttles subagent (Task tool) heartbeat lines: at most
 // one is forwarded per interval so a burst of tool steps across several parallel
@@ -228,9 +258,15 @@ func filterEnv(env []string, keysToRemove ...string) []string {
 
 // streamEvent represents a JSON event from claude CLI stream output.
 type streamEvent struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"` // for "system" events: init, task_started, task_progress, etc.
-	Message struct {
+	Type              string `json:"type"`
+	Subtype           string `json:"subtype"` // for "system" events: init, task_started, task_progress, etc.
+	IsError           bool   `json:"is_error"`
+	Error             string `json:"error"`
+	ErrorStatus       int    `json:"error_status"`
+	APIErrorStatus    int    `json:"api_error_status"`
+	IsAPIErrorMessage bool   `json:"is_api_error_message"`
+	TerminalReason    string `json:"terminal_reason"`
+	Message           struct {
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
@@ -347,55 +383,81 @@ func (e *ClaudeExecutor) Run(ctx context.Context, prompt string) Result {
 	result := e.parseStream(execCtx, stdout, idleTouch)
 	waitErr := wait()
 
-	// idle timeout: derived context canceled but parent is alive — not an error.
-	// return accumulated output and signal as-is, clearing any context-cancellation errors.
-	// set IdleTimedOut so the runner can distinguish idle timeout from normal completion
-	// and avoid false "no changes detected" exits in review loops.
-	if e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil {
-		if patternErr := e.patternError(result.RecentText, result.Signal); patternErr != nil {
-			return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: patternErr}
-		}
+	return e.resolveRunResult(result, claudeRunOutcome{
+		waitErr:      waitErr,
+		parentErr:    ctx.Err(),
+		idleTimedOut: e.IdleTimeout > 0 && execCtx.Err() != nil && ctx.Err() == nil,
+	})
+}
+
+// claudeRunOutcome records process state that is not available while parsing the
+// stream. resolveRunResult combines it with parsed provenance in one decision path.
+type claudeRunOutcome struct {
+	waitErr      error
+	parentErr    error
+	idleTimedOut bool
+}
+
+// resolveRunResult applies cancellation, pattern, idle-timeout, and process-exit
+// semantics in precedence order. trusted diagnostics are always pattern authority.
+// bounded surfaced text becomes authority only when the process itself failed, which
+// keeps limit classification working for the bundled wrapper scripts: they emit result
+// records carrying no is_error field and surface child stderr as ordinary deltas.
+func (e *ClaudeExecutor) resolveRunResult(result Result, outcome claudeRunOutcome) Result {
+	// explicit parent cancellation must never be masked by output patterns.
+	if outcome.waitErr != nil && outcome.parentErr != nil {
+		result.Error = outcome.parentErr
+		result.IdleTimedOut = false
+		return result
+	}
+
+	// signal absence is deliberately NOT part of the promotion rule: a successful run
+	// often emits no marker by design (review_first.txt path B stays silent after fixing
+	// issues, task.txt emits ALL_TASKS_DONE only once the plan has no boxes left), so
+	// treating "no signal" as failure evidence would readmit narration on clean runs. an
+	// idle timeout cancels the stream context, so it reaches this as a stream error.
+	patternText := result.DiagnosticText
+	if outcome.waitErr != nil || result.Error != nil {
+		patternText += "\n" + result.RecentText
+	}
+	if patternErr := e.patternError(patternText, result.Signal); patternErr != nil {
+		result.Error = patternErr
+		result.IdleTimedOut = false
+		return result
+	}
+
+	// a derived idle cancellation is a soft outcome. clear the stream's context
+	// error and let the caller distinguish the timeout from normal completion.
+	if outcome.idleTimedOut {
 		result.Error = nil
 		result.IdleTimedOut = true
 		return result
 	}
 
-	if waitErr != nil {
-		// check if it was context cancellation
-		if ctx.Err() != nil {
-			return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: ctx.Err()}
-		}
-		if result.Output == "" {
-			return Result{Error: fmt.Errorf("claude exited with error: %w", waitErr)}
-		}
-		// non-zero exit with output but no signal means claude failed without doing useful work.
-		// if there IS a signal, work was done — ignore exit code (some tasks exit non-zero after completion).
-		if result.Signal == "" {
-			result.Error = fmt.Errorf("claude exited with error: %w", waitErr)
-		}
-	}
-
-	if patternErr := e.patternError(result.RecentText, result.Signal); patternErr != nil {
-		return Result{Output: result.Output, RecentText: result.RecentText, Signal: result.Signal, Error: patternErr}
+	// a non-zero exit without a structured signal remains a process failure. when
+	// a signal is present, useful work won and only an independent stream error is
+	// retained, matching the historical fallback behavior.
+	if outcome.waitErr != nil && result.Signal == "" {
+		result.Error = fmt.Errorf("claude exited with error: %w", outcome.waitErr)
 	}
 
 	return result
 }
 
-func (e *ClaudeExecutor) patternError(recentText, signal string) error {
+func (e *ClaudeExecutor) patternError(patternText, signal string) error {
 	// a non-empty signal means claude reported a structured outcome (completion, review-done,
 	// etc). a stray retry marker in the output must not discard that by forcing a session
 	// re-run, so retry detection is skipped when a signal is present. limit and error patterns
 	// still fire — they surface loudly instead of silently re-running, so they cannot drop work.
 	if signal == "" {
-		if pattern := matchPattern(recentText, e.RetryPatterns); pattern != "" {
+		if pattern := matchPattern(patternText, e.RetryPatterns); pattern != "" {
 			return &RetryPatternError{Pattern: pattern}
 		}
 	}
-	if pattern := matchPattern(recentText, e.LimitPatterns); pattern != "" {
+	if pattern := matchPattern(patternText, e.LimitPatterns); pattern != "" {
 		return &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"}
 	}
-	if pattern := matchPattern(recentText, e.ErrorPatterns); pattern != "" {
+	if pattern := matchPattern(patternText, e.ErrorPatterns); pattern != "" {
 		return &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"}
 	}
 	return nil
@@ -408,8 +470,8 @@ func (e *ClaudeExecutor) patternError(recentText, signal string) error {
 func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch func()) Result {
 	var output strings.Builder
 	var signal string
-	var recentBlocks [recentBlockCount]string
-	var blockIdx int
+	var recentText textWindow
+	var diagnostics textWindow
 	var lastProgress time.Time // throttle window for subagent heartbeat lines
 
 	err := readLines(ctx, r, func(line string) {
@@ -426,8 +488,8 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 			}
 			output.WriteString(line)
 			output.WriteString("\n")
-			recentBlocks[blockIdx%recentBlockCount] = line
-			blockIdx++
+			recentText.add(line)
+			diagnostics.add(line)
 			if e.OutputHandler != nil {
 				e.OutputHandler(line + "\n")
 			}
@@ -438,7 +500,7 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 		// activity as system/task_* events that carry no text block, so extractText
 		// drops them; without this the parent session appears silent for the whole
 		// duration of a multi-agent review. forwarded to OutputHandler only — not
-		// accumulated into output/recentBlocks/signal, which track the model's own text.
+		// accumulated into output/recentText/signal, which track the model's own text.
 		// task_started (title) is unthrottled; per-step task_progress is throttled so
 		// parallel agents don't flood.
 		if hb, throttle := e.subagentLine(&event); hb != "" {
@@ -463,35 +525,88 @@ func (e *ClaudeExecutor) parseStream(ctx context.Context, r io.Reader, idleTouch
 				e.OutputHandler(text)
 			}
 
-			// track recent blocks for pattern matching (avoids false positives on full output)
-			recentBlocks[blockIdx%recentBlockCount] = text
-			blockIdx++
+			// retain surfaced output separately from trusted pattern input. ordinary
+			// assistant text belongs only in the display/debug window.
+			recentText.add(text)
 
 			// check for signals in text
 			if sig := detectSignal(text); sig != "" {
 				signal = sig
 			}
 		}
+
+		diagnostics.add(e.extractDiagnostic(&event))
 	})
 
-	// join recent blocks in chronological order for pattern matching.
-	// iterate from the oldest slot forward to preserve order after wrap-around.
-	var recent strings.Builder
-	start := blockIdx % recentBlockCount
-	for i := range recentBlockCount {
-		b := recentBlocks[(start+i)%recentBlockCount]
-		if b != "" {
-			recent.WriteString(b)
-			recent.WriteString("\n")
+	if err != nil {
+		return Result{Output: output.String(), RecentText: recentText.string(),
+			DiagnosticText: diagnostics.string(), Signal: signal, Error: fmt.Errorf("stream read: %w", err)}
+	}
+
+	return Result{Output: output.String(), RecentText: recentText.string(),
+		DiagnosticText: diagnostics.string(), Signal: signal}
+}
+
+// extractDiagnostic returns pattern input from structured Claude events. normal
+// assistant messages and successful result summaries are deliberately excluded,
+// even when they quote a configured error phrase.
+func (e *ClaudeExecutor) extractDiagnostic(event *streamEvent) string {
+	switch event.Type {
+	case "assistant":
+		if event.IsAPIErrorMessage || event.Error != "" {
+			if text := e.extractText(event); text != "" {
+				return text
+			}
+			return formatStructuredError(event.APIErrorStatus, event.Error, event.Description)
+		}
+	case "result":
+		// a string-valued result is normally a session summary that extractText drops,
+		// so error prose arriving only there would be lost. capture it, but only when the
+		// record authenticates itself as an error: treating every result string as
+		// diagnostic would readmit the quoted-summary false positive.
+		if isErrorResult(event) {
+			if text := extractResultText(event.Result); text != "" {
+				return text
+			}
+			return formatStructuredError(event.APIErrorStatus, event.Error, event.Description)
+		}
+	case "system":
+		if strings.Contains(event.Subtype, "error") {
+			return formatStructuredError(event.ErrorStatus, event.Error, event.Description)
+		}
+	case "error":
+		if text := extractResultText(event.Result); text != "" {
+			return text
+		}
+		statusCode := event.APIErrorStatus
+		if statusCode == 0 {
+			statusCode = event.ErrorStatus
+		}
+		return formatStructuredError(statusCode, event.Error, event.Description)
+	}
+	return ""
+}
+
+// isErrorResult reports whether a result record authenticates itself as an error.
+// terminal_reason alone does not qualify — only the api_error value does, because a
+// successful result can carry a terminal reason of its own. subtype is never consulted:
+// Claude Code has been observed emitting subtype:"success" on a genuine rate-limit
+// result, so is_error and the error fields are the authoritative signals.
+func isErrorResult(event *streamEvent) bool {
+	return event.IsError || event.TerminalReason == "api_error" || event.APIErrorStatus != 0
+}
+
+func formatStructuredError(statusCode int, parts ...string) string {
+	var result []string
+	if statusCode != 0 {
+		result = append(result, fmt.Sprintf("API Error: %d", statusCode))
+	}
+	for _, part := range parts {
+		if part != "" {
+			result = append(result, part)
 		}
 	}
-
-	if err != nil {
-		return Result{Output: output.String(), RecentText: recent.String(), Signal: signal,
-			Error: fmt.Errorf("stream read: %w", err)}
-	}
-
-	return Result{Output: output.String(), RecentText: recent.String(), Signal: signal}
+	return strings.Join(result, " ")
 }
 
 // subagentLine formats a one-line heartbeat for a subagent (Task tool) system
@@ -545,18 +660,29 @@ func (e *ClaudeExecutor) extractText(event *streamEvent) string {
 		if len(event.Result) == 0 {
 			return ""
 		}
-		// try as string first (session summary format)
+		// string results are session summaries whose content already streamed
 		var resultStr string
 		if err := json.Unmarshal(event.Result, &resultStr); err == nil {
 			return "" // skip session summary - content already streamed
 		}
-		// try as object with output field
-		var resultObj struct {
-			Output string `json:"output"`
-		}
-		if err := json.Unmarshal(event.Result, &resultObj); err == nil {
-			return resultObj.Output
-		}
+		return extractResultText(event.Result)
+	}
+	return ""
+}
+
+func extractResultText(result json.RawMessage) string {
+	if len(result) == 0 {
+		return ""
+	}
+	var resultStr string
+	if err := json.Unmarshal(result, &resultStr); err == nil {
+		return resultStr
+	}
+	var resultObj struct {
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(result, &resultObj); err == nil {
+		return resultObj.Output
 	}
 	return ""
 }
