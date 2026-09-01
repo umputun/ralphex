@@ -81,6 +81,30 @@ func TestExecCodexRunner_childEnv(t *testing.T) {
 			env:               []string{"OPENAI_API_KEY=ok", "FOO=bar"},
 			want:              []string{"OPENAI_API_KEY=ok", "FOO=bar"},
 		},
+		{
+			name:              "every Claude Code session marker stripped regardless of mode",
+			stripAnthropicKey: false,
+			env: []string{
+				"PATH=/usr/bin", "CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli",
+				"CLAUDE_CODE_EXECPATH=/usr/bin/claude", "CLAUDE_CODE_SESSION_ID=abc",
+				"CLAUDE_CODE_CHILD_SESSION=1", "CLAUDE_CODE_BRIDGE_SESSION_ID=def",
+				"CLAUDE_CODE_MESSAGING_SOCKET=/tmp/sock", "CLAUDE_CODE_MESSAGING_TOKEN=tok",
+				"CLAUDE_PID=123", "CLAUDE_EFFORT=high", "HOME=/home/user",
+			},
+			want: []string{"PATH=/usr/bin", "HOME=/home/user"},
+		},
+		{
+			name:              "keeps user-set CLAUDE_CODE_ config vars",
+			stripAnthropicKey: true,
+			env: []string{
+				"CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=8192",
+				"CLAUDE_CONFIG_DIR=/custom/config", "CLAUDE_CODE_SESSION_ID=abc",
+			},
+			want: []string{
+				"CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=8192",
+				"CLAUDE_CONFIG_DIR=/custom/config",
+			},
+		},
 	}
 
 	for _, tc := range tests {
