@@ -1454,6 +1454,22 @@ The `/ralphex` command runs ralphex in the background and provides status update
 
 > **Note:** ralphex automatically strips the `CLAUDECODE` env var from child processes, allowing it to run from inside Claude Code. However, running from a standalone terminal is still recommended for the best experience. If the nested session error is somehow encountered, ralphex detects it via error pattern matching and exits gracefully.
 
+## Codex Integration (Optional)
+
+Ralphex also provides a skills-only Codex plugin. The standalone CLI behavior is unchanged.
+
+```bash
+codex plugin marketplace add umputun/ralphex
+codex plugin add ralphex@ralphex
+```
+
+After installation, start a new Codex conversation and use `/skills` to discover the four workflows:
+
+- `$ralphex` launches and monitors an existing plan.
+- `$ralphex-plan` creates a structured implementation plan.
+- `$ralphex-adopt` converts an existing specification or task list into a Ralphex plan.
+- `$ralphex-update` merges updated defaults into customized Ralphex configuration.
+
 ## For LLMs
 
 See [llms.txt](llms.txt) for LLM-optimized documentation.

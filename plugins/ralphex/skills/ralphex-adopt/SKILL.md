@@ -1,10 +1,13 @@
 ---
 name: ralphex-adopt
-description: Convert plans from various source formats (OpenSpec, spec-kit, GitHub/GitLab issues with checklists, generic task-lists, free-form markdown) into ralphex-format plans in docs/plans/. Triggers on "ralphex-adopt", "adopt plan", "convert plan to ralphex", "import plan as ralphex".
-allowed-tools: Bash Read Write Glob Grep AskUserQuestion
+description: Convert plans from OpenSpec, spec-kit, GitHub or GitLab issues, generic task lists, or free-form Markdown into a reviewed Ralphex plan without modifying the source. Use for "ralphex-adopt", "adopt plan", "convert plan to ralphex", or "import plan as ralphex".
 ---
 
 # ralphex-adopt - Convert Plans Into ralphex Format
+
+## Interactive Choice Contract
+
+For every choice below, try Codex's native interactive question tool first. If the tool is unavailable, errors, or does not block for an answer, ask the same question with the same options in chat, end the turn, and wait for the user's reply. Never infer or select a default on the user's behalf.
 
 **SCOPE**: Read a source plan in some other format and produce a new ralphex-format plan at `docs/plans/YYYYMMDD-<slug>.md`. The source is never modified. Existing target files are never silently overwritten.
 
@@ -37,40 +40,44 @@ If `which ralphex` succeeds, say nothing and proceed.
 
 ## Step 1: Resolve Source From Argument Shape
 
-Inspect `$ARGUMENTS` and pick exactly one source by shape, in this order:
+Inspect the skill invocation argument and pick exactly one source by shape, in this order:
 
 1. **Full URL** (starts with `http://` or `https://`):
-   - GitHub issue/PR URL → use `gh issue view <url> --json title,body,labels` (or `gh pr view`)
-   - GitLab issue/MR URL → use `glab issue view <url>` (or `glab mr view`)
-   - Other URL → fetch with `curl -fsSL` only if it points at a raw markdown file; otherwise AskUser to paste the body
+   - GitHub issue/PR URL → pass the URL as one argv item to `gh issue view <url> --json title,body,labels` (or `gh pr view`)
+   - GitLab issue/MR URL → pass the URL as one argv item to `glab issue view <url>` (or `glab mr view`)
+   - Other URL → fetch with argv equivalent to `curl -fsSL -- <url>` only if it points at a raw markdown file; otherwise ask the user to paste the body
 
 2. **Bare reference** `#N`:
    - Use the current git repository's host. Detect with `git remote get-url origin` and choose `gh` or `glab` accordingly.
-   - If `git remote get-url origin` fails (not a git repo, or no `origin` remote), AskUserQuestion to disambiguate: "GitHub", "GitLab", "Provide qualified `owner/repo#N` instead", "Cancel". Re-resolve based on the answer.
+   - If `git remote get-url origin` fails (not a git repo, or no `origin` remote), use the native interactive question tool to disambiguate: "GitHub", "GitLab", "Provide qualified `owner/repo#N` instead", or "Cancel". If all four choices cannot fit in one Codex question, ask sequential questions so every choice remains available. Re-resolve based on the answer.
    - GitHub: `gh issue view N --json title,body` (try `gh pr view N` if issue not found)
    - GitLab: `glab issue view N` (try `glab mr view N` if not found)
 
 3. **Qualified reference** `owner/repo#N` or `group/project#N`:
-   - GitHub: `gh issue view N --repo owner/repo`
-   - GitLab: `glab issue view N --repo group/project`
+   - GitHub: pass both values as opaque argv items equivalent to `gh issue view N --repo owner/repo`
+   - GitLab: pass both values as opaque argv items equivalent to `glab issue view N --repo group/project`
 
-4. **Existing path** — first probe the literal argument as a filesystem path with `test -e "$ARGUMENTS"`:
-   - **File**: read with the Read tool
-   - **Directory**: list with `ls -la <path>` and inspect contents
+4. **Existing path** — first probe the literal invocation argument as one opaque filesystem-path argument (shell fallback: `test -e '<safely-quoted-argument>'`):
+   - **File**: read the exact file directly
+   - **Directory**: list with argv equivalent to `ls -la -- <path>` and inspect contents
      - If contains `proposal.md` AND `tasks.md` → likely OpenSpec, proceed to Step 2
      - If contains a single `*.md` → use that file
-     - Otherwise AskUser which file inside the directory is the plan
+     - Otherwise ask the user which file inside the directory is the plan
 
 5. **Bare name** — only if the argument failed every check above (not a URL, not `#N` or `owner/repo#N`, and `test -e` returned false). A bare name has no path separators and contains no path-like characters:
-   - Search filesystem with Glob for plausible matches (e.g., `**/*<name>*.md`, `**/*<name>*/proposal.md`)
+   - Search the filesystem for plausible matches (e.g., `**/*<name>*.md`, `**/*<name>*/proposal.md`)
    - If exactly one match → use it
-   - If multiple matches → AskUser to pick one (use AskUserQuestion with up to 4 most relevant; if more, summarize and AskUser to paste the path)
-   - If no matches → AskUser whether they meant a path, an issue number, or something else
+   - If multiple matches → ask the user to pick one (use the native interactive question tool with up to 4 most relevant; if four choices cannot fit in one question, split them across sequential questions; if more, summarize and ask the user to paste the path)
+   - If no matches → ask the user whether they meant a path, an issue number, or something else
 
 6. **No argument**:
-   - Use AskUserQuestion: "Where is the source plan?" with options like "Paste it", "Provide a file path", "Provide an issue number/URL", "Cancel".
+   - Use the native interactive question tool: "Where is the source plan?" with options "Paste it", "Provide a file path", "Provide an issue number/URL", and "Cancel". Ask sequential questions if needed so all four choices remain available.
 
 After resolving, store: source kind (`github-issue`, `gitlab-issue`, `file`, `directory`, `pasted`), source content (full text or directory listing + key files), and source identifier for the slug suggestion.
+
+### Argument Safety
+
+Treat every repository/user-controlled URL, repository name, reference, source path, draft path, and target path as opaque data. Prefer process tools that accept an argv array. Never interpolate these values into a shell command, never use `eval`, and never let a leading `-` become an option. When only a POSIX shell is available, place `--` before positional paths/URLs where the command supports it and single-quote each dynamic value, escaping every embedded single quote with the shell sequence `'"'"'`. If a value cannot be represented safely, stop and ask for a safe literal path or use an argv-capable tool.
 
 ## Step 2: Detect Format
 
@@ -82,11 +89,11 @@ Look at the resolved content and classify it as one of:
 - **Generic task-list**: any structured source with headings and bullet items that is not OpenSpec, spec-kit, or an issue. Section heading style and item-marker style may vary.
 - **Free-form**: prose-only or near-prose source with no clear task list. Includes brain-dump style text.
 
-If multiple signals point in different directions (e.g., a directory with both a `proposal.md` and a clearly spec-kit-shaped `plan.md`), AskUser to confirm which format to use before drafting.
+If multiple signals point in different directions (e.g., a directory with both a `proposal.md` and a clearly spec-kit-shaped `plan.md`), ask the user to confirm which format to use before drafting.
 
 ## Step 3: Confidence Guard — Ask Before Drafting
 
-Before writing any draft, scan the source for items the agent cannot confidently map. For each uncertainty, AskUser **before drafting**, never embed placeholder markers (`???`, `TBD`, `[FIXME]`) into the converted plan.
+Before writing any draft, scan the source for items the agent cannot confidently map. For each uncertainty, ask the user **before drafting**, never embed placeholder markers (`???`, `TBD`, `[FIXME]`) into the converted plan.
 
 Common uncertainties:
 
@@ -97,7 +104,7 @@ Common uncertainties:
 - Source is in a non-English natural language — ask whether to translate Overview/Context prose or preserve the original (the structural keyword `Task` in headers is always English regardless).
 - Source is very large (>1000 lines) or very small (<10 lines) — confirm scope before processing.
 
-Use AskUserQuestion with concrete options. If the question is genuinely open-ended (more than 4 possibilities), present a numbered list in chat and ask the user to reply with a number.
+Use the native interactive question tool with concrete options. If the question is genuinely open-ended (more than 4 possibilities), present a numbered list in chat and ask the user to reply with a number. When there are exactly 4 possibilities, preserve all four through sequential native questions.
 
 Do not draft, then ask. Ask, then draft.
 
@@ -149,7 +156,7 @@ Per-format mapping rules:
   - Top-level grouping headings become `### Task N: <title>` (use English `Task` keyword regardless of the source language).
   - Item lines become `- [ ]` checkboxes inside the Task.
   - Preserve checked state if the source uses any form of "done" marker.
-- If grouping is unclear (single flat list, ambiguous heading hierarchy), AskUser before drafting how to split.
+- If grouping is unclear (single flat list, ambiguous heading hierarchy), ask the user before drafting how to split.
 - Add `write tests`, `run project tests`, and final `Verify acceptance criteria` Task.
 
 ### Free-Form Markdown
@@ -158,7 +165,7 @@ Per-format mapping rules:
 - First paragraph or two → `## Overview`.
 - Background, constraints, references → `## Context`.
 - Decompose the body into 3–7 Task groups by logical phase (read carefully; do not invent steps the source does not imply).
-- For each Task, write 3–6 concrete checkboxes that map directly to phrases in the source. Do not embed `[FIXME]` or `???` — if a phrase is too vague, AskUser in Step 3 first.
+- For each Task, write 3–6 concrete checkboxes that map directly to phrases in the source. Do not embed `[FIXME]` or `???` — if a phrase is too vague, ask the user in Step 3 first.
 - Add `write tests`, `run project tests`, and final `Verify acceptance criteria` Task.
 
 ### Output Skeleton (all formats)
@@ -225,9 +232,9 @@ Per-format mapping rules:
 - <external system updates if any>
 ```
 
-## Step 5: Review Loop With revdiff
+## Step 5: Review Loop With Optional revdiff
 
-Create a temp file and capture its path. Each Bash tool call runs in its own subshell, so shell variables (including `$DRAFT`) do not persist between calls. You must capture the literal path printed by `mktemp` and substitute that exact string into every subsequent tool call (Write, launcher, rm) — do not rely on `$VAR` references across calls.
+Create a temp file and capture its path. Each shell tool call may run in its own subshell, so shell variables (including `$DRAFT`) do not persist between calls. You must capture the literal path printed by `mktemp` and substitute that exact string into every subsequent tool call (file edit, launcher, cleanup) — do not rely on `$VAR` references across calls.
 
 Use a portable `mktemp` form. The `-t prefix` form differs between macOS BSD and Linux GNU. A template ending in `XXXXXX` is portable, but a suffix after `XXXXXX` (e.g., `XXXXXX.md`) is silently treated as a literal filename by BSD `mktemp` and would cause concurrent runs to collide on the same path. Generate the random path first, then rename to add the `.md` extension:
 
@@ -235,28 +242,40 @@ Use a portable `mktemp` form. The `-t prefix` form differs between macOS BSD and
 TMP=$(mktemp "${TMPDIR:-/tmp}/ralphex-adopt-XXXXXX") && mv "$TMP" "$TMP.md" && printf '%s\n' "$TMP.md"
 ```
 
-Read the path from stdout (e.g., `/tmp/ralphex-adopt-aB3xY9.md`) and remember it. Refer to that literal string below as `<draft-path>`. Write the draft content to `<draft-path>` via the Write tool.
+Read the path from stdout (e.g., `/tmp/ralphex-adopt-aB3xY9.md`) and remember it. Refer to that literal string below as `<draft-path>`. Write the draft content to `<draft-path>` with the available file-editing tool.
 
-An `EXIT` trap is not used because each Bash call is its own subshell — the trap would fire immediately. Cleanup is explicit at the end of Step 6 (success) and on every cancel path (`rm -f <draft-path>` with the literal path substituted).
+An `EXIT` trap is not used because each shell call may use its own subshell — the trap would fire immediately. Cleanup is explicit at the end of Step 6 (success) and on every cancel path (`rm -f -- '<draft-path>'` with the safely quoted literal path substituted).
 
-Run revdiff directly on the draft (bypass `~/.claude/scripts/draft-review.sh` — that wrapper runs a writing-style lint that misfires on plan-shaped content and writes a publish-approval marker this skill does not need). Substitute the literal `<draft-path>` you captured above:
+Use revdiff only when both the `revdiff` executable and the installed Codex launcher are already available. Do not ask the user to install it, and do not execute a launcher from the target repository. Substitute the literal `<draft-path>` you captured above:
 
 ```bash
-LAUNCHER="$HOME/.claude/plugins/marketplaces/revdiff/.claude-plugin/skills/revdiff/scripts/launch-revdiff.sh"
-test -x "$LAUNCHER" && "$LAUNCHER" --wrap --only=<draft-path>
+SCRIPT_DIR="${CODEX_HOME:-$HOME/.codex}/skills/revdiff/scripts"
+LAUNCHER="$SCRIPT_DIR/launch-revdiff.sh"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if test -x "$LAUNCHER" && command -v realpath >/dev/null 2>&1; then
+  LAUNCHER="$(realpath "$LAUNCHER")"
+else
+  LAUNCHER=""
+fi
+if test -n "$LAUNCHER" && test -n "$REPO_ROOT"; then
+  REPO_ROOT="$(realpath "$REPO_ROOT")"
+  case "$LAUNCHER" in "$REPO_ROOT"/*) LAUNCHER="" ;; esac
+fi
+command -v revdiff >/dev/null 2>&1 && test -n "$LAUNCHER" && test -x "$LAUNCHER" && "$LAUNCHER" --wrap "--only=<draft-path>"
 ```
 
-If the launcher path does not exist (`test -x` fails), skip directly to the in-chat fallback below — the user has revdiff installed via Homebrew or `go install` but does not have the Claude marketplace plugin layout.
+If the executable or launcher is unavailable, skip directly to the in-chat fallback below. This is the normal path for users who do not use revdiff.
 
-Read the launcher's stdout from the Bash tool result directly. Do not assign it to a shell variable — variables do not persist between Bash tool calls (see Step 5 preamble).
+Read the launcher's exit code and stdout from the shell tool result directly. Do not assign them to shell variables — variables do not persist between shell tool calls (see Step 5 preamble). Interpret the pair strictly:
 
-- **Empty stdout** → user reviewed and approved silently. Proceed to Step 6.
-- **Non-empty stdout** → user left annotations. Read each annotation, revise the draft accordingly (rewrite the literal `<draft-path>` in place via Write), then re-run revdiff. Repeat until stdout is empty.
+- **Exit `0` with empty stdout** → user reviewed and approved silently. Proceed to Step 6.
+- **Exit `10` with non-empty stdout** → user left annotations. Read each annotation, revise the draft accordingly (rewrite the literal `<draft-path>` with the available file-editing tool), then re-run revdiff.
+- **Any other result** — including another non-zero exit, timeout, exit `0` with output, or exit `10` without annotations — is not approval. Fall back to the in-chat gate below.
 
-If the launcher path is missing, OR `launch-revdiff.sh` fails with any revdiff-related error (exit code non-zero with "revdiff" in stderr — "not found in PATH", "command not found", etc.), fall back to in-chat review:
+If the executable or safe launcher path is missing, or the launcher returns any result not accepted above, fall back to in-chat review:
 
 - Print the draft content in chat.
-- Use AskUserQuestion: "Approve draft?" with options "Accept", "Revise" (capture feedback as next message), "Reject" (cancel the conversion).
+- Use the native interactive question tool: "Approve draft?" with options "Accept", "Revise" (capture feedback as next message), and "Reject" (cancel the conversion).
 - On "Revise", treat the next user message as annotation text and revise; loop until "Accept".
 
 ## Step 6: Write Target File
@@ -266,7 +285,7 @@ Compute the target filename:
 - Date: today's date in `YYYYMMDD` form (no dashes, e.g., `20260430`).
 - Slug: derive from the plan title — lowercase, ASCII-only, words joined by `-`, max ~50 characters. Drop articles (a/an/the) and trailing punctuation.
 
-Use AskUserQuestion to confirm or edit the slug before writing:
+Use the native interactive question tool to confirm or edit the slug before writing:
 
 - header: "Filename"
 - question: "Use slug `<computed-slug>` for `docs/plans/<date>-<slug>.md`?"
@@ -277,7 +296,7 @@ Use AskUserQuestion to confirm or edit the slug before writing:
 
 If the target file already exists:
 
-- Use AskUserQuestion: "`docs/plans/<filename>` already exists. What should we do?"
+- Use the native interactive question tool: "`docs/plans/<filename>` already exists. What should we do?"
 - options:
   - label: "Bump suffix" — append `-v2`, then `-v3`, ... to the slug; check `docs/plans/` and `docs/plans/completed/` for collisions, increment until both are clear
   - label: "Pick a new slug" (capture next message)
@@ -296,13 +315,13 @@ Once the filename is confirmed and sanity checks pass:
 mkdir -p docs/plans
 ```
 
-Write the draft content to `docs/plans/<final-name>.md` via the Write tool. Then explicitly clean up the temp file by substituting the literal `<draft-path>` captured in Step 5:
+Write the draft content to `docs/plans/<final-name>.md` with the available file-editing tool. Then explicitly clean up the temp file by substituting the literal, safely quoted `<draft-path>` captured in Step 5:
 
 ```bash
-rm -f <draft-path>
+rm -f -- '<draft-path>'
 ```
 
-Also run the same `rm -f <draft-path>` on any cancel path before exiting (Step 1, Step 3, Step 5 reject, Step 6 cancel) — always with the literal path substituted, never as `$DRAFT`.
+Also run the same `rm -f -- '<draft-path>'` on any cancel path before exiting (Step 1, Step 3, Step 5 reject, Step 6 cancel) — always with the safely quoted literal path substituted, never as `$DRAFT`.
 
 Report to the user:
 
@@ -317,31 +336,31 @@ Next: run `ralphex docs/plans/<final-name>.md` to execute.
 
 ## Edge Cases
 
-- **Missing path**: if user passed a path that does not exist, AskUser to correct or cancel.
-- **Ambiguous bare name**: more than one match — AskUser to pick.
-- **URL fetch failure**: AskUser to paste body as fallback.
-- **Directory with no recognizable structure**: list contents, AskUser to point at the file.
-- **Format detection conflict**: multiple signals — AskUser to choose format.
-- **Zero task-like content**: source has no items the agent can convert — AskUser whether to infer Tasks from prose or cancel.
+- **Missing path**: if user passed a path that does not exist, ask the user to correct or cancel.
+- **Ambiguous bare name**: more than one match — ask the user to pick.
+- **URL fetch failure**: ask the user to paste body as fallback.
+- **Directory with no recognizable structure**: list contents, ask the user to point at the file.
+- **Format detection conflict**: multiple signals — ask the user to choose format.
+- **Zero task-like content**: source has no items the agent can convert — ask the user whether to infer Tasks from prose or cancel.
 - **Mixed localization**: source mixes English and another language — confirm whether to keep the original language for prose. Structural `Task` keyword stays English regardless.
-- **Huge source (>1000 lines)**: warn before processing and AskUser whether to proceed, summarize, or split into multiple plans.
-- **Tiny source (<10 lines)**: warn that the result will be sparse; AskUser whether to proceed or expand interactively.
+- **Huge source (>1000 lines)**: warn before processing and ask the user whether to proceed, summarize, or split into multiple plans.
+- **Tiny source (<10 lines)**: warn that the result will be sparse; ask the user whether to proceed or expand interactively.
 - **Output collision**: target file already exists — never silent overwrite (see Step 6).
 - **Idempotency**: re-running on the same source uses today's date. Old converted plans in `docs/plans/completed/` are never modified.
 
 ## Tool Fallbacks
 
-- **revdiff missing**: fall back to in-chat AskUser Accept/Revise/Reject loop (see Step 5).
-- **gh missing** (when source is a GitHub issue/URL): AskUser to paste the issue body manually.
-- **glab missing** (when source is a GitLab issue/URL): AskUser to paste the issue body manually.
-- **Both gh and glab missing for a `#N` argument**: AskUser to paste the issue body or provide a different reference.
+- **revdiff missing**: fall back to the in-chat Accept/Revise/Reject question loop (see Step 5).
+- **gh missing** (when source is a GitHub issue/URL): ask the user to paste the issue body manually.
+- **glab missing** (when source is a GitLab issue/URL): ask the user to paste the issue body manually.
+- **Both gh and glab missing for a `#N` argument**: ask the user to paste the issue body or provide a different reference.
 
 ## Constraints
 
 - Never modify the source plan or directory.
 - Never write to `docs/plans/` without an explicit user-confirmed slug.
 - Never silently overwrite an existing target file.
-- Never embed placeholder markers (`???`, `TBD`, `[FIXME]`) in the output — AskUser before drafting instead.
+- Never embed placeholder markers (`???`, `TBD`, `[FIXME]`) in the output — ask the user before drafting instead.
 - Never assume the target project is a specific language. Test/run-test checkboxes must use generic phrasing such as "write tests" and "run project tests".
 - Never cite ralphex internal source files (e.g., `pkg/...`) in the converted plan content.
 - Do not run tests, do not run linters, do not commit, do not push. The skill only produces a plan file.
