@@ -506,14 +506,17 @@ func (e *externalBackend) refExists(ref string) bool {
 	return cmd.Run() == nil
 }
 
-// toRelative converts a path to be relative to the repository root.
+// toRelative converts a path to be relative to the repository root, always with forward slashes.
+// git speaks forward slashes on every platform, both in its own output (status --porcelain) and in
+// the paths it accepts as arguments, while filepath.Clean and filepath.Rel yield backslashes on
+// windows - an unconverted result would never match the paths git reports back.
 func (e *externalBackend) toRelative(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		cleaned := filepath.Clean(path)
 		if strings.HasPrefix(cleaned, "..") {
 			return "", fmt.Errorf("path %q escapes repository root", path)
 		}
-		return cleaned, nil
+		return filepath.ToSlash(cleaned), nil
 	}
 
 	// resolve symlinks for consistent comparison (macOS /var -> /private/var)
@@ -531,7 +534,7 @@ func (e *externalBackend) toRelative(path string) (string, error) {
 	if strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path %q is outside repository root %q", path, e.path)
 	}
-	return rel, nil
+	return filepath.ToSlash(rel), nil
 }
 
 // addWorktree creates a git worktree at the given path.
