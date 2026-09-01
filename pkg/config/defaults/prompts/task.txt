@@ -34,6 +34,7 @@ STEP 1 - IMPLEMENT:
 
 STEP 2 - VALIDATE:
 - Run the test and lint commands specified in the plan (e.g., "cargo test", "go test ./...", etc.)
+- Run tests and any long-running commands in the foreground and wait for them to finish in this turn. Do not run them in the background or end your turn expecting to resume at a scheduled wakeup - this session runs headless one-shot and does not resume.
 - Fix any failures, repeat until all validation passes
 
 STEP 3 - COMPLETE (after validation passes):
