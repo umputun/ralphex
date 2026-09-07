@@ -6,7 +6,7 @@ require (
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/fatih/color v1.19.0
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/go-pkgz/notify v1.4.0
+	github.com/go-pkgz/notify v1.5.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/pmezard/go-difflib v1.0.0

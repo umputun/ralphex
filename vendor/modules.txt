@@ -67,7 +67,7 @@ github.com/go-pkgz/email
 # github.com/go-pkgz/lgr v0.12.4
 ## explicit; go 1.21
 github.com/go-pkgz/lgr
-# github.com/go-pkgz/notify v1.4.0
+# github.com/go-pkgz/notify v1.5.0
 ## explicit; go 1.25.0
 github.com/go-pkgz/notify
 # github.com/go-pkgz/repeater/v2 v2.2.0
