@@ -91,7 +91,18 @@ func Test_defaultsFS_EmbeddedAgentsExist(t *testing.T) {
 
 // --- Load tests ---
 
+// isolateHome points DefaultConfigDir() at a temp dir. Load("") installs defaults into whatever
+// it resolves, so without this a test run rewrites the user's own ~/.config/ralphex.
+func isolateHome(t *testing.T) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, ".config"))
+}
+
 func TestLoad_SetsConfigDir(t *testing.T) {
+	isolateHome(t)
+
 	cfg, err := Load("") // empty uses default
 	require.NoError(t, err)
 	assert.NotEmpty(t, cfg.configDir)
@@ -113,6 +124,8 @@ func TestLoad_WithCustomDir(t *testing.T) {
 }
 
 func TestLoad_PopulatesAllFields(t *testing.T) {
+	isolateHome(t)
+
 	cfg, err := Load("") // empty uses default
 	require.NoError(t, err)
 

@@ -251,7 +251,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "test: effort to thinking mapping"
 
-for level in off minimal low medium high xhigh; do
+for level in off minimal low medium high xhigh max; do
     rm -f "$TMPDIR_TEST/pi_args"
     run_wrapper --effort "$level" -p "test prompt" >/dev/null 2>&1
     recorded=$(cat "$TMPDIR_TEST/pi_args")
@@ -261,26 +261,6 @@ for level in off minimal low medium high xhigh; do
         fail "effort '$level' not mapped" "args: $recorded"
     fi
 done
-
-# ---------------------------------------------------------------------------
-# test: --effort max → --thinking xhigh with stderr note
-# ---------------------------------------------------------------------------
-echo "test: effort max maps to xhigh with note"
-
-rm -f "$TMPDIR_TEST/pi_args"
-err_out=$(run_wrapper --effort max -p "test prompt" 2>&1 >/dev/null)
-recorded=$(cat "$TMPDIR_TEST/pi_args")
-if echo "$recorded" | grep -q -- "--thinking xhigh"; then
-    pass "effort max mapped to --thinking xhigh"
-else
-    fail "effort max not mapped to xhigh" "args: $recorded"
-fi
-
-if echo "$err_out" | grep -qi "no 'max' thinking level"; then
-    pass "max effort prints stderr note"
-else
-    fail "max effort note missing" "stderr: $err_out"
-fi
 
 # an unrecognized effort value passes through verbatim (pi validates it).
 rm -f "$TMPDIR_TEST/pi_args"

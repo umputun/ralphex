@@ -40,7 +40,7 @@ ralphex docs/plans/feature.md
 
 Alternatively, disable extensions entirely with `export PI_EXTRA_ARGS="--no-extensions"`, or remove the gating extension while running ralphex.
 
-**Model and effort:** ralphex appends `--model <m>` / `--effort <e>` per phase. `--model` is forwarded to pi's `--model`; `--effort` maps to pi's `--thinking` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh` pass through; `max` → `xhigh` with a stderr note since pi has no `max` level).
+**Model and effort:** ralphex appends `--model <m>` / `--effort <e>` per phase. `--model` is forwarded to pi's `--model`; `--effort` maps to pi's `--thinking` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` pass through verbatim). `max` needs pi 0.80.6 or newer. pi does not reject a level it cannot honor: an older release warns and runs at its own default, and any pi clamps the level to what the selected model exposes, so check the effective level rather than assuming the requested one took effect.
 
 ## Testing
 
@@ -51,7 +51,7 @@ bash scripts/pi-as-claude/pi-as-claude_docs_test.sh
 
 ## Requirements
 
-- `pi` CLI installed and accessible (v0.78.1+)
+- `pi` CLI installed and accessible (v0.78.1+; v0.80.6+ for `--effort max`)
 - `jq` for JSON translation
 
 ## Troubleshooting

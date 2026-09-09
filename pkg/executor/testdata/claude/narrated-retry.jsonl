@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"fixture-narrated-retry"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Useful work is complete. API Error: 529 is mentioned only as a transient-error example in the final explanation."}]},"parent_tool_use_id":null,"session_id":"fixture-narrated-retry"}
+{"type":"result","subtype":"success","is_error":false,"result":"Useful work is complete. API Error: 529 is mentioned only as a transient-error example in the final explanation.","session_id":"fixture-narrated-retry"}

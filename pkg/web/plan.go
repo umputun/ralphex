@@ -9,6 +9,15 @@ import (
 	"github.com/umputun/ralphex/pkg/plan"
 )
 
+// loadSessionPlan loads a plan recorded in a session's progress header. relative paths are
+// resolved against sessionDir, the directory holding the progress file.
+func loadSessionPlan(planPath, sessionDir string) (*plan.Plan, error) {
+	if !filepath.IsAbs(planPath) {
+		planPath = filepath.Join(sessionDir, planPath)
+	}
+	return loadPlanWithFallback(planPath)
+}
+
 // loadPlanWithFallback loads a plan from disk with completed/ directory fallback.
 // probes the original path, then completed/<basename>, then completed/<alt-basename>
 // with the date prefix swapped between YYYY-MM-DD and YYYYMMDD conventions to handle

@@ -18,6 +18,7 @@ import (
 //
 //	# Ralphex Progress Log
 //	Plan: path/to/plan.md
+//	Worktree plan: /repo/.ralphex/worktrees/feature-branch/path/to/plan.md
 //	Branch: feature-branch
 //	Mode: full
 //	Executor: codex
@@ -27,8 +28,9 @@ import (
 //	Started: 2026-01-22 10:30:00
 //	------------------------------------------------------------
 //
-// the Executor and model lines are optional — they appear only when the
-// corresponding parameter was set for the run.
+// the Worktree plan, Executor and model lines are optional — Worktree plan appears
+// only for a run in a git worktree, the rest only when the corresponding parameter
+// was set for the run.
 //
 // the second return value reports whether the terminating separator line was
 // observed, which means the header is fully written. during a truncate+rewrite
@@ -80,6 +82,7 @@ func parseHeaderField(meta *SessionMetadata, line string) {
 		dst    *string
 	}{
 		{"Plan: ", &meta.PlanPath},
+		{"Worktree plan: ", &meta.WorktreePlanPath},
 		{"Branch: ", &meta.Branch},
 		{"Mode: ", &meta.Mode},
 		{"Executor: ", &meta.Executor},

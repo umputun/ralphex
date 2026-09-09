@@ -381,8 +381,9 @@ ralphex appends `--model <m>` / `--effort <e>` per phase. The wrapper forwards `
 
 | ralphex effort | pi thinking |
 |---|---|
-| `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | passed through verbatim |
-| `max` | `xhigh` (pi has no `max`; a one-line note is printed to stderr) |
+| `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | passed through verbatim |
+
+pi does not fail on a level it cannot honor, so an effort ralphex forwards is not necessarily the one that runs. `max` needs pi 0.80.6 or newer: older releases print a warning and run at their own default level instead. Any pi version clamps the level to what the selected model exposes. The wrapper replays pi's stderr after the run ends, so that warning appears in the log only once the work is done.
 
 ### Event translation
 
@@ -426,7 +427,7 @@ A wrapper script must:
 3. Ignore other flags gracefully
 4. Stream JSON events to stdout, one per line
 5. Exit with code 0 on success
-6. Optionally re-emit the child's stderr as `content_block_delta` events so ralphex error/limit pattern detection works — neutralize any literal `<<<RALPHEX:` token first (e.g. insert a space) so stray stderr text cannot be mistaken for a completion signal
+6. Optionally re-emit the child's stderr as `content_block_delta` events. These deltas count as error/limit pattern input only after a non-zero exit or a stream read error. Neutralize any literal `<<<RALPHEX:` token first (e.g. insert a space) so stray stderr text cannot be mistaken for a completion signal.
 
 ### Minimal template
 
@@ -570,7 +571,7 @@ echo '{"type":"result","result":""}'
 
 **Streaming:** the wrapper should emit events as they become available, not buffer the entire response. This allows ralphex to show real-time progress. The codex wrapper achieves this via the `while IFS= read -r line` pattern.
 
-**Error handling:** if the underlying tool fails, the wrapper should either exit with a non-zero code or emit an error in a `result` event. ralphex's `ClaudeExecutor` handles both cases.
+**Error handling:** if the underlying tool fails, the wrapper should either exit with a non-zero code or emit an authenticated error record such as `{"type":"result","is_error":true,"result":"<diagnostic>"}`. The authenticated diagnostic is checked against error/limit patterns even when the wrapper exits with code 0.
 
 **Docker:** when running in Docker, ensure the wrapper script and its dependencies (jq, curl, etc.) are available inside the container. The ralphex base image includes jq. Mount custom scripts as read-only volumes.
 

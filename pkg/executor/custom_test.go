@@ -216,6 +216,8 @@ func TestCustomExecutor_Run_ErrorPatterns(t *testing.T) {
 			}
 
 			result := e.Run(context.Background(), "prompt")
+			assert.Empty(t, result.DiagnosticText,
+				"Claude diagnostic provenance must not change custom result semantics")
 
 			if tc.wantError {
 				require.Error(t, result.Error)

@@ -548,6 +548,109 @@ func TestServer_HandlePlan_WithSession(t *testing.T) {
 		assert.Contains(t, string(body), "session not found")
 	})
 
+	// pins #440: the recorded "Plan:" path is the main checkout, which a worktree run never ticks
+	t.Run("prefers the worktree plan copy over the recorded main-checkout path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		mainPlan := filepath.Join(tmpDir, "main-plan.md")
+		require.NoError(t, os.WriteFile(mainPlan, []byte("# Plan\n\n### Task 1: Work\n\n- [ ] step\n"), 0o600))
+		wtPlan := filepath.Join(tmpDir, "wt", "main-plan.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(wtPlan), 0o750))
+		require.NoError(t, os.WriteFile(wtPlan, []byte("# Plan\n\n### Task 1: Work\n\n- [x] step\n"), 0o600))
+
+		progressPath := filepath.Join(tmpDir, "progress-wt.txt")
+		progressContent := "# Ralphex Progress Log\nPlan: " + mainPlan + "\nWorktree plan: " + wtPlan +
+			"\nBranch: main-plan\nMode: full\nStarted: 2026-01-22 10:30:00\n" +
+			"------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		defer sm.Close()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionIDFromPath(progressPath), http.NoBody)
+		w := httptest.NewRecorder()
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), `"checked":true`, "should serve the ticked worktree copy")
+	})
+
+	t.Run("falls back to the recorded path once the worktree is gone", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		mainPlan := filepath.Join(tmpDir, "main-plan.md")
+		require.NoError(t, os.WriteFile(mainPlan, []byte("# Fallback Plan\n\n### Task 1: Work\n\n- [ ] step\n"), 0o600))
+
+		progressPath := filepath.Join(tmpDir, "progress-wt-gone.txt")
+		progressContent := "# Ralphex Progress Log\nPlan: " + mainPlan +
+			"\nWorktree plan: " + filepath.Join(tmpDir, "removed", "main-plan.md") +
+			"\nBranch: main-plan\nMode: full\nStarted: 2026-01-22 10:30:00\n" +
+			"------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		defer sm.Close()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionIDFromPath(progressPath), http.NoBody)
+		w := httptest.NewRecorder()
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "Fallback Plan")
+	})
+
+	t.Run("surfaces an unreadable worktree plan instead of the stale main copy", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		mainPlan := filepath.Join(tmpDir, "main-plan.md")
+		require.NoError(t, os.WriteFile(mainPlan, []byte("# Stale Plan\n\n### Task 1: Work\n\n- [ ] step\n"), 0o600))
+		wtPlan := filepath.Join(tmpDir, "wt", "main-plan.md")
+		require.NoError(t, os.MkdirAll(wtPlan, 0o750))
+
+		progressPath := filepath.Join(tmpDir, "progress-wt-unreadable.txt")
+		progressContent := "# Ralphex Progress Log\nPlan: " + mainPlan + "\nWorktree plan: " + wtPlan +
+			"\nBranch: main-plan\nMode: full\nStarted: 2026-01-22 10:30:00\n" +
+			"------------------------------------------------------------\n"
+		require.NoError(t, os.WriteFile(progressPath, []byte(progressContent), 0o600))
+
+		sm := NewSessionManager()
+		defer sm.Close()
+		_, err := sm.Discover(tmpDir)
+		require.NoError(t, err)
+
+		srv, err := NewServerWithSessions(ServerConfig{Port: 8080}, sm)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/plan?session="+sessionIDFromPath(progressPath), http.NoBody)
+		w := httptest.NewRecorder()
+		srv.handlePlan(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.NotContains(t, string(body), "Stale Plan")
+	})
+
 	t.Run("returns 404 when session has no plan path", func(t *testing.T) {
 		tmpDir := t.TempDir()
 

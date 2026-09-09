@@ -71,16 +71,13 @@ model="$model_flag"
 [[ -z "$model" ]] && model="$PI_MODEL"
 
 # resolve thinking level: explicit --effort flag wins over PI_THINKING env.
-# pi accepts off|minimal|low|medium|high|xhigh; ralphex's effort levels map directly
-# except `max`, which pi lacks — fall back to `xhigh` with a one-line note (like codex).
+# pi accepts off|minimal|low|medium|high|xhigh|max; ralphex's effort levels pass
+# through verbatim. pi does not reject an unknown level - it warns and keeps its
+# own default - and it clamps a known level to what the model exposes, so the
+# level that runs may differ from the one requested.
 thinking=""
 if [[ -n "$effort_flag" ]]; then
-    if [[ "$effort_flag" == "max" ]]; then
-        thinking="xhigh"
-        echo "note: pi has no 'max' thinking level; using 'xhigh' instead" >&2
-    else
-        thinking="$effort_flag" # passthrough; pi validates the rest
-    fi
+    thinking="$effort_flag" # passthrough; see the note above on pi's handling
 elif [[ -n "$PI_THINKING" ]]; then
     thinking="$PI_THINKING"
 fi

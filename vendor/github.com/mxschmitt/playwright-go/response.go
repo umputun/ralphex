@@ -1,0 +1,173 @@
+package playwright
+
+import (
+	"encoding/base64"
+	"encoding/json"
+)
+
+type responseImpl struct {
+	channelOwner
+	request            *requestImpl
+	provisionalHeaders *rawHeaders
+	rawHeaders         *rawHeaders
+	finished           chan error
+}
+
+func (r *responseImpl) FromServiceWorker() bool {
+	return r.initializer["fromServiceWorker"].(bool)
+}
+
+func (r *responseImpl) URL() string {
+	return r.initializer["url"].(string)
+}
+
+func (r *responseImpl) Ok() bool {
+	return r.Status() == 0 || (r.Status() >= 200 && r.Status() <= 299)
+}
+
+func (r *responseImpl) Status() int {
+	return int(r.initializer["status"].(float64))
+}
+
+func (r *responseImpl) StatusText() string {
+	return r.initializer["statusText"].(string)
+}
+
+func (r *responseImpl) Headers() map[string]string {
+	return r.provisionalHeaders.Headers()
+}
+
+func (r *responseImpl) Finished() error {
+	select {
+	case err := <-r.request.targetClosed():
+		return err
+	case err := <-r.finished:
+		return err
+	}
+}
+
+func (r *responseImpl) Body() ([]byte, error) {
+	b64Body, err := r.channel.Send("body")
+	if err != nil {
+		return nil, err
+	}
+	return base64.StdEncoding.DecodeString(b64Body.(string))
+}
+
+func (r *responseImpl) Text() (string, error) {
+	body, err := r.Body()
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+func (r *responseImpl) JSON(v any) error {
+	body, err := r.Body()
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, v)
+}
+
+func (r *responseImpl) Request() Request {
+	return r.request
+}
+
+func (r *responseImpl) Frame() Frame {
+	return r.request.Frame()
+}
+
+func (r *responseImpl) AllHeaders() (map[string]string, error) {
+	headers, err := r.ActualHeaders()
+	if err != nil {
+		return nil, err
+	}
+	return headers.Headers(), nil
+}
+
+func (r *responseImpl) HeadersArray() ([]NameValue, error) {
+	headers, err := r.ActualHeaders()
+	if err != nil {
+		return nil, err
+	}
+	return headers.HeadersArray(), nil
+}
+
+func (r *responseImpl) HeaderValue(name string) (string, error) {
+	headers, err := r.ActualHeaders()
+	if err != nil {
+		return "", err
+	}
+	return headers.Get(name), err
+}
+
+func (r *responseImpl) HeaderValues(name string) ([]string, error) {
+	headers, err := r.ActualHeaders()
+	if err != nil {
+		return []string{}, err
+	}
+	return headers.GetAll(name), err
+}
+
+func (r *responseImpl) ActualHeaders() (*rawHeaders, error) {
+	if r.rawHeaders == nil {
+		headers, err := r.channel.Send("rawResponseHeaders")
+		if err != nil {
+			return nil, err
+		}
+		r.rawHeaders = newRawHeaders(headers)
+	}
+	return r.rawHeaders, nil
+}
+
+func (r *responseImpl) SecurityDetails() (*ResponseSecurityDetailsResult, error) {
+	details, err := r.channel.Send("securityDetails")
+	if err != nil {
+		return nil, err
+	}
+	if details == nil {
+		return nil, nil
+	}
+	result := &ResponseSecurityDetailsResult{}
+	remapMapToStruct(details, result)
+	return result, nil
+}
+
+func (r *responseImpl) ServerAddr() (*ResponseServerAddrResult, error) {
+	addr, err := r.channel.Send("serverAddr")
+	if err != nil {
+		return nil, err
+	}
+	if addr == nil {
+		return nil, nil
+	}
+	result := &ResponseServerAddrResult{}
+	remapMapToStruct(addr, result)
+	return result, nil
+}
+
+func newResponse(parent *channelOwner, objectType string, guid string, initializer map[string]any) *responseImpl {
+	resp := &responseImpl{}
+	resp.createChannelOwner(resp, parent, objectType, guid, initializer)
+	resp.request = fromChannel(resp.initializer["request"]).(*requestImpl)
+	resp.request.response = resp
+	// The request timing is pre-seeded with the upstream defaults in newRequest.
+	// Mirror upstream's Object.assign(request._timing, initializer.timing) by only
+	// overriding the fields that are actually present in the timing initializer.
+	// Some CDP implementations (e.g. non-Chromium browsers) omit the timing object
+	// entirely or only return a subset of its fields.
+	if timing, ok := resp.initializer["timing"].(map[string]any); ok {
+		assignFloatIfPresent(timing, "startTime", &resp.request.timing.StartTime)
+		assignFloatIfPresent(timing, "domainLookupStart", &resp.request.timing.DomainLookupStart)
+		assignFloatIfPresent(timing, "domainLookupEnd", &resp.request.timing.DomainLookupEnd)
+		assignFloatIfPresent(timing, "connectStart", &resp.request.timing.ConnectStart)
+		assignFloatIfPresent(timing, "secureConnectionStart", &resp.request.timing.SecureConnectionStart)
+		assignFloatIfPresent(timing, "connectEnd", &resp.request.timing.ConnectEnd)
+		assignFloatIfPresent(timing, "requestStart", &resp.request.timing.RequestStart)
+		assignFloatIfPresent(timing, "responseStart", &resp.request.timing.ResponseStart)
+	}
+	resp.provisionalHeaders = newRawHeaders(resp.initializer["headers"])
+	resp.finished = make(chan error, 1)
+	return resp
+}

@@ -260,6 +260,38 @@ func (e *externalBackend) fileHasChanges(path string) (bool, error) {
 	return out != "", nil
 }
 
+// operationMarkers maps git state paths to the unfinished operations they signal.
+var operationMarkers = []struct{ path, operation string }{
+	{"MERGE_HEAD", "merge"},
+	{"CHERRY_PICK_HEAD", "cherry-pick"},
+	{"REVERT_HEAD", "revert"},
+	{"rebase-apply", "rebase or am"},
+	{"rebase-merge", "rebase"},
+	{"BISECT_START", "bisect"},
+}
+
+// operationInProgress returns the name of an unfinished git operation, or empty when there is none.
+// the marker paths are the only signal: once conflicts are resolved and staged, an in-progress merge
+// is indistinguishable from ordinary staged work in status output.
+func (e *externalBackend) operationInProgress() (string, error) {
+	for _, m := range operationMarkers {
+		out, err := e.run("rev-parse", "--git-path", m.path)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s path: %w", m.path, err)
+		}
+		markerPath := strings.TrimSpace(out)
+		if !filepath.IsAbs(markerPath) {
+			markerPath = filepath.Join(e.path, markerPath)
+		}
+		if _, statErr := os.Stat(markerPath); statErr == nil {
+			return m.operation, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("check %s marker: %w", m.path, statErr)
+		}
+	}
+	return "", nil
+}
+
 // hasChangesOtherThan returns the list of dirty file paths (excluding the given file, case-insensitive).
 // this includes modified/deleted tracked files, staged changes, and untracked files (excluding gitignored).
 // an empty slice means no other changes.
@@ -474,14 +506,17 @@ func (e *externalBackend) refExists(ref string) bool {
 	return cmd.Run() == nil
 }
 
-// toRelative converts a path to be relative to the repository root.
+// toRelative converts a path to be relative to the repository root, always with forward slashes.
+// git speaks forward slashes on every platform, both in its own output (status --porcelain) and in
+// the paths it accepts as arguments, while filepath.Clean and filepath.Rel yield backslashes on
+// windows - an unconverted result would never match the paths git reports back.
 func (e *externalBackend) toRelative(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		cleaned := filepath.Clean(path)
 		if strings.HasPrefix(cleaned, "..") {
 			return "", fmt.Errorf("path %q escapes repository root", path)
 		}
-		return cleaned, nil
+		return filepath.ToSlash(cleaned), nil
 	}
 
 	// resolve symlinks for consistent comparison (macOS /var -> /private/var)
@@ -499,7 +534,7 @@ func (e *externalBackend) toRelative(path string) (string, error) {
 	if strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path %q is outside repository root %q", path, e.path)
 	}
-	return rel, nil
+	return filepath.ToSlash(rel), nil
 }
 
 // addWorktree creates a git worktree at the given path.

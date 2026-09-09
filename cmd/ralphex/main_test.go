@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1966,6 +1967,83 @@ func TestModeRequiresBranch(t *testing.T) {
 	}
 }
 
+func TestArchivePlan(t *testing.T) {
+	// #439: a rejected archive commit wrote to stderr, leaving nothing in the run's own record.
+	setup := func(t *testing.T, hook string) (executePlanRequest, *progress.Logger) {
+		t.Helper()
+		dir := setupTestRepo(t)
+		// per-repo hooks are ignored when a global core.hooksPath is set, which is common
+		runGit(t, dir, "config", "core.hooksPath", ".git/hooks")
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join(plansDir, "feature.md")
+		require.NoError(t, os.WriteFile(planFile, []byte("# Plan\n"), 0o600))
+		runGit(t, dir, "add", "docs/plans/feature.md")
+		runGit(t, dir, "commit", "-m", "add plan")
+
+		// after the fixture commit, so only the archive commit meets the hook
+		if hook != "" {
+			writeExecutable(t, filepath.Join(dir, ".git", "hooks", "commit-msg"), hook)
+		}
+
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(dir))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		colors := testColors()
+		gitSvc, err := git.NewService(dir, noopLogger())
+		require.NoError(t, err)
+		log, err := progress.NewLogger(progress.Config{
+			PlanFile: planFile, Mode: "full", Branch: "master", NoColor: true,
+		}, colors, &status.PhaseHolder{})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = log.Close() })
+
+		req := executePlanRequest{
+			PlanFile: planFile, Mode: processor.ModeFull, Colors: colors, GitSvc: gitSvc,
+			Config: &config.Config{MovePlanOnCompletion: true},
+		}
+		return req, log
+	}
+
+	t.Run("rejected_commit_warns_into_progress_file", func(t *testing.T) {
+		req, log := setup(t, "#!/bin/sh\necho 'Invalid commit message format.' >&2\nexit 1\n")
+
+		moved, err := archivePlan(req, log)
+		require.Error(t, err)
+		assert.False(t, moved)
+
+		progressFile, readErr := os.ReadFile(log.Path())
+		require.NoError(t, readErr)
+		assert.Contains(t, string(progressFile), "WARN: failed to move plan to completed")
+	})
+
+	t.Run("successful_move_writes_no_warning", func(t *testing.T) {
+		req, log := setup(t, "")
+
+		moved, err := archivePlan(req, log)
+		require.NoError(t, err)
+		assert.True(t, moved)
+		assert.FileExists(t, filepath.Join(filepath.Dir(req.PlanFile), "completed", "feature.md"))
+
+		progressFile, readErr := os.ReadFile(log.Path())
+		require.NoError(t, readErr)
+		assert.NotContains(t, string(progressFile), "WARN:")
+	})
+
+	t.Run("move_disabled_is_a_no_op", func(t *testing.T) {
+		req, log := setup(t, "")
+		req.Config = &config.Config{MovePlanOnCompletion: false}
+
+		moved, err := archivePlan(req, log)
+		require.NoError(t, err)
+		assert.False(t, moved)
+		assert.FileExists(t, req.PlanFile)
+	})
+}
+
 func TestShouldMovePlan(t *testing.T) {
 	// tests the shouldMovePlan predicate used to guard the plan move call.
 	// all three conditions must be true: non-empty plan file, mode requires branch, and config opts in.
@@ -2101,6 +2179,8 @@ func setupTestRepo(t *testing.T) string {
 	runGit(t, dir, "config", "user.email", "test@test.com")
 	runGit(t, dir, "config", "user.name", "test")
 	runGit(t, dir, "config", "commit.gpgsign", "false")
+	// a global core.hooksPath otherwise decides which hooks every commit in this repo runs
+	runGit(t, dir, "config", "core.hooksPath", filepath.Join(dir, ".git", "hooks"))
 
 	readme := filepath.Join(dir, "README.md")
 	err := os.WriteFile(readme, []byte("# Test\n"), 0o600)
@@ -2667,6 +2747,66 @@ func TestRunWithWorktree_UntrackedPlan(t *testing.T) {
 	assert.NoDirExists(t, wtPath, "worktree should be removed")
 }
 
+// pins #440: the dashboard reads the header path, so it must name the copy the run ticks
+func TestRunWithWorktree_RecordsWorktreePlanInHeader(t *testing.T) {
+	dir := setupTestRepo(t)
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "plans"), 0o750))
+	planPath := filepath.Join(dir, "docs", "plans", "wt-header.md")
+	require.NoError(t, os.WriteFile(planPath, []byte("# WT Header\n\n- [ ] task 1\n"), 0o600))
+	runGit(t, dir, "add", "docs/plans/wt-header.md")
+	runGit(t, dir, "commit", "-m", "add wt header plan")
+
+	gitSvc, err := git.NewService(dir, noopLogger())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err = runWithWorktree(ctx, opts{MaxIterations: 1, NoColor: true}, executePlanRequest{
+		PlanFile: planPath, Mode: processor.ModeFull, GitSvc: gitSvc, Config: &config.Config{WorktreeEnabled: true},
+		Colors: testColors(), DefaultBranch: "master", WtCleanup: &worktreeCleanupFn{},
+	})
+	require.Error(t, err, "runner fails on the canceled context, but the header is already written")
+
+	content, readErr := os.ReadFile(filepath.Join(dir, ".ralphex", "progress", "progress-wt-header.txt")) //nolint:gosec // test
+	require.NoError(t, readErr)
+
+	wantWt := filepath.Join(gitSvc.Root(), ".ralphex", "worktrees", "wt-header", "docs", "plans", "wt-header.md")
+	assert.Contains(t, string(content), "Worktree plan: "+wantWt+"\n")
+	assert.Contains(t, string(content), "Plan: "+planPath+"\n", "the main-checkout path stays recorded as the fallback")
+}
+
+func TestWorktreePlanFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		planFile string
+		repoRoot string
+		wtPath   string
+		want     string
+	}{
+		{
+			name: "maps plan into the worktree", planFile: "/repo/docs/plans/a.md", repoRoot: "/repo",
+			wtPath: "/repo/.ralphex/worktrees/a", want: "/repo/.ralphex/worktrees/a/docs/plans/a.md",
+		},
+		{name: "relative plan path yields empty", planFile: "docs/plans/a.md", repoRoot: "/repo", wtPath: "/repo/.ralphex/worktrees/a"},
+		{
+			name: "plan outside the repo root still maps by relative walk", planFile: "/other/a.md", repoRoot: "/repo",
+			wtPath: "/repo/.ralphex/worktrees/a", want: "/repo/.ralphex/worktrees/other/a.md",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, worktreePlanFile(tc.planFile, tc.repoRoot, tc.wtPath))
+		})
+	}
+}
+
 func TestRunWithWorktree_CreateWorktreeError(t *testing.T) {
 	dir := setupTestRepo(t)
 	origDir, err := os.Getwd()
@@ -2835,7 +2975,7 @@ func TestDisplayStats(t *testing.T) {
 
 		req := executePlanRequest{PlanFile: "docs/plans/feature.md", Colors: colors}
 		stats := git.DiffStats{Files: 5, Additions: 200, Deletions: 50}
-		displayStats(req, baseLog, stats, "2m15s", "feature-branch", false)
+		displayStats(req, baseLog, stats, "2m15s", "feature-branch", false, nil)
 	})
 
 	t.Run("without_diff_stats", func(t *testing.T) {
@@ -2850,11 +2990,15 @@ func TestDisplayStats(t *testing.T) {
 		defer func() { _ = baseLog.Close() }()
 
 		req := executePlanRequest{Colors: colors}
-		displayStats(req, baseLog, git.DiffStats{}, "30s", "main", false)
+		displayStats(req, baseLog, git.DiffStats{}, "30s", "main", false, nil)
 	})
 
-	t.Run("with_main_plan_file", func(t *testing.T) {
+	// #450: a worktree archive exists only in the branch, so the path alone names a file that
+	// stops resolving the moment cleanup deletes the worktree and chdirs back to the main checkout
+	t.Run("worktree_archive_path_names_its_branch", func(t *testing.T) {
 		chdirTemp(t)
+		wtRoot, err := os.Getwd()
+		require.NoError(t, err)
 
 		colors := testColors()
 		holder := &status.PhaseHolder{}
@@ -2865,23 +3009,49 @@ func TestDisplayStats(t *testing.T) {
 		defer func() { _ = baseLog.Close() }()
 
 		req := executePlanRequest{
-			PlanFile:     "worktree/docs/plans/feature.md",
-			MainPlanFile: "docs/plans/feature.md",
-			Colors:       colors,
+			PlanFile:   filepath.Join(wtRoot, "docs", "plans", "feature.md"),
+			Colors:     colors,
+			WtPreserve: &atomic.Bool{},
 		}
-		displayStats(req, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s", "feature-wt", false)
+		output := captureStdout(t, func() {
+			displayStats(req, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s", "feature-wt", true, nil)
+		})
+		assert.Contains(t, output,
+			"  plan: "+filepath.Join("docs", "plans", "completed", "feature.md")+" (committed on branch feature-wt)\n")
+	})
+
+	t.Run("normal_mode_archive_path_carries_no_branch_note", func(t *testing.T) {
+		chdirTemp(t)
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "main-plan.md", Mode: "full", Branch: "main", NoColor: true,
+		}, colors, holder)
+		require.NoError(t, err)
+		defer func() { _ = baseLog.Close() }()
+
+		req := executePlanRequest{PlanFile: filepath.Join("docs", "plans", "feature.md"), Colors: colors}
+		output := captureStdout(t, func() {
+			displayStats(req, baseLog, git.DiffStats{}, "10s", "feature", true, nil)
+		})
+		assert.Contains(t, output, "  plan: "+filepath.Join("docs", "plans", "completed", "feature.md")+"\n")
+		assert.NotContains(t, output, "committed on branch")
 	})
 
 	// plan-path display must reflect the actual location of the plan file:
 	// completed/ path only when the move succeeded, original path when the move was
 	// skipped or failed. The caller (executePlan) passes planMoved=true only after
 	// a successful MovePlanToCompleted call, so this test drives the flag directly.
+	// a failed archive must also say so in the summary - #439: the warning scrolls past and the run reports success.
 	t.Run("plan_path_reflects_plan_moved_flag", func(t *testing.T) {
 		tests := []struct {
-			name      string
-			req       executePlanRequest
-			planMoved bool
-			wantPath  string
+			name        string
+			req         executePlanRequest
+			planMoved   bool
+			planMoveErr error
+			wantPath    string
+			wantNote    bool
 		}{
 			{
 				name: "moved_shows_completed_path",
@@ -2904,14 +3074,16 @@ func TestDisplayStats(t *testing.T) {
 				wantPath:  "docs/plans/feature.md",
 			},
 			{
-				name: "move_failed_shows_original_path",
+				name: "move_failed_shows_original_path_and_note",
 				req: executePlanRequest{
 					PlanFile: "docs/plans/feature.md",
 					Mode:     processor.ModeFull,
 					Config:   &config.Config{MovePlanOnCompletion: true},
 				},
-				planMoved: false,
-				wantPath:  "docs/plans/feature.md",
+				planMoved:   false,
+				planMoveErr: errors.New("commit plan move: hook rejected"),
+				wantPath:    "docs/plans/feature.md",
+				wantNote:    true,
 			},
 			{
 				name: "review_mode_not_moved_shows_original_path",
@@ -2940,9 +3112,15 @@ func TestDisplayStats(t *testing.T) {
 				req.Colors = colors
 
 				output := captureStdout(t, func() {
-					displayStats(req, baseLog, git.DiffStats{}, "1s", "main", tc.planMoved)
+					displayStats(req, baseLog, git.DiffStats{}, "1s", "main", tc.planMoved, tc.planMoveErr)
 				})
 				assert.Contains(t, output, "  plan: "+tc.wantPath+"\n")
+				if tc.wantNote {
+					assert.Contains(t, output, "plan archive did not complete: commit plan move: hook rejected")
+					assert.Contains(t, output, "git status")
+					return
+				}
+				assert.NotContains(t, output, "plan archive did not complete")
 			})
 		}
 	})
@@ -2975,7 +3153,7 @@ func TestDisplayMeta(t *testing.T) {
 			color.Output = &buf
 			t.Cleanup(func() { color.Output = origOutput })
 
-			displayMeta(colors, tc.indent, tc.planFile, tc.branch, tc.progressPath)
+			displayMeta(colors, tc.indent, tc.planFile, "", tc.branch, tc.progressPath)
 
 			out := buf.String()
 			for _, want := range tc.wantContains {
@@ -3096,4 +3274,189 @@ func branchExists(t *testing.T, dir, branch string) bool {
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	return strings.TrimSpace(string(out)) != ""
+}
+
+// gitOut runs a git command in dir and returns its trimmed stdout.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	require.NoError(t, err, "git %v failed", args)
+	return strings.TrimSpace(string(out))
+}
+
+// worktreeRun is the state archivePlan sees at the end of a worktree run: the plan ticked and
+// committed on the feature branch, the main checkout still on the default branch.
+type worktreeRun struct {
+	mainDir    string
+	wtPath     string
+	mainGitSvc *git.Service
+	wtGitSvc   *git.Service
+	planRel    string
+	wtPlanPath string
+	preserve   *atomic.Bool
+}
+
+// setupWorktreeRun builds a main repo with a plan and the worktree production would create,
+// then ticks and commits the plan on the feature branch as the task phase does. tracked
+// controls whether the plan was committed on the default branch before the run.
+func setupWorktreeRun(t *testing.T, tracked bool) worktreeRun {
+	t.Helper()
+	dir := setupTestRepo(t)
+	planRel := filepath.Join("docs", "plans", "feature.md")
+	planPath := filepath.Join(dir, planRel)
+	require.NoError(t, os.MkdirAll(filepath.Dir(planPath), 0o750))
+	require.NoError(t, os.WriteFile(planPath, []byte("# Feature\n\n### Task 1: do it\n\n- [ ] step\n"), 0o600))
+	if tracked {
+		runGit(t, dir, "add", planRel)
+		runGit(t, dir, "commit", "-m", "add plan")
+	}
+
+	mainSvc, err := git.NewService(dir, noopLogger())
+	require.NoError(t, err)
+	wtPath, needsCommit, err := mainSvc.CreateWorktreeForPlan(planPath, "master", "")
+	require.NoError(t, err)
+
+	wtSvc, err := git.NewService(wtPath, noopLogger())
+	require.NoError(t, err)
+	if needsCommit {
+		require.NoError(t, wtSvc.CommitPlanFile(planPath, mainSvc.Root()))
+	}
+
+	wtPlanPath := filepath.Join(wtPath, planRel)
+	require.NoError(t, os.WriteFile(wtPlanPath, []byte("# Feature\n\n### Task 1: do it\n\n- [x] step\n"), 0o600))
+	runGit(t, wtPath, "add", planRel)
+	runGit(t, wtPath, "commit", "-m", "task 1 done")
+
+	return worktreeRun{
+		mainDir: dir, wtPath: wtPath, mainGitSvc: mainSvc, wtGitSvc: wtSvc,
+		planRel: planRel, wtPlanPath: wtPlanPath, preserve: &atomic.Bool{},
+	}
+}
+
+// archiveRequest mirrors the request runWithWorktree builds, so a reintroduced main-repo
+// preference in archivePlan fails here rather than only in production.
+func (r worktreeRun) archiveRequest(colors *progress.Colors) executePlanRequest {
+	return executePlanRequest{
+		PlanFile:   r.wtPlanPath,
+		Mode:       processor.ModeFull,
+		GitSvc:     r.wtGitSvc,
+		Config:     &config.Config{MovePlanOnCompletion: true},
+		Colors:     colors,
+		WtPreserve: r.preserve,
+	}
+}
+
+// #450: a worktree run archived the plan in the user's main checkout, on the default branch,
+// and archived the untouched copy rather than the ticked one.
+func TestArchivePlanWorktree(t *testing.T) {
+	newLog := func(t *testing.T) *progress.Logger {
+		t.Helper()
+		chdirTemp(t)
+		log, err := progress.NewLogger(progress.Config{
+			PlanFile: "feature.md", Mode: "full", Branch: "feature", NoColor: true,
+		}, testColors(), &status.PhaseHolder{})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = log.Close() })
+		return log
+	}
+
+	for _, tracked := range []bool{true, false} {
+		name := "untracked_plan_on_default_branch"
+		if tracked {
+			name = "tracked_plan_on_default_branch"
+		}
+		t.Run(name, func(t *testing.T) {
+			run := setupWorktreeRun(t, tracked)
+			log := newLog(t)
+			mainHead := gitOut(t, run.mainDir, "rev-parse", "HEAD")
+			mainStatus := gitOut(t, run.mainDir, "status", "--porcelain")
+
+			moved, err := archivePlan(run.archiveRequest(testColors()), log)
+			require.NoError(t, err)
+			assert.True(t, moved)
+
+			completedRel := filepath.Join("docs", "plans", "completed", "feature.md")
+			archived := gitOut(t, run.wtPath, "show", "HEAD:"+filepath.ToSlash(completedRel))
+			assert.Contains(t, archived, "- [x] step", "feature branch must carry the ticked plan")
+
+			tree := strings.Split(gitOut(t, run.wtPath, "ls-tree", "-r", "HEAD", "--name-only"), "\n")
+			assert.NotContains(t, tree, filepath.ToSlash(run.planRel), "source must not survive on the feature branch")
+			assert.Contains(t, tree, filepath.ToSlash(completedRel))
+
+			assert.Equal(t, mainHead, gitOut(t, run.mainDir, "rev-parse", "HEAD"), "default branch must not gain a commit")
+			assert.Equal(t, mainStatus, gitOut(t, run.mainDir, "status", "--porcelain"), "main checkout must be untouched")
+			assert.NoFileExists(t, filepath.Join(run.mainDir, completedRel))
+
+			if !tracked {
+				body, readErr := os.ReadFile(filepath.Join(run.mainDir, run.planRel))
+				require.NoError(t, readErr)
+				assert.Contains(t, string(body), "- [ ] step", "the untracked main copy is the user's file and stays put")
+			}
+
+			cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve)
+			assert.NoDirExists(t, run.wtPath)
+			assert.True(t, branchExists(t, run.mainDir, "feature"), "branch must survive worktree removal")
+		})
+	}
+
+	// #439: a commit-msg hook can reject the archive commit, leaving the rename staged
+	t.Run("rejected_commit_keeps_worktree", func(t *testing.T) {
+		run := setupWorktreeRun(t, true)
+		log := newLog(t)
+		featureHead := gitOut(t, run.wtPath, "rev-parse", "HEAD")
+		mainStatus := gitOut(t, run.mainDir, "status", "--porcelain")
+
+		hooks := filepath.Join(run.mainDir, ".git", "hooks")
+		require.NoError(t, os.MkdirAll(hooks, 0o750))
+		writeExecutable(t, filepath.Join(hooks, "commit-msg"), "#!/bin/sh\nexit 1\n")
+
+		moved, err := archivePlan(run.archiveRequest(testColors()), log)
+		require.Error(t, err)
+		assert.False(t, moved)
+		assert.True(t, run.preserve.Load(), "a rejected archive must mark the worktree for retention")
+
+		assert.Equal(t, featureHead, gitOut(t, run.wtPath, "rev-parse", "HEAD"), "feature branch must not advance")
+		assert.Contains(t, gitOut(t, run.wtPath, "status", "--porcelain"), "docs/plans/completed/feature.md",
+			"the staged rename must still be there to recover")
+		assert.Equal(t, mainStatus, gitOut(t, run.mainDir, "status", "--porcelain"))
+
+		cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve)
+		assert.DirExists(t, run.wtPath, "cleanup must not discard the staged rename")
+	})
+
+	// archiving is best effort: a rejected commit must not turn a finished run into a failure
+	t.Run("rejected_commit_keeps_run_green", func(t *testing.T) {
+		run := setupWorktreeRun(t, true)
+
+		fake := filepath.Join(t.TempDir(), "fake-claude")
+		writeExecutable(t, fake, "#!/bin/sh\necho '{\"type\":\"assistant\",\"message\":{\"content\":"+
+			"[{\"type\":\"text\",\"text\":\"<<<RALPHEX:ALL_TASKS_DONE>>>\"}]}}'\n")
+
+		hooks := filepath.Join(run.mainDir, ".git", "hooks")
+		require.NoError(t, os.MkdirAll(hooks, 0o750))
+		writeExecutable(t, filepath.Join(hooks, "commit-msg"), "#!/bin/sh\nexit 1\n")
+
+		origDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(run.wtPath))
+		t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+		req := run.archiveRequest(testColors())
+		req.Mode = processor.ModeTasksOnly
+		req.Config.ClaudeCommand = fake
+		req.DefaultBranch, req.BaseRef = "master", "master"
+
+		output := captureStdout(t, func() {
+			err = executePlan(t.Context(), opts{MaxIterations: 1, NoColor: true}, req)
+		})
+		require.NoError(t, err, "a failed archive must leave the run successful")
+		assert.True(t, run.preserve.Load())
+		assert.Contains(t, output, "worktree kept at "+run.wtGitSvc.Root())
+		assert.Contains(t, output, "git -C "+run.wtGitSvc.Root()+" status")
+
+		cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve)
+		assert.DirExists(t, run.wtPath)
+	})
 }

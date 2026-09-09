@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -465,6 +466,54 @@ func TestExternalBackend_FileHasChanges(t *testing.T) {
 	})
 }
 
+func TestExternalBackend_operationInProgress(t *testing.T) {
+	tests := []struct {
+		name      string
+		marker    string
+		operation string
+		directory bool
+	}{
+		{name: "merge", marker: "MERGE_HEAD", operation: "merge"},
+		{name: "cherry-pick", marker: "CHERRY_PICK_HEAD", operation: "cherry-pick"},
+		{name: "revert", marker: "REVERT_HEAD", operation: "revert"},
+		{name: "rebase or am", marker: "rebase-apply", operation: "rebase or am", directory: true},
+		{name: "merge backend rebase", marker: "rebase-merge", operation: "rebase", directory: true},
+		{name: "bisect", marker: "BISECT_START", operation: "bisect"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := setupExternalTestRepo(t)
+			eb, err := newExternalBackend(dir, "git")
+			require.NoError(t, err)
+
+			markerPath := strings.TrimSpace(runGit(t, dir, "rev-parse", "--git-path", tt.marker))
+			if !filepath.IsAbs(markerPath) {
+				markerPath = filepath.Join(dir, markerPath)
+			}
+			if tt.directory {
+				require.NoError(t, os.MkdirAll(markerPath, 0o750))
+			} else {
+				require.NoError(t, os.WriteFile(markerPath, []byte("test"), 0o600))
+			}
+
+			operation, err := eb.operationInProgress()
+			require.NoError(t, err)
+			assert.Equal(t, tt.operation, operation)
+		})
+	}
+
+	t.Run("none", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+
+		operation, err := eb.operationInProgress()
+		require.NoError(t, err)
+		assert.Empty(t, operation)
+	})
+}
+
 func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 	t.Run("returns empty when no changes", func(t *testing.T) {
 		dir := setupExternalTestRepo(t)
@@ -830,6 +879,12 @@ func TestExternalBackend_toRelative(t *testing.T) {
 		assert.Equal(t, "docs/plans/test.md", rel)
 	})
 
+	t.Run("converts os-specific separators to forward slashes", func(t *testing.T) {
+		rel, err := eb.toRelative(filepath.Join("docs", "plans", "test.md"))
+		require.NoError(t, err)
+		assert.Equal(t, "docs/plans/test.md", rel, "git reports forward slashes on every platform")
+	})
+
 	t.Run("rejects .. path", func(t *testing.T) {
 		_, err := eb.toRelative("../outside.txt")
 		require.Error(t, err)
@@ -840,11 +895,14 @@ func TestExternalBackend_toRelative(t *testing.T) {
 		absPath := filepath.Join(eb.path, "docs", "plans", "test.md")
 		rel, err := eb.toRelative(absPath)
 		require.NoError(t, err)
-		assert.Equal(t, filepath.Join("docs", "plans", "test.md"), rel)
+		assert.Equal(t, "docs/plans/test.md", rel)
 	})
 
 	t.Run("rejects absolute path outside repo", func(t *testing.T) {
-		_, err := eb.toRelative("/tmp/outside/file.txt")
+		// t.TempDir is absolute on every platform; a unix-style literal would fall into the
+		// relative branch on windows and never reach the check under test
+		outside := filepath.Join(t.TempDir(), "file.txt")
+		_, err := eb.toRelative(outside)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "outside repository")
 	})

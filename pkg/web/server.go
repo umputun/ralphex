@@ -234,16 +234,25 @@ func (s *Server) handleSessionPlan(w http.ResponseWriter, sessionID string) {
 		return
 	}
 
-	// resolve plan path: absolute paths used as-is, relative paths resolved from session directory
-	var planPath string
-	if filepath.IsAbs(meta.PlanPath) {
-		planPath = meta.PlanPath
-	} else {
-		sessionDir := filepath.Dir(session.Path)
-		planPath = filepath.Join(sessionDir, meta.PlanPath)
+	sessionDir := filepath.Dir(session.Path)
+
+	// a worktree run ticks its own copy of the plan, so serve that while the worktree exists.
+	// only a missing copy falls through to the recorded path: any other error means the live
+	// plan is there but unreadable, and answering with the stale main copy would hide it.
+	if meta.WorktreePlanPath != "" {
+		p, err := loadSessionPlan(meta.WorktreePlanPath, sessionDir)
+		switch {
+		case err == nil:
+			s.writePlanJSON(w, p)
+			return
+		case !errors.Is(err, fs.ErrNotExist):
+			log.Printf("[WARN] failed to load worktree plan file %s: %v", meta.WorktreePlanPath, err)
+			http.Error(w, "unable to load plan", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	p, err := loadPlanWithFallback(planPath)
+	p, err := loadSessionPlan(meta.PlanPath, sessionDir)
 	if err != nil {
 		log.Printf("[WARN] failed to load plan file %s: %v", meta.PlanPath, err)
 		http.Error(w, "unable to load plan", http.StatusInternalServerError)

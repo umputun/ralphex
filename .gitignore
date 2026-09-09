@@ -64,3 +64,6 @@ __pycache__/
 # ralphex progress logs
 .ralphex/worktrees/
 AGENTS.md
+
+# revmux review archive (profile.md is tracked, rounds are not)
+.revmux/tasks/

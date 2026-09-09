@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.7.0 - 2026-09-07
+
+### New Features
+
+- Archive completed progress logs instead of truncating them #449 @umputun
+
+### Improved
+
+- Update default codex model to gpt-5.6-sol and effort to high #421 @umputun
+- Stop pointing users at gpt-5.5 for codex 76910af
+- Describe Windows support as best effort 09fe05e
+- Refresh dependencies and fix the e2e playwright install #434 @paskal
+- Bump github.com/go-pkgz/notify from 1.4.0 to 1.5.0 #456 @dependabot
+- Bump github.com/stretchr/testify from 1.11.1 to 1.12.0 #432 @dependabot
+- Bump actions/setup-go from 6 to 7 #416 @dependabot
+
+### Fixed
+
+- Match claude limit patterns by diagnostic provenance #455 @yeroo
+- Return repo-relative paths with forward slashes so the plan file excludes itself on Windows #454 @dimi4ik
+- Archive the completed plan on the feature branch #451 @umputun
+- Detect codex "Selected model is at capacity" as a limit pattern #448 @umputun
+- Let worktree mode start with a dirty source checkout #445 @umputun
+- Serve the worktree's plan copy to the dashboard #442 @umputun
+- Surface a failed plan archive instead of reporting a clean success #441 @umputun
+- Restrict the completed-plan archive commit to the plan paths #437 @umputun
+- Stop review agents from spawning subagents of their own #428 @umputun
+- Detect claude individual spend limit in default patterns #426 @umputun
+- Tighten signal rules in review prompts #424 @umputun
+- Enumerate API Error codes in default claude_error_patterns #423 @umputun
+- Pass max thinking level through to pi #433 @asalimonov
+- Persist OAuth token refreshes from container to host #412 @umputun
+- Harden OAuth credential bind mounts and keep older wrappers working 51f0d25
+- Keep authenticated status in claude diagnostics and add weekly limit defaults 84100f4
+
 ## v1.6.1 - 2026-07-21
 
 ### Improved
