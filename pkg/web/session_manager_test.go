@@ -487,6 +487,7 @@ func TestSessionManager_UpdateSession_CompletedToActiveResumesFromOffset(t *test
 
 	m := NewSessionManager()
 	m.Register(session)
+	t.Cleanup(func() { m.Close() })
 
 	// the logger still holds the flock, so IsActive returns true.
 	active, err := IsActive(progressPath)
