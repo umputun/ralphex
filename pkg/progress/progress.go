@@ -817,10 +817,7 @@ func rollbackProgressArchive(archivePath string, cause error) error {
 func archiveCompletedProgress(f *os.File, size int64, completedAt time.Time) (archivePath string, err error) {
 	base := filepath.Base(f.Name())
 	stem := strings.TrimPrefix(strings.TrimSuffix(base, ".txt"), "progress-")
-	historyStem := stem
-	if historyStem == "" || historyStem == "." || historyStem == ".." {
-		historyStem = "progress-" + historyStem
-	}
+	historyStem := safeHistoryStem(stem)
 	historyDir := filepath.Join(filepath.Dir(f.Name()), "history", historyStem)
 	if mkErr := os.MkdirAll(historyDir, 0o750); mkErr != nil {
 		return "", fmt.Errorf("create history dir: %w", mkErr)
@@ -857,6 +854,21 @@ func archiveCompletedProgress(f *os.File, size int64, completedAt time.Time) (ar
 		return "", fmt.Errorf("publish progress archive: %w", renameErr)
 	}
 	return archivePath, nil
+}
+
+func safeHistoryStem(stem string) string {
+	replacer := strings.NewReplacer(
+		string(os.PathSeparator), "-",
+		"/", "-",
+		"\\", "-",
+		":", "-",
+	)
+	stem = replacer.Replace(stem)
+	stem = strings.Trim(stem, ". ")
+	if stem == "" {
+		return "progress"
+	}
+	return stem
 }
 
 // pruneProgressArchives deletes oldest-first until at most keep archives remain. it matches only

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -725,11 +726,12 @@ func TestPreserveAnthropicAPIKeyFlag(t *testing.T) {
 func TestProviderOverrideFlags(t *testing.T) {
 	t.Run("claude_command_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{ClaudeCommand: "configured-claude"}
-		o := parseTestOpts(t, "--claude-command", "/tmp/run-claude")
+		claudeCommand := filepath.Join(t.TempDir(), "run-claude")
+		o := parseTestOpts(t, "--claude-command", claudeCommand)
 
 		require.NoError(t, applyCLIOverrides(o, cfg))
 
-		assert.Equal(t, "/tmp/run-claude", cfg.ClaudeCommand)
+		assert.Equal(t, claudeCommand, cfg.ClaudeCommand)
 	})
 
 	t.Run("claude_args_overrides_config", func(t *testing.T) {
@@ -762,11 +764,12 @@ func TestProviderOverrideFlags(t *testing.T) {
 
 	t.Run("custom_review_script_overrides_config", func(t *testing.T) {
 		cfg := &config.Config{CustomReviewScript: "/configured/review.sh"}
-		o := parseTestOpts(t, "--custom-review-script", "/tmp/review.sh")
+		reviewScript := filepath.Join(t.TempDir(), "review.sh")
+		o := parseTestOpts(t, "--custom-review-script", reviewScript)
 
 		require.NoError(t, applyCLIOverrides(o, cfg))
 
-		assert.Equal(t, "/tmp/review.sh", cfg.CustomReviewScript)
+		assert.Equal(t, reviewScript, cfg.CustomReviewScript)
 	})
 
 	t.Run("external_review_tool_cli_override_does_not_mutate_codex_enabled", func(t *testing.T) {
@@ -807,8 +810,7 @@ func TestRunAppliesClaudeCommandOverrideBeforeDependencyCheck(t *testing.T) {
 	configData := []byte("claude_command = " + missingCommand + "\n")
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config"), configData, 0o600))
 
-	fakeClaude := filepath.Join(tmpDir, "fake-claude")
-	writeExecutable(t, fakeClaude, "#!/bin/sh\nexit 0\n")
+	fakeClaude := writeFakeCommand(t, filepath.Join(tmpDir, "fake-claude"), "exit 0", "exit /b 0")
 
 	workDir := filepath.Join(tmpDir, "work")
 	require.NoError(t, os.MkdirAll(workDir, 0o750))
@@ -2160,6 +2162,19 @@ func writeExecutable(t *testing.T, path, content string) {
 	require.NoError(t, err)
 }
 
+// writeFakeCommand writes a directly executable test command for the host OS.
+// Shell scripts are fine for git hooks on Windows, but os/exec needs .cmd/.exe.
+func writeFakeCommand(t *testing.T, basePath, unixCommand, windowsCommand string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		path := basePath + ".cmd"
+		require.NoError(t, os.WriteFile(path, []byte("@echo off\r\n"+windowsCommand+"\r\n"), 0o700))
+		return path
+	}
+	writeExecutable(t, basePath, "#!/bin/sh\n"+unixCommand+"\n")
+	return basePath
+}
+
 // runGit executes a git command in the given directory and fails the test on error.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -2407,11 +2422,11 @@ func TestHandleEarlyFlags(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, os.Chdir(origDir)) })
 
 		// create a fake VCS script that outputs tmpDir as repo root
-		fakeVCS := filepath.Join(t.TempDir(), "fake-vcs.sh")
+		fakeVCS := filepath.Join(t.TempDir(), "fake-vcs")
 		// resolve symlinks for consistent comparison (macOS /var -> /private/var)
 		resolvedTmpDir, resolveErr := filepath.EvalSymlinks(tmpDir)
 		require.NoError(t, resolveErr)
-		writeExecutable(t, fakeVCS, "#!/bin/sh\necho "+resolvedTmpDir+"\n")
+		fakeVCS = writeFakeCommand(t, fakeVCS, "echo "+resolvedTmpDir, "echo "+resolvedTmpDir)
 
 		cfgDir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config"),
@@ -2432,8 +2447,7 @@ func TestHandleEarlyFlags(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, os.Chdir(origDir)) })
 
 		// create a fake VCS script that exits with error (not a repo)
-		fakeVCS := filepath.Join(t.TempDir(), "fake-vcs.sh")
-		writeExecutable(t, fakeVCS, "#!/bin/sh\nexit 1\n")
+		fakeVCS := writeFakeCommand(t, filepath.Join(t.TempDir(), "fake-vcs"), "exit 1", "exit /b 1")
 
 		cfgDir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config"),
@@ -2454,8 +2468,7 @@ func TestHandleEarlyFlags(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, os.Chdir(origDir)) })
 
 		// create a fake VCS script that outputs empty string
-		fakeVCS := filepath.Join(t.TempDir(), "fake-vcs.sh")
-		writeExecutable(t, fakeVCS, "#!/bin/sh\necho\n")
+		fakeVCS := writeFakeCommand(t, filepath.Join(t.TempDir(), "fake-vcs"), "echo", "echo.")
 
 		cfgDir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config"),
@@ -2478,10 +2491,10 @@ func TestHandleEarlyFlags(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, os.Chdir(origDir)) })
 
 		// create a fake VCS script that returns parent dir as root
-		fakeVCS := filepath.Join(t.TempDir(), "fake-vcs.sh")
+		fakeVCS := filepath.Join(t.TempDir(), "fake-vcs")
 		resolvedTmpDir, resolveErr := filepath.EvalSymlinks(tmpDir)
 		require.NoError(t, resolveErr)
-		writeExecutable(t, fakeVCS, "#!/bin/sh\necho "+resolvedTmpDir+"\n")
+		fakeVCS = writeFakeCommand(t, fakeVCS, "echo "+resolvedTmpDir, "echo "+resolvedTmpDir)
 
 		cfgDir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config"),
@@ -2782,6 +2795,10 @@ func TestRunWithWorktree_RecordsWorktreePlanInHeader(t *testing.T) {
 }
 
 func TestWorktreePlanFile(t *testing.T) {
+	absPath := func(elem ...string) string {
+		root := filepath.VolumeName(os.TempDir()) + string(filepath.Separator)
+		return filepath.Join(append([]string{root}, elem...)...)
+	}
 	tests := []struct {
 		name     string
 		planFile string
@@ -2790,13 +2807,13 @@ func TestWorktreePlanFile(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "maps plan into the worktree", planFile: "/repo/docs/plans/a.md", repoRoot: "/repo",
-			wtPath: "/repo/.ralphex/worktrees/a", want: "/repo/.ralphex/worktrees/a/docs/plans/a.md",
+			name: "maps plan into the worktree", planFile: absPath("repo", "docs", "plans", "a.md"), repoRoot: absPath("repo"),
+			wtPath: absPath("repo", ".ralphex", "worktrees", "a"), want: absPath("repo", ".ralphex", "worktrees", "a", "docs", "plans", "a.md"),
 		},
-		{name: "relative plan path yields empty", planFile: "docs/plans/a.md", repoRoot: "/repo", wtPath: "/repo/.ralphex/worktrees/a"},
+		{name: "relative plan path yields empty", planFile: filepath.Join("docs", "plans", "a.md"), repoRoot: absPath("repo"), wtPath: absPath("repo", ".ralphex", "worktrees", "a")},
 		{
-			name: "plan outside the repo root still maps by relative walk", planFile: "/other/a.md", repoRoot: "/repo",
-			wtPath: "/repo/.ralphex/worktrees/a", want: "/repo/.ralphex/worktrees/other/a.md",
+			name: "plan outside the repo root still maps by relative walk", planFile: absPath("other", "a.md"), repoRoot: absPath("repo"),
+			wtPath: absPath("repo", ".ralphex", "worktrees", "a"), want: absPath("repo", ".ralphex", "worktrees", "other", "a.md"),
 		},
 	}
 
@@ -3430,9 +3447,9 @@ func TestArchivePlanWorktree(t *testing.T) {
 	t.Run("rejected_commit_keeps_run_green", func(t *testing.T) {
 		run := setupWorktreeRun(t, true)
 
-		fake := filepath.Join(t.TempDir(), "fake-claude")
-		writeExecutable(t, fake, "#!/bin/sh\necho '{\"type\":\"assistant\",\"message\":{\"content\":"+
-			"[{\"type\":\"text\",\"text\":\"<<<RALPHEX:ALL_TASKS_DONE>>>\"}]}}'\n")
+		fake := writeFakeCommand(t, filepath.Join(t.TempDir(), "fake-claude"),
+			"echo '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"<<<RALPHEX:ALL_TASKS_DONE>>>\"}]}}'",
+			"echo {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"<<<RALPHEX:ALL_TASKS_DONE>>>\"}]}}")
 
 		hooks := filepath.Join(run.mainDir, ".git", "hooks")
 		require.NoError(t, os.MkdirAll(hooks, 0o750))

@@ -15,9 +15,9 @@ build:
 test:
 	go clean -testcache
 	go test -race -coverprofile=coverage.out ./...
-	grep -v "_mock.go" coverage.out | grep -v mocks > coverage_no_mocks.out
-	go tool cover -func=coverage_no_mocks.out
-	rm coverage.out coverage_no_mocks.out
+	go run scripts/coverage_files.go filter coverage.out coverage_no_mocks.out
+	go tool cover -func coverage_no_mocks.out
+	go run scripts/coverage_files.go clean coverage.out coverage_no_mocks.out
 
 lint:
 	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0

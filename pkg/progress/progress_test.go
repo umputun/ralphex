@@ -1270,7 +1270,7 @@ func TestNewLogger_HistoryStemCannotEscapeHistoryDirectory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, l.Close())
 
-	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "progress-..", "*.txt"))
+	archives, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "history", "progress", "*.txt"))
 	require.NoError(t, err)
 	assert.Len(t, archives, 1)
 	escaped, err := filepath.Glob(filepath.Join(tmpDir, progressDir, "progress-..-*.txt"))

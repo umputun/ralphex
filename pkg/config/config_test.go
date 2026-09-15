@@ -964,7 +964,9 @@ color_task = #123456
 
 	// create symlink (like ln -s dotfiles-repo/ralphex-config ~/.config/ralphex)
 	symlinkDir := filepath.Join(tmpDir, "config-symlink")
-	require.NoError(t, os.Symlink(realDir, symlinkDir))
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
 
 	// load config through symlink
 	cfg, err := loadWithLocal(symlinkDir, "")
@@ -1228,7 +1230,9 @@ claude_command = local-symlinked-claude
 
 	// create symlink for local dir (like ln -s shared-configs/project-a .ralphex)
 	symlinkLocalDir := filepath.Join(tmpDir, ".ralphex-symlink")
-	require.NoError(t, os.Symlink(realLocalDir, symlinkLocalDir))
+	if err := os.Symlink(realLocalDir, symlinkLocalDir); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
 
 	// load with symlinked local dir
 	cfg, err := loadWithLocal(globalDir, symlinkLocalDir)

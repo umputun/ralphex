@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -680,7 +682,7 @@ func TestTerminalCollector_computeDiff(t *testing.T) {
 func TestTerminalCollector_openEditor(t *testing.T) {
 	t.Run("writes content and reads it back", func(t *testing.T) {
 		// use "true" as editor — it does nothing, file stays unchanged
-		t.Setenv("EDITOR", "true")
+		t.Setenv("EDITOR", writeEditorCommand(t, "editor-ok", 0))
 		t.Setenv("VISUAL", "")
 
 		c := &TerminalCollector{}
@@ -691,8 +693,8 @@ func TestTerminalCollector_openEditor(t *testing.T) {
 	})
 
 	t.Run("VISUAL takes precedence over EDITOR", func(t *testing.T) {
-		t.Setenv("VISUAL", "true")
-		t.Setenv("EDITOR", "false") // would fail if used
+		t.Setenv("VISUAL", writeEditorCommand(t, "visual-ok", 0))
+		t.Setenv("EDITOR", writeEditorCommand(t, "editor-fail", 1)) // would fail if used
 
 		c := &TerminalCollector{}
 		result, err := c.openEditor(context.Background(), "test content\n")
@@ -726,7 +728,8 @@ func TestTerminalCollector_openEditor(t *testing.T) {
 	t.Run("editor with arguments", func(t *testing.T) {
 		// use "env true" as a multi-word editor command to verify argument splitting
 		t.Setenv("VISUAL", "")
-		t.Setenv("EDITOR", "env true")
+		editor := writeEditorCommand(t, "editor-ok", 0)
+		t.Setenv("EDITOR", editor+" --ignored")
 
 		c := &TerminalCollector{}
 		_, err := c.openEditor(context.Background(), "content\n")
@@ -736,7 +739,7 @@ func TestTerminalCollector_openEditor(t *testing.T) {
 	t.Run("editor exits with error returns error", func(t *testing.T) {
 		// "false" exits with code 1
 		t.Setenv("VISUAL", "")
-		t.Setenv("EDITOR", "false")
+		t.Setenv("EDITOR", writeEditorCommand(t, "editor-fail", 1))
 
 		c := &TerminalCollector{}
 		_, err := c.openEditor(context.Background(), "content")
@@ -760,7 +763,8 @@ func TestTerminalCollector_openEditor(t *testing.T) {
 		// exercises the real editor-launch path with whitespace-padded env vars.
 		// verifies strings.TrimSpace correctly handles padded editor values.
 		t.Setenv("VISUAL", "")
-		t.Setenv("EDITOR", "  true  ")
+		editor := writeEditorCommand(t, "editor-ok", 0)
+		t.Setenv("EDITOR", "  "+editor+"  ")
 
 		c := &TerminalCollector{}
 		result, err := c.openEditor(context.Background(), "whitespace env test")
@@ -770,7 +774,7 @@ func TestTerminalCollector_openEditor(t *testing.T) {
 
 	t.Run("temp file is cleaned up", func(t *testing.T) {
 		t.Setenv("VISUAL", "")
-		t.Setenv("EDITOR", "true")
+		t.Setenv("EDITOR", writeEditorCommand(t, "editor-ok", 0))
 
 		c := &TerminalCollector{}
 		result, err := c.openEditor(context.Background(), "cleanup test content")
@@ -780,6 +784,18 @@ func TestTerminalCollector_openEditor(t *testing.T) {
 		matches, _ := filepath.Glob(os.TempDir() + "/ralphex-plan-*.md")
 		assert.Empty(t, matches, "temp file should be cleaned up, found: %v", matches)
 	})
+}
+
+func writeEditorCommand(t *testing.T, name string, exitCode int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if runtime.GOOS == "windows" {
+		path += ".cmd"
+		require.NoError(t, os.WriteFile(path, []byte("@echo off\r\nexit /b "+strconv.Itoa(exitCode)+"\r\n"), 0o700))
+		return path
+	}
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nexit "+strconv.Itoa(exitCode)+"\n"), 0o700))
+	return path
 }
 
 func TestTerminalCollector_renderMarkdown(t *testing.T) {

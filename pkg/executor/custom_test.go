@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -325,9 +328,9 @@ func TestCustomExecutor_Run_PassesPromptToScript(t *testing.T) {
 func TestExecCustomRunner_Run(t *testing.T) {
 	// test the real runner with a simple command
 	runner := &execCustomRunner{}
+	script := writeCustomTestScript(t, "echo hello")
 
-	// use echo which writes to stdout
-	stdout, wait, err := runner.Run(context.Background(), "echo", "hello")
+	stdout, wait, err := runner.Run(context.Background(), script, "prompt.txt")
 
 	require.NoError(t, err)
 	require.NotNil(t, stdout)
@@ -369,6 +372,18 @@ func TestExecCustomRunner_Run_ContextAlreadyCanceled(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context already canceled")
+}
+
+func writeCustomTestScript(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "script")
+	if runtime.GOOS == "windows" {
+		path += ".cmd"
+		require.NoError(t, os.WriteFile(path, []byte("@echo off\r\n"+body+"\r\n"), 0o700))
+		return path
+	}
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700))
+	return path
 }
 
 func TestCustomExecutor_Run_LimitPattern(t *testing.T) {

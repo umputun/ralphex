@@ -1338,7 +1338,8 @@ func TestService_CreateWorktreeForPlan(t *testing.T) {
 		assert.NoFileExists(t, filepath.Join(wtPath, "other.txt"), "untracked file must not reach the worktree")
 		wtReadme, err := os.ReadFile(filepath.Join(wtPath, "README.md")) //nolint:gosec // test fixture path
 		require.NoError(t, err)
-		assert.Equal(t, "# Test\n", string(wtReadme), "worktree must hold the committed README, not the edit")
+		assert.Equal(t, "# Test\n", strings.ReplaceAll(string(wtReadme), "\r\n", "\n"),
+			"worktree must hold the committed README, not the edit")
 		assert.FileExists(t, filepath.Join(dir, "other.txt"), "source untracked file must stay in place")
 		sourceReadme, err := os.ReadFile(filepath.Join(dir, "README.md")) //nolint:gosec // test fixture path
 		require.NoError(t, err)

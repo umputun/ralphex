@@ -577,9 +577,11 @@ func TestCodexExecutor_processStderr_contextCancellation(t *testing.T) {
 func TestExecCodexRunner_Run(t *testing.T) {
 	// test the real runner with a simple command
 	runner := &execCodexRunner{}
+	t.Setenv("RALPHEX_TEST_ECHO_PROCESS", "1")
+	exe, err := os.Executable()
+	require.NoError(t, err)
 
-	// use echo which writes to stdout
-	streams, wait, err := runner.Run(context.Background(), "echo", "hello")
+	streams, wait, err := runner.Run(context.Background(), exe, "-test.run=TestPortableEchoProcess", "--", "hello")
 
 	require.NoError(t, err)
 	require.NotNil(t, streams.Stdout)
@@ -600,9 +602,11 @@ func TestExecCodexRunner_Run_Stdin(t *testing.T) {
 	// test that stdin is piped to the child process (prompt via stdin for Windows compat)
 	prompt := "hello from stdin"
 	runner := &execCodexRunner{stdin: strings.NewReader(prompt)}
+	t.Setenv("RALPHEX_TEST_CAT_PROCESS", "1")
+	exe, err := os.Executable()
+	require.NoError(t, err)
 
-	// use cat which reads stdin and writes to stdout
-	streams, wait, err := runner.Run(context.Background(), "cat")
+	streams, wait, err := runner.Run(context.Background(), exe, "-test.run=TestPortableCatProcess")
 
 	require.NoError(t, err)
 	require.NotNil(t, streams.Stdout)
@@ -1859,6 +1863,7 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 	// can resolve it via the same glob the real runtime uses.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	sessionID := "019e3bbe-9788-79f1-b668-deadbeefcafe"
 	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "18")
 	require.NoError(t, os.MkdirAll(dir, 0o750))
@@ -1933,6 +1938,7 @@ func TestCodexExecutor_tailRolloutFile_streamsAssistantMessages(t *testing.T) {
 func TestCodexExecutor_findRolloutFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	e := &CodexExecutor{}
 
 	t.Run("returns empty when no file", func(t *testing.T) {
