@@ -1,0 +1,20 @@
+{
+  "name": "ralphex",
+  "interface": {
+    "displayName": "Ralphex"
+  },
+  "plugins": [
+    {
+      "name": "ralphex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ralphex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
