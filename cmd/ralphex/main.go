@@ -56,6 +56,7 @@ type opts struct {
 	PassClaudeMd            bool          `long:"pass-claude-md" description:"pass project CLAUDE.md to codex via project_doc_fallback_filenames; user-level ~/.claude/CLAUDE.md is NOT auto-passed but a one-time setup hint is shown (codex executor only)"`
 	Worktree                bool          `long:"worktree" description:"run in isolated git worktree"`
 	Branch                  string        `long:"branch" description:"override branch name for worktree/branch creation (default: derived from plan filename)"`
+	KeepWorktree            bool          `long:"keep-worktree" description:"leave the worktree in place when the run ends; the caller removes it (worktree mode only)"`
 	PlanDescription         string        `long:"plan" description:"create plan interactively (enter plan description)"`
 	Debug                   bool          `short:"d" long:"debug" description:"enable debug logging"`
 	NoColor                 bool          `long:"no-color" description:"disable color output"`
@@ -699,7 +700,8 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 // runWithWorktree creates a worktree, creates the progress logger (before chdir so it lands
 // in the main repo), chdirs into the worktree, and runs executePlan. On return CWD is always
 // restored; the worktree is removed unless the plan archive left state behind in it, in which
-// case it is kept for recovery. req.WtCleanup is populated for interrupt handler use.
+// case it is kept for recovery, or --keep-worktree leaves its removal to the caller.
+// req.WtCleanup is populated for interrupt handler use.
 func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err error) {
 	wtPath, planNeedsCommit, err := req.GitSvc.CreateWorktreeForPlan(req.PlanFile, req.DefaultBranch, req.BranchOverride)
 	if err != nil {
@@ -777,7 +779,7 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 	wtPreserve := &atomic.Bool{}
 	var cleanupOnce sync.Once
 	cleanup := func() {
-		cleanupOnce.Do(func() { cleanupWorktree(req.GitSvc, origDir, wtPath, wtPreserve) })
+		cleanupOnce.Do(func() { cleanupWorktree(req.GitSvc, origDir, wtPath, wtPreserve, o.KeepWorktree) })
 	}
 	setupDone = true // disable safety-net defer, main cleanup takes over
 	req.WtCleanup.set(cleanup)
@@ -823,10 +825,15 @@ func runWithWorktree(ctx context.Context, o opts, req executePlanRequest) (err e
 // removal is skipped when preserve is set, which covers the whole archive attempt: removal is
 // forced, so anything the attempt left in the worktree - a rename staged by a rejected commit
 // most of all - would go with it. the message is deliberately generic about what is there,
-// since an archive that failed before touching the tree leaves nothing to recover.
-func cleanupWorktree(gitSvc *git.Service, origDir, wtPath string, preserve *atomic.Bool) {
+// since an archive that failed before touching the tree leaves nothing to recover. keep
+// (--keep-worktree) leaves the worktree for the caller to inspect and remove.
+func cleanupWorktree(gitSvc *git.Service, origDir, wtPath string, preserve *atomic.Bool, keep bool) {
 	if chdirErr := os.Chdir(origDir); chdirErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to restore working directory: %v\n", chdirErr)
+	}
+	if keep && !preserve.Load() {
+		fmt.Fprintf(os.Stderr, "worktree kept at %s (--keep-worktree): remove it with git worktree remove %s\n", wtPath, wtPath)
+		return
 	}
 	if preserve.Load() {
 		fmt.Fprintf(os.Stderr, "worktree kept at %s: the plan archive did not complete\n"+
@@ -1577,6 +1584,9 @@ func applyCLIOverrides(o opts, cfg *config.Config) error {
 	}
 	if o.Worktree {
 		cfg.WorktreeEnabled = true
+	}
+	if o.KeepWorktree && !cfg.WorktreeEnabled {
+		return errors.New("--keep-worktree requires worktree mode (--worktree or use_worktree)")
 	}
 	if o.Wait > 0 || (o.Wait == 0 && o.waitSet) {
 		cfg.WaitOnLimit = o.Wait
