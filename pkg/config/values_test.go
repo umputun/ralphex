@@ -2250,6 +2250,8 @@ func TestValuesLoader_parseValuesFromBytes_SessionTimeout(t *testing.T) {
 		{name: "1 hour", input: "session_timeout = 1h", expected: time.Hour, expectedSet: true},
 		{name: "1h30m compound", input: "session_timeout = 1h30m", expected: 90 * time.Minute, expectedSet: true},
 		{name: "90 seconds", input: "session_timeout = 90s", expected: 90 * time.Second, expectedSet: true},
+		{name: "500 milliseconds", input: "session_timeout = 500ms", expected: 500 * time.Millisecond, expectedSet: true},
+		{name: "1 nanosecond", input: "session_timeout = 1ns", expected: time.Nanosecond, expectedSet: true},
 		{name: "zero", input: "session_timeout = 0s", expected: 0, expectedSet: true},
 		{name: "empty value", input: "session_timeout = ", expected: 0, expectedSet: false},
 		{name: "not set", input: "", expected: 0, expectedSet: false},
@@ -2273,6 +2275,7 @@ func TestValuesLoader_parseValuesFromBytes_SessionTimeout_Invalid(t *testing.T) 
 	}{
 		{name: "invalid format", input: "session_timeout = notaduration", errContains: "invalid session_timeout"},
 		{name: "negative duration", input: "session_timeout = -5m", errContains: "must be non-negative"},
+		{name: "negative nanosecond", input: "session_timeout = -1ns", errContains: "must be non-negative"},
 	}
 
 	for _, tc := range tests {
@@ -2372,6 +2375,8 @@ func TestValuesLoader_parseValuesFromBytes_IdleTimeout(t *testing.T) {
 		{name: "5 minutes", input: "idle_timeout = 5m", expected: 5 * time.Minute, expectedSet: true},
 		{name: "1 hour", input: "idle_timeout = 1h", expected: time.Hour, expectedSet: true},
 		{name: "30 seconds", input: "idle_timeout = 30s", expected: 30 * time.Second, expectedSet: true},
+		{name: "500 milliseconds", input: "idle_timeout = 500ms", expected: 500 * time.Millisecond, expectedSet: true},
+		{name: "1 nanosecond", input: "idle_timeout = 1ns", expected: time.Nanosecond, expectedSet: true},
 		{name: "zero", input: "idle_timeout = 0s", expected: 0, expectedSet: true},
 		{name: "empty value", input: "idle_timeout = ", expected: 0, expectedSet: false},
 		{name: "not set", input: "", expected: 0, expectedSet: false},
@@ -2395,6 +2400,7 @@ func TestValuesLoader_parseValuesFromBytes_IdleTimeout_Invalid(t *testing.T) {
 	}{
 		{name: "invalid format", input: "idle_timeout = notaduration", errContains: "invalid idle_timeout"},
 		{name: "negative duration", input: "idle_timeout = -5m", errContains: "must be non-negative"},
+		{name: "negative nanosecond", input: "idle_timeout = -1ns", errContains: "must be non-negative"},
 	}
 
 	for _, tc := range tests {
