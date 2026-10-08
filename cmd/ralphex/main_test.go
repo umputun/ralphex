@@ -693,6 +693,31 @@ func TestSkipFinalizeFlag(t *testing.T) {
 	})
 }
 
+func TestKeepWorktreeFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		cfg     config.Config
+		wantErr string
+	}{
+		{name: "requires worktree mode", args: []string{"--keep-worktree"}, wantErr: "--keep-worktree requires worktree mode (--worktree or use_worktree)"},
+		{name: "with worktree flag", args: []string{"--worktree", "--keep-worktree"}},
+		{name: "with use_worktree config", args: []string{"--keep-worktree"}, cfg: config.Config{WorktreeEnabled: true}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tc.cfg
+			err := applyCLIOverrides(parseTestOpts(t, tc.args...), &cfg)
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.True(t, cfg.WorktreeEnabled)
+		})
+	}
+}
+
 func TestPreserveAnthropicAPIKeyFlag(t *testing.T) {
 	t.Run("flag enables when config disabled", func(t *testing.T) {
 		cfg := &config.Config{PreserveAnthropicAPIKey: false}
@@ -3395,11 +3420,25 @@ func TestArchivePlanWorktree(t *testing.T) {
 				assert.Contains(t, string(body), "- [ ] step", "the untracked main copy is the user's file and stays put")
 			}
 
-			cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve)
+			cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve, false)
 			assert.NoDirExists(t, run.wtPath)
 			assert.True(t, branchExists(t, run.mainDir, "feature"), "branch must survive worktree removal")
 		})
 	}
+
+	t.Run("keep_worktree_leaves_worktree_for_caller", func(t *testing.T) {
+		run := setupWorktreeRun(t, true)
+		moved, err := archivePlan(run.archiveRequest(testColors()), newLog(t))
+		require.NoError(t, err)
+		assert.True(t, moved)
+		head := gitOut(t, run.wtPath, "rev-parse", "HEAD")
+
+		cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve, true)
+		assert.DirExists(t, run.wtPath, "a kept worktree must survive cleanup")
+		assert.Equal(t, head, gitOut(t, run.wtPath, "rev-parse", "HEAD"))
+		assert.Empty(t, gitOut(t, run.wtPath, "status", "--porcelain"), "kept worktree must be clean")
+		assert.Contains(t, gitOut(t, run.mainDir, "worktree", "list", "--porcelain"), "branch refs/heads/feature")
+	})
 
 	// #439: a commit-msg hook can reject the archive commit, leaving the rename staged
 	t.Run("rejected_commit_keeps_worktree", func(t *testing.T) {
@@ -3422,7 +3461,7 @@ func TestArchivePlanWorktree(t *testing.T) {
 			"the staged rename must still be there to recover")
 		assert.Equal(t, mainStatus, gitOut(t, run.mainDir, "status", "--porcelain"))
 
-		cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve)
+		cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve, false)
 		assert.DirExists(t, run.wtPath, "cleanup must not discard the staged rename")
 	})
 
@@ -3456,7 +3495,7 @@ func TestArchivePlanWorktree(t *testing.T) {
 		assert.Contains(t, output, "worktree kept at "+run.wtGitSvc.Root())
 		assert.Contains(t, output, "git -C "+run.wtGitSvc.Root()+" status")
 
-		cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve)
+		cleanupWorktree(run.mainGitSvc, run.mainDir, run.wtPath, run.preserve, false)
 		assert.DirExists(t, run.wtPath)
 	})
 }

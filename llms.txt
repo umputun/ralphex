@@ -83,6 +83,9 @@ ralphex --worktree docs/plans/feature.md
 ralphex --worktree --branch=my-feature docs/plans/tasks.md
 ralphex --branch=my-feature docs/plans/tasks.md
 
+# keep the worktree after the run (caller removes it with git worktree remove)
+ralphex --worktree --keep-worktree docs/plans/feature.md
+
 # override default branch for review diffs (useful for comparing against specific ref)
 ralphex --review --base-ref develop
 ralphex --review --base-ref abc1234 --skip-finalize
