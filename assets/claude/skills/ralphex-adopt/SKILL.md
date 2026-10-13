@@ -1,6 +1,7 @@
 ---
+name: ralphex-adopt
 description: Convert plans from various source formats (OpenSpec, spec-kit, GitHub/GitLab issues with checklists, generic task-lists, free-form markdown) into ralphex-format plans in docs/plans/. Triggers on "ralphex-adopt", "adopt plan", "convert plan to ralphex", "import plan as ralphex".
-allowed-tools: [Bash, Read, Write, Glob, Grep, AskUserQuestion]
+allowed-tools: Bash Read Write Glob Grep AskUserQuestion
 ---
 
 # ralphex-adopt - Convert Plans Into ralphex Format

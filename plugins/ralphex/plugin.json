@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ralphex",
+  "version": "0.20.2",
+  "description": "Plan-driven implementation, review, adoption, and configuration workflows for Ralphex",
+  "author": { "name": "umputun", "email": "umputun@gmail.com", "url": "https://github.com/umputun" },
+  "homepage": "https://ralphex.com/docs/#codex-integration-optional",
+  "repository": "https://github.com/umputun/ralphex",
+  "license": "MIT",
+  "keywords": ["automation", "planning", "code-review", "task-execution"]
+}

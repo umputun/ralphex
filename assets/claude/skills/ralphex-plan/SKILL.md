@@ -1,4 +1,5 @@
 ---
+name: ralphex-plan
 description: Create structured implementation plan in docs/plans/
 ---
 

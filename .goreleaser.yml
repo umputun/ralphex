@@ -1,9 +1,5 @@
 version: 2
 
-before:
-  hooks:
-    - ./scripts/internal/update-plugin-version.sh {{ .Tag }}
-
 builds:
   - id: ralphex
     main: ./cmd/ralphex
