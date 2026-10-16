@@ -32,6 +32,7 @@ Steps:
 5. Verify the branch is ready:
    - Run tests using the project's test command (check CLAUDE.md or plan file for the correct command)
    - Run linter if applicable
+   - Run tests and any long-running commands in the foreground and wait for them to finish in this turn. Do not run them in the background or end your turn expecting to resume at a scheduled wakeup - this session runs headless one-shot and does not resume.
 
 Report what was done. This step is best-effort - if rebase fails, explain why and the branch remains as-is.
 
