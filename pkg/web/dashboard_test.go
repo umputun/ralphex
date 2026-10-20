@@ -230,7 +230,7 @@ func TestStartServerAsync_PortInUse(t *testing.T) {
 	// first server should start
 	errCh, err := startServerAsync(ctx, srv, 8999)
 	require.NoError(t, err)
-	defer func() { cancel(); <-errCh }()
+	defer func() { cancel(); assert.NoError(t, <-errCh) }()
 
 	// second server should fail
 	_, err = startServerAsync(ctx, srv2, 8999)

@@ -972,8 +972,8 @@ func TestWatcher_CloseAfterStart(t *testing.T) {
 
 	// wait for watcher to exit
 	select {
-	case <-done:
-		// watcher exited
+	case err := <-done:
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("watcher did not stop after Close")
 	}
