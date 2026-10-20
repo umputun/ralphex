@@ -55,7 +55,7 @@ SIGNAL LOGIC - READ CAREFULLY:
 
 IMPORTANT: Do not decide on a signal path until you have completed Steps 1-3 in full — all agents finished, all results collected, all findings verified and acted on.
 
-IMPORTANT: A signal marker is irreversible. The moment you write one it takes effect, and you cannot retract it by explaining afterwards that you did not mean it. If you emit a marker it MUST be the final non-empty line of your output, with nothing after it. While you are still reasoning about which path applies, emit nothing. A marker takes effect wherever it appears, even inside a sentence: to refer to a signal, including to say you are not sending one, write its bare name (REVIEW_DONE), never the full marker.
+IMPORTANT: A signal marker is irreversible. The moment you write one it takes effect, and you cannot retract it by explaining afterwards that you did not mean it. If you emit a marker it MUST be the final non-empty line of your output, with nothing after it. While you are still reasoning about which path applies, emit nothing. A marker takes effect wherever it appears, even inside a sentence: to refer to a signal, including to say you are not sending one, write its bare name (REVIEW_DONE, TASK_FAILED), never the full marker.
 
 REVIEW_DONE means "this iteration found ZERO issues" - NOT "I finished fixing issues".
 
