@@ -45,6 +45,8 @@ STEP 3 - COMPLETE (after validation passes):
 
 If any phase fails after reasonable fix attempts, output exactly: <<<RALPHEX:TASK_FAILED>>>
 
+SIGNALS: a signal marker takes effect wherever it appears in your output, even inside a sentence. Write the marker only when you are sending it, exactly as given and alone on its own line. To refer to a signal, including to say you are not sending one, write its bare name (ALL_TASKS_DONE, TASK_FAILED), never the full marker.
+
 REMINDER: ONE section (Task/Iteration) per loop cycle. After commit, STOP and let the loop handle the next section.
 
 OUTPUT FORMAT: No markdown formatting (no **bold**, `code`, # headers). Plain text and - lists are fine. Do not echo phase names or step numbers - just do the work.

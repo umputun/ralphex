@@ -35,6 +35,8 @@ Do NOT reject issues just because they existed before this branch - fix them any
 
 ## After Evaluation
 
+SIGNALS: a signal marker takes effect wherever it appears in your output, even inside a sentence. Write the marker only when you are sending it, exactly as given and alone on its own line. To refer to a signal, including to say you are not sending one, write its bare name (CODEX_REVIEW_DONE), never the full marker.
+
 **If there were actionable issues to fix:**
 - Fix them, run tests/linter to verify - ALL tests must pass, ALL linter issues resolved
 - Do NOT commit yet - more codex iterations may follow
