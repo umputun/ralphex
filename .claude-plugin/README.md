@@ -18,7 +18,7 @@ Users can install via the plugin marketplace:
 
 ## Versioning
 
-The `version` field in both JSON files is automatically updated during releases by `scripts/internal/update-plugin-version.sh`, triggered by goreleaser.
+The plugin version is independent from the ralphex CLI version. When distributed skill payload changes, maintainers bump all Claude, Codex, and portable manifests together with `make bump-plugin-version VERSION=<version>` before merging. Releases do not mutate plugin manifests.
 
 ## Marketplace Structure
 
