@@ -294,6 +294,8 @@ When `executor = codex` is set in config and the user has also set `external_rev
 
 The `--worktree` flag runs plan execution in an isolated git worktree at `.ralphex/worktrees/<branch>`, enabling parallel execution of multiple plans on the same repo without branch conflicts.
 
+**Keeping the worktree:** by default the worktree is removed when the run ends and only the branch remains. `--keep-worktree` leaves it in place, for tools that inspect, test or serve the result after the run; remove it afterwards with `git worktree remove <path>`. It requires worktree mode (`--worktree` or `use_worktree`).
+
 **Supported modes:** `--worktree` only applies to full mode and `--tasks-only`. It is silently ignored for `--review`, `--external-only`, and `--plan` — these modes operate from the current directory.
 
 **Source checkout state:** Uncommitted files in the source checkout do not have to be stashed first. Ralphex lists them in a warning and does not copy them into the generated worktree. An uncommitted selected plan is copied so it can be committed on the feature branch. A new feature branch starts at the current `HEAD`; an existing feature branch keeps its own tip. Local `.ralphex` configuration is loaded before worktree creation and still applies to the run. Commit any repository changes the plan needs before starting. An unfinished Git operation remains a hard error because completion archives the plan in the source checkout. In-place branch mode also requires a clean checkout because it creates the feature branch in that same working tree.
@@ -733,6 +735,7 @@ ralphex --serve --port=3000 docs/plans/feature.md
 | `--session-timeout` | Per-session timeout for task/review executor (e.g., `30m`, `1h`). Applies to Claude calls in default executor mode and every executor call under `--codex`; external codex/custom review in Claude mode is not affected | disabled |
 | `--idle-timeout` | Kill executor session when no output for specified duration (e.g., `5m`). Resets on each output line. Applies to the claude executor in default mode and to every executor call under `--codex`; external codex review in default-claude mode is NOT affected (preserves master behavior). Custom review is also not affected | disabled |
 | `--worktree` | Run in isolated git worktree (full and tasks-only modes only) | false |
+| `--keep-worktree` | Leave the worktree in place when the run ends instead of removing it; the caller removes it (worktree mode only) | false |
 | `--preserve-anthropic-api-key` | Pass `ANTHROPIC_API_KEY` through to claude (for users authenticating Claude Code via API key rather than OAuth/keychain) | false |
 | `--plan` | Create plan interactively (provide description) | - |
 | `-s, --serve` | Start web dashboard for real-time streaming | false |
