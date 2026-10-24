@@ -394,7 +394,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 **Container CAN access (read-write):**
 - Project directory mounted at `/workspace` - full access to create, modify, delete files
 - Git operations within the project (branch, commit, etc.)
-- `~/.claude/.credentials.json` and `~/.codex/auth.json` - bind-mounted individually into the container's home so OAuth token refreshes persist back to the host instead of being lost when the container exits
+- `~/.claude/.credentials.json` and `~/.codex/auth.json` - bind-mounted individually into the container's home so OAuth token refreshes persist back to the host instead of being lost when the container exits. Claude credentials kept only in the macOS keychain are copied instead, see "Claude login in the macOS keychain" below
 
 **Container CAN access (read-only):**
 - `~/.claude/` - settings, commands, skills, and agents (copied into the container at startup)
@@ -419,7 +419,7 @@ Then use `ralphex` as usual - it runs in a container with Claude Code and Codex 
 
 **Volume mounts:**
 - **Read-only**: `~/.claude` and `~/.codex` mounted to `/mnt/`, copied at startup to preserve isolation (the two credential files below are bind-mounted separately instead of copied)
-- **Read-write (single-file)**: `~/.claude/.credentials.json` and `~/.codex/auth.json` bind-mounted to the matching paths under the container's home, so refreshed OAuth tokens are written back to the host
+- **Read-write (single-file)**: `~/.claude/.credentials.json` and `~/.codex/auth.json` bind-mounted to the matching paths under the container's home, so refreshed OAuth tokens are written back to the host. Only when the file exists on the host; macOS keychain credentials are mounted read-only and copied
 - **Read-write**: project directory (`/workspace`) - where ralphex creates branches, edits code, and commits
 - **Extra mounts**: user-defined volumes via `-v`/`--volume` flags or `RALPHEX_EXTRA_VOLUMES` env var
 
@@ -461,6 +461,20 @@ Or bake it into a custom image so every run refreshes:
 FROM ghcr.io/umputun/ralphex:latest
 ENV RALPHEX_CLI_UPDATE=1
 ```
+
+**Claude login in the macOS keychain:**
+
+On macOS, Claude Code often keeps its login in the keychain rather than in `~/.claude/.credentials.json`. The wrapper mounts an extracted keychain entry read-only, then copies it into the container's writable home. Refreshed credentials stay inside the container and are not written back to the keychain. Refresh tokens rotate, so the next run, or Claude Code on the host, can find the stored refresh token already used and require signing in again. Codex is not affected: `~/.codex/auth.json` is a file on disk and refreshes are written through to it.
+
+To use a long-lived token instead of the copied login credentials, generate one on the host and pass it by name:
+
+```bash
+claude setup-token                    # prints a one-year OAuth token (Pro, Max, Team or Enterprise plan)
+export CLAUDE_CODE_OAUTH_TOKEN=<token>
+ralphex -E CLAUDE_CODE_OAUTH_TOKEN docs/plans/feature.md
+```
+
+Claude Code prefers this token over stored login credentials. The name-only `-E` form (or `RALPHEX_EXTRA_ENV=CLAUDE_CODE_OAUTH_TOKEN`) inherits the value from the host environment, so it never appears on the docker command line. The wrapper still requires a regular Claude login on the host (keychain or `~/.claude/.credentials.json`) before it starts, so the token adds to that login and does not replace it.
 
 **Docker socket support:**
 
