@@ -68,7 +68,7 @@ const subagentProgressInterval = 10 * time.Second
 // PatternMatchError is returned when a configured error pattern is detected in output.
 type PatternMatchError struct {
 	Pattern string // the pattern that matched
-	HelpCmd string // command to run for more information (e.g., "claude /usage")
+	HelpCmd string // command to run for more information (e.g., "claude /status")
 }
 
 func (e *PatternMatchError) Error() string {
@@ -482,7 +482,7 @@ func (e *ClaudeExecutor) patternError(patternText, signal string) error {
 		return &LimitPatternError{Pattern: pattern, HelpCmd: "claude /usage"}
 	}
 	if pattern := matchPattern(patternText, e.ErrorPatterns); pattern != "" {
-		return &PatternMatchError{Pattern: pattern, HelpCmd: "claude /usage"}
+		return &PatternMatchError{Pattern: pattern, HelpCmd: "claude /status"}
 	}
 	return nil
 }
