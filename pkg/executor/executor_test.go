@@ -1060,7 +1060,7 @@ func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
 			patterns:    []string{"hit your limit"},
 			wantError:   true,
 			wantPattern: "hit your limit",
-			wantHelpCmd: "claude /usage",
+			wantHelpCmd: "claude /status",
 			wantOutput:  "Error: You've hit your limit for today",
 		},
 		{
@@ -1069,7 +1069,7 @@ func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
 			patterns:    []string{"rate limit exceeded"},
 			wantError:   true,
 			wantPattern: "rate limit exceeded",
-			wantHelpCmd: "claude /usage",
+			wantHelpCmd: "claude /status",
 			wantOutput:  "RATE LIMIT EXCEEDED",
 		},
 		{
@@ -1078,7 +1078,7 @@ func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
 			patterns:    []string{"rate limit", "quota exceeded"},
 			wantError:   true,
 			wantPattern: "rate limit",
-			wantHelpCmd: "claude /usage",
+			wantHelpCmd: "claude /status",
 			wantOutput:  "rate limit and quota exceeded",
 		},
 		{
@@ -1087,8 +1087,17 @@ func TestClaudeExecutor_Run_ErrorPattern(t *testing.T) {
 			patterns:    []string{"Not logged in"},
 			wantError:   true,
 			wantPattern: "Not logged in",
-			wantHelpCmd: "claude /usage",
+			wantHelpCmd: "claude /status",
 			wantOutput:  "Not logged in \u00b7 Please run /login\n",
+		},
+		{
+			name:        "expired oauth token points at status",
+			output:      `{"type":"assistant","error":"authentication_failed","is_api_error_message":true,"message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401 OAuth token has expired"}]}}`,
+			patterns:    []string{"API Error: 401"},
+			wantError:   true,
+			wantPattern: "API Error: 401",
+			wantHelpCmd: "claude /status",
+			wantOutput:  "Failed to authenticate. API Error: 401 OAuth token has expired",
 		},
 	}
 
@@ -1626,7 +1635,7 @@ func TestClaudeExecutor_Run_OutcomeProvenanceMatrix(t *testing.T) {
 				var patternErr *PatternMatchError
 				require.ErrorAs(t, result.Error, &patternErr)
 				assert.Equal(t, errorPhrase, patternErr.Pattern)
-				assert.Equal(t, "claude /usage", patternErr.HelpCmd)
+				assert.Equal(t, "claude /status", patternErr.HelpCmd)
 			default:
 				t.Fatalf("unknown error kind %q", tc.wantKind)
 			}
