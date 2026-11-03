@@ -1,6 +1,7 @@
 ---
+name: ralphex-update
 description: Smart-merge updated ralphex defaults into customized prompts/agents
-allowed-tools: [Bash, Read, Write, Glob, AskUserQuestion]
+allowed-tools: Bash Read Write Glob AskUserQuestion
 ---
 
 # ralphex-update - Smart Prompt Merging
