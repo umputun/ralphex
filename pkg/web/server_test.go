@@ -832,6 +832,37 @@ func TestLoadPlanWithFallback(t *testing.T) {
 		assert.Equal(t, "Completed Plan", plan.Title)
 	})
 
+	t.Run("loads an in-place date rename before an archived copy", func(t *testing.T) {
+		tests := []struct {
+			name, original, renamed string
+			staleCompleted          bool
+		}{
+			{name: "dashed to compact", original: "2026-05-12-foo.md", renamed: "20260512-foo.md"},
+			{name: "compact to dashed", original: "20260512-foo.md", renamed: "2026-05-12-foo.md"},
+			{name: "live rename wins", original: "2026-05-12-foo.md", renamed: "20260512-foo.md", staleCompleted: true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				tmpDir := t.TempDir()
+				originalPath := filepath.Join(tmpDir, tt.original)
+				renamedPath := filepath.Join(tmpDir, tt.renamed)
+				require.NoError(t, os.WriteFile(originalPath, []byte("# Live Plan\n"), 0o600))
+				require.NoError(t, os.Rename(originalPath, renamedPath))
+				if tt.staleCompleted {
+					completedDir := filepath.Join(tmpDir, "completed")
+					require.NoError(t, os.MkdirAll(completedDir, 0o750))
+					for _, name := range []string{tt.original, tt.renamed} {
+						require.NoError(t, os.WriteFile(filepath.Join(completedDir, name), []byte("# Archived Plan\n"), 0o600))
+					}
+				}
+
+				p, err := loadPlanWithFallback(originalPath)
+				require.NoError(t, err)
+				assert.Equal(t, "Live Plan", p.Title)
+			})
+		}
+	})
+
 	t.Run("returns error when not found in either location", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		nonexistentPath := filepath.Join(tmpDir, "nonexistent.md")

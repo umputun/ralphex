@@ -19,9 +19,9 @@ func loadSessionPlan(planPath, sessionDir string) (*plan.Plan, error) {
 }
 
 // loadPlanWithFallback loads a plan from disk with completed/ directory fallback.
-// probes the original path, then completed/<basename>, then completed/<alt-basename>
-// with the date prefix swapped between YYYY-MM-DD and YYYYMMDD conventions to handle
-// plans renamed by an LLM-driven git mv.
+// probes the original path, then an in-place alternate-date basename, then completed/
+// with either basename. the live rename must win over a stale archived copy, matching
+// the processor's plan locator.
 // does not cache - each call reads from disk.
 func loadPlanWithFallback(path string) (*plan.Plan, error) {
 	p, err := plan.ParsePlanFile(path)
@@ -35,6 +35,16 @@ func loadPlanWithFallback(path string) (*plan.Plan, error) {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	attempted := []string{path}
+	altBase := plan.AltDateBasename(base)
+	if altBase != "" {
+		altPath := filepath.Join(dir, altBase)
+		attempted = append(attempted, altPath)
+		if p, err := plan.ParsePlanFile(altPath); err == nil {
+			return p, nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("load plan with fallback: %w", err)
+		}
+	}
 
 	completedPath := filepath.Join(dir, "completed", base)
 	attempted = append(attempted, completedPath)
@@ -44,7 +54,7 @@ func loadPlanWithFallback(path string) (*plan.Plan, error) {
 		return nil, fmt.Errorf("load plan with fallback: %w", err)
 	}
 
-	if altBase := plan.AltDateBasename(base); altBase != "" {
+	if altBase != "" {
 		altCompletedPath := filepath.Join(dir, "completed", altBase)
 		attempted = append(attempted, altCompletedPath)
 		if p, err := plan.ParsePlanFile(altCompletedPath); err == nil {
