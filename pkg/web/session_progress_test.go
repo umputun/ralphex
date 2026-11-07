@@ -721,6 +721,7 @@ func TestPhaseFromSection(t *testing.T) {
 		{"review loop", "review iteration 1", status.PhaseReview},
 		{"claude eval", "claude-eval", status.PhaseClaudeEval},
 		{"claude eval space", "claude eval", status.PhaseClaudeEval},
+		{"claude eval producer label", status.NewClaudeEvalSection().Label, status.PhaseClaudeEval},
 		{"unknown defaults to task", "unknown section", status.PhaseTask},
 	}
 

@@ -306,6 +306,7 @@ func TestTailer_PhaseFromSection(t *testing.T) {
 		{"codex section", "codex analysis", status.PhaseCodex},
 		{"claude-eval section", "claude-eval phase", status.PhaseClaudeEval},
 		{"claude eval section", "claude eval phase", status.PhaseClaudeEval},
+		{"claude eval producer label", status.NewClaudeEvalSection().Label, status.PhaseClaudeEval},
 		{"uppercase task", "TASK Phase", status.PhaseTask},
 	}
 
