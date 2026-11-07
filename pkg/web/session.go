@@ -52,8 +52,7 @@ func (r *allEventsReplayer) Put(message *sse.Message, topics []string) (*sse.Mes
 
 // Replay replays events. If LastEventID is empty, replays from ID "0" (all events).
 func (r *allEventsReplayer) Replay(subscription sse.Subscription) error {
-	// if no LastEventID, replay from the beginning by using ID "0"
-	// (our auto-generated IDs start at 1, so "0" means "replay everything")
+	// "0" is the placeholder's ID (see newAllEventsReplayer), so replaying after it sends every real event
 	if subscription.LastEventID.String() == "" {
 		subscription.LastEventID = sse.ID("0")
 	}
