@@ -107,6 +107,33 @@ func TestExternalReviewPhaseRunCodexFindings(t *testing.T) {
 	assert.Len(t, review.RunCalls(), 2)
 }
 
+// regression: the phase reset after eval left live lines codex while progress-file replay showed eval.
+func TestExternalReviewPhaseSetsCodexPhaseAtIterationHeader(t *testing.T) {
+	var holder *status.PhaseHolder
+	var externalPhases, reviewPhases []status.Phase
+	reviewResults := []executor.Result{{Output: "fixed"}, {Output: "done", Signal: status.CodexDone}}
+	review := &executorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
+		reviewPhases = append(reviewPhases, holder.Get())
+		return reviewResults[len(reviewPhases)-1]
+	}}
+	external := &executorMock{RunFunc: func(_ context.Context, _ string) executor.Result {
+		externalPhases = append(externalPhases, holder.Get())
+		return executor.Result{Output: "found issue"}
+	}}
+	phase, _ := externalReviewPhaseFromRunner(t, externalReviewPhaseTestOpts{
+		cfg: Config{MaxIterations: 50, CodexEnabled: true, AppConfig: testAppConfig(t)}, review: review, external: external,
+	})
+	holder = phase.phaseHolder
+	holder.Set(status.PhaseTask)
+
+	_, err := phase.Run(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, []status.Phase{status.PhaseCodex, status.PhaseCodex}, externalPhases)
+	assert.Equal(t, []status.Phase{status.PhaseClaudeEval, status.PhaseClaudeEval}, reviewPhases)
+	assert.Equal(t, status.PhaseClaudeEval, holder.Get())
+}
+
 func TestExternalReviewPhaseRunCustomSuccess(t *testing.T) {
 	review := newTaskPhaseMockExecutor([]executor.Result{{Output: "done", Signal: status.CodexDone}})
 	custom := &executor.CustomExecutor{Script: "/path/to/script.sh"}

@@ -208,6 +208,10 @@ func (p *ExternalReviewPhase) runIteration(ctx context.Context, opts externalRev
 		return externalReviewIterationResult{}, err
 	}
 
+	// phase changes only at section headers, so progress-file replay stays in step with live output
+	if p.phaseHolder != nil {
+		p.phaseHolder.Set(status.PhaseCodex)
+	}
 	p.log.PrintSection(p.section(opts.tool, opts.iteration))
 
 	reviewExecResult := p.runReviewTool(ctx, opts.tool, p.reviewPrompt(opts.tool, !opts.firstCompleted, opts.claudeResponse))
@@ -296,9 +300,6 @@ func (p *ExternalReviewPhase) runClaudeEvaluation(loopCtx, parent context.Contex
 	}
 	p.log.PrintSection(status.NewClaudeEvalSection())
 	result := p.policy.Run(loopCtx, p.review.Run, p.evalPrompt(tool, output), "claude")
-	if p.phaseHolder != nil {
-		p.phaseHolder.Set(status.PhaseCodex)
-	}
 
 	if result.Result.Error == nil {
 		return result, nil
