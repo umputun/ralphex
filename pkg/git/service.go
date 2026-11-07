@@ -542,7 +542,7 @@ func (s *Service) MovePlanToCompleted(planFile string) error {
 // A source that still exists returns done=false whatever sits in completed/, so a
 // same-basename collision reaches the move path and fails there rather than passing for
 // a successful archive.
-// Probe order mirrors resolvePlanFilePath in pkg/processor/prompts.go: the in-place
+// Probe order mirrors plan.CandidatePaths (pkg/plan/altdate.go): the in-place
 // alternate source is checked before any completed/ probe so a current renamed file
 // wins over a stale completed/ copy left from a prior run.
 func (s *Service) resolvePlanMoveTargets(planFile, completedDir string) (sourceFile, destPath string, done bool) {

@@ -1,6 +1,9 @@
 package plan
 
-import "regexp"
+import (
+	"path/filepath"
+	"regexp"
+)
 
 var (
 	dashedDatePattern  = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})-(.+\.md)$`)
@@ -19,4 +22,17 @@ func AltDateBasename(name string) string {
 		return d[0:4] + "-" + d[4:6] + "-" + d[6:8] + "-" + m[2]
 	}
 	return ""
+}
+
+// CandidatePaths returns the paths a plan may live at after an in-place date rename or an archive
+// move, in probe order: path itself, its alternate-date sibling, then completed/ with each
+// basename. The live rename precedes completed/ so a stale archived copy never shadows it.
+func CandidatePaths(path string) []string {
+	dir, base := filepath.Dir(path), filepath.Base(path)
+	altBase := AltDateBasename(base)
+	if altBase == "" {
+		return []string{path, filepath.Join(dir, "completed", base)}
+	}
+	return []string{path, filepath.Join(dir, altBase), filepath.Join(dir, "completed", base),
+		filepath.Join(dir, "completed", altBase)}
 }
