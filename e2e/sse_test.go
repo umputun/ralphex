@@ -3,6 +3,8 @@
 package e2e
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +262,46 @@ func TestPhaseFilter(t *testing.T) {
 
 	// verify all tab is active
 	waitForClass(t, allTab, "active")
+}
+
+func TestPhaseFilterCodexTabIncludesEval(t *testing.T) {
+	path := filepath.Join(testTmpDir, "progress-eval-filter.txt")
+	content := `# Ralphex Progress Log
+Plan: eval-filter-plan.md
+Branch: eval-filter
+Mode: review
+Started: 2026-01-22 13:00:00
+------------------------------------------------------------
+
+--- codex iteration 1 ---
+[26-01-22 13:00:01] codex found one issue
+
+--- claude evaluating codex findings ---
+[26-01-22 13:00:02] evaluating the codex finding
+
+--- review 1: critical/major ---
+[26-01-22 13:00:03] final review pass
+`
+	require.NoError(t, atomicWriteFile(path, []byte(content), 0o600))
+	t.Cleanup(func() { os.Remove(path) })
+
+	page := newPage(t)
+	navigateToDashboard(t, page)
+	clickSessionByName(t, page, "eval-filter-plan")
+	waitVisible(t, page, ".section-header[data-phase='claude-eval']")
+
+	codexTab := page.Locator(".phase-tab[data-phase='codex']")
+	require.NoError(t, codexTab.Click())
+	waitForClass(t, codexTab, "active")
+	waitVisible(t, page, ".section-header[data-phase='codex']")
+	waitVisible(t, page, ".section-header[data-phase='claude-eval']")
+	waitHidden(t, page, ".section-header[data-phase='review']")
+
+	reviewTab := page.Locator(".phase-tab[data-phase='review']")
+	require.NoError(t, reviewTab.Click())
+	waitForClass(t, reviewTab, "active")
+	waitVisible(t, page, ".section-header[data-phase='review']")
+	waitHidden(t, page, ".section-header[data-phase='claude-eval']")
 }
 
 func TestSearchFunctionality(t *testing.T) {

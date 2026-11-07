@@ -21,11 +21,28 @@ const DefaultReplayerSize = 10000
 // for first-time connections (no Last-Event-ID header).
 //
 // implementation note: FiniteReplayer assigns monotonically increasing integer IDs
-// as strings starting at "1". by setting LastEventID to "0" when empty, we effectively
-// request replay of all stored events. this depends on FiniteReplayer's internal
-// ID generation scheme - if the library changes this behavior, replay may break.
+// as strings starting at "0" and replays the events after the given ID. setting an
+// empty LastEventID to "0" requests all stored events only because
+// newAllEventsReplayer stores a placeholder that takes ID "0". this depends on
+// FiniteReplayer's internal ID generation scheme - if the library changes it,
+// replay may break.
 type allEventsReplayer struct {
 	inner *sse.FiniteReplayer
+}
+
+// replayOriginTopic carries the placeholder event; no client subscribes to it.
+const replayOriginTopic = "replay-origin"
+
+// newAllEventsReplayer creates a replayer holding count events.
+func newAllEventsReplayer(count int) (*allEventsReplayer, error) {
+	inner, err := sse.NewFiniteReplayer(count, true)
+	if err != nil {
+		return nil, fmt.Errorf("create finite replayer: %w", err)
+	}
+	if _, err := inner.Put(&sse.Message{}, []string{replayOriginTopic}); err != nil {
+		return nil, fmt.Errorf("store replay placeholder: %w", err)
+	}
+	return &allEventsReplayer{inner: inner}, nil
 }
 
 // Put delegates to the inner replayer.
@@ -35,8 +52,7 @@ func (r *allEventsReplayer) Put(message *sse.Message, topics []string) (*sse.Mes
 
 // Replay replays events. If LastEventID is empty, replays from ID "0" (all events).
 func (r *allEventsReplayer) Replay(subscription sse.Subscription) error {
-	// if no LastEventID, replay from the beginning by using ID "0"
-	// (our auto-generated IDs start at 1, so "0" means "replay everything")
+	// "0" is the placeholder's ID (see newAllEventsReplayer), so replaying after it sends every real event
 	if subscription.LastEventID.String() == "" {
 		subscription.LastEventID = sse.ID("0")
 	}
@@ -156,17 +172,16 @@ type Session struct {
 // the session starts with an SSE server configured for event replay.
 // metadata should be populated by calling ParseMetadata after creation.
 func NewSession(id, path string) *Session {
-	finiteReplayer, err := sse.NewFiniteReplayer(DefaultReplayerSize, true)
+	allReplayer, err := newAllEventsReplayer(DefaultReplayerSize)
 	if err != nil {
 		// FiniteReplayer only returns error for count < 2, which won't happen
 		log.Printf("[WARN] failed to create replayer: %v", err)
-		finiteReplayer = nil
 	}
 
-	// wrap in allEventsReplayer to replay all events on first connection
+	// replay all events on first connection
 	var replayer sse.Replayer
-	if finiteReplayer != nil {
-		replayer = &allEventsReplayer{inner: finiteReplayer}
+	if allReplayer != nil {
+		replayer = allReplayer
 	}
 
 	sseServer := &sse.Server{

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -883,11 +884,8 @@ Started: 2026-01-22 10:30:00
 
 func TestAllEventsReplayer_Replay(t *testing.T) {
 	t.Run("empty LastEventID is replaced with 0", func(t *testing.T) {
-		// create a FiniteReplayer and wrap it in allEventsReplayer
-		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		replayer, err := newAllEventsReplayer(100)
 		require.NoError(t, err)
-
-		replayer := &allEventsReplayer{inner: finiteReplayer}
 
 		// create a mock message writer to capture replayed messages
 		writer := &mockMessageWriter{}
@@ -905,10 +903,8 @@ func TestAllEventsReplayer_Replay(t *testing.T) {
 	})
 
 	t.Run("non-empty LastEventID passes through unchanged", func(t *testing.T) {
-		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		replayer, err := newAllEventsReplayer(100)
 		require.NoError(t, err)
-
-		replayer := &allEventsReplayer{inner: finiteReplayer}
 
 		// store some events first
 		msg := &sse.Message{}
@@ -929,10 +925,8 @@ func TestAllEventsReplayer_Replay(t *testing.T) {
 	})
 
 	t.Run("replayer Put delegation works correctly", func(t *testing.T) {
-		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		replayer, err := newAllEventsReplayer(100)
 		require.NoError(t, err)
-
-		replayer := &allEventsReplayer{inner: finiteReplayer}
 
 		// put should delegate to inner replayer
 		msg := &sse.Message{}
@@ -943,10 +937,8 @@ func TestAllEventsReplayer_Replay(t *testing.T) {
 	})
 
 	t.Run("replayer replays events to new clients", func(t *testing.T) {
-		finiteReplayer, err := sse.NewFiniteReplayer(100, true)
+		replayer, err := newAllEventsReplayer(100)
 		require.NoError(t, err)
-
-		replayer := &allEventsReplayer{inner: finiteReplayer}
 
 		// store multiple events
 		for i := 1; i <= 3; i++ {
@@ -968,8 +960,43 @@ func TestAllEventsReplayer_Replay(t *testing.T) {
 		require.NoError(t, err)
 
 		// verify events were replayed
-		assert.GreaterOrEqual(t, writer.messageCount, 0, "messages should be replayed")
+		assert.Equal(t, 3, writer.messageCount, "all stored messages should be replayed")
 	})
+
+	t.Run("replays full buffer after placeholder is evicted", func(t *testing.T) {
+		replayer, err := newAllEventsReplayer(3)
+		require.NoError(t, err)
+		for i := range 5 {
+			msg := &sse.Message{}
+			msg.AppendData(fmt.Sprintf("event %d", i))
+			_, putErr := replayer.Put(msg, []string{"events"})
+			require.NoError(t, putErr)
+		}
+
+		writer := &mockMessageWriter{}
+		require.NoError(t, replayer.Replay(sse.Subscription{Client: writer, LastEventID: sse.ID(""), Topics: []string{"events"}}))
+
+		assert.Equal(t, 3, writer.messageCount)
+	})
+}
+
+// regression: go-sse numbers auto ids from 0, so replaying "after 0" dropped each session's first event.
+func TestSession_ReplaysFirstEventToNewClient(t *testing.T) {
+	session := NewSession("replay-first", "/tmp/progress-replay-first.txt")
+	defer session.Close()
+	require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "first")))
+	require.NoError(t, session.Publish(NewOutputEvent(status.PhaseTask, "second")))
+
+	events, cleanup := subscribeSSEEvents(t, session)
+	defer cleanup()
+	got := drainChannel(events, 100*time.Millisecond)
+
+	require.Len(t, got, 2)
+	var first, second Event
+	require.NoError(t, json.Unmarshal([]byte(got[0]), &first))
+	require.NoError(t, json.Unmarshal([]byte(got[1]), &second))
+	assert.Equal(t, "first", first.Text)
+	assert.Equal(t, "second", second.Text)
 }
 
 // mockMessageWriter implements sse.MessageWriter for testing
