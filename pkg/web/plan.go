@@ -18,51 +18,20 @@ func loadSessionPlan(planPath, sessionDir string) (*plan.Plan, error) {
 	return loadPlanWithFallback(planPath)
 }
 
-// loadPlanWithFallback loads a plan from disk with completed/ directory fallback.
-// probes the original path, then an in-place alternate-date basename, then completed/
-// with either basename. the live rename must win over a stale archived copy, matching
-// the processor's plan locator.
+// loadPlanWithFallback loads the first readable plan among plan.CandidatePaths(path), the same
+// probe order the processor's plan locator uses. an error other than not-found stops the probe,
+// so an unreadable live plan is reported instead of being hidden behind an archived copy.
 // does not cache - each call reads from disk.
 func loadPlanWithFallback(path string) (*plan.Plan, error) {
-	p, err := plan.ParsePlanFile(path)
-	if err == nil {
-		return p, nil
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("load plan with fallback: %w", err)
-	}
-
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-	attempted := []string{path}
-	altBase := plan.AltDateBasename(base)
-	if altBase != "" {
-		altPath := filepath.Join(dir, altBase)
-		attempted = append(attempted, altPath)
-		if p, err := plan.ParsePlanFile(altPath); err == nil {
+	candidates := plan.CandidatePaths(path)
+	for _, c := range candidates {
+		p, err := plan.ParsePlanFile(c)
+		if err == nil {
 			return p, nil
-		} else if !errors.Is(err, fs.ErrNotExist) {
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("load plan with fallback: %w", err)
 		}
 	}
-
-	completedPath := filepath.Join(dir, "completed", base)
-	attempted = append(attempted, completedPath)
-	if p, err := plan.ParsePlanFile(completedPath); err == nil {
-		return p, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("load plan with fallback: %w", err)
-	}
-
-	if altBase != "" {
-		altCompletedPath := filepath.Join(dir, "completed", altBase)
-		attempted = append(attempted, altCompletedPath)
-		if p, err := plan.ParsePlanFile(altCompletedPath); err == nil {
-			return p, nil
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("load plan with fallback: %w", err)
-		}
-	}
-
-	return nil, fmt.Errorf("load plan with fallback: plan not found, attempted %v: %w", attempted, fs.ErrNotExist)
+	return nil, fmt.Errorf("load plan with fallback: plan not found, attempted %v: %w", candidates, fs.ErrNotExist)
 }
