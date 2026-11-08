@@ -106,6 +106,12 @@ type Session struct {
 	state    SessionState    // current state (active/completed)
 	tailer   *Tailer         // file tailer for reading new content (nil if not tailing)
 
+	// liveOutput is true for the in-process session registered by Dashboard.Start.
+	// its events are published directly by the BroadcastLogger, so a tailer must
+	// not run for it: reading the same progress file would publish every line twice.
+	// set once before registration; guarded by mu for readers on watcher goroutines.
+	liveOutput bool
+
 	// lastModified tracks the file's last modification time for change detection
 	lastModified time.Time
 
@@ -229,6 +235,32 @@ func (s *Session) GetState() SessionState {
 	return s.state
 }
 
+// markLiveOutput flags the session as fed directly by a BroadcastLogger.
+// called once by Dashboard.Start before the session is registered so that
+// discovery, reactivation, and start-tailing never attach a second event source.
+func (s *Session) markLiveOutput() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.liveOutput = true
+}
+
+// isLiveOutput reports whether the session's events come from a BroadcastLogger.
+func (s *Session) isLiveOutput() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.liveOutput
+}
+
+// clearLiveOutput removes the BroadcastLogger mark once the run it belonged to has
+// finished. the dashboard process can outlive the run (keepDashboardAlive) and later
+// observe another run of the same plan path: that run has no broadcast logger, so it
+// must be served by the ordinary discovery/tailer path again.
+func (s *Session) clearLiveOutput() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.liveOutput = false
+}
+
 // GetTailer returns the session's tailer thread-safely.
 func (s *Session) GetTailer() *Tailer {
 	s.mu.RLock()
@@ -308,6 +340,9 @@ func (s *Session) resetForNewRun() {
 	s.lastTask = 0
 	s.loaded = false
 	s.diffStats = nil
+	// a new run on the same progress file is not fed by the previous run's
+	// BroadcastLogger, so hand it back to the discovery/tailer path.
+	s.liveOutput = false
 }
 
 // tailerStartMode selects how startTailerLocked begins tailing.
@@ -384,6 +419,10 @@ func (s *Session) StartTailing(fromStart bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.liveOutput {
+		return nil // events already stream live through the BroadcastLogger
+	}
+
 	if s.stopping {
 		return nil // StopTailing mid-flight; caller retries on next event
 	}
@@ -421,6 +460,10 @@ func (s *Session) StartTailing(fromStart bool) error {
 func (s *Session) Reactivate() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.liveOutput {
+		return nil // events already stream live through the BroadcastLogger
+	}
 
 	if s.stopping {
 		return nil // StopTailing mid-flight; watcher retries on next Write event

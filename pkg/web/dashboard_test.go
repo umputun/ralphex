@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,6 +300,66 @@ func TestDashboard_PrintWatchInfo(t *testing.T) {
 
 	// just verify it doesn't panic
 	d.printWatchInfo([]string{"/tmp", "/var"})
+}
+
+func TestDashboard_Start_MultiSessionDoesNotDuplicateLiveEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	colors := testColors()
+	holder := &status.PhaseHolder{}
+	baseLog, err := progress.NewLogger(progress.Config{
+		PlanFile: "test.md",
+		Mode:     "full",
+		Branch:   "main",
+		NoColor:  true,
+	}, colors, holder)
+	require.NoError(t, err)
+	defer baseLog.Close()
+
+	cfg := DashboardConfig{
+		BaseLog:   baseLog,
+		Port:      0, // use random port
+		PlanFile:  "test.md",
+		Branch:    "main",
+		WatchDirs: []string{tmpDir}, // multi-session mode
+		Colors:    colors,
+	}
+
+	d := NewDashboard(cfg, holder)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	broadcastLog, err := d.Start(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, broadcastLog)
+
+	// the watcher discovers the progress file of the live session. a tailer started
+	// for it would republish every line the BroadcastLogger already streamed.
+	sess := broadcastLog.session
+	require.Eventually(t, func() bool {
+		return sess.GetState() == SessionStateActive
+	}, 2*time.Second, 10*time.Millisecond, "watcher should discover the live progress file")
+	time.Sleep(200 * time.Millisecond) // allow an erroneous tailer to start
+	assert.False(t, sess.IsTailing(), "live session must not be tailed; file events would duplicate live events")
+
+	events, cleanup := subscribeSSEEvents(t, sess)
+	defer cleanup()
+	_ = drainChannel(events, 200*time.Millisecond)
+
+	broadcastLog.Print("unique live line %d", 7)
+	delivered := drainChannel(events, 500*time.Millisecond)
+
+	var matches int
+	for _, ev := range delivered {
+		if strings.Contains(ev, "unique live line 7") {
+			matches++
+		}
+	}
+	assert.Equal(t, 1, matches, "live line must reach SSE exactly once")
 }
 
 func TestConnectHost(t *testing.T) {

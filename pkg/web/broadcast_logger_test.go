@@ -402,6 +402,17 @@ func TestBroadcastLogger_LogDraftReview_ReviseWithFeedback(t *testing.T) {
 	assert.Equal(t, "Please add more details to Task 3", mockLogger.LogDraftReviewCalls()[0].Feedback)
 }
 
+func TestBroadcastLogger_LogDiffStats(t *testing.T) {
+	session := NewSession("test", "/tmp/test.txt")
+	defer session.Close()
+
+	bl := NewBroadcastLogger(&mocks.LoggerMock{}, session, &status.PhaseHolder{})
+	bl.LogDiffStats(4, 12, 3)
+
+	// the live session has no tailer, so the wrapper itself must record the stats
+	require.Equal(t, &DiffStats{Files: 4, Additions: 12, Deletions: 3}, session.GetDiffStats())
+}
+
 func TestExtractTerminalSignal(t *testing.T) {
 	cases := []struct {
 		name   string

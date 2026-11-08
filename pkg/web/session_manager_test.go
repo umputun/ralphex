@@ -929,6 +929,95 @@ func TestSessionManager_RefreshStates(t *testing.T) {
 	})
 }
 
+func TestSessionManager_LiveSessionNotTailedAndStateRefreshed(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	holder := &status.PhaseHolder{}
+	logger, err := progress.NewLogger(progress.Config{PlanFile: "live.md", Mode: "full", NoColor: true}, testColors(), holder)
+	require.NoError(t, err)
+	loggerClosed := false
+	t.Cleanup(func() {
+		if !loggerClosed {
+			_ = logger.Close()
+		}
+	})
+
+	session := NewSession(sessionIDFromPath(logger.Path()), logger.Path())
+	session.markLiveOutput()
+
+	m := NewSessionManager()
+	t.Cleanup(m.Close)
+	m.Register(session)
+
+	// discovery sees the file locked by this process, but must not attach a tailer:
+	// the BroadcastLogger is already publishing the live events for this session.
+	_, err = m.Discover(filepath.Dir(logger.Path()))
+	require.NoError(t, err)
+	assert.Equal(t, SessionStateActive, session.GetState())
+	assert.False(t, session.IsTailing())
+
+	// once the run releases the lock, the periodic refresh must mark it completed.
+	require.NoError(t, logger.Close())
+	loggerClosed = true
+	m.RefreshStates()
+	assert.Equal(t, SessionStateCompleted, session.GetState())
+	assert.False(t, session.isLiveOutput(), "a finished run must clear the broadcast mark")
+}
+
+func TestSessionManager_LiveSessionAllowsNextRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldWd, wdErr := os.Getwd()
+	require.NoError(t, wdErr)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	holder := &status.PhaseHolder{}
+	logger, err := progress.NewLogger(progress.Config{PlanFile: "next-run.md", Mode: "full", NoColor: true}, testColors(), holder)
+	require.NoError(t, err)
+	path := logger.Path()
+
+	session := NewSession(sessionIDFromPath(path), path)
+	session.SetState(SessionStateActive)
+	session.markLiveOutput()
+
+	m := NewSessionManager()
+	t.Cleanup(m.Close)
+	m.Register(session)
+
+	_, err = m.Discover(filepath.Dir(path))
+	require.NoError(t, err)
+	require.False(t, session.IsTailing())
+
+	// the dashboard process outlives the run; once the live run releases the lock,
+	// the refresh clears the broadcast mark because no logger feeds this session anymore.
+	require.NoError(t, logger.Close())
+	m.RefreshStates()
+	require.Equal(t, SessionStateCompleted, session.GetState())
+	require.False(t, session.isLiveOutput())
+
+	// a later run of the same plan path is a separate process with no broadcast logger;
+	// discovery must serve it through the tailer again.
+	logger2, err := progress.NewLogger(progress.Config{PlanFile: "next-run.md", Mode: "full", NoColor: true}, testColors(), holder)
+	require.NoError(t, err)
+	logger2Closed := false
+	t.Cleanup(func() {
+		if !logger2Closed {
+			_ = logger2.Close()
+		}
+	})
+
+	_, err = m.Discover(filepath.Dir(path))
+	require.NoError(t, err)
+	assert.True(t, session.IsTailing(), "a later run must be tailed after the live mark is cleared")
+
+	require.NoError(t, logger2.Close())
+	logger2Closed = true
+}
+
 func testColors() *progress.Colors {
 	return progress.NewColors(config.ColorConfig{
 		Task:       "0,255,0",
