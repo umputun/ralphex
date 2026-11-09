@@ -302,6 +302,7 @@ func TestDashboard_PrintWatchInfo(t *testing.T) {
 	d.printWatchInfo([]string{"/tmp", "/var"})
 }
 
+// regression: watcher discovery tailed the live session's own file and published every line twice
 func TestDashboard_Start_MultiSessionDoesNotDuplicateLiveEvents(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldWd, wdErr := os.Getwd()
@@ -322,10 +323,10 @@ func TestDashboard_Start_MultiSessionDoesNotDuplicateLiveEvents(t *testing.T) {
 
 	cfg := DashboardConfig{
 		BaseLog:   baseLog,
-		Port:      0, // use random port
+		Port:      0,
 		PlanFile:  "test.md",
 		Branch:    "main",
-		WatchDirs: []string{tmpDir}, // multi-session mode
+		WatchDirs: []string{tmpDir},
 		Colors:    colors,
 	}
 
@@ -337,10 +338,6 @@ func TestDashboard_Start_MultiSessionDoesNotDuplicateLiveEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, broadcastLog)
 
-	// the watcher discovers the progress file of the live session. a tailer started
-	// for it would republish every line the BroadcastLogger already streamed. wait on
-	// StartTime, which only discovery sets: Start already marks the session active, so
-	// waiting on the state alone returns before discovery has run.
 	sess := broadcastLog.session
 	require.Eventually(t, func() bool {
 		return !sess.GetMetadata().StartTime.IsZero()

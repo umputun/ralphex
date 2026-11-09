@@ -520,9 +520,7 @@ func buildNotifyResult(req executePlanRequest, branch, elapsed string, stats git
 func displayStats(req executePlanRequest, baseLog *progress.Logger, runnerLog processor.Logger, stats git.DiffStats, elapsed, branch string,
 	planMoved bool, planMoveErr error) {
 	if stats.Files > 0 {
-		// prefer the runner logger so a --serve dashboard gets the line as well:
-		// the progress logger writes it to the file only, and a live session has no
-		// tailer to read it back.
+		// under --serve the runner logger is the BroadcastLogger, which also publishes the line
 		if w, ok := runnerLog.(interface{ LogDiffStats(int, int, int) }); ok {
 			w.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
 		} else {
@@ -991,9 +989,7 @@ func archivePlan(req executePlanRequest, log processor.Logger) (moved bool, err 
 	}
 
 	if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
-		// the runner logger, not the progress logger: under --serve the session is fed by
-		// the BroadcastLogger and has no tailer to read the WARN back from the file, so the
-		// warning has to go through the wrapper to reach the dashboard.
+		// under --serve the runner logger is the BroadcastLogger, which also publishes the warning
 		if w, ok := log.(web.WarnWriter); ok {
 			w.Warn("failed to move plan to completed: %v", moveErr)
 		} else {

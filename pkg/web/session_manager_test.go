@@ -954,14 +954,11 @@ func TestSessionManager_LiveSessionNotTailedAndStateRefreshed(t *testing.T) {
 	t.Cleanup(m.Close)
 	m.Register(session)
 
-	// discovery sees the file locked by this process, but must not attach a tailer:
-	// the BroadcastLogger is already publishing the live events for this session.
 	_, err = m.Discover(filepath.Dir(logger.Path()))
 	require.NoError(t, err)
 	assert.Equal(t, SessionStateActive, session.GetState())
 	assert.False(t, session.IsTailing())
 
-	// once the run releases the lock, the periodic refresh must mark it completed.
 	require.NoError(t, logger.Close())
 	loggerClosed = true
 	m.RefreshStates()
@@ -993,15 +990,11 @@ func TestSessionManager_LiveSessionAllowsNextRun(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, session.IsTailing())
 
-	// the dashboard process outlives the run; once the live run releases the lock,
-	// the refresh clears the broadcast mark because no logger feeds this session anymore.
 	require.NoError(t, logger.Close())
 	m.RefreshStates()
 	require.Equal(t, SessionStateCompleted, session.GetState())
 	require.False(t, session.isLiveOutput())
 
-	// a later run of the same plan path is a separate process with no broadcast logger;
-	// discovery must serve it through the tailer again.
 	logger2, err := progress.NewLogger(progress.Config{PlanFile: "next-run.md", Mode: "full", NoColor: true}, testColors(), holder)
 	require.NoError(t, err)
 	logger2Closed := false
@@ -1019,6 +1012,7 @@ func TestSessionManager_LiveSessionAllowsNextRun(t *testing.T) {
 	logger2Closed = true
 }
 
+// regression: a finished live session was replayed from its file on the next discovery of the dir
 func TestSessionManager_LiveSessionDoesNotReplayFinishedFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldWd, wdErr := os.Getwd()
@@ -1039,11 +1033,9 @@ func TestSessionManager_LiveSessionDoesNotReplayFinishedFile(t *testing.T) {
 	t.Cleanup(m.Close)
 	m.Register(session)
 
-	// the line a live dashboard sees comes from the BroadcastLogger, not from the file
 	bl := NewBroadcastLogger(logger, session, holder)
 	bl.Print("unique live line")
 
-	// countEvents counts SSE events carrying the live line under test.
 	countEvents := func(raw []string) int {
 		var matched int
 		for _, payload := range raw {
@@ -1060,15 +1052,11 @@ func TestSessionManager_LiveSessionDoesNotReplayFinishedFile(t *testing.T) {
 	defer cleanup()
 	require.Equal(t, 1, countEvents(drainChannel(events, 300*time.Millisecond)))
 
-	// the run ends while the live mark is still set: discovery must not load the file,
-	// even though this session never went through the loader (the !isLiveOutput gate).
 	require.NoError(t, logger.Close())
 	_, err = m.Discover(filepath.Dir(path))
 	require.NoError(t, err)
 	assert.Equal(t, 0, countEvents(drainChannel(events, 300*time.Millisecond)))
 
-	// the refresh finishes the live run; the file must now count as loaded, otherwise the
-	// next discovery replays every line the logger already published.
 	m.RefreshStates()
 	require.Equal(t, SessionStateCompleted, session.GetState())
 	require.True(t, session.IsLoaded())
@@ -1078,8 +1066,6 @@ func TestSessionManager_LiveSessionDoesNotReplayFinishedFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, countEvents(drainChannel(events, 300*time.Millisecond)))
 
-	// another run writing its progress file into the same directory (parallel --worktree)
-	// makes the watcher rescan the directory; this session must stay loaded.
 	createProgressFile(t, filepath.Join(filepath.Dir(path), "progress-other.txt"), "other.md", "main", "full")
 	_, err = m.Discover(filepath.Dir(path))
 	require.NoError(t, err)
@@ -1105,7 +1091,6 @@ func TestSessionManager_LiveSessionRestartIsTailed(t *testing.T) {
 	t.Cleanup(m.Close)
 	m.Register(session)
 
-	// the live run is discovered but never tailed, and the loader gate stays shut
 	_, err = m.Discover(filepath.Dir(path))
 	require.NoError(t, err)
 	require.False(t, session.IsTailing())
@@ -1115,9 +1100,6 @@ func TestSessionManager_LiveSessionRestartIsTailed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, SessionStateCompleted, session.GetState())
 
-	// the next run rewrites the same progress file. moving the stored Started: back makes
-	// discovery see a restart; resetForNewRun alone has to clear the live mark here, since
-	// RefreshStates is deliberately not called.
 	meta := session.GetMetadata()
 	meta.StartTime = meta.StartTime.Add(-time.Hour)
 	session.SetMetadata(meta)

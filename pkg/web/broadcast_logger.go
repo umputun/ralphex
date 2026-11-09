@@ -158,9 +158,6 @@ func (b *BroadcastLogger) LogDraftReview(action, feedback string) {
 }
 
 // Warn records a warning in the wrapped logger and publishes it as a warn event.
-// the progress logger writes its WARN line to the file only; a watch-mode dashboard
-// reads it back through the tailer, but a live session has no tailer by design, so
-// without this forward the warning would never reach a --serve dashboard.
 func (b *BroadcastLogger) Warn(format string, args ...any) {
 	if w, ok := b.inner.(WarnWriter); ok {
 		w.Warn(format, args...)
@@ -168,9 +165,8 @@ func (b *BroadcastLogger) Warn(format string, args ...any) {
 	b.broadcast(NewWarnEvent(b.holder.Get(), "WARN: "+formatText(format, args...)))
 }
 
-// LogDiffStats records completion diff stats in the wrapped logger and publishes the
-// same line for the dashboard. the progress logger writes this line to the file only,
-// so a live session (which has no tailer by design) would otherwise never see it.
+// LogDiffStats records completion diff stats in the wrapped logger and the session, and
+// publishes the DIFFSTATS line for the dashboard.
 func (b *BroadcastLogger) LogDiffStats(files, additions, deletions int) {
 	if w, ok := b.inner.(DiffStatsWriter); ok {
 		w.LogDiffStats(files, additions, deletions)
