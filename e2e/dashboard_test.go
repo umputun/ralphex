@@ -448,7 +448,7 @@ func TestScrollToBottomButton(t *testing.T) {
 	}`, nil)
 	require.NoError(t, err)
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.(map[string]any)
 	require.True(t, ok, "expected map from JavaScript evaluation")
 
 	exists, ok := resultMap["exists"].(bool)
@@ -497,7 +497,7 @@ func TestSearchFiltering(t *testing.T) {
 
 // createSessionWithPlan creates a progress file that references a specific plan.
 // the plan file may or may not exist.
-func createSessionWithPlan(t *testing.T, sessionName, planName string) string {
+func createSessionWithPlan(t *testing.T, sessionName, planName string) {
 	t.Helper()
 	filename := "progress-" + sessionName + ".txt"
 	path := filepath.Join(testTmpDir, filename)
@@ -517,10 +517,8 @@ Started: 2026-01-22 12:00:00
 	require.NoError(t, err, "create session progress file")
 
 	t.Cleanup(func() {
-		os.Remove(path)
+		_ = os.Remove(path)
 	})
-
-	return filename
 }
 
 // TestPlanParsingEdgeCases tests graceful handling of missing and malformed plans.
