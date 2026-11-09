@@ -76,9 +76,6 @@ func (d *Dashboard) Start(ctx context.Context) (*BroadcastLogger, error) {
 	// the run starts now, so the card is active even before watcher discovery
 	// (which only happens when a watch dir covers the project).
 	session.SetState(SessionStateActive)
-	// events for this session come from the BroadcastLogger, not from a file tailer.
-	// without the mark, watcher discovery would start a tailer on the same progress
-	// file and publish every live line a second time.
 	session.markLiveOutput()
 	broadcastLog := NewBroadcastLogger(d.baseLog, session, d.holder)
 

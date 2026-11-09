@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +20,7 @@ import (
 	flags "github.com/jessevdk/go-flags"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tmaxmax/go-sse"
 
 	"github.com/umputun/ralphex/pkg/config"
 	"github.com/umputun/ralphex/pkg/git"
@@ -2026,8 +2030,6 @@ func TestArchivePlan(t *testing.T) {
 
 		session := web.NewSession("archive-warn", log.Path())
 		defer session.Close()
-		// under --serve the run logs through the wrapper, and the live session has no
-		// tailer: the warning must still reach the progress file through it.
 		bl := web.NewBroadcastLogger(log, session, &status.PhaseHolder{})
 
 		moved, err := archivePlan(req, bl)
@@ -2037,6 +2039,15 @@ func TestArchivePlan(t *testing.T) {
 		progressFile, readErr := os.ReadFile(log.Path())
 		require.NoError(t, readErr)
 		assert.Contains(t, string(progressFile), "WARN: failed to move plan to completed")
+
+		var warns []web.Event
+		for _, e := range replayedSessionEvents(t, session) {
+			if e.Type == web.EventTypeWarn {
+				warns = append(warns, e)
+			}
+		}
+		require.Len(t, warns, 1)
+		assert.Contains(t, warns[0].Text, "WARN: failed to move plan to completed")
 	})
 
 	t.Run("successful_move_writes_no_warning", func(t *testing.T) {
@@ -2061,6 +2072,35 @@ func TestArchivePlan(t *testing.T) {
 		assert.False(t, moved)
 		assert.FileExists(t, req.PlanFile)
 	})
+}
+
+func replayedSessionEvents(t *testing.T, session *web.Session) []web.Event {
+	t.Helper()
+	ts := httptest.NewServer(session.SSE)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, http.NoBody)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	var events []web.Event
+	for ev, readErr := range sse.Read(resp.Body, nil) {
+		if readErr != nil {
+			break
+		}
+		if ev.Data == "" {
+			continue
+		}
+		var e web.Event
+		require.NoError(t, json.Unmarshal([]byte(ev.Data), &e))
+		events = append(events, e)
+	}
+	return events
 }
 
 func TestShouldMovePlan(t *testing.T) {
@@ -3030,12 +3070,8 @@ func TestDisplayStats(t *testing.T) {
 		req := executePlanRequest{Colors: colors}
 		displayStats(req, baseLog, bl, git.DiffStats{Files: 2, Additions: 3, Deletions: 1}, "1s", "main", false, nil)
 
-		// a live dashboard session has no tailer to read the DIFFSTATS line back,
-		// so the stats must be recorded through the broadcast logger.
 		require.Equal(t, &web.DiffStats{Files: 2, Additions: 3, Deletions: 1}, session.GetDiffStats())
 
-		// under --serve the broadcast wrapper is also the only path to the progress file,
-		// so the line must still land there through the wrapped progress logger.
 		progressFile, readErr := os.ReadFile(baseLog.Path())
 		require.NoError(t, readErr)
 		assert.Contains(t, string(progressFile), "DIFFSTATS: files=2 additions=3 deletions=1")

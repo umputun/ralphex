@@ -235,9 +235,7 @@ func (s *Session) GetState() SessionState {
 	return s.state
 }
 
-// markLiveOutput flags the session as fed directly by a BroadcastLogger.
-// called once by Dashboard.Start before the session is registered so that
-// discovery, reactivation, and start-tailing never attach a second event source.
+// markLiveOutput flags the session as fed by a BroadcastLogger; called before registration.
 func (s *Session) markLiveOutput() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -251,22 +249,11 @@ func (s *Session) isLiveOutput() bool {
 	return s.liveOutput
 }
 
-// finishLiveOutput removes the BroadcastLogger mark once the run it belonged to has
-// finished, and marks the session loaded in the same locked section. the dashboard
-// process can outlive the run (keepDashboardAlive) and later observe another run of the
-// same plan path: that run has no broadcast logger, so it must be served by the ordinary
-// discovery/tailer path again.
-//
-// the loaded mark is what keeps the finished file from being replayed: its lines were
-// published by the BroadcastLogger, never loaded from the file, so the loader gate in
-// updateSession would otherwise read the whole file into the same session on the next
-// discovery. lastOffset deliberately stays 0 - a rerun started in the same second
-// rewrites the file without a StartTime change, and an offset left at the old file size
-// would make that run resume mid-stream.
-//
-// a session that was tailed rather than fed by a BroadcastLogger is left alone: its
-// tailer captured its own offset, and updateSession's loader gate already decides
-// whether anything is still owed to it.
+// finishLiveOutput hands a finished live session back to the discovery/tailer path.
+// it marks the session loaded under the same lock, because the BroadcastLogger already
+// published the file's lines and the loader would read them in again. lastOffset stays 0:
+// a rerun started in the same second keeps the same Started: header and would otherwise
+// resume mid-stream. tailed sessions are left alone.
 func (s *Session) finishLiveOutput() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -356,8 +343,7 @@ func (s *Session) resetForNewRun() {
 	s.lastTask = 0
 	s.loaded = false
 	s.diffStats = nil
-	// a new run on the same progress file is not fed by the previous run's
-	// BroadcastLogger, so hand it back to the discovery/tailer path.
+	// no BroadcastLogger feeds a new run on the same file
 	s.liveOutput = false
 }
 
