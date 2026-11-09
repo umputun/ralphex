@@ -313,9 +313,8 @@ func (p *pageImpl) URL() string {
 
 func (p *pageImpl) Unroute(url any, handlers ...routeHandler) error {
 	p.Lock()
-	defer p.Unlock()
-
 	removed, remaining, err := unroute(p.routes, url, handlers...)
+	p.Unlock()
 	if err != nil {
 		return err
 	}
@@ -323,7 +322,9 @@ func (p *pageImpl) Unroute(url any, handlers ...routeHandler) error {
 }
 
 func (p *pageImpl) unrouteInternal(removed []*routeHandlerEntry, remaining []*routeHandlerEntry, behavior *UnrouteBehavior) error {
+	p.Lock()
 	p.routes = remaining
+	p.Unlock()
 	err := p.updateInterceptionPatterns()
 	if err != nil {
 		return err
@@ -356,12 +357,16 @@ func (p *pageImpl) UnrouteAll(options ...PageUnrouteAllOptions) error {
 		behavior = options[0].Behavior
 	}
 	p.Lock()
-	defer p.Unlock()
+	removed := p.routes
+	p.Unlock()
 	defer p.disposeHarRouters()
-	return p.unrouteInternal(p.routes, []*routeHandlerEntry{}, behavior)
+	return p.unrouteInternal(removed, []*routeHandlerEntry{}, behavior)
 }
 
-func (p *pageImpl) Content() (string, error) {
+func (p *pageImpl) Content(options ...PageContentOptions) (string, error) {
+	if len(options) == 1 {
+		return p.mainFrame.Content(FrameContentOptions(options[0]))
+	}
 	return p.mainFrame.Content()
 }
 
@@ -799,8 +804,8 @@ func (p *pageImpl) ExpectWorker(cb func() error, options ...PageExpectWorkerOpti
 
 func (p *pageImpl) Route(url any, handler routeHandler, times ...int) error {
 	p.Lock()
-	defer p.Unlock()
 	p.routes = slices.Insert(p.routes, 0, newRouteHandlerEntry(newURLMatcher(url, p.browserContext.options.BaseURL), handler, times...))
+	p.Unlock()
 	return p.updateInterceptionPatterns()
 }
 
@@ -1028,6 +1033,7 @@ func newPage(parent *channelOwner, objectType string, guid string, initializer m
 	bt.setEventSubscriptionMapping(map[string]string{
 		"console":         "console",
 		"dialog":          "dialog",
+		"dialogclosed":    "dialogClosed",
 		"request":         "request",
 		"response":        "response",
 		"requestfinished": "requestFinished",
@@ -1099,16 +1105,20 @@ func (p *pageImpl) onRoute(route *routeImpl) {
 	p.Unlock()
 
 	checkInterceptionIfNeeded := func() {
+		// Do not hold the page mutex across the protocol round-trip; dispatch
+		// may need to run other handlers before the reply can be delivered.
 		p.Lock()
-		defer p.Unlock()
-		if len(p.routes) == 0 {
-			_, err := p.connection.WrapAPICall(func() (any, error) {
-				err := p.updateInterceptionPatterns()
-				return nil, err
-			}, true)
-			if err != nil {
-				logger.Error("could not update interception patterns", "error", err)
-			}
+		empty := len(p.routes) == 0
+		p.Unlock()
+		if !empty {
+			return
+		}
+		_, err := p.connection.WrapAPICall(func() (any, error) {
+			err := p.updateInterceptionPatterns()
+			return nil, err
+		}, true)
+		if err != nil {
+			logger.Error("could not update interception patterns", "error", err)
 		}
 	}
 
@@ -1123,15 +1133,18 @@ func (p *pageImpl) onRoute(route *routeImpl) {
 		if !handlerEntry.Matches(url) {
 			continue
 		}
-		if !slices.ContainsFunc(p.routes, func(entry *routeHandlerEntry) bool {
+		p.Lock()
+		stillListed := slices.ContainsFunc(p.routes, func(entry *routeHandlerEntry) bool {
 			return entry == handlerEntry
-		}) {
-			continue
-		}
-		if handlerEntry.WillExceed() {
+		})
+		if stillListed && handlerEntry.WillExceed() {
 			p.routes = slices.DeleteFunc(p.routes, func(rhe *routeHandlerEntry) bool {
 				return rhe == handlerEntry
 			})
+		}
+		p.Unlock()
+		if !stillListed {
+			continue
 		}
 		handled := handlerEntry.Handle(route)
 		checkInterceptionIfNeeded()
@@ -1144,7 +1157,9 @@ func (p *pageImpl) onRoute(route *routeImpl) {
 }
 
 func (p *pageImpl) updateInterceptionPatterns() error {
+	p.Lock()
 	patterns := prepareInterceptionPatterns(p.routes)
+	p.Unlock()
 	_, err := p.channel.Send("setNetworkInterceptionPatterns", map[string]any{
 		"patterns": patterns,
 	})
@@ -1235,6 +1250,10 @@ func (p *pageImpl) TextContent(selector string, options ...PageTextContentOption
 		return p.mainFrame.TextContent(selector, FrameTextContentOptions(options[0]))
 	}
 	return p.mainFrame.TextContent(selector)
+}
+
+func (p *pageImpl) WebMCP() WebMCP {
+	return p.mainFrame.WebMCP()
 }
 
 func (p *pageImpl) Video() Video {
@@ -1421,6 +1440,10 @@ func (p *pageImpl) GetByPlaceholder(text any, options ...PageGetByPlaceholderOpt
 	return p.Locator(selector)
 }
 
+func (p *pageImpl) GetByRef(ref string) Locator {
+	return p.Locator("aria-ref=" + ref)
+}
+
 func (p *pageImpl) GetByRole(role AriaRole, options ...PageGetByRoleOptions) Locator {
 	if len(options) == 1 {
 		selector, err := getByRoleSelector(role, LocatorGetByRoleOptions(options[0]))
@@ -1472,8 +1495,8 @@ func (p *pageImpl) GetByTitle(text any, options ...PageGetByTitleOptions) Locato
 	return p.Locator(selector)
 }
 
-func (p *pageImpl) FrameLocator(selector string) FrameLocator {
-	return p.mainFrame.FrameLocator(selector)
+func (p *pageImpl) FrameLocator(selector ...string) FrameLocator {
+	return p.mainFrame.FrameLocator(selector...)
 }
 
 func (p *pageImpl) OnClose(fn func(Page)) {
@@ -1490,6 +1513,10 @@ func (p *pageImpl) OnCrash(fn func(Page)) {
 
 func (p *pageImpl) OnDialog(fn func(Dialog)) {
 	p.On("dialog", fn)
+}
+
+func (p *pageImpl) OnDialogClosed(fn func(Dialog)) {
+	p.On("dialogclosed", fn)
 }
 
 func (p *pageImpl) OnDOMContentLoaded(fn func(Page)) {

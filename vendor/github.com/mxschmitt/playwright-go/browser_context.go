@@ -143,51 +143,40 @@ func (b *browserContextImpl) AddCookies(cookies []OptionalCookie) error {
 func (b *browserContextImpl) ClearCookies(options ...BrowserContextClearCookiesOptions) error {
 	params := map[string]any{}
 	if len(options) == 1 {
-		if options[0].Domain != nil {
-			switch t := options[0].Domain.(type) {
-			case string:
-				params["domain"] = t
-			case *string:
-				params["domain"] = t
-			case *regexp.Regexp:
-				pattern, flag := convertRegexp(t)
-				params["domainRegexSource"] = pattern
-				params["domainRegexFlags"] = flag
-			default:
-				return errors.New("invalid type for domain, expected string or *regexp.Regexp")
-			}
-		}
-		if options[0].Name != nil {
-			switch t := options[0].Name.(type) {
-			case string:
-				params["name"] = t
-			case *string:
-				params["name"] = t
-			case *regexp.Regexp:
-				pattern, flag := convertRegexp(t)
-				params["nameRegexSource"] = pattern
-				params["nameRegexFlags"] = flag
-			default:
-				return errors.New("invalid type for name, expected string or *regexp.Regexp")
-			}
-		}
-		if options[0].Path != nil {
-			switch t := options[0].Path.(type) {
-			case string:
-				params["path"] = t
-			case *string:
-				params["path"] = t
-			case *regexp.Regexp:
-				pattern, flag := convertRegexp(t)
-				params["pathRegexSource"] = pattern
-				params["pathRegexFlags"] = flag
-			default:
-				return errors.New("invalid type for path, expected string or *regexp.Regexp")
-			}
+		var err error
+		if params, err = toClearCookiesParams(options[0].Name, options[0].Domain, options[0].Path); err != nil {
+			return err
 		}
 	}
 	_, err := b.channel.Send("clearCookies", params)
 	return err
+}
+
+// toClearCookiesParams converts the string or *regexp.Regexp cookie filters of
+// ClearCookies into protocol parameters.
+func toClearCookiesParams(name, domain, path any) (map[string]any, error) {
+	params := map[string]any{}
+	for _, filter := range []struct {
+		key   string
+		value any
+	}{{"name", name}, {"domain", domain}, {"path", path}} {
+		if filter.value == nil {
+			continue
+		}
+		switch t := filter.value.(type) {
+		case string:
+			params[filter.key] = t
+		case *string:
+			params[filter.key] = t
+		case *regexp.Regexp:
+			pattern, flag := convertRegexp(t)
+			params[filter.key+"RegexSource"] = pattern
+			params[filter.key+"RegexFlags"] = flag
+		default:
+			return nil, fmt.Errorf("invalid type for %s, expected string or *regexp.Regexp", filter.key)
+		}
+	}
+	return params, nil
 }
 
 func (b *browserContextImpl) GrantPermissions(permissions []string, options ...BrowserContextGrantPermissionsOptions) error {
@@ -273,13 +262,15 @@ func (b *browserContextImpl) ExposeFunction(name string, binding ExposedFunction
 
 func (b *browserContextImpl) Route(url any, handler routeHandler, times ...int) error {
 	b.Lock()
-	defer b.Unlock()
 	b.routes = slices.Insert(b.routes, 0, newRouteHandlerEntry(newURLMatcher(url, b.options.BaseURL), handler, times...))
+	b.Unlock()
 	return b.updateInterceptionPatterns()
 }
 
 func (b *browserContextImpl) Unroute(url any, handlers ...routeHandler) error {
+	b.Lock()
 	removed, remaining, err := unroute(b.routes, url, handlers...)
+	b.Unlock()
 	if err != nil {
 		return err
 	}
@@ -288,8 +279,8 @@ func (b *browserContextImpl) Unroute(url any, handlers ...routeHandler) error {
 
 func (b *browserContextImpl) unrouteInternal(removed []*routeHandlerEntry, remaining []*routeHandlerEntry, behavior *UnrouteBehavior) error {
 	b.Lock()
-	defer b.Unlock()
 	b.routes = remaining
+	b.Unlock()
 	if err := b.updateInterceptionPatterns(); err != nil {
 		return err
 	}
@@ -313,8 +304,11 @@ func (b *browserContextImpl) UnrouteAll(options ...BrowserContextUnrouteAllOptio
 	if len(options) == 1 {
 		behavior = options[0].Behavior
 	}
+	b.Lock()
+	removed := b.routes
+	b.Unlock()
 	defer b.disposeHarRouters()
-	return b.unrouteInternal(b.routes, []*routeHandlerEntry{}, behavior)
+	return b.unrouteInternal(removed, []*routeHandlerEntry{}, behavior)
 }
 
 func (b *browserContextImpl) disposeHarRouters() {
@@ -557,6 +551,7 @@ func (b *browserContextImpl) StorageState(options ...BrowserContextStorageStateO
 	var path *string
 	if len(options) == 1 {
 		params["indexedDB"] = options[0].IndexedDB
+		params["opfs"] = options[0].Opfs
 		params["credentials"] = options[0].Credentials
 		path = options[0].Path
 	}
@@ -610,6 +605,9 @@ func (b *browserContextImpl) onClose() {
 		// closing context doesn't keep every later API call collecting stacks.
 		b.tracing.resetStackCounter()
 	}
+	if b.request != nil && b.request.tracing != nil {
+		b.request.tracing.resetStackCounter()
+	}
 	b.disposeHarRouters()
 	b.Emit("close", b)
 }
@@ -634,16 +632,21 @@ func (b *browserContextImpl) onRoute(route *routeImpl) {
 	b.Unlock()
 
 	checkInterceptionIfNeeded := func() {
+		// Do not hold the context mutex across the protocol round-trip:
+		// dispatch may need the same lock (e.g. page.onClose) to deliver the
+		// setNetworkInterceptionPatterns reply.
 		b.Lock()
-		defer b.Unlock()
-		if len(b.routes) == 0 {
-			_, err := b.connection.WrapAPICall(func() (any, error) {
-				err := b.updateInterceptionPatterns()
-				return nil, err
-			}, true)
-			if err != nil {
-				logger.Error("could not update interception patterns", "error", err)
-			}
+		empty := len(b.routes) == 0
+		b.Unlock()
+		if !empty {
+			return
+		}
+		_, err := b.connection.WrapAPICall(func() (any, error) {
+			err := b.updateInterceptionPatterns()
+			return nil, err
+		}, true)
+		if err != nil {
+			logger.Error("could not update interception patterns", "error", err)
 		}
 	}
 
@@ -656,15 +659,18 @@ func (b *browserContextImpl) onRoute(route *routeImpl) {
 		if !handlerEntry.Matches(url) {
 			continue
 		}
-		if !slices.ContainsFunc(b.routes, func(entry *routeHandlerEntry) bool {
+		b.Lock()
+		stillListed := slices.ContainsFunc(b.routes, func(entry *routeHandlerEntry) bool {
 			return entry == handlerEntry
-		}) {
-			continue
-		}
-		if handlerEntry.WillExceed() {
+		})
+		if stillListed && handlerEntry.WillExceed() {
 			b.routes = slices.DeleteFunc(b.routes, func(rhe *routeHandlerEntry) bool {
 				return rhe == handlerEntry
 			})
+		}
+		b.Unlock()
+		if !stillListed {
+			continue
 		}
 		handled := handlerEntry.Handle(route)
 		checkInterceptionIfNeeded()
@@ -679,7 +685,9 @@ func (b *browserContextImpl) onRoute(route *routeImpl) {
 }
 
 func (b *browserContextImpl) updateInterceptionPatterns() error {
+	b.Lock()
 	patterns := prepareInterceptionPatterns(b.routes)
+	b.Unlock()
 	_, err := b.channel.Send("setNetworkInterceptionPatterns", map[string]any{
 		"patterns": patterns,
 	})
@@ -746,6 +754,9 @@ func (b *browserContextImpl) setOptions(options *BrowserNewContextOptions, trace
 	b.options = options
 	if tracesDir != nil {
 		b.tracing.tracesDir = *tracesDir
+		if b.request != nil && b.request.tracing != nil {
+			b.request.tracing.tracesDir = *tracesDir
+		}
 	}
 }
 
@@ -805,6 +816,10 @@ func (b *browserContextImpl) OnConsole(fn func(ConsoleMessage)) {
 
 func (b *browserContextImpl) OnDialog(fn func(Dialog)) {
 	b.On("dialog", fn)
+}
+
+func (b *browserContextImpl) OnDialogClosed(fn func(Dialog)) {
+	b.On("dialogclosed", fn)
 }
 
 func (b *browserContextImpl) OnDownload(fn func(Download)) {
@@ -1017,6 +1032,13 @@ func newBrowserContext(parent *channelOwner, objectType string, guid string, ini
 			}
 		}()
 	})
+	bt.channel.On("dialogClosed", func(params map[string]any) {
+		dialog := fromChannel(params["dialog"]).(*dialogImpl)
+		bt.Emit("dialogclosed", dialog)
+		if dialog.page != nil {
+			dialog.page.Emit("dialogclosed", dialog)
+		}
+	})
 	bt.channel.On(
 		"pageError", func(ev map[string]any) {
 			pwErr := &Error{}
@@ -1085,6 +1107,7 @@ func newBrowserContext(parent *channelOwner, objectType string, guid string, ini
 	bt.setEventSubscriptionMapping(map[string]string{
 		"console":         "console",
 		"dialog":          "dialog",
+		"dialogclosed":    "dialogClosed",
 		"request":         "request",
 		"response":        "response",
 		"requestfinished": "requestFinished",
@@ -1111,4 +1134,19 @@ func (b *browserContextImpl) SetStorageState(storageStatePath string) error {
 	}
 	_, err = b.channel.Send("setStorageState", map[string]any{"storageState": storageState})
 	return err
+}
+
+// readStorageStateFile reads a storage state file saved by StorageState. It
+// keeps the raw JSON so that entries the StorageState struct does not model,
+// such as IndexedDB and OPFS contents, are sent to the driver unchanged.
+func readStorageStateFile(path string) (map[string]any, error) {
+	storageString, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not read storage state file: %w", err)
+	}
+	var storageState map[string]any
+	if err := json.Unmarshal(storageString, &storageState); err != nil {
+		return nil, fmt.Errorf("could not parse storage state file: %w", err)
+	}
+	return storageState, nil
 }
