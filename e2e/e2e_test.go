@@ -5,12 +5,15 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +61,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "failed to build binary: %v\n", err)
 		return
 	}
-	defer os.Remove(binaryPath)
+	defer func() { _ = os.Remove(binaryPath) }()
 
 	// create temp directory for test data
 	var err error
@@ -67,7 +70,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
 		return
 	}
-	defer os.RemoveAll(testTmpDir)
+	defer func() { _ = os.RemoveAll(testTmpDir) }()
 
 	// copy test data to temp directory
 	if err := copyTestData(); err != nil {
@@ -156,14 +159,14 @@ func copyTestData() error {
 func resolveTestDataDir() (string, error) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		return "", fmt.Errorf("locate test file")
+		return "", errors.New("locate test file")
 	}
 
 	return filepath.Join(filepath.Dir(filename), testDataDir), nil
 }
 
 func copyFile(src, dst string) error {
-	content, err := os.ReadFile(src)
+	content, err := os.ReadFile(src) //nolint:gosec // path from the e2e testdata dir
 	if err != nil {
 		return fmt.Errorf("read %s: %w", src, err)
 	}
@@ -186,7 +189,7 @@ func atomicWriteFile(path string, content []byte, perm os.FileMode) error {
 	// ensure cleanup on error
 	defer func() {
 		if tmpPath != "" {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 		}
 	}()
 
@@ -213,7 +216,7 @@ func atomicWriteFile(path string, content []byte, perm os.FileMode) error {
 func startServer() error {
 	serverCmd = exec.Command(binaryPath,
 		"--serve",
-		"--port", fmt.Sprintf("%d", testPort),
+		"--port", strconv.Itoa(testPort),
 		"--watch", testTmpDir,
 	)
 	serverCmd.Stdout = os.Stdout
@@ -273,7 +276,7 @@ func setupPlaywright() error {
 	headless := os.Getenv("E2E_HEADLESS") != "false"
 
 	opts := playwright.BrowserTypeLaunchOptions{
-		Headless: playwright.Bool(headless),
+		Headless: new(headless),
 	}
 
 	// add slow motion when not headless (for visual observation)
@@ -343,7 +346,7 @@ func waitVisible(t *testing.T, page playwright.Page, selector string, timeout ..
 
 	err := page.Locator(selector).First().WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(timeoutMs),
+		Timeout: new(timeoutMs),
 	})
 	require.NoError(t, err, "wait for %s to be visible", selector)
 }
@@ -359,7 +362,7 @@ func waitHidden(t *testing.T, page playwright.Page, selector string, timeout ...
 
 	err := page.Locator(selector).First().WaitFor(playwright.LocatorWaitForOptions{
 		State:   playwright.WaitForSelectorStateHidden,
-		Timeout: playwright.Float(timeoutMs),
+		Timeout: new(timeoutMs),
 	})
 	require.NoError(t, err, "wait for %s to be hidden", selector)
 }
@@ -382,12 +385,7 @@ func isDetailsOpen(locator playwright.Locator) bool {
 // uses strings.Fields for exact token matching to avoid false positives
 // (e.g. "sidebar-collapsed" matching "collapsed").
 func hasClass(classAttr, class string) bool {
-	for _, c := range strings.Fields(classAttr) {
-		if c == class {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Fields(classAttr), class)
 }
 
 // waitForClass polls until the locator's class attribute contains the exact token.
@@ -412,7 +410,7 @@ func waitForClassGone(t *testing.T, loc playwright.Locator, class string) {
 func waitAllDetailsState(t *testing.T, sections playwright.Locator, count int, open bool) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		for i := 0; i < count; i++ {
+		for i := range count {
 			if isDetailsOpen(sections.Nth(i)) != open {
 				return false
 			}
@@ -466,13 +464,13 @@ func waitForCount(t *testing.T, loc playwright.Locator, expected int) {
 	}, longPollTimeout, longPollInterval, "expected %d elements", expected)
 }
 
-// waitForMinCount polls until the locator count is at least min.
-func waitForMinCount(t *testing.T, loc playwright.Locator, min int) {
+// waitForMinCount polls until the locator count is at least minCount.
+func waitForMinCount(t *testing.T, loc playwright.Locator, minCount int) {
 	t.Helper()
 	require.Eventually(t, func() bool {
 		count, err := loc.Count()
-		return err == nil && count >= min
-	}, longPollTimeout, longPollInterval, "expected at least %d elements", min)
+		return err == nil && count >= minCount
+	}, longPollTimeout, longPollInterval, "expected at least %d elements", minCount)
 }
 
 // waitForText polls until the locator's text content equals expected.
@@ -520,33 +518,27 @@ func expandAllSections(t *testing.T, page playwright.Page) {
 }
 
 // clickSessionByName polls the session sidebar until a session with the given name
-// appears, then clicks it. Returns true if the session was found and clicked.
-func clickSessionByName(t *testing.T, page playwright.Page, name string) bool {
+// appears, then clicks it.
+func clickSessionByName(t *testing.T, page playwright.Page, name string) {
 	t.Helper()
-	var clicked bool
 	require.Eventually(t, func() bool {
 		items := page.Locator(".session-item")
 		count, err := items.Count()
 		if err != nil || count == 0 {
 			return false
 		}
-		for i := 0; i < count; i++ {
+		for i := range count {
 			nameEl := items.Nth(i).Locator(".session-name")
 			text, err := nameEl.TextContent()
 			if err != nil {
 				continue
 			}
 			if text == name {
-				if err := items.Nth(i).Click(); err != nil {
-					return false
-				}
-				clicked = true
-				return true
+				return items.Nth(i).Click() == nil
 			}
 		}
 		return false
 	}, longPollTimeout, longPollInterval, "session %q should appear in sidebar", name)
-	return clicked
 }
 
 // assertDurationsClose asserts two duration strings (e.g. "7m 0s", "6m 59s") are within tolerance.

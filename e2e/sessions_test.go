@@ -13,7 +13,7 @@ import (
 
 // createTestSession creates a progress file for a test session.
 // registers cleanup to remove the file when the test completes.
-func createTestSession(t *testing.T, name string) string {
+func createTestSession(t *testing.T, name string) {
 	t.Helper()
 	filename := "progress-" + name + ".txt"
 	path := filepath.Join(testTmpDir, filename)
@@ -34,10 +34,8 @@ Started: 2026-01-22 11:00:00
 	require.NoError(t, err, "create session progress file")
 
 	t.Cleanup(func() {
-		os.Remove(path)
+		_ = os.Remove(path)
 	})
-
-	return filename
 }
 
 func TestSessionSidebarDiscovery(t *testing.T) {
@@ -263,10 +261,10 @@ func TestSessionSwitchingUpdatesHeader(t *testing.T) {
 	// click second session (should be the new one or different from first)
 	// find a session that's not currently selected
 	var foundUnselected bool
-	for i := 0; i < count; i++ {
+	for i := range count {
 		session := sessionItems.Nth(i)
-		class, err := session.GetAttribute("class")
-		require.NoError(t, err)
+		class, attrErr := session.GetAttribute("class")
+		require.NoError(t, attrErr)
 		if class == "" || !hasClass(class, "selected") {
 			// click the unselected session
 			err = session.Click()
@@ -282,7 +280,7 @@ func TestSessionSwitchingUpdatesHeader(t *testing.T) {
 
 	// wait for the clicked session to become selected
 	require.Eventually(t, func() bool {
-		for i := 0; i < count; i++ {
+		for i := range count {
 			session := sessionItems.Nth(i)
 			class, _ := session.GetAttribute("class")
 			if hasClass(class, "selected") {

@@ -5,6 +5,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 
 // toFloat64 converts a JavaScript number result to float64.
 // JavaScript numbers can be returned as int or float64 depending on value.
-func toFloat64(v interface{}) float64 {
+func toFloat64(v any) float64 {
 	switch n := v.(type) {
 	case float64:
 		return n
@@ -283,7 +284,7 @@ Started: 2026-01-22 13:00:00
 [26-01-22 13:00:03] final review pass
 `
 	require.NoError(t, atomicWriteFile(path, []byte(content), 0o600))
-	t.Cleanup(func() { os.Remove(path) })
+	t.Cleanup(func() { _ = os.Remove(path) })
 
 	page := newPage(t)
 	navigateToDashboard(t, page)
@@ -450,7 +451,7 @@ func TestSignalEventRendering(t *testing.T) {
 		require.NoError(t, err)
 
 		foundCompletion := false
-		for i := 0; i < count; i++ {
+		for i := range count {
 			text, err := completionLines.Nth(i).TextContent()
 			if err != nil {
 				continue
@@ -655,10 +656,10 @@ func TestIterationBoundaryRendering(t *testing.T) {
 
 		if reviewCount >= 2 {
 			// verify both review sections have different titles (pass 1 vs pass 2)
-			firstTitle, err := reviewSections.Nth(0).Locator(".section-title").TextContent()
-			require.NoError(t, err)
-			secondTitle, err := reviewSections.Nth(1).Locator(".section-title").TextContent()
-			require.NoError(t, err)
+			firstTitle, titleErr := reviewSections.Nth(0).Locator(".section-title").TextContent()
+			require.NoError(t, titleErr)
+			secondTitle, titleErr := reviewSections.Nth(1).Locator(".section-title").TextContent()
+			require.NoError(t, titleErr)
 
 			// titles should contain numbers or be distinguishable
 			hasNumber := strings.Contains(firstTitle, "1") || strings.Contains(firstTitle, "2") ||
@@ -809,7 +810,7 @@ func TestAutoScrollOnNewContent(t *testing.T) {
 		outputDiv := page.Locator("#output")
 		children, err := outputDiv.Locator(":scope > *").Count()
 		require.NoError(t, err)
-		assert.Greater(t, children, 0, "output should have content")
+		assert.Positive(t, children, "output should have content")
 	})
 
 	t.Run("scroll position preserved when user scrolled up", func(t *testing.T) {
@@ -823,8 +824,8 @@ func TestAutoScrollOnNewContent(t *testing.T) {
 
 		// wait for scroll position to be at top
 		require.Eventually(t, func() bool {
-			result, err := outputPanel.Evaluate("el => el.scrollTop", nil)
-			if err != nil {
+			result, evalErr := outputPanel.Evaluate("el => el.scrollTop", nil)
+			if evalErr != nil {
 				return false
 			}
 			return toFloat64(result) <= 10
@@ -908,8 +909,8 @@ func TestScrollToBottomButtonBehavior(t *testing.T) {
 
 		// wait for scroll position to be at top
 		require.Eventually(t, func() bool {
-			result, err := outputPanel.Evaluate("el => el.scrollTop", nil)
-			if err != nil {
+			result, evalErr := outputPanel.Evaluate("el => el.scrollTop", nil)
+			if evalErr != nil {
 				return false
 			}
 			return toFloat64(result) <= 10
@@ -982,11 +983,9 @@ func TestSSEReconnectionBehavior(t *testing.T) {
 			if err != nil {
 				return false
 			}
-			for _, valid := range validStatuses {
-				if text == valid {
-					t.Logf("Status badge shows: %q after SSE events loaded", text)
-					return true
-				}
+			if slices.Contains(validStatuses, text) {
+				t.Logf("Status badge shows: %q after SSE events loaded", text)
+				return true
 			}
 			return false
 		}, longPollTimeout, pollInterval, "badge should show a valid status")
@@ -1000,7 +999,7 @@ func TestSSEReconnectionBehavior(t *testing.T) {
 		outputDiv := page.Locator("#output")
 		children, err := outputDiv.Locator(":scope > *").Count()
 		require.NoError(t, err)
-		assert.Greater(t, children, 0, "output should have content after SSE delivers events")
+		assert.Positive(t, children, "output should have content after SSE delivers events")
 	})
 
 	t.Run("multiple sections loaded indicates successful SSE streaming", func(t *testing.T) {
@@ -1092,10 +1091,11 @@ func TestSSEConnectionLossHandling(t *testing.T) {
 		text, err := badge.TextContent()
 		require.NoError(t, err)
 
-		if text == "COMPLETED" {
+		switch text {
+		case "COMPLETED":
 			// verify badge has completed class
 			waitForClass(t, badge, "completed")
-		} else if text == "FAILED" {
+		case "FAILED":
 			// verify badge has failed class
 			waitForClass(t, badge, "failed")
 		}
