@@ -112,7 +112,7 @@ github.com/muesli/reflow/wordwrap
 # github.com/muesli/termenv v0.16.0
 ## explicit; go 1.17
 github.com/muesli/termenv
-# github.com/mxschmitt/playwright-go v0.6201.1
+# github.com/mxschmitt/playwright-go v0.6401.0
 ## explicit; go 1.22
 github.com/mxschmitt/playwright-go
 github.com/mxschmitt/playwright-go/internal/safe
