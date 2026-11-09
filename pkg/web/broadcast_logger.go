@@ -27,6 +27,11 @@ type DiffStatsWriter interface {
 	LogDiffStats(files, additions, deletions int)
 }
 
+// WarnWriter is implemented by loggers that persist warnings.
+type WarnWriter interface {
+	Warn(format string, args ...any)
+}
+
 // BroadcastLogger wraps a Logger and broadcasts events to SSE clients.
 // implements the decorator pattern - all calls are forwarded to the inner logger
 // while also being converted to events for web streaming.
@@ -150,6 +155,17 @@ func (b *BroadcastLogger) LogDraftReview(action, feedback string) {
 	if feedback != "" {
 		b.broadcast(NewOutputEvent(b.holder.Get(), "FEEDBACK: "+feedback))
 	}
+}
+
+// Warn records a warning in the wrapped logger and publishes it as a warn event.
+// the progress logger writes its WARN line to the file only; a watch-mode dashboard
+// reads it back through the tailer, but a live session has no tailer by design, so
+// without this forward the warning would never reach a --serve dashboard.
+func (b *BroadcastLogger) Warn(format string, args ...any) {
+	if w, ok := b.inner.(WarnWriter); ok {
+		w.Warn(format, args...)
+	}
+	b.broadcast(NewWarnEvent(b.holder.Get(), "WARN: "+formatText(format, args...)))
 }
 
 // LogDiffStats records completion diff stats in the wrapped logger and publishes the

@@ -2021,6 +2021,24 @@ func TestArchivePlan(t *testing.T) {
 		assert.Contains(t, string(progressFile), "WARN: failed to move plan to completed")
 	})
 
+	t.Run("rejected_commit_warns_through_broadcast_logger", func(t *testing.T) {
+		req, log := setup(t, "#!/bin/sh\necho 'Invalid commit message format.' >&2\nexit 1\n")
+
+		session := web.NewSession("archive-warn", log.Path())
+		defer session.Close()
+		// under --serve the run logs through the wrapper, and the live session has no
+		// tailer: the warning must still reach the progress file through it.
+		bl := web.NewBroadcastLogger(log, session, &status.PhaseHolder{})
+
+		moved, err := archivePlan(req, bl)
+		require.Error(t, err)
+		assert.False(t, moved)
+
+		progressFile, readErr := os.ReadFile(log.Path())
+		require.NoError(t, readErr)
+		assert.Contains(t, string(progressFile), "WARN: failed to move plan to completed")
+	})
+
 	t.Run("successful_move_writes_no_warning", func(t *testing.T) {
 		req, log := setup(t, "")
 
@@ -3015,6 +3033,12 @@ func TestDisplayStats(t *testing.T) {
 		// a live dashboard session has no tailer to read the DIFFSTATS line back,
 		// so the stats must be recorded through the broadcast logger.
 		require.Equal(t, &web.DiffStats{Files: 2, Additions: 3, Deletions: 1}, session.GetDiffStats())
+
+		// under --serve the broadcast wrapper is also the only path to the progress file,
+		// so the line must still land there through the wrapped progress logger.
+		progressFile, readErr := os.ReadFile(baseLog.Path())
+		require.NoError(t, readErr)
+		assert.Contains(t, string(progressFile), "DIFFSTATS: files=2 additions=3 deletions=1")
 	})
 
 	// #450: a worktree archive exists only in the branch, so the path alone names a file that

@@ -54,6 +54,16 @@ func NewOutputEvent(phase status.Phase, text string) Event {
 	}
 }
 
+// NewWarnEvent creates a warning event.
+func NewWarnEvent(phase status.Phase, text string) Event {
+	return Event{
+		Type:      EventTypeWarn,
+		Phase:     phase,
+		Text:      text,
+		Timestamp: time.Now(),
+	}
+}
+
 // NewSectionEvent creates a section header event.
 func NewSectionEvent(phase status.Phase, name string) Event {
 	return Event{

@@ -251,14 +251,30 @@ func (s *Session) isLiveOutput() bool {
 	return s.liveOutput
 }
 
-// clearLiveOutput removes the BroadcastLogger mark once the run it belonged to has
-// finished. the dashboard process can outlive the run (keepDashboardAlive) and later
-// observe another run of the same plan path: that run has no broadcast logger, so it
-// must be served by the ordinary discovery/tailer path again.
-func (s *Session) clearLiveOutput() {
+// finishLiveOutput removes the BroadcastLogger mark once the run it belonged to has
+// finished, and marks the session loaded in the same locked section. the dashboard
+// process can outlive the run (keepDashboardAlive) and later observe another run of the
+// same plan path: that run has no broadcast logger, so it must be served by the ordinary
+// discovery/tailer path again.
+//
+// the loaded mark is what keeps the finished file from being replayed: its lines were
+// published by the BroadcastLogger, never loaded from the file, so the loader gate in
+// updateSession would otherwise read the whole file into the same session on the next
+// discovery. lastOffset deliberately stays 0 - a rerun started in the same second
+// rewrites the file without a StartTime change, and an offset left at the old file size
+// would make that run resume mid-stream.
+//
+// a session that was tailed rather than fed by a BroadcastLogger is left alone: its
+// tailer captured its own offset, and updateSession's loader gate already decides
+// whether anything is still owed to it.
+func (s *Session) finishLiveOutput() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.liveOutput {
+		return
+	}
 	s.liveOutput = false
+	s.loaded = true
 }
 
 // GetTailer returns the session's tailer thread-safely.

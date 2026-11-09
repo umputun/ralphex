@@ -338,12 +338,14 @@ func TestDashboard_Start_MultiSessionDoesNotDuplicateLiveEvents(t *testing.T) {
 	require.NotNil(t, broadcastLog)
 
 	// the watcher discovers the progress file of the live session. a tailer started
-	// for it would republish every line the BroadcastLogger already streamed.
+	// for it would republish every line the BroadcastLogger already streamed. wait on
+	// StartTime, which only discovery sets: Start already marks the session active, so
+	// waiting on the state alone returns before discovery has run.
 	sess := broadcastLog.session
 	require.Eventually(t, func() bool {
-		return sess.GetState() == SessionStateActive
+		return !sess.GetMetadata().StartTime.IsZero()
 	}, 2*time.Second, 10*time.Millisecond, "watcher should discover the live progress file")
-	time.Sleep(200 * time.Millisecond) // allow an erroneous tailer to start
+	assert.Equal(t, SessionStateActive, sess.GetState())
 	assert.False(t, sess.IsTailing(), "live session must not be tailed; file events would duplicate live events")
 
 	events, cleanup := subscribeSSEEvents(t, sess)

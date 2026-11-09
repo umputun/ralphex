@@ -405,9 +405,9 @@ func (m *SessionManager) RefreshStates() {
 			// session completed, update state and stop tailing
 			session.SetState(SessionStateCompleted)
 			session.StopTailing()
-			// the run that the BroadcastLogger fed has finished; a later run of the
-			// same plan path must fall back to the discovery/tailer path.
-			session.clearLiveOutput()
+			// the run that the BroadcastLogger fed has finished; mark the session loaded
+			// so a later discovery does not replay the file it already streamed.
+			session.finishLiveOutput()
 		}
 	}
 }
