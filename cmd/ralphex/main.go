@@ -517,10 +517,17 @@ func buildNotifyResult(req executePlanRequest, branch, elapsed string, stats git
 // what the planMoveErr note points at: it is non-nil only when the archive was attempted
 // and failed, and it goes last because the warning at the failure site is well above the
 // completion line.
-func displayStats(req executePlanRequest, baseLog *progress.Logger, stats git.DiffStats, elapsed, branch string,
+func displayStats(req executePlanRequest, baseLog *progress.Logger, runnerLog processor.Logger, stats git.DiffStats, elapsed, branch string,
 	planMoved bool, planMoveErr error) {
 	if stats.Files > 0 {
-		baseLog.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
+		// prefer the runner logger so a --serve dashboard gets the line as well:
+		// the progress logger writes it to the file only, and a live session has no
+		// tailer to read it back.
+		if w, ok := runnerLog.(interface{ LogDiffStats(int, int, int) }); ok {
+			w.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
+		} else {
+			baseLog.LogDiffStats(stats.Files, stats.Additions, stats.Deletions)
+		}
 		req.Colors.Info().Printf("\ncompleted in %s (%d files, +%d/-%d lines)\n",
 			elapsed, stats.Files, stats.Additions, stats.Deletions)
 	} else {
@@ -685,12 +692,12 @@ func executePlan(ctx context.Context, o opts, req executePlanRequest) error {
 	}
 
 	// track actual success so the completion summary reflects where the plan really lives
-	planMoved, planMoveErr := archivePlan(req, plr.baseLog)
+	planMoved, planMoveErr := archivePlan(req, runnerLog)
 
 	// notify after the archive so a retained worktree is already recorded when the message goes out
 	sendNotification(req, branch, elapsed, stats, nil)
 
-	displayStats(req, plr.baseLog, stats, elapsed, branch, planMoved, planMoveErr)
+	displayStats(req, plr.baseLog, runnerLog, stats, elapsed, branch, planMoved, planMoveErr)
 	keepDashboardAlive(ctx, o, req, plr.closeLog)
 
 	return nil
@@ -961,12 +968,12 @@ func makePauseHandler(stdin io.Reader, stdout io.Writer) func(ctx context.Contex
 	}
 }
 
-// archivePlan moves a completed plan into completed/ and reports a failure through the progress
+// archivePlan moves a completed plan into completed/ and reports a failure through the runner
 // logger, so the progress file holds it - a bare stderr write left no trace in the run's own record.
 // the archive always runs against req.GitSvc, so in worktree mode the move and its commit land
 // on the feature branch alongside the ticked plan rather than in the user's main checkout.
 // the returned error is what displayStats repeats at the end of the summary.
-func archivePlan(req executePlanRequest, log *progress.Logger) (moved bool, err error) {
+func archivePlan(req executePlanRequest, log processor.Logger) (moved bool, err error) {
 	if !shouldMovePlan(req) {
 		return false, nil
 	}
@@ -984,7 +991,14 @@ func archivePlan(req executePlanRequest, log *progress.Logger) (moved bool, err 
 	}
 
 	if moveErr := req.GitSvc.MovePlanToCompleted(req.PlanFile); moveErr != nil {
-		log.Warn("failed to move plan to completed: %v", moveErr)
+		// the runner logger, not the progress logger: under --serve the session is fed by
+		// the BroadcastLogger and has no tailer to read the WARN back from the file, so the
+		// warning has to go through the wrapper to reach the dashboard.
+		if w, ok := log.(web.WarnWriter); ok {
+			w.Warn("failed to move plan to completed: %v", moveErr)
+		} else {
+			log.Print("WARN: failed to move plan to completed: %v", moveErr)
+		}
 		return false, fmt.Errorf("move %s: %w", filepath.Base(req.PlanFile), moveErr)
 	}
 	return true, nil

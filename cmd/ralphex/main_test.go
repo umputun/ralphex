@@ -26,6 +26,7 @@ import (
 	"github.com/umputun/ralphex/pkg/processor"
 	"github.com/umputun/ralphex/pkg/progress"
 	"github.com/umputun/ralphex/pkg/status"
+	"github.com/umputun/ralphex/pkg/web"
 )
 
 // captureStdout runs fn while redirecting os.Stdout (and the fatih/color Output
@@ -2020,6 +2021,24 @@ func TestArchivePlan(t *testing.T) {
 		assert.Contains(t, string(progressFile), "WARN: failed to move plan to completed")
 	})
 
+	t.Run("rejected_commit_warns_through_broadcast_logger", func(t *testing.T) {
+		req, log := setup(t, "#!/bin/sh\necho 'Invalid commit message format.' >&2\nexit 1\n")
+
+		session := web.NewSession("archive-warn", log.Path())
+		defer session.Close()
+		// under --serve the run logs through the wrapper, and the live session has no
+		// tailer: the warning must still reach the progress file through it.
+		bl := web.NewBroadcastLogger(log, session, &status.PhaseHolder{})
+
+		moved, err := archivePlan(req, bl)
+		require.Error(t, err)
+		assert.False(t, moved)
+
+		progressFile, readErr := os.ReadFile(log.Path())
+		require.NoError(t, readErr)
+		assert.Contains(t, string(progressFile), "WARN: failed to move plan to completed")
+	})
+
 	t.Run("successful_move_writes_no_warning", func(t *testing.T) {
 		req, log := setup(t, "")
 
@@ -2975,7 +2994,7 @@ func TestDisplayStats(t *testing.T) {
 
 		req := executePlanRequest{PlanFile: "docs/plans/feature.md", Colors: colors}
 		stats := git.DiffStats{Files: 5, Additions: 200, Deletions: 50}
-		displayStats(req, baseLog, stats, "2m15s", "feature-branch", false, nil)
+		displayStats(req, baseLog, baseLog, stats, "2m15s", "feature-branch", false, nil)
 	})
 
 	t.Run("without_diff_stats", func(t *testing.T) {
@@ -2990,7 +3009,36 @@ func TestDisplayStats(t *testing.T) {
 		defer func() { _ = baseLog.Close() }()
 
 		req := executePlanRequest{Colors: colors}
-		displayStats(req, baseLog, git.DiffStats{}, "30s", "main", false, nil)
+		displayStats(req, baseLog, baseLog, git.DiffStats{}, "30s", "main", false, nil)
+	})
+
+	t.Run("diff_stats_reach_broadcast_session", func(t *testing.T) {
+		chdirTemp(t)
+
+		colors := testColors()
+		holder := &status.PhaseHolder{}
+		baseLog, err := progress.NewLogger(progress.Config{
+			PlanFile: "broadcast-stats.md", Mode: "full", Branch: "main", NoColor: true,
+		}, colors, holder)
+		require.NoError(t, err)
+		defer func() { _ = baseLog.Close() }()
+
+		session := web.NewSession("broadcast-stats", baseLog.Path())
+		defer session.Close()
+		bl := web.NewBroadcastLogger(baseLog, session, holder)
+
+		req := executePlanRequest{Colors: colors}
+		displayStats(req, baseLog, bl, git.DiffStats{Files: 2, Additions: 3, Deletions: 1}, "1s", "main", false, nil)
+
+		// a live dashboard session has no tailer to read the DIFFSTATS line back,
+		// so the stats must be recorded through the broadcast logger.
+		require.Equal(t, &web.DiffStats{Files: 2, Additions: 3, Deletions: 1}, session.GetDiffStats())
+
+		// under --serve the broadcast wrapper is also the only path to the progress file,
+		// so the line must still land there through the wrapped progress logger.
+		progressFile, readErr := os.ReadFile(baseLog.Path())
+		require.NoError(t, readErr)
+		assert.Contains(t, string(progressFile), "DIFFSTATS: files=2 additions=3 deletions=1")
 	})
 
 	// #450: a worktree archive exists only in the branch, so the path alone names a file that
@@ -3014,7 +3062,7 @@ func TestDisplayStats(t *testing.T) {
 			WtPreserve: &atomic.Bool{},
 		}
 		output := captureStdout(t, func() {
-			displayStats(req, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s", "feature-wt", true, nil)
+			displayStats(req, baseLog, baseLog, git.DiffStats{Files: 1, Additions: 10, Deletions: 5}, "10s", "feature-wt", true, nil)
 		})
 		assert.Contains(t, output,
 			"  plan: "+filepath.Join("docs", "plans", "completed", "feature.md")+" (committed on branch feature-wt)\n")
@@ -3033,7 +3081,7 @@ func TestDisplayStats(t *testing.T) {
 
 		req := executePlanRequest{PlanFile: filepath.Join("docs", "plans", "feature.md"), Colors: colors}
 		output := captureStdout(t, func() {
-			displayStats(req, baseLog, git.DiffStats{}, "10s", "feature", true, nil)
+			displayStats(req, baseLog, baseLog, git.DiffStats{}, "10s", "feature", true, nil)
 		})
 		assert.Contains(t, output, "  plan: "+filepath.Join("docs", "plans", "completed", "feature.md")+"\n")
 		assert.NotContains(t, output, "committed on branch")
@@ -3112,7 +3160,7 @@ func TestDisplayStats(t *testing.T) {
 				req.Colors = colors
 
 				output := captureStdout(t, func() {
-					displayStats(req, baseLog, git.DiffStats{}, "1s", "main", tc.planMoved, tc.planMoveErr)
+					displayStats(req, baseLog, baseLog, git.DiffStats{}, "1s", "main", tc.planMoved, tc.planMoveErr)
 				})
 				assert.Contains(t, output, "  plan: "+tc.wantPath+"\n")
 				if tc.wantNote {
