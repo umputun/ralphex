@@ -138,8 +138,8 @@ github.com/stretchr/testify/assert/yaml
 github.com/stretchr/testify/internal/difflib
 github.com/stretchr/testify/internal/spew
 github.com/stretchr/testify/require
-# github.com/tmaxmax/go-sse v0.11.0
-## explicit; go 1.22
+# github.com/tmaxmax/go-sse v0.12.0
+## explicit; go 1.26
 github.com/tmaxmax/go-sse
 github.com/tmaxmax/go-sse/internal/parser
 # github.com/xo/terminfo v1.0.0

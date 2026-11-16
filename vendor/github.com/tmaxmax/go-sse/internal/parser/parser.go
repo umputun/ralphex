@@ -87,6 +87,10 @@ func (r *Parser) Next(f *Field) bool {
 // Err returns the last read error. At the end of input
 // it will always be equal to io.EOF.
 func (r *Parser) Err() error {
+	// A partial final field must not hide the error that ended the read.
+	if r.inputScanner != nil && r.inputScanner.Err() != nil {
+		return r.inputScanner.Err()
+	}
 	if err := r.fieldScanner.Err(); err != nil {
 		return err
 	}
