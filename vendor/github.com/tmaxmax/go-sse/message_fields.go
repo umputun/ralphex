@@ -151,7 +151,7 @@ func (i *messageField) MarshalJSON() ([]byte, error) {
 //   - nil interfaces (result: unset value)
 //   - byte slice
 //   - string
-func (i *messageField) Scan(src interface{}) error {
+func (i *messageField) Scan(src any) error {
 	*i = messageField{}
 
 	if src == nil {

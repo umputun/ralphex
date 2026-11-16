@@ -3,7 +3,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/tmaxmax/go-sse.svg)](https://pkg.go.dev/github.com/tmaxmax/go-sse)
 ![CI](https://github.com/tmaxmax/go-sse/actions/workflows/go.yml/badge.svg)
 [![codecov](https://codecov.io/gh/tmaxmax/go-sse/branch/master/graph/badge.svg?token=EP52XJI4RO)](https://codecov.io/gh/tmaxmax/go-sse)
-[![Go Report Card](https://goreportcard.com/badge/github.com/tmaxmax/go-sse)](https://goreportcard.com/report/github.com/tmaxmax/go-sse)
 
 Lightweight, fully spec-compliant HTML5 server-sent events library.
 
@@ -68,17 +67,7 @@ for ev, err := range sse.Read(res.Body, nil) {
 }
 ```
 
-See the [LLM example](cmd/llm/main.go) for a fully working Go program.
-
-Go 1.23 iterators (officially ["range-over-func"](https://go.dev/blog/range-functions)) are used for this feature. If you are still on Go 1.22 use the `GOEXPERIMENT=rangefunc` environment variable (e.g. `GOEXPERIMENT=rangefunc go run main.go`) or use the iterator without the syntactic sugar:
-```go
-events(func(ev Event) bool {
-    // do something with event
-    return true // or false to stop iteration
-})
-```
-
-`sse.Read` is also useful if you're implementing an LLM SDK: call it in your code and spare yourself time and maintenance burden by not reimplementing event stream parsing.
+See the [LLM example](cmd/llm/main.go) for a fully working Go program. `sse.Read` is also useful if you're implementing an LLM SDK: call it in your code and spare yourself time and maintenance burden by not reimplementing event stream parsing.
 
 ## Implementing a server
 
@@ -278,15 +267,14 @@ We will use the `sse.Client` type for connecting to event streams:
 
 ```go
 type Client struct {
-    HTTPClient              *http.Client
-    OnRetry                 backoff.Notify
-    ResponseValidator       ResponseValidator
-    MaxRetries              int
-    DefaultReconnectionTime time.Duration
+    HTTPClient        *http.Client
+    OnRetry           func(error, time.Duration)
+    ResponseValidator ResponseValidator
+    Backoff           Backoff
 }
 ```
 
-As you can see, it uses a `net/http` client. It also uses the [cenkalti/backoff][1] library for implementing auto-reconnect when a connection to a server is lost. Read the [client docs][5] and the Backoff library's docs to find out how to configure the client. We'll use the default client the package provides for further examples.
+As you can see, it uses a `net/http` client. Read the [client docs][5] to find out how to configure the client. We'll use the default client the package provides for further examples.
 
 ### Initiating a connection
 
@@ -477,7 +465,6 @@ The library's in its early stages, so contributions are vital - I'm so glad you 
 
 Thank you for contributing!
 
-[1]: https://github.com/cenkalti/backoff
 [2]: https://pkg.go.dev/github.com/tmaxmax/go-sse#Provider
 [3]: https://pkg.go.dev/github.com/tmaxmax/go-sse#Replayer
 [4]: https://pkg.go.dev/github.com/tmaxmax/go-sse#Message

@@ -152,7 +152,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub, ok := s.getSubscription(sess)
+	sub, ok := s.getSubscription(sess, r)
 	if !ok {
 		if l != nil {
 			l.Warn("sse: invalid subscription")
@@ -208,10 +208,10 @@ func (s *Server) init() {
 	})
 }
 
-func (s *Server) getSubscription(sess *Session) (Subscription, bool) {
+func (s *Server) getSubscription(sess *Session, r *http.Request) (Subscription, bool) {
 	sub := Subscription{Client: sess, LastEventID: sess.LastEventID, Topics: defaultTopicSlice}
 	if s.OnSession != nil {
-		topics, ok := s.OnSession(sess.Res, sess.Req)
+		topics, ok := s.OnSession(sess.res, r)
 		if ok && len(topics) > 0 {
 			sub.Topics = topics
 		}

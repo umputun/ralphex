@@ -5,8 +5,8 @@ import (
 	"net/http"
 )
 
-// ResponseWriter is a http.ResponseWriter augmented with a Flush method.
-type ResponseWriter interface {
+// responseWriter is a http.responseWriter augmented with a Flush method.
+type responseWriter interface {
 	http.ResponseWriter
 	Flush() error
 }
@@ -23,16 +23,8 @@ type MessageWriter interface {
 
 // A Session is an HTTP request from an SSE client.
 // Create one using the Upgrade function.
-//
-// Using a Session you can also access the initial HTTP request,
-// get the last event ID, or write data to the client.
 type Session struct {
-	// The response writer for the request. Can be used to write an error response
-	// back to the client. Must not be used after the Session was subscribed!
-	Res ResponseWriter
-	// The initial HTTP request. Can be used to retrieve authentication data,
-	// topics, or data from context – a logger, for example.
-	Req *http.Request
+	res responseWriter
 	// Last event ID of the client. It is unset if no ID was provided in the Last-Event-Id
 	// request header.
 	LastEventID EventID
@@ -45,7 +37,7 @@ func (s *Session) Send(e *Message) error {
 	if err := s.doUpgrade(); err != nil {
 		return err
 	}
-	if _, err := e.WriteTo(s.Res); err != nil {
+	if _, err := e.WriteTo(s.res); err != nil {
 		return err
 	}
 	return nil
@@ -58,15 +50,15 @@ func (s *Session) Flush() error {
 		return err
 	}
 	if prevDidUpgrade == s.didUpgrade {
-		return s.Res.Flush()
+		return s.res.Flush()
 	}
 	return nil
 }
 
 func (s *Session) doUpgrade() error {
 	if !s.didUpgrade {
-		s.Res.Header()[headerContentType] = headerContentTypeValue
-		if err := s.Res.Flush(); err != nil {
+		s.res.Header()[headerContentType] = headerContentTypeValue
+		if err := s.res.Flush(); err != nil {
 			return err
 		}
 		s.didUpgrade = true
@@ -96,7 +88,7 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*Session, error) {
 		id, _ = NewID(h[0])
 	}
 
-	return &Session{Req: r, Res: rw, LastEventID: id}, nil
+	return &Session{res: rw, LastEventID: id}, nil
 }
 
 // ErrUpgradeUnsupported is returned when a request can't be upgraded to support server-sent events.
@@ -129,7 +121,7 @@ type rwUnwrapper interface {
 	Unwrap() http.ResponseWriter
 }
 
-func getResponseWriter(w http.ResponseWriter) ResponseWriter {
+func getResponseWriter(w http.ResponseWriter) responseWriter {
 	for {
 		switch v := w.(type) {
 		case writeFlusherError:

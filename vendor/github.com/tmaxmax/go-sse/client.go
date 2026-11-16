@@ -18,7 +18,8 @@ import (
 type ResponseValidator func(*http.Response) error
 
 // The Client struct is used to initialize new connections to different servers.
-// It is safe for concurrent use.
+// Concurrent reads and writes on the Client itself are not safe.
+// One may open and use multiple Connections concurrently.
 //
 // After connections are created, the Connect method must be called to start
 // receiving events.
@@ -81,10 +82,11 @@ func (c *Client) NewConnection(r *http.Request) *Connection {
 		panic("go-sse.client.NewConnection: request cannot be nil")
 	}
 
-	mergeDefaults(c)
+	client := *c
+	mergeDefaults(&client)
 
 	conn := &Connection{
-		client:       *c,                   // we clone the client so the config cannot be modified from outside
+		client:       client,               // we clone the client so the config cannot be modified from outside
 		request:      r.Clone(r.Context()), // we clone the request so its fields cannot be modified from outside
 		callbacks:    map[string]map[int]EventCallback{},
 		callbacksAll: map[int]EventCallback{},

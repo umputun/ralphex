@@ -34,7 +34,8 @@ type ReadConfig struct {
 // Read parses an SSE stream and yields all incoming events,
 // On any encountered errors iteration stops and no further events are parsed –
 // the loop can safely be ended on error. If EOF is reached, the Read operation
-// is considered successful and no error is returned. An Event will never
+// is considered successful and no error is returned. An incomplete final event
+// is discarded: only a blank line dispatches an event. An Event will never
 // be yielded together with an error.
 //
 // Read is especially useful for parsing responses from services which
@@ -120,13 +121,10 @@ func read(pf func() *parser.Parser, lastEventID string, onRetry func(int64), ign
 		err := p.Err()
 		isEOF := err == io.EOF //nolint:errorlint // Our scanner returns io.EOF unwrapped
 
-		if dirty && isEOF {
-			if !doYield(sb.String()) {
-				return
-			}
-		}
-
-		if err != nil && !(ignoreEOF && isEOF) {
+		// End-of-input never dispatches a pending event. Read treats an
+		// incomplete final line like EOF; Connection retains the error for
+		// its reconnection policy. Other reader errors must still propagate.
+		if err != nil && !(ignoreEOF && (isEOF || err == parser.ErrUnexpectedEOF)) { //nolint
 			yield(Event{}, err)
 		}
 	}
