@@ -152,7 +152,7 @@ Write the accepted plan to disk:
 ### Task N+1: Update documentation
 
 - [ ] update README.md if user-facing changes
-- [ ] update CLAUDE.md if internal patterns changed
+- [ ] update AGENTS.md or CLAUDE.md if internal patterns changed
 ---
 
 ## Step 4.5: Validate Plan Before Draft

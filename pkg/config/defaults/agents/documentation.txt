@@ -1,6 +1,6 @@
 Review code changes and identify missing documentation updates, plus existing documentation the changes made stale or inaccurate.
 
-First read the current README.md and CLAUDE.md - report a gap only when the item is not already documented.
+First read the current README.md and the project's agent instructions, AGENTS.md and/or CLAUDE.md, whichever exist - report a gap only when the item is not already documented.
 
 ## README.md (Human Documentation)
 
@@ -26,9 +26,9 @@ Skip:
 
 If the repository maintains other documentation (docs/ site, CHANGELOG, man pages, --help text), apply the same criteria to those.
 
-## CLAUDE.md (AI Knowledge Base)
+## AGENTS.md / CLAUDE.md (AI Knowledge Base)
 
-Check if changes require CLAUDE.md updates:
+Check if changes require AGENTS.md or CLAUDE.md updates. When the project has both and one only imports or links the other, the update belongs in the file that holds the content:
 
 Must document:
 - New architectural patterns established by these changes
