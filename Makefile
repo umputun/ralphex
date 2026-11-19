@@ -34,7 +34,7 @@ version:
 	@echo "revision: $(REV)"
 
 e2e-setup:
-	go run github.com/playwright-community/playwright-go/cmd/playwright@latest install --with-deps chromium
+	go run -mod=mod github.com/mxschmitt/playwright-go/cmd/playwright install --with-deps chromium
 
 e2e:
 	go test -v -failfast -count=1 -timeout=5m -tags=e2e ./e2e/...

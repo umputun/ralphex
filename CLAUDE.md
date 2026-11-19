@@ -387,7 +387,7 @@ Playwright-based e2e tests for the web dashboard are in `e2e/` directory:
 
 ```bash
 # install playwright browsers (first time only)
-go run github.com/mxschmitt/playwright-go/cmd/playwright@latest install --with-deps chromium
+go run -mod=mod github.com/mxschmitt/playwright-go/cmd/playwright install --with-deps chromium
 
 # run web ui e2e tests
 go test -tags=e2e -timeout=10m -count=1 -v ./e2e/...

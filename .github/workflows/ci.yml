@@ -30,6 +30,11 @@ jobs:
           go test -race -timeout=100s -covermode=atomic -coverprofile=$GITHUB_WORKSPACE/profile.cov_tmp ./...
           grep -v -E "_mock.go|/mocks/" $GITHUB_WORKSPACE/profile.cov_tmp > $GITHUB_WORKSPACE/profile.cov
 
+      # the e2e suite runs only by manual dispatch; this keeps a dependency bump from breaking
+      # the e2e-tagged package unnoticed
+      - name: vet e2e package
+        run: go vet -tags=e2e ./e2e/...
+
       - name: test docker wrapper script
         run: python3 scripts/ralphex-dk.sh --test
 
