@@ -1066,6 +1066,8 @@ For a one-off run without editing config, use `--external-review-tool=custom --c
 
 Your script receives a single argument: path to a prompt file containing review instructions. The script outputs findings to stdout - ralphex passes them to Claude for evaluation and fixing.
 
+The script inherits ralphex's environment, including `ANTHROPIC_API_KEY`, minus Claude Code's per-session markers (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_EFFORT` and the rest), so a script that calls `claude` runs it as a standalone session even when ralphex itself was started from inside Claude Code.
+
 ```bash
 #!/bin/bash
 # example: ~/.config/ralphex/scripts/my-review.sh
