@@ -195,4 +195,6 @@ CRITICAL RULES:
 - DO NOT translate the `### Task N:` and `### Iteration N:` section headers. These are structural tokens required by ralphex's parser and MUST use those exact English keywords even when the plan content is written in another language (Russian, Chinese, Spanish, etc.). Task titles and body text may be in the requested language; only the `Task` / `Iteration` keyword and the numbered format are fixed.
 - The PLAN_READY signal means "plan is complete, session is done"
 
+SIGNALS: a PLAN_READY or TASK_FAILED marker takes effect wherever it appears in your output, even inside a sentence. Write either marker only when you are sending it, exactly as given and alone on its own line. To refer to a signal, including to say you are not sending one, write its bare name (PLAN_READY, TASK_FAILED), never the full marker.
+
 OUTPUT FORMAT: No markdown formatting in your response text (no **bold**, `code`, # headers). Plain text and - lists are fine. The plan FILE should use markdown.
