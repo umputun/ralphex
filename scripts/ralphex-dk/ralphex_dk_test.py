@@ -405,21 +405,49 @@ class TestDetectTimezone(unittest.TestCase):
                 os.environ["RALPHEX_CLI_UPDATE"] = old
 
 class TestExtractCredentials(unittest.TestCase):
-    def test_write_pattern_adds_trailing_newline(self) -> None:
-        """credential write pattern appends newline (matching bash echo behavior)."""
-        fd, tmp_path = tempfile.mkstemp()
-        try:
-            with os.fdopen(fd, "w") as f:
-                creds = '{"token": "test"}'
-                f.write(creds + "\n")
-            content = Path(tmp_path).read_text()
-            self.assertTrue(content.endswith("\n"), "credentials should end with newline")
-            self.assertEqual(content, '{"token": "test"}\n')
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+    def setUp(self) -> None:
+        self.claude_home = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.claude_home)
+        service = keychain_service_name(self.claude_home)
+        find = ["security", "find-generic-password", "-s", service, "-w"]
+        self.find_call = unittest.mock.call(find, capture_output=True, text=True, check=False)
+        self.unlock_call = unittest.mock.call(["security", "unlock-keychain"], capture_output=True, check=False)
+
+    def _extract(self, side_effect: list) -> tuple[Optional[Path], unittest.mock.MagicMock]:
+        with unittest.mock.patch("ralphex_dk.platform.system", return_value="Darwin"), \
+                unittest.mock.patch("ralphex_dk.subprocess.run", side_effect=side_effect) as run, \
+                unittest.mock.patch("sys.stderr", new_callable=io.StringIO):
+            result = extract_macos_credentials(self.claude_home)
+        if result is not None:
+            self.addCleanup(result.unlink)
+        return result, run
+
+    @staticmethod
+    def _proc(returncode: int, stdout: str = "") -> unittest.mock.Mock:
+        return unittest.mock.Mock(returncode=returncode, stdout=stdout)
+
+    def test_found_without_unlock(self) -> None:
+        result, run = self._extract([self._proc(0, '{"token": "test"}\n')])
+        assert result is not None
+        self.assertEqual(result.read_text(), '{"token": "test"}\n')
+        self.assertEqual(stat.S_IMODE(result.stat().st_mode), 0o600)
+        self.assertEqual(run.call_args_list, [self.find_call])
+
+    def test_locked_then_found(self) -> None:
+        result, run = self._extract([self._proc(44), self._proc(0), self._proc(0, '{"token": "test"}')])
+        assert result is not None
+        self.assertEqual(result.read_text(), '{"token": "test"}\n')
+        self.assertEqual(run.call_args_list, [self.find_call, self.unlock_call, self.find_call])
+
+    def test_not_found(self) -> None:
+        result, run = self._extract([self._proc(44), self._proc(0), self._proc(44)])
+        self.assertIsNone(result)
+        self.assertEqual(run.call_args_list, [self.find_call, self.unlock_call, self.find_call])
+
+    def test_find_oserror_treated_as_not_found(self) -> None:
+        result, run = self._extract([OSError("no security"), self._proc(0), OSError("no security")])
+        self.assertIsNone(result)
+        self.assertEqual(run.call_args_list, [self.find_call, self.unlock_call, self.find_call])
 
     def test_skips_non_darwin(self) -> None:
         """extract_macos_credentials returns None on non-Darwin platforms."""
