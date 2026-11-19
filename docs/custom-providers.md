@@ -66,7 +66,7 @@ The executor also recognizes `message_stop` events, but wrapper scripts don't ne
 
 ### Signal detection
 
-ralphex prompts instruct the agent to emit signals like `<<<RALPHEX:COMPLETED>>>` or `<<<RALPHEX:FAILED>>>` in its output. These signals must appear in the text content of `content_block_delta` or `result` events. The wrapper doesn't need to handle signals — as long as the underlying tool follows the prompt instructions and the text passes through, signals will be detected automatically.
+ralphex prompts instruct the agent to emit signals such as `<<<RALPHEX:ALL_TASKS_DONE>>>` or `<<<RALPHEX:TASK_FAILED>>>` in the task phase; each phase prompt names the signals it expects (the full set is in `pkg/status/status.go`). The wrapper doesn't need to handle signals — as long as the underlying tool follows the prompt instructions and the text passes through, signals will be detected automatically. Two constraints on where the text lands. A completion signal (`ALL_TASKS_DONE`, `TASK_FAILED`, `REVIEW_DONE`, `CODEX_REVIEW_DONE`, `PLAN_READY`) is matched within a single event, so the complete marker must be present in the text extracted from one event rather than split across several; the `QUESTION` and `PLAN_DRAFT` payload blocks are parsed from the accumulated output and may span events. A string-valued `result` is treated as a summary of text already streamed and is not scanned, so a signal that appears only there is lost; a `result` object's `output` field is scanned.
 
 ### Argument handling
 
@@ -583,7 +583,8 @@ echo '{"type":"result","result":""}'
 - Ensure `jq` is installed and accessible
 
 **Signals not detected:**
-- The model must include `<<<RALPHEX:COMPLETED>>>` or `<<<RALPHEX:FAILED>>>` in its text output
+- The model must include the signal the phase prompt asks for (e.g. `<<<RALPHEX:ALL_TASKS_DONE>>>` or `<<<RALPHEX:TASK_FAILED>>>` for tasks) in its text output
+- A completion signal's marker must be complete in the text extracted from one event, not split across deltas, and not only in a string-valued `result`
 - Check that the prompt is passed through correctly (not truncated or escaped)
 - Test manually: run the wrapper with a prompt that includes signal instructions
 

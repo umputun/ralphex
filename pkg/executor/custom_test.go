@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -341,6 +344,32 @@ func TestExecCustomRunner_Run(t *testing.T) {
 	// wait should complete successfully
 	err = wait()
 	require.NoError(t, err)
+}
+
+func TestExecCustomRunner_Run_StripsSessionEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script")
+	}
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "abc")
+	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/sock")
+	t.Setenv("CLAUDE_EFFORT", "high")
+	t.Setenv("ANTHROPIC_API_KEY", "secret")
+	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+
+	script := filepath.Join(t.TempDir(), "env.sh")
+	body := "#!/bin/sh\nfor v in CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_EFFORT " +
+		"ANTHROPIC_API_KEY CLAUDE_CODE_USE_BEDROCK; do\n  val=$(printenv \"$v\") && echo \"$v=$val\"\ndone\nexit 0\n"
+	require.NoError(t, os.WriteFile(script, []byte(body), 0o700)) //nolint:gosec // test script must be executable
+
+	stdout, wait, err := (&execCustomRunner{}).Run(context.Background(), script, "prompt.txt")
+	require.NoError(t, err)
+	data, err := io.ReadAll(stdout)
+	require.NoError(t, err)
+	require.NoError(t, wait())
+
+	assert.ElementsMatch(t, []string{"ANTHROPIC_API_KEY=secret", "CLAUDE_CODE_USE_BEDROCK=1"},
+		strings.Fields(string(data)))
 }
 
 func TestExecCustomRunner_Run_CommandNotFound(t *testing.T) {
