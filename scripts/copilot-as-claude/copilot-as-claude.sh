@@ -544,6 +544,27 @@ accepted_draft_ready_fallback_path() {
     plan_written_since_start "$plan_progress_file" "$draft_text"
 }
 
+# fence_skip mirrors pkg/plan's fenceTracker: returns 0 when the line opens, closes or sits inside
+# a fenced code block. a closer has no info string and repeats the opener's character at least as
+# many times. state lives in fence_open, which each scan resets.
+fence_skip() {
+    local line="$1"
+    local open_re='^[[:space:]]*(`{3,}|~{3,})'
+    local close_re='^[[:space:]]*(`{3,}|~{3,})[[:space:]]*$'
+    if [[ -z "$fence_open" ]]; then
+        [[ "$line" =~ $open_re ]] || return 1
+        fence_open="${BASH_REMATCH[1]}"
+        return 0
+    fi
+    if [[ "$line" =~ $close_re ]]; then
+        local run="${BASH_REMATCH[1]}"
+        if (( ${#run} >= ${#fence_open} )) && [[ "${run:0:1}" == "${fence_open:0:1}" ]]; then
+            fence_open=""
+        fi
+    fi
+    return 0
+}
+
 task_complete_fallback() {
     # Copilot sometimes reads a fully-checked plan, narrates "nothing left to do",
     # and exits cleanly without emitting ALL_TASKS_DONE. When the plan file has
@@ -559,7 +580,9 @@ task_complete_fallback() {
     local in_task=0
     local has_tasks=0
     local saw_title=0
+    fence_open=""
     while IFS= read -r line || [[ -n "$line" ]]; do
+        fence_skip "$line" && continue
         if [[ "$line" =~ ^#[[:space:]] && "$saw_title" == "0" ]]; then
             saw_title=1
             continue
@@ -588,7 +611,9 @@ task_complete_fallback() {
 
     # fallback for malformed plans with no task headers: check entire file
     if [[ "$has_tasks" == "0" ]]; then
+        fence_open=""
         while IFS= read -r line || [[ -n "$line" ]]; do
+            fence_skip "$line" && continue
             if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \] ]]; then
                 return 1
             fi
