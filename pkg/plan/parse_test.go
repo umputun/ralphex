@@ -499,6 +499,23 @@ Just some text, no checkboxes.
 		assert.True(t, p.Tasks[1].HasUncompletedCheckbox())
 	})
 
+	t.Run("tab-indented opener closes on a space-indented closer", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Example\n\n" +
+			"- [x] write the example\n\n" +
+			"\t```\n" +
+			"\t- [ ] example item\n" +
+			"     ```\n\n" +
+			"### Task 2: Ship\n\n" +
+			"- [ ] real todo\n"
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+		assert.Equal(t, "real todo", p.Tasks[1].Checkboxes[0].Text)
+	})
+
 	t.Run("handles fence info string with backticks count > 3", func(t *testing.T) {
 		content := "# Plan\n\n" +
 			"### Task 1: Quad fence\n\n" +

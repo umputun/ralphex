@@ -208,7 +208,7 @@ func (f *fenceTracker) openerMarker(line string) (marker string, indent int) {
 	if len(m) < 3 {
 		return "", 0
 	}
-	return m[2], len(m[1])
+	return m[2], f.indentWidth(m[1])
 }
 
 // closerMarker returns the fence sequence that closes a fenced code block and its indent width,
@@ -218,7 +218,12 @@ func (f *fenceTracker) closerMarker(line string) (marker string, indent int) {
 	if len(m) < 3 {
 		return "", 0
 	}
-	return m[2], len(m[1])
+	return m[2], f.indentWidth(m[1])
+}
+
+// indentWidth returns the width of a whitespace prefix, counting a tab as 4 columns.
+func (f *fenceTracker) indentWidth(prefix string) int {
+	return len(prefix) + 3*strings.Count(prefix, "\t")
 }
 
 // JSON returns the plan as JSON bytes.

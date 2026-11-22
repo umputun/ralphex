@@ -545,20 +545,23 @@ accepted_draft_ready_fallback_path() {
 
 # fence_skip mirrors pkg/plan's fenceTracker: returns 0 when the line opens, closes or sits inside
 # a fenced code block. a closer has no info string, repeats the opener's character at least as
-# many times, and is indented at most 3 beyond the opener. state lives in fence_open and
-# fence_indent, which each scan resets.
+# many times, and is indented at most 3 beyond the opener, a tab counting as 4. state lives in
+# fence_open and fence_indent, which each scan resets.
 fence_skip() {
     local line="$1"
     local open_re='^([[:space:]]*)(`{3,}|~{3,})'
     local close_re='^([[:space:]]*)(`{3,}|~{3,})[[:space:]]*$'
+    local tab=$'\t'
     if [[ -z "$fence_open" ]]; then
         [[ "$line" =~ $open_re ]] || return 1
-        fence_indent=${#BASH_REMATCH[1]}
+        local prefix="${BASH_REMATCH[1]//$tab/    }"
+        fence_indent=${#prefix}
         fence_open="${BASH_REMATCH[2]}"
         return 0
     fi
     if [[ "$line" =~ $close_re ]]; then
-        local indent=${#BASH_REMATCH[1]}
+        local prefix="${BASH_REMATCH[1]//$tab/    }"
+        local indent=${#prefix}
         local run="${BASH_REMATCH[2]}"
         if (( ${#run} >= ${#fence_open} && indent <= fence_indent + 3 )) &&
             [[ "${run:0:1}" == "${fence_open:0:1}" ]]; then
