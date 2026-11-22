@@ -48,7 +48,7 @@ var (
 	checkboxPattern = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
 	// formatInText matches [ ] or [x] in checkbox text — description/example, not actionable for completion check.
-	formatInText = regexp.MustCompile(`\[\s*[ xX]?\s*\]`)
+	formatInText = regexp.MustCompile(`\[\s*[ xX]\s*\]`)
 	// fenceOpenPattern matches a CommonMark code-fence opener: optional indentation up to 3 spaces,
 	// then 3+ backticks or 3+ tildes, optional info string. captures the fence character run.
 	fenceOpenPattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
