@@ -333,7 +333,7 @@ Just some text, no checkboxes.
 		}
 	})
 
-	t.Run("HasUncompletedCheckbox returns true when actionable unchecked", func(t *testing.T) {
+	t.Run("HasUncompletedCheckbox returns true when a box is unchecked", func(t *testing.T) {
 		content := `# Plan
 
 ### Task 1: Mixed
@@ -477,7 +477,7 @@ Just some text, no checkboxes.
 	t.Run("does not close fence on opener-with-info-string of equal length", func(t *testing.T) {
 		// CommonMark: closing fence may not have an info string. A line like ```bash is an opener,
 		// not a valid closer for an outer ``` fence. If treated as a close, the inner example
-		// checkbox leaks back as actionable — the same failure mode as issue #328.
+		// checkbox leaks back as an open task — the same failure mode as issue #328.
 		content := "# Plan\n\n" +
 			"### Task 1: Show PR body example\n\n" +
 			"```markdown\n" +

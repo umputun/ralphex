@@ -547,17 +547,15 @@ accepted_draft_ready_fallback_path() {
 task_complete_fallback() {
     # Copilot sometimes reads a fully-checked plan, narrates "nothing left to do",
     # and exits cleanly without emitting ALL_TASKS_DONE. When the plan file has
-    # no remaining unchecked actionable task checkboxes, synthesize the signal.
+    # no remaining unchecked task checkboxes, synthesize the signal.
     [[ "$is_task_prompt" == "1" ]] || return 1
     [[ "$intentional_stop" == "0" ]] || return 1
     [[ "$copilot_exit" == "0" ]] || return 1
     [[ "${task_signal_emitted:-0}" == "0" ]] || return 1
     [[ -n "$task_plan_file" && -f "$task_plan_file" ]] || return 1
 
-    # check for unchecked actionable checkboxes inside Task/Iteration sections.
-    # mirrors Go's hasUncompletedTasks() logic:
-    #   - only look at lines inside "### Task N:" or "### Iteration N:" sections
-    #   - skip checkboxes whose text contains [ ] or [x] (format descriptions)
+    # check for unchecked checkboxes inside Task/Iteration sections.
+    # mirrors Go's HasUncompletedTasks(): only lines inside "### Task N:" or "### Iteration N:" count.
     local in_task=0
     local has_tasks=0
     local saw_title=0
@@ -583,24 +581,15 @@ task_complete_fallback() {
         fi
         [[ "$in_task" == "1" ]] || continue
         # match unchecked checkbox: "- [ ] text"
-        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \][[:space:]]*(.*) ]]; then
-            local cb_text="${BASH_REMATCH[1]}"
-            # skip format-description checkboxes (text contains [ ] or [x])
-            if [[ "$cb_text" =~ \[[[:space:]]*[xX\ ]?[[:space:]]*\] ]]; then
-                continue
-            fi
-            return 1  # found actionable unchecked checkbox
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \] ]]; then
+            return 1  # found unchecked checkbox
         fi
     done < "$task_plan_file"
 
     # fallback for malformed plans with no task headers: check entire file
     if [[ "$has_tasks" == "0" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
-            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \][[:space:]]*(.*) ]]; then
-                local cb_text="${BASH_REMATCH[1]}"
-                if [[ "$cb_text" =~ \[[[:space:]]*[xX\ ]?[[:space:]]*\] ]]; then
-                    continue
-                fi
+            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \] ]]; then
                 return 1
             fi
         done < "$task_plan_file"

@@ -1270,9 +1270,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# test: task fallback skips format-description checkboxes
+# test: task fallback counts unchecked checkboxes whose text quotes a marker
 # ---------------------------------------------------------------------------
-echo "test: task fallback skips format-description checkboxes"
+echo "test: task fallback counts unchecked checkboxes whose text quotes a marker"
 
 reset_captures
 plan_file_format="$TMPDIR_TEST/plan-format-desc.md"
@@ -1281,7 +1281,7 @@ cat > "$plan_file_format" <<'EOF'
 
 ### Task 1: Fix the widget
 - [x] Refactor widget module
-- [x] Change [ ] to [x] in plan file
+- [ ] Change [ ] to [x] in plan file
 
 ### Task 2: Update docs
 - [x] Update README
@@ -1296,9 +1296,9 @@ output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/task_no_signal_events.jsonl" \
 
 fallback_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
 if echo "$fallback_text" | grep -q '<<<RALPHEX:ALL_TASKS_DONE>>>'; then
-    pass "wrapper handles format-description checkboxes correctly"
+    fail "wrapper must not synthesize ALL_TASKS_DONE while a marker-quoting [ ] remains" "text: $fallback_text"
 else
-    fail "wrapper should synthesize ALL_TASKS_DONE when only format-description [ ] remain" "text: $fallback_text"
+    pass "wrapper counts unchecked checkboxes whose text quotes a marker"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1326,6 +1326,34 @@ if echo "$fallback_text" | grep -q '<<<RALPHEX:ALL_TASKS_DONE>>>'; then
     fail "wrapper should NOT synthesize ALL_TASKS_DONE for plan with unchecked items and no task headers" "text: $fallback_text"
 else
     pass "wrapper correctly detects unchecked items in headerless plan"
+fi
+
+# ---------------------------------------------------------------------------
+# test: headerless fallback counts unchecked checkboxes whose text quotes a marker
+# ---------------------------------------------------------------------------
+echo "test: headerless fallback counts unchecked checkboxes whose text quotes a marker"
+
+reset_captures
+plan_file_no_headers_marker="$TMPDIR_TEST/plan-no-headers-marker.md"
+cat > "$plan_file_no_headers_marker" <<'EOF'
+# Fix bugs
+
+- [x] Refactor widget module
+- [ ] mark all tasks `[x]` in the plan
+EOF
+
+task_prompt_no_headers_marker="Read the plan file at $plan_file_no_headers_marker. Find the FIRST Task section.
+When all tasks are done emit <<<RALPHEX:ALL_TASKS_DONE>>>
+If task fails emit <<<RALPHEX:TASK_FAILED>>>"
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/task_no_signal_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$task_prompt_no_headers_marker" 2>/dev/null)
+
+fallback_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$fallback_text" | grep -q '<<<RALPHEX:ALL_TASKS_DONE>>>'; then
+    fail "headerless fallback must not synthesize ALL_TASKS_DONE while a marker-quoting [ ] remains" "text: $fallback_text"
+else
+    pass "headerless fallback counts unchecked checkboxes whose text quotes a marker"
 fi
 
 # ---------------------------------------------------------------------------

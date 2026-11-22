@@ -512,12 +512,14 @@ func TestTryAutoPlanMode(t *testing.T) {
 
 	t.Run("description_switches_to_plan_mode", func(t *testing.T) {
 		req, selector := newReq(t, "master")
-		require.NoError(t, os.WriteFile(filepath.Join(req.GitSvc.Root(), ".ralphex"), []byte("x"), 0o600))
+		t.Chdir(req.GitSvc.Root())
+		blocker := filepath.Join(".ralphex", "progress", "progress-plan-add-caching.txt")
+		require.NoError(t, os.MkdirAll(blocker, 0o750))
 		setTestStdin(t, "add caching\n")
 		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
 		assert.True(t, handled)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ensure gitignore")
+		assert.Contains(t, err.Error(), "progress-plan-add-caching.txt", "plan mode names its log after the typed description")
 	})
 }
 

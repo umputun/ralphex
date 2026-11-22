@@ -52,7 +52,7 @@ func NewTaskPhase(opts TaskPhaseOpts) *TaskPhase {
 	}
 }
 
-// Run executes one plan task per iteration until all actionable task checkboxes are complete.
+// Run executes one plan task per iteration until all task checkboxes are complete.
 func (p *TaskPhase) Run(ctx context.Context) error {
 	prompt := p.prompts.TaskPrompt()
 	retryCount := 0
@@ -146,7 +146,7 @@ func (p *TaskPhase) ValidatePlanHasTasks() error {
 	return nil
 }
 
-// HasUncompletedTasks reports whether the current plan still has actionable unchecked task work.
+// HasUncompletedTasks reports whether the current plan still has unchecked task checkboxes.
 func (p *TaskPhase) HasUncompletedTasks() bool {
 	path := p.locator.Path()
 	if path == "" {
