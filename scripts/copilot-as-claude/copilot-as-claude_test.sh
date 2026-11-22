@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="$SCRIPT_DIR/copilot-as-claude.sh"
 TMPDIR_TEST=$(mktemp -d)
+export TMPDIR_TEST
 trap 'rm -rf "$TMPDIR_TEST"' EXIT
 
 passed=0
@@ -83,7 +84,7 @@ reset_captures() {
 }
 
 run_wrapper() {
-    TMPDIR_TEST="$TMPDIR_TEST" PATH="$TMPDIR_TEST:$PATH" "$@"
+    PATH="$TMPDIR_TEST:$PATH" "$@"
 }
 
 echo "running copilot-as-claude.sh tests"
@@ -1106,7 +1107,7 @@ cat > "$TMPDIR_TEST/slow_events.jsonl" <<'EOF'
 EOF
 
 reset_captures
-TMPDIR_TEST="$TMPDIR_TEST" PATH="$TMPDIR_TEST:$PATH" \
+PATH="$TMPDIR_TEST:$PATH" \
     MOCK_STDOUT_FILE="$TMPDIR_TEST/slow_events.jsonl" \
     MOCK_PID_FILE="$TMPDIR_TEST/copilot_pid" \
     MOCK_SLEEP_SECONDS=30 \

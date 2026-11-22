@@ -339,7 +339,6 @@ last_draft_review_action() {
 plan_written_since_start() {
     local progress_file="$1"
     local draft_text="$2"
-    local attempt=""
     local candidate=""
     local candidate_text=""
     local draft_file=""
@@ -354,7 +353,7 @@ plan_written_since_start() {
     normalize_plan_text "$draft_text" > "$draft_file"
     [[ -s "$draft_file" ]] || return 1
 
-    for attempt in 1 2 3 4 5; do
+    for _ in 1 2 3 4 5; do
         matches=0
         matched_path=""
         while IFS= read -r -d '' candidate; do
