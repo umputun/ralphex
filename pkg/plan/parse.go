@@ -47,16 +47,14 @@ var (
 	// allow leading whitespace for indented sub-items (e.g. "  - [ ] Unit tests")
 	checkboxPattern = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
-	// formatInText matches [ ] or [x] in checkbox text — description/example, not actionable for completion check.
-	formatInText = regexp.MustCompile(`\[\s*[ xX]\s*\]`)
-	// fenceOpenPattern matches a CommonMark code-fence opener: optional indentation up to 3 spaces,
-	// then 3+ backticks or 3+ tildes, optional info string. captures the fence character run.
-	fenceOpenPattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
-	// fenceClosePattern matches a CommonMark code-fence closer: same as opener but with no info
-	// string permitted — only optional trailing whitespace (including a trailing CR for CRLF
-	// inputs that reach scanners which do not strip it). used to avoid treating an inner
+	// fenceOpenPattern matches a code-fence opener and captures its indent and backtick or tilde run.
+	// indent is uncapped: a fence under "10." or a nested bullet sits 4+ spaces deep.
+	fenceOpenPattern = regexp.MustCompile("^([ \t]*)(`{3,}|~{3,})")
+	// fenceClosePattern matches a code-fence closer: same as opener but with no info string
+	// permitted — only optional trailing whitespace (including a trailing CR for CRLF inputs that
+	// reach scanners which do not strip it). used to avoid treating an inner
 	// opener-with-info-string (e.g. ```go) as closing an outer fence.
-	fenceClosePattern = regexp.MustCompile(`^ {0,3}(` + "`" + `{3,}|~{3,})[ \t]*\r?$`)
+	fenceClosePattern = regexp.MustCompile(`^([ \t]*)(` + "`" + `{3,}|~{3,})[ \t]*\r?$`)
 )
 
 // ParsePlan parses plan markdown content into a structured Plan.
@@ -151,9 +149,8 @@ func ParsePlanFile(path string) (*Plan, error) {
 	return ParsePlan(string(content))
 }
 
-// FileHasUncompletedCheckbox returns true if the file contains any uncompleted actionable checkbox (- [ ]).
+// FileHasUncompletedCheckbox returns true if the file contains any uncompleted checkbox (- [ ]).
 // used for malformed plans (no task headers) to avoid treating them as complete.
-// ignores format-description checkboxes (text containing [ ] or [x]) to match HasUncompletedActionableWork behavior.
 func FileHasUncompletedCheckbox(path string) (bool, error) {
 	content, err := os.ReadFile(path) //nolint:gosec // path is internally resolved
 	if err != nil {
@@ -168,11 +165,7 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 		if len(matches) < 3 {
 			continue
 		}
-		cb := Checkbox{
-			Text:    strings.TrimSpace(matches[2]),
-			Checked: matches[1] == "x" || matches[1] == "X",
-		}
-		if !cb.Checked && cb.IsActionable() {
+		if matches[1] == " " {
 			return true, nil
 		}
 	}
@@ -182,47 +175,55 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 // fenceTracker tracks markdown fenced code block state across a line-by-line scan.
 // the zero value is ready to use.
 type fenceTracker struct {
-	open string // current fence marker (e.g. "```" or "~~~~"); empty when not in fenced block
+	open   string // current fence marker (e.g. "```" or "~~~~"); empty when not in fenced block
+	indent int    // leading whitespace of the opener
 }
 
 // skip reports whether line is inside (or opens/closes) a fenced code block and should be skipped
-// by the caller. when the call returns true, the caller should advance to the next line. fence
-// matching follows CommonMark: 0-3 leading spaces, then 3+ backticks or 3+ tildes. an opener may
-// carry an info string (e.g. ```go); a closer may not — only trailing whitespace is allowed —
-// and must use the same character as the opener with length at least equal to the opener.
+// by the caller. when the call returns true, the caller should advance to the next line. a fence
+// is any indentation, then 3+ backticks or 3+ tildes. an opener may carry an info string
+// (e.g. ```go); a closer may not — only trailing whitespace is allowed — and must use the same
+// character as the opener with length at least equal to the opener. a closer indented more than
+// 3 beyond the opener is content, so a deeper fence quoted inside an example cannot close it.
 func (f *fenceTracker) skip(line string) bool {
 	if f.open == "" {
-		marker := f.openerMarker(line)
+		marker, indent := f.openerMarker(line)
 		if marker == "" {
 			return false
 		}
-		f.open = marker
+		f.open, f.indent = marker, indent
 		return true
 	}
-	if marker := f.closerMarker(line); marker != "" && len(marker) >= len(f.open) && marker[0] == f.open[0] {
+	marker, indent := f.closerMarker(line)
+	if marker != "" && len(marker) >= len(f.open) && marker[0] == f.open[0] && indent <= f.indent+3 {
 		f.open = ""
 	}
 	return true
 }
 
-// openerMarker returns the fence sequence (backticks or tildes) that opens a fenced code block,
-// or empty string if line is not an opener. trailing info strings are allowed.
-func (f *fenceTracker) openerMarker(line string) string {
+// openerMarker returns the fence sequence (backticks or tildes) that opens a fenced code block
+// and its indent width, or an empty marker if line is not an opener. info strings are allowed.
+func (f *fenceTracker) openerMarker(line string) (marker string, indent int) {
 	m := fenceOpenPattern.FindStringSubmatch(line)
-	if len(m) < 2 {
-		return ""
+	if len(m) < 3 {
+		return "", 0
 	}
-	return m[1]
+	return m[2], f.indentWidth(m[1])
 }
 
-// closerMarker returns the fence sequence that closes a fenced code block, or empty string if
-// line is not a valid closer. closers must have no info string — only optional trailing whitespace.
-func (f *fenceTracker) closerMarker(line string) string {
+// closerMarker returns the fence sequence that closes a fenced code block and its indent width,
+// or an empty marker if line is not a valid closer. closers must have no info string.
+func (f *fenceTracker) closerMarker(line string) (marker string, indent int) {
 	m := fenceClosePattern.FindStringSubmatch(line)
-	if len(m) < 2 {
-		return ""
+	if len(m) < 3 {
+		return "", 0
 	}
-	return m[1]
+	return m[2], f.indentWidth(m[1])
+}
+
+// indentWidth returns the width of a whitespace prefix, counting a tab as 4 columns.
+func (f *fenceTracker) indentWidth(prefix string) int {
+	return len(prefix) + 3*strings.Count(prefix, "\t")
 }
 
 // JSON returns the plan as JSON bytes.
@@ -245,17 +246,10 @@ func parseTaskNum(s string) int {
 	return n
 }
 
-// IsActionable returns false if checkbox text contains format pattern [ ] or [x] —
-// such checkboxes are description/examples, ignored for completion check.
-func (cb Checkbox) IsActionable() bool {
-	return !formatInText.MatchString(cb.Text)
-}
-
-// HasUncompletedActionableWork returns true if the task has any unchecked actionable checkbox.
-// checkboxes whose text contains [ ] or [x] (format description) are ignored.
-func (t *Task) HasUncompletedActionableWork() bool {
+// HasUncompletedCheckbox returns true if the task has any unchecked checkbox.
+func (t *Task) HasUncompletedCheckbox() bool {
 	for _, cb := range t.Checkboxes {
-		if !cb.Checked && cb.IsActionable() {
+		if !cb.Checked {
 			return true
 		}
 	}

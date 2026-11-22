@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER="$SCRIPT_DIR/copilot-as-claude.sh"
 TMPDIR_TEST=$(mktemp -d)
+export TMPDIR_TEST
 trap 'rm -rf "$TMPDIR_TEST"' EXIT
 
 passed=0
@@ -83,7 +84,7 @@ reset_captures() {
 }
 
 run_wrapper() {
-    TMPDIR_TEST="$TMPDIR_TEST" PATH="$TMPDIR_TEST:$PATH" "$@"
+    PATH="$TMPDIR_TEST:$PATH" "$@"
 }
 
 echo "running copilot-as-claude.sh tests"
@@ -1106,7 +1107,7 @@ cat > "$TMPDIR_TEST/slow_events.jsonl" <<'EOF'
 EOF
 
 reset_captures
-TMPDIR_TEST="$TMPDIR_TEST" PATH="$TMPDIR_TEST:$PATH" \
+PATH="$TMPDIR_TEST:$PATH" \
     MOCK_STDOUT_FILE="$TMPDIR_TEST/slow_events.jsonl" \
     MOCK_PID_FILE="$TMPDIR_TEST/copilot_pid" \
     MOCK_SLEEP_SECONDS=30 \
@@ -1270,9 +1271,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# test: task fallback skips format-description checkboxes
+# test: task fallback counts unchecked checkboxes whose text quotes a marker
 # ---------------------------------------------------------------------------
-echo "test: task fallback skips format-description checkboxes"
+echo "test: task fallback counts unchecked checkboxes whose text quotes a marker"
 
 reset_captures
 plan_file_format="$TMPDIR_TEST/plan-format-desc.md"
@@ -1281,7 +1282,7 @@ cat > "$plan_file_format" <<'EOF'
 
 ### Task 1: Fix the widget
 - [x] Refactor widget module
-- [x] Change [ ] to [x] in plan file
+- [ ] Change [ ] to [x] in plan file
 
 ### Task 2: Update docs
 - [x] Update README
@@ -1296,9 +1297,9 @@ output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/task_no_signal_events.jsonl" \
 
 fallback_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
 if echo "$fallback_text" | grep -q '<<<RALPHEX:ALL_TASKS_DONE>>>'; then
-    pass "wrapper handles format-description checkboxes correctly"
+    fail "wrapper must not synthesize ALL_TASKS_DONE while a marker-quoting [ ] remains" "text: $fallback_text"
 else
-    fail "wrapper should synthesize ALL_TASKS_DONE when only format-description [ ] remain" "text: $fallback_text"
+    pass "wrapper counts unchecked checkboxes whose text quotes a marker"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1327,6 +1328,73 @@ if echo "$fallback_text" | grep -q '<<<RALPHEX:ALL_TASKS_DONE>>>'; then
 else
     pass "wrapper correctly detects unchecked items in headerless plan"
 fi
+
+# ---------------------------------------------------------------------------
+# test: headerless fallback counts unchecked checkboxes whose text quotes a marker
+# ---------------------------------------------------------------------------
+echo "test: headerless fallback counts unchecked checkboxes whose text quotes a marker"
+
+reset_captures
+plan_file_no_headers_marker="$TMPDIR_TEST/plan-no-headers-marker.md"
+cat > "$plan_file_no_headers_marker" <<'EOF'
+# Fix bugs
+
+- [x] Refactor widget module
+- [ ] mark all tasks `[x]` in the plan
+EOF
+
+task_prompt_no_headers_marker="Read the plan file at $plan_file_no_headers_marker. Find the FIRST Task section.
+When all tasks are done emit <<<RALPHEX:ALL_TASKS_DONE>>>
+If task fails emit <<<RALPHEX:TASK_FAILED>>>"
+
+output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/task_no_signal_events.jsonl" \
+    run_wrapper bash "$WRAPPER" -p "$task_prompt_no_headers_marker" 2>/dev/null)
+
+fallback_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+if echo "$fallback_text" | grep -q '<<<RALPHEX:ALL_TASKS_DONE>>>'; then
+    fail "headerless fallback must not synthesize ALL_TASKS_DONE while a marker-quoting [ ] remains" "text: $fallback_text"
+else
+    pass "headerless fallback counts unchecked checkboxes whose text quotes a marker"
+fi
+
+# ---------------------------------------------------------------------------
+# test: task fallback ignores checkboxes inside fenced code blocks, like pkg/plan
+# ---------------------------------------------------------------------------
+echo "test: task fallback ignores checkboxes inside fenced code blocks"
+
+fence_dir="$TMPDIR_TEST/fences"
+mkdir -p "$fence_dir"
+printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n```markdown\n- [ ] example item\n```\n' > "$fence_dir/synth-plain.md"
+printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n10. Example output:\n\n    ```\n    - [ ] example item\n    ```\n' > "$fence_dir/synth-nested.md"
+printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n```\n```bash\n- [ ] example item\n```\n' > "$fence_dir/synth-info-opener.md"
+printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n````\n```\n- [ ] example item\n````\n' > "$fence_dir/synth-longer-opener.md"
+printf '# Plan\n\n- [x] real done\n\n~~~\n- [ ] example item\n~~~\n' > "$fence_dir/synth-headerless.md"
+printf '# Plan\n\n### Task 1: Docs\n```\n- [ ] example item\n```\n- [ ] real todo\n' > "$fence_dir/open-after-fence.md"
+printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n```markdown\n10. Run it:\n\n     ```bash\n     make test\n     ```\n```\n\n### Task 2: Ship\n- [ ] real todo\n' > "$fence_dir/open-after-deeper-inner-fence.md"
+printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n\t```\n\t- [ ] example item\n     ```\n\n### Task 2: Ship\n- [ ] real todo\n' > "$fence_dir/open-after-tab-opener-fence.md"
+
+for fence_plan in "$fence_dir"/*.md; do
+    reset_captures
+    fence_prompt="Read the plan file at $fence_plan. Find the FIRST Task section.
+When all tasks are done emit <<<RALPHEX:ALL_TASKS_DONE>>>
+If task fails emit <<<RALPHEX:TASK_FAILED>>>"
+    output=$(MOCK_STDOUT_FILE="$TMPDIR_TEST/task_no_signal_events.jsonl" \
+        run_wrapper bash "$WRAPPER" -p "$fence_prompt" 2>/dev/null)
+    fallback_text=$(echo "$output" | jq -r 'select(.type=="content_block_delta") | .delta.text')
+    synthesized=0
+    if echo "$fallback_text" | grep -q '<<<RALPHEX:ALL_TASKS_DONE>>>'; then
+        synthesized=1
+    fi
+    case "$(basename "$fence_plan")" in
+        synth-*) want=1 ;;
+        *) want=0 ;;
+    esac
+    if [[ "$synthesized" == "$want" ]]; then
+        pass "fence fallback $(basename "$fence_plan"): synthesized=$synthesized"
+    else
+        fail "fence fallback $(basename "$fence_plan"): synthesized=$synthesized, want $want" "text: $fallback_text"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # test: task fallback keeps checkboxes under task subsections actionable

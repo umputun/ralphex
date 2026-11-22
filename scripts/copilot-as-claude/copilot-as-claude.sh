@@ -339,7 +339,6 @@ last_draft_review_action() {
 plan_written_since_start() {
     local progress_file="$1"
     local draft_text="$2"
-    local attempt=""
     local candidate=""
     local candidate_text=""
     local draft_file=""
@@ -354,7 +353,7 @@ plan_written_since_start() {
     normalize_plan_text "$draft_text" > "$draft_file"
     [[ -s "$draft_file" ]] || return 1
 
-    for attempt in 1 2 3 4 5; do
+    for _ in 1 2 3 4 5; do
         matches=0
         matched_path=""
         while IFS= read -r -d '' candidate; do
@@ -544,24 +543,52 @@ accepted_draft_ready_fallback_path() {
     plan_written_since_start "$plan_progress_file" "$draft_text"
 }
 
+# fence_skip mirrors pkg/plan's fenceTracker: returns 0 when the line opens, closes or sits inside
+# a fenced code block. a closer has no info string, repeats the opener's character at least as
+# many times, and is indented at most 3 beyond the opener, a tab counting as 4. state lives in
+# fence_open and fence_indent, which each scan resets.
+fence_skip() {
+    local line="$1"
+    local open_re='^([[:space:]]*)(`{3,}|~{3,})'
+    local close_re='^([[:space:]]*)(`{3,}|~{3,})[[:space:]]*$'
+    local tab=$'\t'
+    if [[ -z "$fence_open" ]]; then
+        [[ "$line" =~ $open_re ]] || return 1
+        local prefix="${BASH_REMATCH[1]//$tab/    }"
+        fence_indent=${#prefix}
+        fence_open="${BASH_REMATCH[2]}"
+        return 0
+    fi
+    if [[ "$line" =~ $close_re ]]; then
+        local prefix="${BASH_REMATCH[1]//$tab/    }"
+        local indent=${#prefix}
+        local run="${BASH_REMATCH[2]}"
+        if (( ${#run} >= ${#fence_open} && indent <= fence_indent + 3 )) &&
+            [[ "${run:0:1}" == "${fence_open:0:1}" ]]; then
+            fence_open=""
+        fi
+    fi
+    return 0
+}
+
 task_complete_fallback() {
     # Copilot sometimes reads a fully-checked plan, narrates "nothing left to do",
     # and exits cleanly without emitting ALL_TASKS_DONE. When the plan file has
-    # no remaining unchecked actionable task checkboxes, synthesize the signal.
+    # no remaining unchecked task checkboxes, synthesize the signal.
     [[ "$is_task_prompt" == "1" ]] || return 1
     [[ "$intentional_stop" == "0" ]] || return 1
     [[ "$copilot_exit" == "0" ]] || return 1
     [[ "${task_signal_emitted:-0}" == "0" ]] || return 1
     [[ -n "$task_plan_file" && -f "$task_plan_file" ]] || return 1
 
-    # check for unchecked actionable checkboxes inside Task/Iteration sections.
-    # mirrors Go's hasUncompletedTasks() logic:
-    #   - only look at lines inside "### Task N:" or "### Iteration N:" sections
-    #   - skip checkboxes whose text contains [ ] or [x] (format descriptions)
+    # check for unchecked checkboxes inside Task/Iteration sections.
+    # mirrors Go's HasUncompletedTasks(): only lines inside "### Task N:" or "### Iteration N:" count.
     local in_task=0
     local has_tasks=0
     local saw_title=0
+    fence_open=""; fence_indent=0
     while IFS= read -r line || [[ -n "$line" ]]; do
+        fence_skip "$line" && continue
         if [[ "$line" =~ ^#[[:space:]] && "$saw_title" == "0" ]]; then
             saw_title=1
             continue
@@ -583,24 +610,17 @@ task_complete_fallback() {
         fi
         [[ "$in_task" == "1" ]] || continue
         # match unchecked checkbox: "- [ ] text"
-        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \][[:space:]]*(.*) ]]; then
-            local cb_text="${BASH_REMATCH[1]}"
-            # skip format-description checkboxes (text contains [ ] or [x])
-            if [[ "$cb_text" =~ \[[[:space:]]*[xX\ ]?[[:space:]]*\] ]]; then
-                continue
-            fi
-            return 1  # found actionable unchecked checkbox
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \] ]]; then
+            return 1  # found unchecked checkbox
         fi
     done < "$task_plan_file"
 
     # fallback for malformed plans with no task headers: check entire file
     if [[ "$has_tasks" == "0" ]]; then
+        fence_open=""; fence_indent=0
         while IFS= read -r line || [[ -n "$line" ]]; do
-            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \][[:space:]]*(.*) ]]; then
-                local cb_text="${BASH_REMATCH[1]}"
-                if [[ "$cb_text" =~ \[[[:space:]]*[xX\ ]?[[:space:]]*\] ]]; then
-                    continue
-                fi
+            fence_skip "$line" && continue
+            if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \] ]]; then
                 return 1
             fi
         done < "$task_plan_file"

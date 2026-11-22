@@ -314,24 +314,26 @@ Just some text, no checkboxes.
 		assert.Equal(t, "Integration tests", p.Tasks[0].Checkboxes[2].Text)
 	})
 
-	t.Run("HasUncompletedActionableWork ignores description checkboxes", func(t *testing.T) {
-		content := `# Plan
-
-### Task 1: Format example
-
-- [x] Faulti format
-- [ ] use this format for [ ] unchecked items
-`
-		p, err := plan.ParsePlan(content)
-		require.NoError(t, err)
-
-		require.Len(t, p.Tasks, 1)
-		require.Len(t, p.Tasks[0].Checkboxes, 2)
-		// first actionable (done), second is description (text contains [ ]) — no actionable uncompleted
-		assert.False(t, p.Tasks[0].HasUncompletedActionableWork())
+	t.Run("HasUncompletedCheckbox counts checkboxes whose text holds brackets", func(t *testing.T) {
+		tests := []struct{ name, text string }{
+			{name: "format example", text: "use this format for [ ] unchecked items"},
+			{name: "checked marker example", text: "use [x] in examples"},
+			{name: "backticked marker", text: "update this plan file: mark all tasks `[x]`"},
+			{name: "index expression", text: "bounds-check s[x] before the copy"},
+			{name: "empty brackets", text: "convert []string to []T in the callers"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				p, err := plan.ParsePlan("# Plan\n\n### Task 1: Work\n\n- [x] done\n- [ ] " + tt.text + "\n")
+				require.NoError(t, err)
+				require.Len(t, p.Tasks, 1)
+				require.Len(t, p.Tasks[0].Checkboxes, 2)
+				assert.True(t, p.Tasks[0].HasUncompletedCheckbox())
+			})
+		}
 	})
 
-	t.Run("HasUncompletedActionableWork returns true when actionable unchecked", func(t *testing.T) {
+	t.Run("HasUncompletedCheckbox returns true when a box is unchecked", func(t *testing.T) {
 		content := `# Plan
 
 ### Task 1: Mixed
@@ -343,22 +345,7 @@ Just some text, no checkboxes.
 		require.NoError(t, err)
 
 		require.Len(t, p.Tasks, 1)
-		assert.True(t, p.Tasks[0].HasUncompletedActionableWork())
-	})
-
-	t.Run("HasUncompletedActionableWork counts empty brackets as task text", func(t *testing.T) {
-		// "[]" shows up in ordinary task wording (Go slice types, CLI flags) and is not the
-		// "[ ]" / "[x]" formatting example the description check looks for.
-		content := "# Plan\n\n### Task 1: Convert types\n\n- [ ] convert []string to []T in the callers\n"
-		p, err := plan.ParsePlan(content)
-		require.NoError(t, err)
-
-		require.Len(t, p.Tasks, 1)
-		require.Len(t, p.Tasks[0].Checkboxes, 1)
-		assert.False(t, p.Tasks[0].Checkboxes[0].Checked)
-		assert.True(t, p.Tasks[0].Checkboxes[0].IsActionable(),
-			"empty brackets must not mark the checkbox as a formatting example")
-		assert.True(t, p.Tasks[0].HasUncompletedActionableWork())
+		assert.True(t, p.Tasks[0].HasUncompletedCheckbox())
 	})
 
 	t.Run("ignores checkboxes inside backtick fenced code blocks", func(t *testing.T) {
@@ -381,7 +368,7 @@ Just some text, no checkboxes.
 		assert.Equal(t, "Validation green", p.Tasks[0].Checkboxes[0].Text)
 		assert.Equal(t, "PR body file generated", p.Tasks[0].Checkboxes[1].Text)
 		assert.Equal(t, plan.TaskStatusDone, p.Tasks[0].Status)
-		assert.False(t, p.Tasks[0].HasUncompletedActionableWork())
+		assert.False(t, p.Tasks[0].HasUncompletedCheckbox())
 	})
 
 	t.Run("ignores checkboxes inside tilde fenced code blocks", func(t *testing.T) {
@@ -419,7 +406,7 @@ Just some text, no checkboxes.
 		require.Len(t, p.Tasks[0].Checkboxes, 2)
 		assert.Equal(t, "real item one", p.Tasks[0].Checkboxes[0].Text)
 		assert.Equal(t, "real unchecked item", p.Tasks[0].Checkboxes[1].Text)
-		assert.True(t, p.Tasks[0].HasUncompletedActionableWork())
+		assert.True(t, p.Tasks[0].HasUncompletedCheckbox())
 	})
 
 	t.Run("treats unclosed fence as code until end of file", func(t *testing.T) {
@@ -468,6 +455,67 @@ Just some text, no checkboxes.
 		assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
 	})
 
+	t.Run("handles fences nested four or more spaces deep in lists", func(t *testing.T) {
+		tests := []struct{ name, content string }{
+			{name: "two-digit ordered item", content: "10. Example output:\n\n" +
+				"    ```markdown\n" +
+				"    - [ ] Render [x] in the output\n" +
+				"    ```\n"},
+			{name: "nested bullet", content: "- outer\n" +
+				"  - inner example:\n\n" +
+				"      ~~~\n" +
+				"      - [ ] example item\n" +
+				"      ~~~\n"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				p, err := plan.ParsePlan("# Plan\n\n### Task 1: Nested fence\n\n" + tt.content + "\n- [x] real done\n")
+				require.NoError(t, err)
+				require.Len(t, p.Tasks, 1)
+				require.Len(t, p.Tasks[0].Checkboxes, 1)
+				assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
+			})
+		}
+	})
+
+	t.Run("deeper inner fence does not close the outer fence", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Document lists\n\n" +
+			"- [x] write the example\n\n" +
+			"```markdown\n" +
+			"10. Run it:\n\n" +
+			"     ```bash\n" +
+			"     make test\n" +
+			"     ```\n" +
+			"```\n\n" +
+			"### Task 2: Ship\n\n" +
+			"- [ ] real todo\n"
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+		assert.Equal(t, "real todo", p.Tasks[1].Checkboxes[0].Text)
+		assert.True(t, p.Tasks[1].HasUncompletedCheckbox())
+	})
+
+	t.Run("tab-indented opener closes on a space-indented closer", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Example\n\n" +
+			"- [x] write the example\n\n" +
+			"\t```\n" +
+			"\t- [ ] example item\n" +
+			"     ```\n\n" +
+			"### Task 2: Ship\n\n" +
+			"- [ ] real todo\n"
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+		assert.Equal(t, "real todo", p.Tasks[1].Checkboxes[0].Text)
+	})
+
 	t.Run("handles fence info string with backticks count > 3", func(t *testing.T) {
 		content := "# Plan\n\n" +
 			"### Task 1: Quad fence\n\n" +
@@ -490,7 +538,7 @@ Just some text, no checkboxes.
 	t.Run("does not close fence on opener-with-info-string of equal length", func(t *testing.T) {
 		// CommonMark: closing fence may not have an info string. A line like ```bash is an opener,
 		// not a valid closer for an outer ``` fence. If treated as a close, the inner example
-		// checkbox leaks back as actionable — the same failure mode as issue #328.
+		// checkbox leaks back as an open task — the same failure mode as issue #328.
 		content := "# Plan\n\n" +
 			"### Task 1: Show PR body example\n\n" +
 			"```markdown\n" +
@@ -506,7 +554,7 @@ Just some text, no checkboxes.
 		require.Len(t, p.Tasks, 1)
 		require.Len(t, p.Tasks[0].Checkboxes, 1, "outer fence must not be closed by an inner opener-with-info-string")
 		assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
-		assert.False(t, p.Tasks[0].HasUncompletedActionableWork())
+		assert.False(t, p.Tasks[0].HasUncompletedCheckbox())
 	})
 }
 
@@ -561,7 +609,7 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("returns false when only format-description checkboxes unchecked", func(t *testing.T) {
+	t.Run("returns true when unchecked checkbox text holds a marker", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		path := filepath.Join(tmpDir, "plan.md")
 		content := "# Plan\n- [ ] use this format for [ ] unchecked items\n- [ ] example with [x] in text"
@@ -569,7 +617,7 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 
 		has, err := plan.FileHasUncompletedCheckbox(path)
 		require.NoError(t, err)
-		assert.False(t, has)
+		assert.True(t, has)
 	})
 
 	t.Run("returns false when only fenced-block checkboxes unchecked", func(t *testing.T) {
@@ -603,6 +651,40 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		assert.True(t, has)
 	})
 
+	t.Run("returns false when only a deeply indented fence holds unchecked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\n\n" +
+			"10. Example output:\n\n" +
+			"    ```\n" +
+			"    - [ ] inside nested fence\n" +
+			"    ```\n\n" +
+			"- [x] real done\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.False(t, has)
+	})
+
+	t.Run("returns true for unchecked after a fence holding a deeper inner fence", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\n\n" +
+			"```markdown\n" +
+			"- step:\n\n" +
+			"      ```bash\n" +
+			"      code\n" +
+			"      ```\n" +
+			"```\n\n" +
+			"- [ ] real unchecked\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.True(t, has)
+	})
+
 	t.Run("handles CRLF line endings around fence markers", func(t *testing.T) {
 		// FileHasUncompletedCheckbox splits on \n, leaving trailing \r on each line. The closer
 		// regex must tolerate the trailing \r or it will never see a closing fence on a CRLF file,
@@ -621,16 +703,17 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		assert.True(t, has, "real unchecked checkbox after a CRLF-terminated fence must be detected")
 	})
 
-	t.Run("agrees with checkbox actionability on edge cases", func(t *testing.T) {
+	t.Run("reports open state on edge cases", func(t *testing.T) {
 		tests := []struct {
 			name string
 			line string
-			cb   plan.Checkbox
+			want bool
 		}{
-			{name: "actionable unchecked", line: "- [ ] real work", cb: plan.Checkbox{Text: "real work"}},
-			{name: "format unchecked", line: "- [ ] use [ ] in examples", cb: plan.Checkbox{Text: "use [ ] in examples"}},
-			{name: "format checked marker unchecked", line: "- [ ] use [x] in examples", cb: plan.Checkbox{Text: "use [x] in examples"}},
-			{name: "actionable checked", line: "- [x] real work", cb: plan.Checkbox{Text: "real work", Checked: true}},
+			{name: "unchecked", line: "- [ ] real work", want: true},
+			{name: "unchecked with marker in text", line: "- [ ] use [ ] in examples", want: true},
+			{name: "unchecked with checked marker in text", line: "- [ ] use [x] in examples", want: true},
+			{name: "checked", line: "- [x] real work", want: false},
+			{name: "checked with marker in text", line: "- [x] use [ ] in examples", want: false},
 		}
 
 		for _, tt := range tests {
@@ -641,7 +724,7 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 
 				has, err := plan.FileHasUncompletedCheckbox(path)
 				require.NoError(t, err)
-				assert.Equal(t, !tt.cb.Checked && tt.cb.IsActionable(), has)
+				assert.Equal(t, tt.want, has)
 			})
 		}
 	})

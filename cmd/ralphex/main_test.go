@@ -482,6 +482,60 @@ func TestTryAutoPlanMode(t *testing.T) {
 		assert.False(t, handled, "non-missing-plans error propagates to caller untouched")
 		require.NoError(t, err)
 	})
+
+	t.Run("unset_default_branch_names_main_or_master", func(t *testing.T) {
+		req, selector := newReq(t, "feature-x")
+		req.DefaultBranch = ""
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
+		assert.True(t, handled)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"main/master"`)
+	})
+
+	t.Run("branch_lookup_failure_refuses_with_reason", func(t *testing.T) {
+		req, selector := newReq(t, "master")
+		require.NoError(t, os.RemoveAll(filepath.Join(req.GitSvc.Root(), ".git")))
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
+		assert.True(t, handled)
+		require.Error(t, err)
+		require.ErrorIs(t, err, plan.ErrNoPlansFound)
+		assert.Contains(t, err.Error(), "failed to determine current branch")
+	})
+
+	t.Run("empty_description_cancels", func(t *testing.T) {
+		req, selector := newReq(t, "master")
+		setTestStdin(t, "")
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
+		assert.True(t, handled)
+		require.NoError(t, err)
+	})
+
+	t.Run("description_switches_to_plan_mode", func(t *testing.T) {
+		req, selector := newReq(t, "master")
+		t.Chdir(req.GitSvc.Root())
+		blocker := filepath.Join(".ralphex", "progress", "progress-plan-add-caching.txt")
+		require.NoError(t, os.MkdirAll(blocker, 0o750))
+		setTestStdin(t, "add caching\n")
+		handled, err := tryAutoPlanMode(t.Context(), plan.ErrNoPlansFound, opts{}, req, selector)
+		assert.True(t, handled)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "progress-plan-add-caching.txt", "plan mode names its log after the typed description")
+	})
+}
+
+func setTestStdin(t *testing.T, content string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, err = w.WriteString(content)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	orig := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = orig
+		_ = r.Close()
+	})
 }
 
 func TestCheckClaudeDep(t *testing.T) {
