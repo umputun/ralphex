@@ -161,7 +161,7 @@ func (p *TaskPhase) HasUncompletedTasks() bool {
 		return true
 	}
 	for _, t := range parsed.Tasks {
-		if t.HasUncompletedActionableWork() {
+		if t.HasUncompletedCheckbox() {
 			return true
 		}
 	}
@@ -185,7 +185,7 @@ func (p *TaskPhase) NextPlanTaskPosition() int {
 		return 0
 	}
 	for i, t := range parsed.Tasks {
-		if t.HasUncompletedActionableWork() {
+		if t.HasUncompletedCheckbox() {
 			return i + 1
 		}
 	}

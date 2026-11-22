@@ -47,8 +47,6 @@ var (
 	// allow leading whitespace for indented sub-items (e.g. "  - [ ] Unit tests")
 	checkboxPattern = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
-	// formatInText matches [ ] or [x] in checkbox text — description/example, not actionable for completion check.
-	formatInText = regexp.MustCompile(`\[\s*[ xX]\s*\]`)
 	// fenceOpenPattern matches a CommonMark code-fence opener: optional indentation up to 3 spaces,
 	// then 3+ backticks or 3+ tildes, optional info string. captures the fence character run.
 	fenceOpenPattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
@@ -151,9 +149,8 @@ func ParsePlanFile(path string) (*Plan, error) {
 	return ParsePlan(string(content))
 }
 
-// FileHasUncompletedCheckbox returns true if the file contains any uncompleted actionable checkbox (- [ ]).
+// FileHasUncompletedCheckbox returns true if the file contains any uncompleted checkbox (- [ ]).
 // used for malformed plans (no task headers) to avoid treating them as complete.
-// ignores format-description checkboxes (text containing [ ] or [x]) to match HasUncompletedActionableWork behavior.
 func FileHasUncompletedCheckbox(path string) (bool, error) {
 	content, err := os.ReadFile(path) //nolint:gosec // path is internally resolved
 	if err != nil {
@@ -168,11 +165,7 @@ func FileHasUncompletedCheckbox(path string) (bool, error) {
 		if len(matches) < 3 {
 			continue
 		}
-		cb := Checkbox{
-			Text:    strings.TrimSpace(matches[2]),
-			Checked: matches[1] == "x" || matches[1] == "X",
-		}
-		if !cb.Checked && cb.IsActionable() {
+		if matches[1] == " " {
 			return true, nil
 		}
 	}
@@ -245,17 +238,10 @@ func parseTaskNum(s string) int {
 	return n
 }
 
-// IsActionable returns false if checkbox text contains format pattern [ ] or [x] —
-// such checkboxes are description/examples, ignored for completion check.
-func (cb Checkbox) IsActionable() bool {
-	return !formatInText.MatchString(cb.Text)
-}
-
-// HasUncompletedActionableWork returns true if the task has any unchecked actionable checkbox.
-// checkboxes whose text contains [ ] or [x] (format description) are ignored.
-func (t *Task) HasUncompletedActionableWork() bool {
+// HasUncompletedCheckbox returns true if the task has any unchecked checkbox.
+func (t *Task) HasUncompletedCheckbox() bool {
 	for _, cb := range t.Checkboxes {
-		if !cb.Checked && cb.IsActionable() {
+		if !cb.Checked {
 			return true
 		}
 	}

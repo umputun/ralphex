@@ -102,7 +102,7 @@ func TestTaskPhase_PlanState(t *testing.T) {
 		{name: "has uncompleted task", content: "# Plan\n### Task 1: first\n- [x] done\n### Task 2: second\n- [ ] todo", wantOpen: true, wantPos: 2},
 		{name: "success criteria ignored", content: "# Plan\n## Success criteria\n- [ ] Manual\n### Task 1: first\n- [x] done", wantOpen: false, wantPos: 0},
 		{name: "malformed plan has open checkbox", content: "# Plan\n- [x] done\n- [ ] todo", wantOpen: true, wantPos: 0},
-		{name: "description checkbox skipped", content: "# Plan\n### Task 1: format\n- [x] done\n- [ ] use [ ] example\n### Task 2: build\n- [ ] build", wantOpen: true, wantPos: 2},
+		{name: "checkbox mentioning a marker counts", content: "# Plan\n### Task 1: format\n- [x] done\n- [ ] use [ ] example\n### Task 2: build\n- [ ] build", wantOpen: true, wantPos: 1},
 	}
 
 	for _, tc := range tests {
