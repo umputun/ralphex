@@ -478,6 +478,27 @@ Just some text, no checkboxes.
 		}
 	})
 
+	t.Run("deeper inner fence does not close the outer fence", func(t *testing.T) {
+		content := "# Plan\n\n" +
+			"### Task 1: Document lists\n\n" +
+			"- [x] write the example\n\n" +
+			"```markdown\n" +
+			"10. Run it:\n\n" +
+			"     ```bash\n" +
+			"     make test\n" +
+			"     ```\n" +
+			"```\n\n" +
+			"### Task 2: Ship\n\n" +
+			"- [ ] real todo\n"
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 2)
+		require.Len(t, p.Tasks[1].Checkboxes, 1)
+		assert.Equal(t, "real todo", p.Tasks[1].Checkboxes[0].Text)
+		assert.True(t, p.Tasks[1].HasUncompletedCheckbox())
+	})
+
 	t.Run("handles fence info string with backticks count > 3", func(t *testing.T) {
 		content := "# Plan\n\n" +
 			"### Task 1: Quad fence\n\n" +
@@ -627,6 +648,24 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		has, err := plan.FileHasUncompletedCheckbox(path)
 		require.NoError(t, err)
 		assert.False(t, has)
+	})
+
+	t.Run("returns true for unchecked after a fence holding a deeper inner fence", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\n\n" +
+			"```markdown\n" +
+			"- step:\n\n" +
+			"      ```bash\n" +
+			"      code\n" +
+			"      ```\n" +
+			"```\n\n" +
+			"- [ ] real unchecked\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.True(t, has)
 	})
 
 	t.Run("handles CRLF line endings around fence markers", func(t *testing.T) {

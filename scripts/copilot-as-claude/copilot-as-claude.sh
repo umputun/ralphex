@@ -544,20 +544,24 @@ accepted_draft_ready_fallback_path() {
 }
 
 # fence_skip mirrors pkg/plan's fenceTracker: returns 0 when the line opens, closes or sits inside
-# a fenced code block. a closer has no info string and repeats the opener's character at least as
-# many times. state lives in fence_open, which each scan resets.
+# a fenced code block. a closer has no info string, repeats the opener's character at least as
+# many times, and is indented at most 3 beyond the opener. state lives in fence_open and
+# fence_indent, which each scan resets.
 fence_skip() {
     local line="$1"
-    local open_re='^[[:space:]]*(`{3,}|~{3,})'
-    local close_re='^[[:space:]]*(`{3,}|~{3,})[[:space:]]*$'
+    local open_re='^([[:space:]]*)(`{3,}|~{3,})'
+    local close_re='^([[:space:]]*)(`{3,}|~{3,})[[:space:]]*$'
     if [[ -z "$fence_open" ]]; then
         [[ "$line" =~ $open_re ]] || return 1
-        fence_open="${BASH_REMATCH[1]}"
+        fence_indent=${#BASH_REMATCH[1]}
+        fence_open="${BASH_REMATCH[2]}"
         return 0
     fi
     if [[ "$line" =~ $close_re ]]; then
-        local run="${BASH_REMATCH[1]}"
-        if (( ${#run} >= ${#fence_open} )) && [[ "${run:0:1}" == "${fence_open:0:1}" ]]; then
+        local indent=${#BASH_REMATCH[1]}
+        local run="${BASH_REMATCH[2]}"
+        if (( ${#run} >= ${#fence_open} && indent <= fence_indent + 3 )) &&
+            [[ "${run:0:1}" == "${fence_open:0:1}" ]]; then
             fence_open=""
         fi
     fi
@@ -579,7 +583,7 @@ task_complete_fallback() {
     local in_task=0
     local has_tasks=0
     local saw_title=0
-    fence_open=""
+    fence_open=""; fence_indent=0
     while IFS= read -r line || [[ -n "$line" ]]; do
         fence_skip "$line" && continue
         if [[ "$line" =~ ^#[[:space:]] && "$saw_title" == "0" ]]; then
@@ -610,7 +614,7 @@ task_complete_fallback() {
 
     # fallback for malformed plans with no task headers: check entire file
     if [[ "$has_tasks" == "0" ]]; then
-        fence_open=""
+        fence_open=""; fence_indent=0
         while IFS= read -r line || [[ -n "$line" ]]; do
             fence_skip "$line" && continue
             if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+\[\ \] ]]; then

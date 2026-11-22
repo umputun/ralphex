@@ -1370,6 +1370,7 @@ printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n```\n```bash\n- [ ] examp
 printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n````\n```\n- [ ] example item\n````\n' > "$fence_dir/synth-longer-opener.md"
 printf '# Plan\n\n- [x] real done\n\n~~~\n- [ ] example item\n~~~\n' > "$fence_dir/synth-headerless.md"
 printf '# Plan\n\n### Task 1: Docs\n```\n- [ ] example item\n```\n- [ ] real todo\n' > "$fence_dir/open-after-fence.md"
+printf '# Plan\n\n### Task 1: Docs\n- [x] real done\n\n```markdown\n10. Run it:\n\n     ```bash\n     make test\n     ```\n```\n\n### Task 2: Ship\n- [ ] real todo\n' > "$fence_dir/open-after-deeper-inner-fence.md"
 
 for fence_plan in "$fence_dir"/*.md; do
     reset_captures
