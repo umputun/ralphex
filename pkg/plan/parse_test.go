@@ -346,6 +346,21 @@ Just some text, no checkboxes.
 		assert.True(t, p.Tasks[0].HasUncompletedActionableWork())
 	})
 
+	t.Run("HasUncompletedActionableWork counts empty brackets as task text", func(t *testing.T) {
+		// "[]" shows up in ordinary task wording (Go slice types, CLI flags) and is not the
+		// "[ ]" / "[x]" formatting example the description check looks for.
+		content := "# Plan\n\n### Task 1: Convert types\n\n- [ ] convert []string to []T in the callers\n"
+		p, err := plan.ParsePlan(content)
+		require.NoError(t, err)
+
+		require.Len(t, p.Tasks, 1)
+		require.Len(t, p.Tasks[0].Checkboxes, 1)
+		assert.False(t, p.Tasks[0].Checkboxes[0].Checked)
+		assert.True(t, p.Tasks[0].Checkboxes[0].IsActionable(),
+			"empty brackets must not mark the checkbox as a formatting example")
+		assert.True(t, p.Tasks[0].HasUncompletedActionableWork())
+	})
+
 	t.Run("ignores checkboxes inside backtick fenced code blocks", func(t *testing.T) {
 		content := "# Plan\n\n" +
 			"### Task 1: Generate PR body\n\n" +
