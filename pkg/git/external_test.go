@@ -594,6 +594,39 @@ func TestExternalBackend_HasChangesOtherThan(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, dirty, "plan file with different case should be excluded")
 	})
+
+	t.Run("excludes plan file with non-ASCII name", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+
+		// git C-quotes a non-ASCII path in status --porcelain output, which used to make the
+		// plan look like somebody else's dirty file and blocked branch creation.
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join("docs", "plans", "修复登录.md")
+		require.NoError(t, os.WriteFile(filepath.Join(dir, planFile), []byte("# Plan\n"), 0o600))
+
+		dirty, err := eb.hasChangesOtherThan(planFile)
+		require.NoError(t, err)
+		assert.Empty(t, dirty, "plan file with a non-ASCII name should be excluded")
+	})
+
+	t.Run("reports non-ASCII file other than the plan", func(t *testing.T) {
+		dir := setupExternalTestRepo(t)
+		eb, err := newExternalBackend(dir, "git")
+		require.NoError(t, err)
+
+		plansDir := filepath.Join(dir, "docs", "plans")
+		require.NoError(t, os.MkdirAll(plansDir, 0o750))
+		planFile := filepath.Join("docs", "plans", "feature.md")
+		require.NoError(t, os.WriteFile(filepath.Join(dir, planFile), []byte("# Plan\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(plansDir, "其他.md"), []byte("other"), 0o600))
+
+		dirty, err := eb.hasChangesOtherThan(planFile)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"docs/plans/其他.md"}, dirty)
+	})
 }
 
 func TestExternalBackend_Add(t *testing.T) {
@@ -1025,6 +1058,15 @@ func TestExternalBackend_extractPathFromPorcelain(t *testing.T) {
 
 	t.Run("extracts renamed path", func(t *testing.T) {
 		assert.Equal(t, "new.txt", eb.extractPathFromPorcelain("R  old.txt -> new.txt"))
+	})
+
+	t.Run("unquotes escaped non-ASCII path", func(t *testing.T) {
+		assert.Equal(t, "docs/plans/修复登录.md",
+			eb.extractPathFromPorcelain(`?? "docs/plans/\344\277\256\345\244\215\347\231\273\345\275\225.md"`))
+	})
+
+	t.Run("unquotes renamed path with spaces", func(t *testing.T) {
+		assert.Equal(t, "new name.txt", eb.extractPathFromPorcelain(`R  "old name.txt" -> "new name.txt"`))
 	})
 
 	t.Run("returns empty for short line", func(t *testing.T) {

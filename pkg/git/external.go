@@ -584,5 +584,13 @@ func (e *externalBackend) extractPathFromPorcelain(line string) string {
 	if idx := strings.Index(path, " -> "); idx >= 0 {
 		path = path[idx+4:]
 	}
+	// git C-quotes a path holding non-ASCII or control bytes (core.quotePath defaults to true),
+	// so a name in a non-Latin script arrives as "\344\277\256...". unquote it back to the plain
+	// name, otherwise comparing it to the path the caller holds never matches.
+	if strings.HasPrefix(path, `"`) {
+		if unquoted, err := strconv.Unquote(path); err == nil {
+			return unquoted
+		}
+	}
 	return path
 }
