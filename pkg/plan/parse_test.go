@@ -455,6 +455,29 @@ Just some text, no checkboxes.
 		assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
 	})
 
+	t.Run("handles fences nested four or more spaces deep in lists", func(t *testing.T) {
+		tests := []struct{ name, content string }{
+			{name: "two-digit ordered item", content: "10. Example output:\n\n" +
+				"    ```markdown\n" +
+				"    - [ ] Render [x] in the output\n" +
+				"    ```\n"},
+			{name: "nested bullet", content: "- outer\n" +
+				"  - inner example:\n\n" +
+				"      ~~~\n" +
+				"      - [ ] example item\n" +
+				"      ~~~\n"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				p, err := plan.ParsePlan("# Plan\n\n### Task 1: Nested fence\n\n" + tt.content + "\n- [x] real done\n")
+				require.NoError(t, err)
+				require.Len(t, p.Tasks, 1)
+				require.Len(t, p.Tasks[0].Checkboxes, 1)
+				assert.Equal(t, "real done", p.Tasks[0].Checkboxes[0].Text)
+			})
+		}
+	})
+
 	t.Run("handles fence info string with backticks count > 3", func(t *testing.T) {
 		content := "# Plan\n\n" +
 			"### Task 1: Quad fence\n\n" +
@@ -588,6 +611,22 @@ func TestFileHasUncompletedCheckbox(t *testing.T) {
 		has, err := plan.FileHasUncompletedCheckbox(path)
 		require.NoError(t, err)
 		assert.True(t, has)
+	})
+
+	t.Run("returns false when only a deeply indented fence holds unchecked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "plan.md")
+		content := "# Plan\n\n" +
+			"10. Example output:\n\n" +
+			"    ```\n" +
+			"    - [ ] inside nested fence\n" +
+			"    ```\n\n" +
+			"- [x] real done\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		has, err := plan.FileHasUncompletedCheckbox(path)
+		require.NoError(t, err)
+		assert.False(t, has)
 	})
 
 	t.Run("handles CRLF line endings around fence markers", func(t *testing.T) {

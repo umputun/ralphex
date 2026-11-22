@@ -47,14 +47,14 @@ var (
 	// allow leading whitespace for indented sub-items (e.g. "  - [ ] Unit tests")
 	checkboxPattern = regexp.MustCompile(`^\s*-\s+\[([ xX])\]\s*(.*)$`)
 	titlePattern    = regexp.MustCompile(`^#\s+(.*)$`)
-	// fenceOpenPattern matches a CommonMark code-fence opener: optional indentation up to 3 spaces,
-	// then 3+ backticks or 3+ tildes, optional info string. captures the fence character run.
-	fenceOpenPattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
-	// fenceClosePattern matches a CommonMark code-fence closer: same as opener but with no info
-	// string permitted — only optional trailing whitespace (including a trailing CR for CRLF
-	// inputs that reach scanners which do not strip it). used to avoid treating an inner
+	// fenceOpenPattern matches a code-fence opener and captures its backtick or tilde run. indent is
+	// uncapped: a fence under "10." or a nested bullet sits 4+ spaces deep.
+	fenceOpenPattern = regexp.MustCompile("^[ \t]*(`{3,}|~{3,})")
+	// fenceClosePattern matches a code-fence closer: same as opener but with no info string
+	// permitted — only optional trailing whitespace (including a trailing CR for CRLF inputs that
+	// reach scanners which do not strip it). used to avoid treating an inner
 	// opener-with-info-string (e.g. ```go) as closing an outer fence.
-	fenceClosePattern = regexp.MustCompile(`^ {0,3}(` + "`" + `{3,}|~{3,})[ \t]*\r?$`)
+	fenceClosePattern = regexp.MustCompile(`^[ \t]*(` + "`" + `{3,}|~{3,})[ \t]*\r?$`)
 )
 
 // ParsePlan parses plan markdown content into a structured Plan.
@@ -179,10 +179,10 @@ type fenceTracker struct {
 }
 
 // skip reports whether line is inside (or opens/closes) a fenced code block and should be skipped
-// by the caller. when the call returns true, the caller should advance to the next line. fence
-// matching follows CommonMark: 0-3 leading spaces, then 3+ backticks or 3+ tildes. an opener may
-// carry an info string (e.g. ```go); a closer may not — only trailing whitespace is allowed —
-// and must use the same character as the opener with length at least equal to the opener.
+// by the caller. when the call returns true, the caller should advance to the next line. a fence
+// is any indentation, then 3+ backticks or 3+ tildes. an opener may carry an info string
+// (e.g. ```go); a closer may not — only trailing whitespace is allowed — and must use the same
+// character as the opener with length at least equal to the opener.
 func (f *fenceTracker) skip(line string) bool {
 	if f.open == "" {
 		marker := f.openerMarker(line)
