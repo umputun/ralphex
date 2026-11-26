@@ -3,6 +3,7 @@ package phase
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -478,4 +479,127 @@ func TestPlanCreationPhase_Run_TimeoutPreservesRevisionFeedback(t *testing.T) {
 	assert.Contains(t, exec.RunCalls()[1].Prompt, "please add error handling task")
 	assert.Contains(t, exec.RunCalls()[2].Prompt, "please add error handling task")
 	assert.Contains(t, exec.RunCalls()[2].Prompt, "PREVIOUS DRAFT FEEDBACK")
+}
+
+func TestPlanCreationPhase_Run_SessionHistoryInlinedIntoNextPrompt(t *testing.T) {
+	questionSignal := `<<<RALPHEX:QUESTION>>>
+{"question": "Which cache backend?", "options": ["Redis", "In-memory"]}
+<<<RALPHEX:END>>>`
+	exec := newTaskPhaseMockExecutor([]executor.Result{
+		{Output: questionSignal},
+		{Output: "plan created", Signal: status.PlanReady},
+	})
+	inputCollector := newPlanInputCollector([]string{"Redis"})
+	phase, runner, _ := planCreationPhaseFromRunner(t, planCreationPhaseTestOpts{
+		cfg:  Config{PlanDescription: "add caching layer", MaxIterations: 50},
+		exec: exec,
+	})
+	runner.SetInputCollector(inputCollector)
+
+	err := phase.Run(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, exec.RunCalls(), 2)
+	assert.NotContains(t, exec.RunCalls()[0].Prompt, "SESSION HISTORY")
+	assert.Contains(t, exec.RunCalls()[1].Prompt, "SESSION HISTORY")
+	assert.Contains(t, exec.RunCalls()[1].Prompt, "QUESTION: Which cache backend?")
+	assert.Contains(t, exec.RunCalls()[1].Prompt, "ANSWER: Redis")
+}
+
+func TestPlanCreationPhase_Run_DraftDecisionInlinedIntoNextPrompt(t *testing.T) {
+	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Test Plan
+## Tasks
+- [ ] Task 1
+<<<RALPHEX:END>>>`
+	exec := newTaskPhaseMockExecutor([]executor.Result{
+		{Output: planDraftSignal},
+		{Output: "plan created", Signal: status.PlanReady},
+	})
+	inputCollector := newPlanInputCollectorWithDraftReview(nil, []struct {
+		action   string
+		feedback string
+		err      error
+	}{{action: "accept"}})
+	phase, runner, _ := planCreationPhaseFromRunner(t, planCreationPhaseTestOpts{
+		cfg:  Config{PlanDescription: "add health endpoint", MaxIterations: 50},
+		exec: exec,
+	})
+	runner.SetInputCollector(inputCollector)
+
+	err := phase.Run(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, exec.RunCalls(), 2)
+	assert.NotContains(t, exec.RunCalls()[0].Prompt, "DRAFT REVIEW: accept")
+	assert.Contains(t, exec.RunCalls()[1].Prompt, "DRAFT REVIEW: accept")
+}
+
+func TestPlanCreationPhase_Run_RevisionFeedbackInlinedIntoNextPrompt(t *testing.T) {
+	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Test Plan
+## Tasks
+- [ ] Task 1
+<<<RALPHEX:END>>>`
+	exec := newTaskPhaseMockExecutor([]executor.Result{
+		{Output: planDraftSignal},
+		{Output: "plan created", Signal: status.PlanReady},
+	})
+	inputCollector := newPlanInputCollectorWithDraftReview(nil, []struct {
+		action   string
+		feedback string
+		err      error
+	}{{action: "revise", feedback: "please add an error handling task"}})
+	phase, runner, _ := planCreationPhaseFromRunner(t, planCreationPhaseTestOpts{
+		cfg:  Config{PlanDescription: "add health endpoint", MaxIterations: 50},
+		exec: exec,
+	})
+	runner.SetInputCollector(inputCollector)
+
+	err := phase.Run(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, exec.RunCalls(), 2)
+
+	// the feedback also reaches the prompt through PREVIOUS DRAFT FEEDBACK, so
+	// only the tail after the marker proves the inline copy carries it
+	parts := strings.SplitN(exec.RunCalls()[1].Prompt, "SESSION HISTORY", 2)
+	require.Len(t, parts, 2, "second prompt must carry the inline session history")
+	assert.Contains(t, parts[1], "DRAFT REVIEW: revise")
+	assert.Contains(t, parts[1], "FEEDBACK: please add an error handling task")
+}
+
+func TestPlanCreationPhase_Run_SessionHistoryAccumulates(t *testing.T) {
+	questionSignal := `<<<RALPHEX:QUESTION>>>
+{"question": "Which cache backend?", "options": ["Redis", "In-memory"]}
+<<<RALPHEX:END>>>`
+	planDraftSignal := `<<<RALPHEX:PLAN_DRAFT>>>
+# Test Plan
+## Tasks
+- [ ] Task 1
+<<<RALPHEX:END>>>`
+	exec := newTaskPhaseMockExecutor([]executor.Result{
+		{Output: questionSignal},
+		{Output: planDraftSignal},
+		{Output: "plan created", Signal: status.PlanReady},
+	})
+	inputCollector := newPlanInputCollectorWithDraftReview([]string{"Redis"}, []struct {
+		action   string
+		feedback string
+		err      error
+	}{{action: "accept"}})
+	phase, runner, _ := planCreationPhaseFromRunner(t, planCreationPhaseTestOpts{
+		cfg:  Config{PlanDescription: "add caching layer", MaxIterations: 50},
+		exec: exec,
+	})
+	runner.SetInputCollector(inputCollector)
+
+	err := phase.Run(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, exec.RunCalls(), 3)
+	third := exec.RunCalls()[2].Prompt
+	assert.Equal(t, 1, strings.Count(third, "QUESTION: Which cache backend?"))
+	assert.Less(t, strings.Index(third, "QUESTION: Which cache backend?"), strings.Index(third, "ANSWER: Redis"))
+	assert.Contains(t, third, "DRAFT REVIEW: accept")
 }

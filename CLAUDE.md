@@ -201,7 +201,7 @@ The `--plan "description"` flag enables interactive plan creation:
 - Claude explores codebase and asks clarifying questions
 - Questions use QUESTION signal with JSON: `{"question": "...", "options": [...]}`
 - User answers via fzf picker (or numbered fallback); an "Other" option allows typing a custom answer
-- Q&A history stored in progress file for context
+- Q&A history and draft decisions are stored in the progress file and repeated inline in every iteration prompt as a `SESSION HISTORY` block, so an executor that reads a stale snapshot of the file still sees them (#438)
 - When ready, Claude emits PLAN_DRAFT signal with full plan content for user review
 - User can Accept, Revise (with feedback), Interactive review, or Reject the draft
 - Interactive review opens `$EDITOR` with the plan content; on save, a unified diff is computed and fed back as revision feedback

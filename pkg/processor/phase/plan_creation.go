@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/umputun/ralphex/pkg/status"
@@ -13,6 +14,36 @@ type draftReviewResult struct {
 	handled  bool
 	feedback string
 	err      error
+}
+
+// planSession records the questions, answers and draft decisions of the current
+// plan run. The progress file carries the same exchange, but an executor behind
+// a shared filesystem can keep reading a snapshot taken before the append
+// (umputun/ralphex#438), so plan mode must not depend on that file alone.
+type planSession struct {
+	entries []string
+}
+
+func (s *planSession) addQuestion(question, answer string) {
+	s.entries = append(s.entries, "QUESTION: "+question, "ANSWER: "+answer)
+}
+
+func (s *planSession) addDraftDecision(action, feedback string) {
+	s.entries = append(s.entries, "DRAFT REVIEW: "+action)
+	if feedback != "" {
+		s.entries = append(s.entries, "FEEDBACK: "+feedback)
+	}
+}
+
+// render returns the inline copy of the session appended to each iteration
+// prompt, empty on the first iteration.
+func (s *planSession) render() string {
+	if len(s.entries) == 0 {
+		return ""
+	}
+	return "\n\n---\nSESSION HISTORY (inline copy of this run's questions, answers and draft " +
+		"decisions; the progress file records the same exchange - use this copy when that " +
+		"file looks stale or unreadable):\n\n" + strings.Join(s.entries, "\n")
 }
 
 type planIterationOutcome struct {
@@ -70,6 +101,7 @@ func (p *PlanCreationPhase) Run(ctx context.Context) error {
 
 	maxPlanIterations := max(minPlanIterations, p.cfg.MaxIterations/planIterationDivisor)
 	var lastRevisionFeedback string
+	var session planSession
 
 	for i := 1; i <= maxPlanIterations; i++ {
 		select {
@@ -80,7 +112,7 @@ func (p *PlanCreationPhase) Run(ctx context.Context) error {
 
 		p.log.PrintSection(status.NewPlanIterationSection(i))
 
-		outcome, err := p.runIteration(ctx, lastRevisionFeedback)
+		outcome, err := p.runIteration(ctx, lastRevisionFeedback, &session)
 		if err != nil {
 			return err
 		}
@@ -97,8 +129,8 @@ func (p *PlanCreationPhase) Run(ctx context.Context) error {
 	return fmt.Errorf("max plan iterations (%d) reached without completion", maxPlanIterations)
 }
 
-func (p *PlanCreationPhase) runIteration(ctx context.Context, lastRevisionFeedback string) (planIterationOutcome, error) {
-	prompt := p.prompts.PlanPrompt()
+func (p *PlanCreationPhase) runIteration(ctx context.Context, lastRevisionFeedback string, session *planSession) (planIterationOutcome, error) {
+	prompt := p.prompts.PlanPrompt() + session.render()
 	if lastRevisionFeedback != "" {
 		prompt = fmt.Sprintf("%s\n\n---\nPREVIOUS DRAFT FEEDBACK:\nUser requested revisions with this feedback:\n%s\n\nPlease revise the plan accordingly and present a new PLAN_DRAFT.", prompt, lastRevisionFeedback)
 	}
@@ -124,7 +156,7 @@ func (p *PlanCreationPhase) runIteration(ctx context.Context, lastRevisionFeedba
 		return planIterationOutcome{feedback: lastRevisionFeedback}, nil
 	}
 
-	draftResult := p.handleDraft(ctx, result.Output)
+	draftResult := p.handleDraft(ctx, result.Output, session)
 	if draftResult.err != nil {
 		return planIterationOutcome{}, draftResult.err
 	}
@@ -132,7 +164,7 @@ func (p *PlanCreationPhase) runIteration(ctx context.Context, lastRevisionFeedba
 		return planIterationOutcome{feedback: draftResult.feedback}, nil
 	}
 
-	handled, err := p.handleQuestion(ctx, result.Output)
+	handled, err := p.handleQuestion(ctx, result.Output, session)
 	if err != nil {
 		return planIterationOutcome{}, err
 	}
@@ -143,7 +175,7 @@ func (p *PlanCreationPhase) runIteration(ctx context.Context, lastRevisionFeedba
 	return planIterationOutcome{}, nil
 }
 
-func (p *PlanCreationPhase) handleDraft(ctx context.Context, output string) draftReviewResult {
+func (p *PlanCreationPhase) handleDraft(ctx context.Context, output string, session *planSession) draftReviewResult {
 	planContent, draftErr := ParsePlanDraftPayload(output)
 	if draftErr != nil {
 		if !errors.Is(draftErr, ErrNoPlanDraftSignal) {
@@ -160,6 +192,7 @@ func (p *PlanCreationPhase) handleDraft(ctx context.Context, output string) draf
 	}
 
 	p.log.LogDraftReview(action, feedback)
+	session.addDraftDecision(action, feedback)
 
 	switch action {
 	case "accept":
@@ -176,7 +209,7 @@ func (p *PlanCreationPhase) handleDraft(ctx context.Context, output string) draf
 	return draftReviewResult{handled: true}
 }
 
-func (p *PlanCreationPhase) handleQuestion(ctx context.Context, output string) (bool, error) {
+func (p *PlanCreationPhase) handleQuestion(ctx context.Context, output string, session *planSession) (bool, error) {
 	question, err := ParseQuestionPayload(output)
 	if err != nil {
 		if !errors.Is(err, ErrNoQuestionSignal) {
@@ -193,5 +226,6 @@ func (p *PlanCreationPhase) handleQuestion(ctx context.Context, output string) (
 	}
 
 	p.log.LogAnswer(answer)
+	session.addQuestion(question.Question, answer)
 	return true, nil
 }

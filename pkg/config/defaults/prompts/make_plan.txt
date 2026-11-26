@@ -12,7 +12,7 @@ You are helping create an implementation plan for: {{PLAN_DESCRIPTION}}
 
 Progress log: {{PROGRESS_FILE}} (contains previous Q&A from this session)
 
-IMPORTANT: Read the progress file first to see any questions you already asked and answers provided. Do not repeat questions.
+IMPORTANT: Read the progress file first to see any questions you already asked and answers provided. Do not repeat questions. From the second iteration on, the prompt repeats that exchange and the user's draft decisions inline as a SESSION HISTORY block; when the file is missing, empty or looks stale, take the answers and decisions from there.
 
 ## Step 0: Check for Existing Plan
 
@@ -83,24 +83,24 @@ The loop will:
 
 **Handling user responses:**
 
-If user ACCEPTS (progress file contains "DRAFT REVIEW: accept"):
+If user ACCEPTS (the progress file or the SESSION HISTORY block contains "DRAFT REVIEW: accept"):
 - Proceed to Step 4 to write the plan file to disk
 - Then emit PLAN_READY
 
-If user requests REVISION (progress file contains "DRAFT REVIEW: revise" and "FEEDBACK:"):
-- Read the feedback from the progress file
+If user requests REVISION (the progress file or the SESSION HISTORY block contains "DRAFT REVIEW: revise" and "FEEDBACK:"):
+- Read the feedback from the progress file or the SESSION HISTORY block
 - Feedback may be free-form text (from "Revise") or a unified diff with interpretation instructions (from "Interactive review" where the user edited the plan in $EDITOR). Both formats indicate what the user wants changed — apply the requested modifications
 - Modify the plan based on the feedback
 - Emit a new PLAN_DRAFT with the updated plan
 - STOP and wait for next review
 
-If user REJECTS (progress file contains "DRAFT REVIEW: reject"):
+If user REJECTS (the progress file or the SESSION HISTORY block contains "DRAFT REVIEW: reject"):
 - Output exactly: <<<RALPHEX:TASK_FAILED>>>
 - STOP immediately - the user has cancelled plan creation
 
 ## Step 4: Write Plan File (after draft accepted)
 
-This step executes ONLY after the user accepts your draft (progress file contains "DRAFT REVIEW: accept").
+This step executes ONLY after the user accepts your draft (the progress file or the SESSION HISTORY block contains "DRAFT REVIEW: accept").
 
 Write the accepted plan to disk:
 
