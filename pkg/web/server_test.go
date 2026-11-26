@@ -1,13 +1,19 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -868,4 +874,213 @@ func TestServerConfig_host(t *testing.T) {
 		cfg := ServerConfig{Host: "0.0.0.0"}
 		assert.Equal(t, "0.0.0.0", cfg.host())
 	})
+}
+
+// This test ensures that a subscriber that stops reading its SSE stream fails
+// its own connection instead of blocking Session.Publish for everyone else.
+// Publish is synchronous through go-sse's Joe provider, so without a write
+// deadline the publisher waits forever once the client's socket buffer fills.
+func TestServer_HandleEvents_SlowClientDoesNotBlockPublish(t *testing.T) {
+	session := NewSession("slow", filepath.Join(t.TempDir(), "progress-slow.txt"))
+	srv, err := NewServer(ServerConfig{Host: "127.0.0.1"}, session)
+	require.NoError(t, err)
+	srv.sseWriteTimeout = 200 * time.Millisecond
+
+	// handleEvents returns once the stalled subscriber is dropped, which is a
+	// definite signal, unlike inferring the drop from a slow publish
+	handlerReturned := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv.handleEvents(w, r)
+		close(handlerReturned)
+	}))
+	t.Cleanup(func() {
+		ts.Close()
+		session.Close()
+	})
+
+	// open a real connection and never read from it, with a small receive
+	// buffer so the server's socket buffer fills after a few events
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+	if tc, ok := conn.(*net.TCPConn); ok {
+		require.NoError(t, tc.SetReadBuffer(4096))
+	}
+	_, err = fmt.Fprintf(conn, "GET /events HTTP/1.1\r\nHost: %s\r\nAccept: text/event-stream\r\n\r\n", addr)
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond) // let the server subscribe the client
+
+	publish := func(payload string) {
+		done := make(chan error, 1)
+		go func() { done <- session.Publish(NewOutputEvent(status.PhaseTask, payload)) }()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("publish blocked for over 3s")
+		}
+	}
+
+	// fill the unread socket until the write deadline drops the subscriber
+	payload := strings.Repeat("x", 32*1024)
+	budget := time.Now().Add(10 * time.Second)
+	for i := 0; i < 100 && time.Now().Before(budget) && !channelClosed(handlerReturned); i++ {
+		publish(payload)
+	}
+	require.Eventually(t, func() bool { return channelClosed(handlerReturned) },
+		3*time.Second, 10*time.Millisecond, "slow subscriber was not dropped by the write deadline")
+
+	// once the stalled subscriber is gone, publishing stays fast
+	start := time.Now()
+	for range 10 {
+		publish(payload)
+	}
+	assert.Less(t, time.Since(start), 5*srv.sseWriteTimeout, "publishing stayed slow after the drop")
+}
+
+// channelClosed reports whether ch has been closed.
+func channelClosed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// This test ensures that a subscriber that keeps reading is not disconnected:
+// every write refreshes the deadline, so earlier deadlines must not accumulate.
+func TestServer_HandleEvents_ActiveClientStaysConnected(t *testing.T) {
+	session := NewSession("active", filepath.Join(t.TempDir(), "progress-active.txt"))
+	srv, err := NewServer(ServerConfig{Host: "127.0.0.1"}, session)
+	require.NoError(t, err)
+	srv.sseWriteTimeout = 200 * time.Millisecond
+
+	ts := httptest.NewServer(http.HandlerFunc(srv.handleEvents))
+	t.Cleanup(func() {
+		ts.Close()
+		session.Close()
+	})
+
+	addr := strings.TrimPrefix(ts.URL, "http://")
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+	_, err = fmt.Fprintf(conn, "GET /events HTTP/1.1\r\nHost: %s\r\nAccept: text/event-stream\r\n\r\n", addr)
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var received bytes.Buffer
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := conn.Read(buf)
+			mu.Lock()
+			received.Write(buf[:n])
+			mu.Unlock()
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	time.Sleep(100 * time.Millisecond) // let the server subscribe the client
+	for i := range 3 {
+		marker := fmt.Sprintf("marker-%d", i)
+		done := make(chan error, 1)
+		go func() { done <- session.Publish(NewOutputEvent(status.PhaseTask, marker)) }()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("publish %d blocked for over 3s for an active client", i)
+		}
+		// idle longer than the deadline: the next write must refresh it rather
+		// than inherit an expired one and drop a healthy subscriber
+		time.Sleep(2 * srv.sseWriteTimeout)
+	}
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(received.String(), "marker-2")
+	}, 3*time.Second, 10*time.Millisecond, "active client did not receive the last event")
+}
+
+// flushErrorWriter exposes the FlushError method net/http provides, so the
+// wrapper is expected to preserve it for go-sse.
+type flushErrorWriter struct {
+	http.ResponseWriter
+	flushed   int
+	deadlines int
+	err       error
+}
+
+func (w *flushErrorWriter) Flush() { w.flushed++ }
+
+func (w *flushErrorWriter) FlushError() error {
+	w.flushed++
+	return w.err
+}
+
+func (w *flushErrorWriter) SetWriteDeadline(time.Time) error {
+	w.deadlines++
+	return nil
+}
+
+// This test ensures that the wrapper keeps exposing the underlying writer's
+// FlushError: go-sse prefers it over http.Flusher and drops a subscriber when
+// a flush fails, so hiding it would leave a broken client subscribed.
+func TestSSEClientWriter_FlushErrorPropagates(t *testing.T) {
+	inner := &flushErrorWriter{err: errors.New("flush boom")}
+	w := &sseClientWriter{
+		ResponseWriter: inner,
+		rc:             http.NewResponseController(inner),
+		timeout:        time.Second,
+	}
+
+	require.ErrorIs(t, w.FlushError(), inner.err)
+	assert.Equal(t, 1, inner.flushed)
+	assert.Equal(t, 1, inner.deadlines, "flush must refresh the write deadline")
+}
+
+// nonFlusherWriter implements http.ResponseWriter without flush support.
+type nonFlusherWriter struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (w *nonFlusherWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = http.Header{}
+	}
+	return w.header
+}
+
+func (w *nonFlusherWriter) Write(p []byte) (int, error) {
+	n, err := w.body.Write(p)
+	if err != nil {
+		return n, fmt.Errorf("write body: %w", err)
+	}
+	return n, nil
+}
+
+func (w *nonFlusherWriter) WriteHeader(code int) { w.status = code }
+
+// This test ensures that a writer without flush support is still rejected with
+// 500 instead of being wrapped into an SSE stream that cannot flush.
+func TestServer_HandleEvents_NonFlusherWriter(t *testing.T) {
+	session := NewSession("plain", filepath.Join(t.TempDir(), "progress-plain.txt"))
+	defer session.Close()
+	srv, err := NewServer(ServerConfig{Host: "127.0.0.1"}, session)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/events", http.NoBody)
+	w := &nonFlusherWriter{}
+	srv.handleEvents(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.status)
+	assert.Contains(t, w.body.String(), "Server-sent events unsupported")
 }
