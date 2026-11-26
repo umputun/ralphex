@@ -43,11 +43,12 @@ func (c ServerConfig) host() string {
 
 // Server provides HTTP server for the real-time dashboard.
 type Server struct {
-	cfg     ServerConfig
-	session *Session        // used for single-session mode (direct execution)
-	sm      *SessionManager // used for multi-session mode (dashboard)
-	srv     *http.Server
-	tmpl    *template.Template
+	cfg             ServerConfig
+	session         *Session        // used for single-session mode (direct execution)
+	sm              *SessionManager // used for multi-session mode (dashboard)
+	srv             *http.Server
+	tmpl            *template.Template
+	sseWriteTimeout time.Duration // per-write deadline for SSE subscribers
 }
 
 // NewServer creates a new web server for single-session mode (direct execution).
@@ -59,9 +60,10 @@ func NewServer(cfg ServerConfig, session *Session) (*Server, error) {
 	}
 
 	return &Server{
-		cfg:     cfg,
-		session: session,
-		tmpl:    tmpl,
+		cfg:             cfg,
+		session:         session,
+		tmpl:            tmpl,
+		sseWriteTimeout: defaultSSEWriteTimeout,
 	}, nil
 }
 
@@ -74,9 +76,10 @@ func NewServerWithSessions(cfg ServerConfig, sm *SessionManager) (*Server, error
 	}
 
 	return &Server{
-		cfg:  cfg,
-		sm:   sm,
-		tmpl: tmpl,
+		cfg:             cfg,
+		sm:              sm,
+		tmpl:            tmpl,
+		sseWriteTimeout: defaultSSEWriteTimeout,
 	}, nil
 }
 
@@ -279,6 +282,76 @@ func (s *Server) loadPlan() (*plan.Plan, error) {
 	return loadPlanWithFallback(s.cfg.PlanFile)
 }
 
+// defaultSSEWriteTimeout bounds a single write to an SSE subscriber. Broadcasts
+// are synchronous through go-sse's Joe provider: Publish writes to every
+// subscriber before it returns, so without a per-write deadline one client that
+// stops reading blocks the run that publishes progress events. A stalled client
+// now fails its own connection, and the browser's EventSource reconnects and
+// replays from Last-Event-ID. A publish visits subscribers one by one, so k
+// stalled clients can delay one publish by up to k*timeout before all of them
+// are dropped; ten seconds is far above the time a normal event (a few KiB)
+// needs and keeps that bound small.
+const defaultSSEWriteTimeout = 10 * time.Second
+
+// sseClientWriter sets a write deadline before every write and flush so a slow
+// SSE subscriber cannot block the publisher.
+type sseClientWriter struct {
+	http.ResponseWriter
+	rc      *http.ResponseController
+	timeout time.Duration
+}
+
+// Write sets the deadline, then writes through to the underlying writer.
+func (w *sseClientWriter) Write(p []byte) (int, error) {
+	_ = w.rc.SetWriteDeadline(time.Now().Add(w.timeout))
+	n, err := w.ResponseWriter.Write(p)
+	if err != nil {
+		return n, fmt.Errorf("write sse event: %w", err)
+	}
+	return n, nil
+}
+
+// Flush sets the deadline, then flushes the underlying writer if it supports it.
+func (w *sseClientWriter) Flush() {
+	_ = w.FlushError()
+}
+
+// FlushError sets the deadline and reports a flush error, so go-sse keeps
+// seeing the underlying writer's FlushError instead of only http.Flusher.
+func (w *sseClientWriter) FlushError() error {
+	_ = w.rc.SetWriteDeadline(time.Now().Add(w.timeout))
+	if f, ok := w.ResponseWriter.(interface{ FlushError() error }); ok {
+		if err := f.FlushError(); err != nil {
+			return fmt.Errorf("flush sse event: %w", err)
+		}
+		return nil
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+	return nil
+}
+
+// sseWriter bounds SSE writes when w supports flushing. A writer that supports
+// neither http.Flusher nor FlushError is passed through untouched, so go-sse
+// rejects it with the same "unsupported" error as before.
+func (s *Server) sseWriter(w http.ResponseWriter) http.ResponseWriter {
+	_, flusher := w.(http.Flusher)
+	_, flusherError := w.(interface{ FlushError() error })
+	if !flusher && !flusherError {
+		return w
+	}
+	timeout := s.sseWriteTimeout
+	if timeout <= 0 {
+		timeout = defaultSSEWriteTimeout
+	}
+	return &sseClientWriter{
+		ResponseWriter: w,
+		rc:             http.NewResponseController(w),
+		timeout:        timeout,
+	}
+}
+
 // handleEvents serves the SSE stream.
 // in multi-session mode, accepts ?session=<id> query parameter.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +371,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// - Connection management
 	// - History replay via FiniteReplayer
 	// - Graceful disconnection
-	session.SSE.ServeHTTP(w, r)
+	// the writer bounds every write so a client that stops reading cannot
+	// block the publisher.
+	session.SSE.ServeHTTP(s.sseWriter(w), r)
 	log.Printf("[SSE] connection closed: session=%s", sessionID)
 }
 
