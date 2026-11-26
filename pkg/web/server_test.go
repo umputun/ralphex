@@ -876,10 +876,7 @@ func TestServerConfig_host(t *testing.T) {
 	})
 }
 
-// This test ensures that a subscriber that stops reading its SSE stream fails
-// its own connection instead of blocking Session.Publish for everyone else.
-// Publish is synchronous through go-sse's Joe provider, so without a write
-// deadline the publisher waits forever once the client's socket buffer fills.
+// regression: a subscriber that stopped reading blocked Session.Publish forever
 func TestServer_HandleEvents_SlowClientDoesNotBlockPublish(t *testing.T) {
 	session := NewSession("slow", filepath.Join(t.TempDir(), "progress-slow.txt"))
 	srv, err := NewServer(ServerConfig{Host: "127.0.0.1"}, session)
@@ -949,8 +946,6 @@ func channelClosed(ch chan struct{}) bool {
 	}
 }
 
-// This test ensures that a subscriber that keeps reading is not disconnected:
-// every write refreshes the deadline, so earlier deadlines must not accumulate.
 func TestServer_HandleEvents_ActiveClientStaysConnected(t *testing.T) {
 	session := NewSession("active", filepath.Join(t.TempDir(), "progress-active.txt"))
 	srv, err := NewServer(ServerConfig{Host: "127.0.0.1"}, session)
@@ -1029,9 +1024,6 @@ func (w *flushErrorWriter) SetWriteDeadline(time.Time) error {
 	return nil
 }
 
-// This test ensures that the wrapper keeps exposing the underlying writer's
-// FlushError: go-sse prefers it over http.Flusher and drops a subscriber when
-// a flush fails, so hiding it would leave a broken client subscribed.
 func TestSSEClientWriter_FlushErrorPropagates(t *testing.T) {
 	inner := &flushErrorWriter{err: errors.New("flush boom")}
 	w := &sseClientWriter{
@@ -1069,8 +1061,6 @@ func (w *nonFlusherWriter) Write(p []byte) (int, error) {
 
 func (w *nonFlusherWriter) WriteHeader(code int) { w.status = code }
 
-// This test ensures that a writer without flush support is still rejected with
-// 500 instead of being wrapped into an SSE stream that cannot flush.
 func TestServer_HandleEvents_NonFlusherWriter(t *testing.T) {
 	session := NewSession("plain", filepath.Join(t.TempDir(), "progress-plain.txt"))
 	defer session.Close()

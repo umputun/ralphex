@@ -282,19 +282,16 @@ func (s *Server) loadPlan() (*plan.Plan, error) {
 	return loadPlanWithFallback(s.cfg.PlanFile)
 }
 
-// defaultSSEWriteTimeout bounds a single write to an SSE subscriber. Broadcasts
-// are synchronous through go-sse's Joe provider: Publish writes to every
-// subscriber before it returns, so without a per-write deadline one client that
-// stops reading blocks the run that publishes progress events. A stalled client
-// now fails its own connection, and the browser's EventSource reconnects and
-// replays from Last-Event-ID. A publish visits subscribers one by one, so k
-// stalled clients can delay one publish by up to k*timeout before all of them
-// are dropped; ten seconds is far above the time a normal event (a few KiB)
-// needs and keeps that bound small.
+// defaultSSEWriteTimeout bounds each write to an SSE subscriber. go-sse's Joe writes every
+// event to each subscriber from one loop, so a client that stops reading stalls the loop and
+// every later Publish waits on it. When the deadline expires the write fails, Joe drops the
+// subscriber, and the dashboard reconnects with a fresh EventSource that requests all retained
+// events. Each stalled subscriber can add a timeout to the wait because Joe visits subscribers
+// serially.
 const defaultSSEWriteTimeout = 10 * time.Second
 
-// sseClientWriter sets a write deadline before every write and flush so a slow
-// SSE subscriber cannot block the publisher.
+// sseClientWriter sets a deadline on each write and flush so a stalled subscriber cannot hold
+// Joe's loop indefinitely.
 type sseClientWriter struct {
 	http.ResponseWriter
 	rc      *http.ResponseController
@@ -371,8 +368,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// - Connection management
 	// - History replay via FiniteReplayer
 	// - Graceful disconnection
-	// the writer bounds every write so a client that stops reading cannot
-	// block the publisher.
+	// the writer's deadline bounds how long a client that stops reading can block the publisher.
 	session.SSE.ServeHTTP(s.sseWriter(w), r)
 	log.Printf("[SSE] connection closed: session=%s", sessionID)
 }
